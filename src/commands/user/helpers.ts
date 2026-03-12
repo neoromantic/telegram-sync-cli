@@ -81,8 +81,7 @@ export function findCachedUser(
   }
 
   if (parsed.kind === 'phone') {
-    const lookup = parsed.raw.replace(/[\s+\-()]/g, '')
-    return usersCache.getByPhone(lookup)
+    return usersCache.getByPhone(parsed.value)
   }
 
   return usersCache.getById(parsed.value)
