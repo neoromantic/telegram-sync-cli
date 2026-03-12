@@ -52,7 +52,6 @@ export function parseUserIdentifier(identifier: string): ParsedIdentifier {
     identifier.startsWith('@') ||
     (Number.isNaN(Number(identifier)) && !identifier.startsWith('+'))
   const isPhone = identifier.startsWith('+') || /^\d{10,}$/.test(identifier)
-  const isUserId = !isUsername && !isPhone && !Number.isNaN(Number(identifier))
 
   if (isUsername) {
     return {
@@ -68,10 +67,6 @@ export function parseUserIdentifier(identifier: string): ParsedIdentifier {
       value: identifier.replace(/[\s+\-()]/g, ''),
       raw: identifier,
     }
-  }
-
-  if (isUserId) {
-    return { kind: 'id', value: identifier, raw: identifier }
   }
 
   return { kind: 'id', value: identifier, raw: identifier }
