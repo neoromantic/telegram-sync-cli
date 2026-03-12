@@ -86,7 +86,7 @@ async function resolveUserFromApi(
   return resolveUserById(client, parsed.value)
 }
 
-function handleUserLookupError(err: unknown, _identifier: string): never {
+function handleUserLookupError(err: unknown): never {
   const errMsg = err instanceof Error ? err.message : String(err)
   if (errMsg.includes('USERNAME_NOT_OCCUPIED')) {
     error(ErrorCodes.TELEGRAM_ERROR, 'Username not found')
@@ -178,7 +178,7 @@ export const userCommand = defineCommand({
           { method: err.method, wait_seconds: err.waitSeconds },
         )
       }
-      handleUserLookupError(err, args.identifier as string)
+      handleUserLookupError(err)
     }
   },
 })
