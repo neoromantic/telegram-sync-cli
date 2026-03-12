@@ -163,12 +163,8 @@ export async function loginWithPhone(
     // Start authentication flow
     const user = await client.start({
       phone: () => Promise.resolve(phone),
-      code: async () => {
-        return await prompt('Enter the verification code: ')
-      },
-      password: async () => {
-        return await promptPassword('Enter 2FA password: ')
-      },
+      code: async () => prompt('Enter the verification code: '),
+      password: async () => promptPassword('Enter 2FA password: '),
     })
 
     // Check if an account with this user_id already exists (to handle duplicates)
@@ -266,9 +262,7 @@ export async function loginWithQr(
       onQrScanned: () => {
         console.log('✓ QR code scanned! Completing authentication...')
       },
-      password: async () => {
-        return await deps.promptPassword('\nEnter 2FA password: ')
-      },
+      password: async () => deps.promptPassword('\nEnter 2FA password: '),
       invalidPasswordCallback: () => {
         console.log('Invalid password, please try again.')
       },
