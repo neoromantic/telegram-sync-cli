@@ -156,7 +156,7 @@ export const userCommand = defineCommand({
 
       const user = await resolveUserFromApi(client, parsed)
 
-      if (!user || user._ !== 'user') {
+      if (!user) {
         error(ErrorCodes.TELEGRAM_ERROR, `User not found: ${identifier}`)
       }
 
