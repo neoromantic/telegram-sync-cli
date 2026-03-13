@@ -164,16 +164,14 @@ export class UsersCache {
    * Delete user from cache
    */
   delete(userId: string): boolean {
-    const result = this.statements.delete.run({ $user_id: userId })
-    return result.changes > 0
+    return this.statements.delete.run({ $user_id: userId }).changes > 0
   }
 
   /**
    * Count total cached users
    */
   count(): number {
-    const result = this.statements.count.get() as { count: number } | null
-    return result?.count ?? 0
+    return (this.statements.count.get() as { count: number } | null)?.count ?? 0
   }
 
   /**
@@ -181,8 +179,7 @@ export class UsersCache {
    */
   prune(maxAgeMs: number): number {
     const threshold = Date.now() - maxAgeMs
-    const result = this.statements.prune.run({ $threshold: threshold })
-    return result.changes
+    return this.statements.prune.run({ $threshold: threshold }).changes
   }
 }
 
