@@ -3,5 +3,5 @@ export function isUsernameIdentifier(identifier: string): boolean {
 }
 
 export function normalizeUsername(identifier: string): string {
-  return identifier.startsWith('@') ? identifier.slice(1) : identifier
+  return identifier.replace(/^@/, '')
 }
