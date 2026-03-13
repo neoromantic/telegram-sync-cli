@@ -11,6 +11,8 @@ import { ErrorCodes } from '../../types'
 import { error, success } from '../../utils/output'
 import { formatSchemaAsSql, formatSchemaAsText } from './schema-text'
 
+const SUPPORTED_OUTPUTS = ['json', 'text', 'sql'] as const
+
 function readTableInfo(db: ReturnType<typeof getCacheDb>, tableName: string) {
   return db.query(`PRAGMA table_info(${tableName})`).all() as Array<{
     name: string
@@ -155,7 +157,7 @@ export const printSchemaCommand = defineCommand({
     const output = args.output ?? 'json'
     const tableName = args.table
 
-    if (output !== 'json' && output !== 'text' && output !== 'sql') {
+    if (!SUPPORTED_OUTPUTS.includes(output as (typeof SUPPORTED_OUTPUTS)[number])) {
       error(
         ErrorCodes.INVALID_ARGS,
         `Invalid output: ${output}. Use 'json', 'text', or 'sql'.`,
