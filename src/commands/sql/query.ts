@@ -18,9 +18,7 @@ type QueryArgs = {
 
 function parseQueryArgs(args: QueryArgs) {
   const positionalArgs = args._ ?? []
-  const query =
-    args.query ??
-    (positionalArgs.length > 0 ? positionalArgs.join(' ') : undefined)
+  const query = (args.query ?? positionalArgs.join(' ')) || undefined
   const output = args.output ?? 'json'
   const limitStr = args.limit ?? '1000'
   const limit = Number.parseInt(limitStr, 10)
