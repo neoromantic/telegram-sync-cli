@@ -48,13 +48,10 @@ export const searchChatsCommand = defineCommand({
         const anyStale = results.some((c) =>
           isCacheStale(c.fetched_at, cacheConfig.staleness.dialogs),
         )
-
-        const items = results.map(chatRowToItem)
-
         success({
           query,
-          results: items,
-          total: items.length,
+          results: results.map(chatRowToItem),
+          total: results.length,
           source: 'cache',
           stale: anyStale,
         })
