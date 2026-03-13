@@ -145,8 +145,6 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
     },
 
     getDaemonInfo(): DaemonInfo {
-      const status =
-        service.get('daemon_status') === 'running' ? 'running' : 'stopped'
       const pidStr = service.get('daemon_pid')
       const startedAtStr = service.get('daemon_started_at')
       const lastUpdateStr = service.get('last_update')
@@ -155,7 +153,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       const syncedStr = service.get('messages_synced')
 
       return {
-        status,
+        status: service.get('daemon_status') === 'running' ? 'running' : 'stopped',
         pid: pidStr ? parseInt(pidStr, 10) : null,
         startedAt: startedAtStr ? parseInt(startedAtStr, 10) : null,
         lastUpdate: lastUpdateStr ? parseInt(lastUpdateStr, 10) : null,
