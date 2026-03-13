@@ -90,7 +90,6 @@ export const sqlQueryCommand = defineCommand({
     command: {
       type: 'positional',
       description: 'Optional subcommand (print-schema)',
-      required: false,
     },
     query: {
       type: 'string',
