@@ -9,12 +9,7 @@
 
 import { join } from 'node:path'
 import { defineCommand } from 'citty'
-import {
-  createDaemon,
-  createPidFile,
-  type DaemonConfig,
-  DaemonExitCode,
-} from '../daemon'
+import { createDaemon, createPidFile, DaemonExitCode } from '../daemon'
 import { getCacheDb, getDataDir } from '../db'
 import { createDaemonStatusService } from '../db/daemon-status'
 import { ErrorCodes } from '../types'
@@ -45,12 +40,7 @@ const startCommand = defineCommand({
   },
   async run({ args }) {
     const verbosity = args.quiet ? 'quiet' : args.verbose ? 'verbose' : 'normal'
-
-    const config: Partial<DaemonConfig> = {
-      verbosity,
-    }
-
-    const daemon = createDaemon(config)
+    const daemon = createDaemon({ verbosity })
     const exitCode = await daemon.start()
 
     process.exit(exitCode)
