@@ -10,9 +10,8 @@ export async function resolveUsername(
   identifier: string,
 ): Promise<tl.contacts.TypeResolvedPeer> {
   const username = normalizeUsername(identifier)
-  const request: tl.contacts.RawResolveUsernameRequest = {
+  return client.call({
     _: 'contacts.resolveUsername',
     username,
-  }
-  return client.call(request)
+  } satisfies tl.contacts.RawResolveUsernameRequest)
 }
