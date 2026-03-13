@@ -220,12 +220,10 @@ export const searchContactsCommand = defineCommand({
             isCacheStale(u.fetched_at, cacheConfig.staleness.peers),
           )
 
-          const contacts = cachedResults.map(cachedUserToContact)
-
           success({
             query,
-            results: contacts,
-            total: contacts.length,
+            results: cachedResults.map(cachedUserToContact),
+            total: cachedResults.length,
             source: 'cache',
             stale: anyStale,
           })
@@ -257,13 +255,10 @@ export const searchContactsCommand = defineCommand({
         verbose(`Cached ${cacheInputs.length} search results`)
       }
 
-      // Map to Contact type
-      const contacts = apiUsers.map(apiUserToContact)
-
       success({
         query,
-        results: contacts,
-        total: contacts.length,
+        results: apiUsers.map(apiUserToContact),
+        total: apiUsers.length,
         source: 'api',
         stale: false,
       })
