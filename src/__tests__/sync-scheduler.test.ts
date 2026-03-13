@@ -186,7 +186,7 @@ describe('SyncScheduler', () => {
   })
 
   describe('queueInitialLoad', () => {
-    it('queues initial load job with specified message count', () => {
+    it('queues initial load job', () => {
       chatSyncState.upsert({
         chat_id: 100,
         chat_type: 'group',
@@ -195,7 +195,7 @@ describe('SyncScheduler', () => {
         member_count: 50,
       })
 
-      scheduler.queueInitialLoad(100, 10)
+      scheduler.queueInitialLoad(100)
 
       const jobs = jobsService.getJobsForChat(100)
       expect(jobs).toHaveLength(1)

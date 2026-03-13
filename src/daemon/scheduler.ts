@@ -31,7 +31,7 @@ export interface SyncScheduler {
   /** Queue backward history sync job for a chat */
   queueBackwardHistory(chatId: number): void
   /** Queue initial load job for a chat */
-  queueInitialLoad(chatId: number, messageCount: number): void
+  queueInitialLoad(chatId: number): void
   /** Initialize scheduler with startup jobs */
   initializeForStartup(): Promise<void>
   /** Refresh job queue based on current sync state */
@@ -135,7 +135,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     })
   }
 
-  queueInitialLoad(chatId: number, _messageCount: number): void {
+  queueInitialLoad(chatId: number): void {
     if (this.jobsService.hasActiveJobForChat(chatId, SyncJobType.InitialLoad)) {
       return
     }
@@ -166,7 +166,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     )
     for (const chat of highPriorityChats) {
       if (!chat.history_complete && chat.synced_messages === 0) {
-        this.queueInitialLoad(chat.chat_id, 10)
+        this.queueInitialLoad(chat.chat_id)
       }
     }
 
@@ -175,7 +175,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     )
     for (const chat of mediumChats) {
       if (!chat.history_complete && chat.synced_messages === 0) {
-        this.queueInitialLoad(chat.chat_id, 10)
+        this.queueInitialLoad(chat.chat_id)
       }
     }
 
