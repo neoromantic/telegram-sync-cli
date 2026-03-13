@@ -50,8 +50,7 @@ async function getQrGenerator(): Promise<QrCodeGenerator> {
 export async function prompt(message: string): Promise<string> {
   const rl = readline.createInterface({ input, output })
   try {
-    const answer = await rl.question(message)
-    return answer.trim()
+    return (await rl.question(message)).trim()
   } finally {
     rl.close()
   }
