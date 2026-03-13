@@ -18,10 +18,6 @@ import {
 } from '../utils/telegram-rate-limits'
 import { resolvePeer } from './send/peer-resolver'
 
-function createRandomId(): tl.Long {
-  return toLong(BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)))
-}
-
 function extractMessageInfo(result: tl.TypeUpdates): {
   messageId: number | null
   timestamp: number | null
@@ -152,7 +148,9 @@ export const sendCommand = defineCommand({
         _: 'messages.sendMessage',
         peer: inputPeer,
         message: messageText,
-        randomId: createRandomId(),
+        randomId: toLong(
+          BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
+        ),
         noWebpage: false,
         silent,
       }
