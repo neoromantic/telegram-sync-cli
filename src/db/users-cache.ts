@@ -5,7 +5,6 @@
 import type { Database } from 'bun:sqlite'
 
 import { UserCacheRow } from './schema'
-import type { CacheConfig } from './types'
 
 /**
  * Cached user with computed display_name
@@ -63,10 +62,7 @@ function computeDisplayName(
 export class UsersCache {
   private statements: ReturnType<typeof createStatements>
 
-  constructor(
-    private db: Database,
-    _config?: CacheConfig,
-  ) {
+  constructor(private db: Database) {
     this.statements = createStatements(db)
   }
 
@@ -276,7 +272,6 @@ function createStatements(db: Database) {
  */
 export function createUsersCache(
   db: Database,
-  config?: CacheConfig,
 ): UsersCache {
-  return new UsersCache(db, config)
+  return new UsersCache(db)
 }
