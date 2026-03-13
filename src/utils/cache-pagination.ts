@@ -18,7 +18,6 @@ export function buildCachePaginatedResponse<
 ): PaginatedResult<TOutput> & { source: string; stale: boolean } {
   const { offset, limit, ttlMs, source, staleMessage } = options
   const anyStale = items.some((item) => isCacheStale(item.fetched_at, ttlMs))
-  const paginatedItems = items.slice(offset, offset + limit).map(mapItem)
 
   if (anyStale) {
     verbose(
@@ -28,7 +27,7 @@ export function buildCachePaginatedResponse<
   }
 
   return {
-    items: paginatedItems,
+    items: items.slice(offset, offset + limit).map(mapItem),
     total: items.length,
     offset,
     limit,
