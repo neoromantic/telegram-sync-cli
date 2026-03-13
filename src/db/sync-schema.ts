@@ -153,10 +153,11 @@ function rebuildMessageSearchIndex(db: Database): void {
 
 function getMessageSearchColumns(db: Database): string[] {
   try {
-    const rows = db.query('PRAGMA table_info(message_search)').all() as Array<{
-      name: string
-    }>
-    return rows.map((row) => row.name)
+    return (
+      db.query('PRAGMA table_info(message_search)').all() as Array<{
+        name: string
+      }>
+    ).map((row) => row.name)
   } catch {
     return []
   }
