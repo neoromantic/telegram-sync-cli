@@ -48,12 +48,10 @@ export function cachedUserToUserInfo(cached: CachedUser): UserInfo {
 }
 
 export function parseUserIdentifier(identifier: string): ParsedIdentifier {
-  const isUsername =
+  if (
     identifier.startsWith('@') ||
     (Number.isNaN(Number(identifier)) && !identifier.startsWith('+'))
-  const isPhone = identifier.startsWith('+') || /^\d{10,}$/.test(identifier)
-
-  if (isUsername) {
+  ) {
     return {
       kind: 'username',
       value: identifier.startsWith('@') ? identifier.slice(1) : identifier,
@@ -61,7 +59,7 @@ export function parseUserIdentifier(identifier: string): ParsedIdentifier {
     }
   }
 
-  if (isPhone) {
+  if (identifier.startsWith('+') || /^\d{10,}$/.test(identifier)) {
     return {
       kind: 'phone',
       value: identifier.replace(/[\s+\-()]/g, ''),
