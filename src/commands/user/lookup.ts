@@ -35,29 +35,32 @@ async function resolveUserByUsername(
   client: TelegramClientLike,
   username: string,
 ): Promise<tl.RawUser | undefined> {
-  const resolved = await client.call({
+  return (
+    await client.call({
     _: 'contacts.resolveUsername',
     username,
-  } as tl.contacts.RawResolveUsernameRequest)
-  return resolved.users?.find(isRawUser)
+    } as tl.contacts.RawResolveUsernameRequest)
+  ).users?.find(isRawUser)
 }
 
 async function resolveUserByPhone(
   client: TelegramClientLike,
   phone: string,
 ): Promise<tl.RawUser | undefined> {
-  const resolved = await client.call({
+  return (
+    await client.call({
     _: 'contacts.resolvePhone',
     phone,
-  } as tl.contacts.RawResolvePhoneRequest)
-  return resolved.users?.find(isRawUser)
+    } as tl.contacts.RawResolvePhoneRequest)
+  ).users?.find(isRawUser)
 }
 
 async function resolveUserById(
   client: TelegramClientLike,
   identifier: string,
 ): Promise<tl.RawUser | undefined> {
-  const result = await client.call({
+  return (
+    await client.call({
     _: 'users.getUsers',
     id: [
       {
@@ -66,8 +69,8 @@ async function resolveUserById(
         accessHash: toLong(0),
       },
     ],
-  } as tl.users.RawGetUsersRequest)
-  return result.find(isRawUser)
+    } as tl.users.RawGetUsersRequest)
+  ).find(isRawUser)
 }
 
 async function resolveUserFromApi(
