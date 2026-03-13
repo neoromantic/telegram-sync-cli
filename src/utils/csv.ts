@@ -70,10 +70,9 @@ export function stringify<T extends Record<string, unknown>>(
 
   // Add header row
   if (opts.includeHeader) {
-    const headerLine = headers
-      .map((h) => escapeValue(h, opts.delimiter))
-      .join(opts.delimiter)
-    lines.push(headerLine)
+    lines.push(
+      headers.map((h) => escapeValue(h, opts.delimiter)).join(opts.delimiter),
+    )
   }
 
   // Add data rows
