@@ -101,21 +101,15 @@ const stopCommand = defineCommand({
 
     // Wait for process to exit
     const startTime = Date.now()
-    let stopped = false
     while (Date.now() - startTime < timeoutMs) {
       if (!pidFile.isRunning()) {
-        stopped = true
-        break
+        success({ message: 'Daemon stopped successfully' })
+        return
       }
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
 
     // Graceful shutdown timed out
-    if (stopped) {
-      success({ message: 'Daemon stopped successfully' })
-      return
-    }
-
     if (!args.force) {
       error(
         ErrorCodes.DAEMON_SHUTDOWN_TIMEOUT,
