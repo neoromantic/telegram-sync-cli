@@ -22,12 +22,7 @@ function parseIdentifier(
     return { username: normalizeUsername(input) }
   }
 
-  const parsed = Number.parseInt(input, 10)
-  if (Number.isNaN(parsed)) {
-    return undefined
-  }
-
-  return { id: parsed }
+  return { id: Number.parseInt(input, 10) }
 }
 
 function rowToItem(
