@@ -133,8 +133,6 @@ export const searchMessagesCommand = defineCommand({
         senderUsername: senderFilter?.username,
       })
 
-      const items = results.map(rowToItem)
-
       success({
         query,
         filters: {
@@ -142,8 +140,8 @@ export const searchMessagesCommand = defineCommand({
           sender: args.sender ?? null,
           includeDeleted: args.includeDeleted ?? false,
         },
-        results: items,
-        total: items.length,
+        results: results.map(rowToItem),
+        total: results.length,
         limit,
         offset,
         source: 'cache',
