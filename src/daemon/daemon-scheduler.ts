@@ -72,15 +72,11 @@ function selectAvailableWorker(ctx: DaemonContext): {
 function canProcessJob(ctx: DaemonContext, now: number): boolean {
   if (!ctx.runtime.scheduler) return false
 
-  const timeSinceLastJob = now - ctx.runtime.lastJobProcessTime
-  if (
-    ctx.runtime.lastJobProcessTime > 0 &&
-    timeSinceLastJob < DEFAULT_JOB_EXECUTOR_CONFIG.interJobDelayMs
-  ) {
-    return false
-  }
-
-  return true
+  return (
+    ctx.runtime.lastJobProcessTime === 0 ||
+    now - ctx.runtime.lastJobProcessTime >=
+      DEFAULT_JOB_EXECUTOR_CONFIG.interJobDelayMs
+  )
 }
 
 function getJobContext(ctx: DaemonContext, now: number) {
