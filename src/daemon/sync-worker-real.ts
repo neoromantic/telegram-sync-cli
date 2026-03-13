@@ -78,8 +78,7 @@ export function createRealSyncWorker(deps: RealSyncWorkerDeps) {
     canMakeApiCall: () => canMakeApiCall(ctx),
     getWaitTime: () => getWaitTime(ctx),
     buildInputPeer: (chatId: number) => getInputPeer(ctx, chatId),
-    parseRawMessage: (msg: unknown, chatId: number) =>
-      parseRawMessage(msg, chatId),
+    parseRawMessage,
   }
 }
 
