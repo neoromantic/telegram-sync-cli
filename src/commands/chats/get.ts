@@ -110,24 +110,28 @@ async function fetchChatFromApi(
     )
   }
 
-  const peer = resolvedChat
-  const type = peerToChatType(peer)
+  const type = peerToChatType(resolvedChat)
 
   const cacheInput = {
-    chat_id: String(peer.id),
+    chat_id: String(resolvedChat.id),
     type,
-    title: 'title' in peer ? (peer.title ?? null) : null,
-    username: 'username' in peer ? (peer.username ?? null) : null,
+    title: 'title' in resolvedChat ? (resolvedChat.title ?? null) : null,
+    username:
+      'username' in resolvedChat ? (resolvedChat.username ?? null) : null,
     member_count:
-      'participantsCount' in peer ? (peer.participantsCount ?? null) : null,
+      'participantsCount' in resolvedChat
+        ? (resolvedChat.participantsCount ?? null)
+        : null,
     access_hash:
-      isChannelPeer(peer) && peer.accessHash ? String(peer.accessHash) : null,
-    is_creator: 'creator' in peer && peer.creator ? 1 : 0,
-    is_admin: 'adminRights' in peer && peer.adminRights ? 1 : 0,
+      isChannelPeer(resolvedChat) && resolvedChat.accessHash
+        ? String(resolvedChat.accessHash)
+        : null,
+    is_creator: 'creator' in resolvedChat && resolvedChat.creator ? 1 : 0,
+    is_admin: 'adminRights' in resolvedChat && resolvedChat.adminRights ? 1 : 0,
     last_message_id: null,
     last_message_at: null,
     fetched_at: Date.now(),
-    raw_json: JSON.stringify(peer),
+    raw_json: JSON.stringify(resolvedChat),
   }
 
   chatsCache.upsert(cacheInput)
