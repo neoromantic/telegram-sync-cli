@@ -141,7 +141,6 @@ const statusCommand = defineCommand({
     name: 'status',
     description: 'Show daemon status',
   },
-  args: {},
   async run() {
     const dataDir = getDataDir()
     const pidPath = join(dataDir, 'daemon.pid')
