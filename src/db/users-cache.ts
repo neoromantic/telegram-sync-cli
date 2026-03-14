@@ -270,8 +270,6 @@ function createStatements(db: Database) {
 /**
  * Create a users cache instance
  */
-export function createUsersCache(
-  db: Database,
-): UsersCache {
+export function createUsersCache(db: Database): UsersCache {
   return new UsersCache(db)
 }

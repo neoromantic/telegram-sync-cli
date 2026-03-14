@@ -157,7 +157,9 @@ export const printSchemaCommand = defineCommand({
     const output = args.output ?? 'json'
     const tableName = args.table
 
-    if (!SUPPORTED_OUTPUTS.includes(output as (typeof SUPPORTED_OUTPUTS)[number])) {
+    if (
+      !SUPPORTED_OUTPUTS.includes(output as (typeof SUPPORTED_OUTPUTS)[number])
+    ) {
       error(
         ErrorCodes.INVALID_ARGS,
         `Invalid output: ${output}. Use 'json', 'text', or 'sql'.`,
