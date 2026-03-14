@@ -9,7 +9,7 @@ import {
   resolveAccountSelector,
 } from '../../utils/account-selector'
 import { error, success } from '../../utils/output'
-import { cachedChatToItem } from './helpers'
+import { chatRowToItem } from './helpers'
 
 export const searchChatsCommand = defineCommand({
   meta: {
@@ -49,7 +49,7 @@ export const searchChatsCommand = defineCommand({
           isCacheStale(c.fetched_at, cacheConfig.staleness.dialogs),
         )
 
-        const items = results.map(cachedChatToItem)
+        const items = results.map(chatRowToItem)
 
         success({
           query,

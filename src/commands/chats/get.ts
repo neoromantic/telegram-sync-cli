@@ -20,11 +20,7 @@ import {
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import { resolveUsername } from '../../utils/telegram-resolve'
-import {
-  cachedChatToItem,
-  chatRowToItem,
-  userToPrivateChatCacheInput,
-} from './helpers'
+import { chatRowToItem, userToPrivateChatCacheInput } from './helpers'
 
 type ResolvedChat = Exclude<tl.TypeChat, tl.RawChatEmpty>
 
@@ -61,7 +57,7 @@ function getCachedChat(
 
   const stale = isCacheStale(cached.fetched_at, cacheConfig.staleness.dialogs)
   return {
-    ...cachedChatToItem(cached),
+    ...chatRowToItem(cached),
     source: 'cache',
     stale,
   }

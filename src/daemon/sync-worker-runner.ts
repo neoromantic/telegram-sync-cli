@@ -3,21 +3,17 @@ import type { RealSyncWorker } from './sync-worker-real'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-function resolveLogger(logger?: {
-  debug(message: string): void
-  info(message: string): void
-  warn(message: string): void
-  error(message: string): void
-}) {
-  return logger ?? console
-}
-
 async function handleWorkerResult(
   result: Awaited<ReturnType<RealSyncWorker['runOnceReal']>>,
   options: {
     pollIntervalMs: number
     onRateLimited?: (waitSeconds: number) => void
-    logger: ReturnType<typeof resolveLogger>
+    logger: {
+      debug(message: string): void
+      info(message: string): void
+      warn(message: string): void
+      error(message: string): void
+    }
   },
 ): Promise<number> {
   const { pollIntervalMs, onRateLimited, logger } = options
@@ -65,7 +61,7 @@ export function createSyncWorkerRunner(
   const pollIntervalMs = options.pollIntervalMs ?? 1000
   const shouldStop = options.shouldStop ?? (() => false)
   const onRateLimited = options.onRateLimited
-  const logger = resolveLogger(options.logger)
+  const logger = options.logger ?? console
 
   let running = false
 

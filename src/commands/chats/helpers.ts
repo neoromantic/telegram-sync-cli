@@ -1,11 +1,7 @@
 import type { Dialog } from '@mtcute/bun'
 import type { tl } from '@mtcute/tl'
 
-import type {
-  CachedChat,
-  CachedChatInput,
-  ChatsCache,
-} from '../../db/chats-cache'
+import type { CachedChat, CachedChatInput } from '../../db/chats-cache'
 import type { ChatType } from '../../db/types'
 
 export interface ChatItem {
@@ -43,13 +39,6 @@ export function chatRowToItem(chat: ChatRow): ChatItem {
     isCreator: chat.is_creator === 1,
     isAdmin: chat.is_admin === 1,
   }
-}
-
-export function cachedChatToItem(
-  cached: ReturnType<ChatsCache['getById']>,
-): ChatItem {
-  if (!cached) throw new Error('Chat not found')
-  return chatRowToItem(cached)
 }
 
 export function filterChatsByType(
