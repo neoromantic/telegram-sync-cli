@@ -58,17 +58,16 @@ export const meCommand = defineCommand({
         const client = getClientForAccount(accountId)
 
         const me = await client.getMe()
-        const userRaw = me.raw
 
         // Update cache
-        usersCache.upsert(apiUserToCacheInput(userRaw))
+        usersCache.upsert(apiUserToCacheInput(me.raw))
 
         // Update account with user_id if missing
         if (!account.user_id) {
           accountsDb.update(account.id, { user_id: me.id })
         }
 
-        return { me, userRaw }
+        return me
       }
 
       // Try cache first (no network call!)
@@ -114,7 +113,7 @@ export const meCommand = defineCommand({
       }
 
       success({
-        user: apiUserToUserInfo(result.me.raw),
+        user: apiUserToUserInfo(result.raw),
         source: 'api' as const,
         stale: false,
       })

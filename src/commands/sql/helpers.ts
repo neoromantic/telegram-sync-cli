@@ -1,17 +1,5 @@
-const WRITE_KEYWORDS = [
-  'INSERT',
-  'UPDATE',
-  'DELETE',
-  'REPLACE',
-  'DROP',
-  'ALTER',
-  'CREATE',
-  'TRUNCATE',
-  'ATTACH',
-  'DETACH',
-  'VACUUM',
-  'REINDEX',
-]
+const WRITE_KEYWORDS =
+  /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|ATTACH|DETACH|VACUUM|REINDEX)\b/
 
 export function isReadOnlyQuery(query: string): boolean {
   const normalized = query.trim().replace(/\s+/g, ' ').toUpperCase()
@@ -25,14 +13,7 @@ export function isReadOnlyQuery(query: string): boolean {
     return false
   }
 
-  for (const keyword of WRITE_KEYWORDS) {
-    const regex = new RegExp(`\\b${keyword}\\b`, 'i')
-    if (regex.test(normalized)) {
-      return false
-    }
-  }
-
-  return true
+  return !WRITE_KEYWORDS.test(normalized)
 }
 
 export function applyQueryLimit(query: string, limit: number): string {
