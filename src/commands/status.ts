@@ -72,7 +72,7 @@ export const statusCommand = defineCommand({
     const pidFile = createPidFile(pidPath)
 
     // Collect all status data
-    const statusData = await collectStatus(pidFile, dataDir)
+    const statusData = await collectStatus(pidFile)
 
     // Determine output format
     const format = getOutputFormat()
@@ -93,7 +93,6 @@ export const statusCommand = defineCommand({
  */
 export async function collectStatus(
   pidFile: ReturnType<typeof createPidFile>,
-  _dataDir: string,
 ) {
   const pid = pidFile.read()
   const isRunning = pid !== null && pidFile.isRunning()
