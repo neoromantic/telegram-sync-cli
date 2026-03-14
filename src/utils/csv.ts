@@ -64,7 +64,7 @@ export function stringify<T extends Record<string, unknown>>(
   }
 
   // Determine headers from first object if not provided
-  const headers = columns ?? Object.keys(data[0] as object)
+  const headers = columns ?? Object.keys(data[0]!)
 
   const lines: string[] = []
 
