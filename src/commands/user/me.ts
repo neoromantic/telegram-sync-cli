@@ -31,7 +31,7 @@ export const meCommand = defineCommand({
   async run({ args }) {
     try {
       const accountId = resolveAccountSelector(args.account)
-      const fresh = args.fresh ?? false
+      const fresh = args.fresh
 
       // Get the account to find user_id (no network call needed)
       const account =
