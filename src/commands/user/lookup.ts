@@ -39,8 +39,7 @@ async function resolveUserByUsername(
     _: 'contacts.resolveUsername',
     username,
   }
-  const resolved = await client.call(request)
-  return resolved.users?.find(isRawUser)
+  return (await client.call(request)).users?.find(isRawUser)
 }
 
 async function resolveUserByPhone(
@@ -51,8 +50,7 @@ async function resolveUserByPhone(
     _: 'contacts.resolvePhone',
     phone,
   }
-  const resolved = await client.call(request)
-  return resolved.users?.find(isRawUser)
+  return (await client.call(request)).users?.find(isRawUser)
 }
 
 async function resolveUserById(
@@ -64,8 +62,7 @@ async function resolveUserById(
     _: 'users.getUsers',
     id: [{ _: 'inputUser', userId, accessHash: toLong(0) }],
   }
-  const result = await client.call(request)
-  return result.find(isRawUser)
+  return (await client.call(request)).find(isRawUser)
 }
 
 async function resolveUserFromApi(
