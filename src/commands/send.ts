@@ -119,7 +119,7 @@ export const sendCommand = defineCommand({
     const recipient = args.to
     const messageText = args.message
     const accountId = resolveAccountSelector(args.account)
-    const silent = args.silent ?? false
+    const silent = args.silent
     const replyTo = args['reply-to']
       ? Number.parseInt(args['reply-to'], 10)
       : undefined
