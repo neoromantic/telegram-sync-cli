@@ -116,17 +116,7 @@ export const searchMessagesCommand = defineCommand({
     }
 
     const chatFilter = parseIdentifier(args.chat)
-    if (args.chat && !chatFilter) {
-      error(ErrorCodes.INVALID_ARGS, `Invalid chat identifier: ${args.chat}`)
-    }
-
     const senderFilter = parseIdentifier(args.sender)
-    if (args.sender && !senderFilter) {
-      error(
-        ErrorCodes.INVALID_ARGS,
-        `Invalid sender identifier: ${args.sender}`,
-      )
-    }
     resolveAccountSelector(args.account)
 
     try {
