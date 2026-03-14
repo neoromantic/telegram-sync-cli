@@ -152,6 +152,9 @@ export function setupEventHandlers(
     db: cacheDb,
     messagesCache,
     chatSyncState,
+    onMessagesSynced: (count) => {
+      ctx.runtime.totalMessagesSynced += count
+    },
   })
 
   const createContext = (): UpdateContext => ({

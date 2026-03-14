@@ -77,6 +77,7 @@ Job status values:
 
 ### Catch-up + Backfill
 
+0. **Bootstrap dialogs** on daemon startup (populate `chats_cache` + `chat_sync_state`)
 1. Scheduler inspects `chat_sync_state`
 2. Creates `sync_jobs` based on priority + gaps
 3. Worker executes jobs using API calls (`messages.getHistory`)
@@ -98,7 +99,9 @@ Rate limits are tracked per API method:
 
 - Catchup and realtime run concurrently; realtime handlers do not wait for catchup to complete.
 - Medium-group initial load size is governed by worker batch size (currently 100), not a fixed “10 messages” rule.
-- Contact/dialog sync is **CLI-driven**; the daemon only syncs messages.
+- Daemon bootstraps dialogs on startup to seed `chats_cache` + `chat_sync_state`.
+- Scheduler refreshes job queues periodically to pick up newly discovered chats.
+- Contact sync remains **CLI-driven**; the daemon does not refresh contacts.
 
 ## Implementation References
 
@@ -108,3 +111,4 @@ Rate limits are tracked per API method:
 - `src/daemon/scheduler.ts`
 - `src/daemon/sync-worker-core.ts`
 - `src/daemon/sync-worker-real-jobs.ts`
+- `src/daemon/daemon-bootstrap.ts`

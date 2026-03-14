@@ -99,12 +99,14 @@ export interface UpdateHandlersOptions {
   messagesCache: MessagesCache
   chatSyncState: ChatSyncStateService
   logger?: DaemonLogger
+  onMessagesSynced?: (count: number) => void
 }
 
 interface HandlerDeps {
   messagesCache: MessagesCache
   chatSyncState: ChatSyncStateService
   logger: DaemonLogger
+  onMessagesSynced?: (count: number) => void
 }
 
 /**
@@ -175,6 +177,7 @@ async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
   updateForwardCursor(deps.chatSyncState, data.chatId, data.messageId)
   deps.chatSyncState.incrementSyncedMessages(data.chatId, 1)
   deps.chatSyncState.updateLastSync(data.chatId, 'forward')
+  deps.onMessagesSynced?.(1)
 }
 
 async function handleEditMessageImpl(deps: HandlerDeps, data: EditMessageData) {
@@ -240,6 +243,7 @@ function processChatBatch(
   const messageIds = chatMessages.map((m) => m.messageId)
   updateCursorsForBatch(deps.chatSyncState, chatId, messageIds)
   deps.chatSyncState.incrementSyncedMessages(chatId, chatMessages.length)
+  deps.onMessagesSynced?.(chatMessages.length)
 }
 
 async function handleBatchMessagesImpl(
@@ -288,6 +292,7 @@ export function createUpdateHandlers(
     messagesCache: options.messagesCache,
     chatSyncState: options.chatSyncState,
     logger: options.logger ?? noopLogger,
+    onMessagesSynced: options.onMessagesSynced,
   }
 
   return {

@@ -155,6 +155,34 @@ export async function collectStatus(
     active_flood_waits: [],
   }
 
+  const progressStatus: {
+    chats_total: number
+    chats_enabled: number
+    chats_history_complete: number
+    chats_history_pending: number
+    chats_cached: number
+    messages_tracked: number
+    messages_cached: number
+    sample_chats: Array<{
+      chat_id: number
+      chat_type: string
+      synced_messages: number
+      history_complete: boolean
+      forward_cursor: number | null
+      backward_cursor: number | null
+      sync_priority: number
+    }>
+  } = {
+    chats_total: 0,
+    chats_enabled: 0,
+    chats_history_complete: 0,
+    chats_history_pending: 0,
+    chats_cached: 0,
+    messages_tracked: 0,
+    messages_cached: 0,
+    sample_chats: [],
+  }
+
   // Try to read from database
   try {
     const cacheDb = getCacheDb()
@@ -218,6 +246,70 @@ export async function collectStatus(
         remaining_seconds: Math.max(0, fw.blockedUntil - now),
       }),
     )
+
+    const totalChatsRow = cacheDb
+      .query('SELECT COUNT(*) as count FROM chat_sync_state')
+      .get() as { count: number } | null
+    const enabledChatsRow = cacheDb
+      .query(
+        'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1',
+      )
+      .get() as { count: number } | null
+    const completeChatsRow = cacheDb
+      .query(
+        'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 1',
+      )
+      .get() as { count: number } | null
+    const pendingChatsRow = cacheDb
+      .query(
+        'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 0',
+      )
+      .get() as { count: number } | null
+    const chatsCachedRow = cacheDb
+      .query('SELECT COUNT(*) as count FROM chats_cache')
+      .get() as { count: number } | null
+    const messagesTrackedRow = cacheDb
+      .query(
+        'SELECT COALESCE(SUM(synced_messages), 0) as count FROM chat_sync_state',
+      )
+      .get() as { count: number } | null
+    const messagesCachedRow = cacheDb
+      .query('SELECT COUNT(*) as count FROM messages_cache')
+      .get() as { count: number } | null
+    const sampleChatsRows = cacheDb
+      .query(
+        `SELECT chat_id, chat_type, synced_messages, history_complete, forward_cursor, backward_cursor, sync_priority
+         FROM chat_sync_state
+         WHERE sync_enabled = 1
+         ORDER BY history_complete ASC, synced_messages DESC
+         LIMIT 5`,
+      )
+      .all() as Array<{
+      chat_id: number
+      chat_type: string
+      synced_messages: number
+      history_complete: number
+      forward_cursor: number | null
+      backward_cursor: number | null
+      sync_priority: number
+    }>
+
+    progressStatus.chats_total = totalChatsRow?.count ?? 0
+    progressStatus.chats_enabled = enabledChatsRow?.count ?? 0
+    progressStatus.chats_history_complete = completeChatsRow?.count ?? 0
+    progressStatus.chats_history_pending = pendingChatsRow?.count ?? 0
+    progressStatus.chats_cached = chatsCachedRow?.count ?? 0
+    progressStatus.messages_tracked = messagesTrackedRow?.count ?? 0
+    progressStatus.messages_cached = messagesCachedRow?.count ?? 0
+    progressStatus.sample_chats = sampleChatsRows.map((row) => ({
+      chat_id: row.chat_id,
+      chat_type: row.chat_type,
+      synced_messages: row.synced_messages,
+      history_complete: row.history_complete === 1,
+      forward_cursor: row.forward_cursor,
+      backward_cursor: row.backward_cursor,
+      sync_priority: row.sync_priority,
+    }))
   } catch {
     // Database might not be initialized
   }
@@ -246,6 +338,7 @@ export async function collectStatus(
   return {
     daemon: daemonStatus,
     sync: syncStatus,
+    progress: progressStatus,
     rate_limits: rateLimitsStatus,
     accounts: accountsStatus,
     timestamp: new Date().toISOString(),

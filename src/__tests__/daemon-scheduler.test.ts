@@ -42,6 +42,7 @@ const createSchedulerStub = (
     queueBackwardHistory: mock(() => {}),
     queueInitialLoad: mock(() => {}),
     initializeForStartup: mock(async () => {}),
+    refreshQueues: mock(() => {}),
     getNextJob: () => null,
     claimNextJob: () => null,
     startJob: () => true,

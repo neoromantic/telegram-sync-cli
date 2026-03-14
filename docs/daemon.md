@@ -7,6 +7,7 @@
 The `tg daemon` subcommand runs a long-lived process that:
 - Maintains MTProto connections for configured accounts
 - Processes real-time updates (new/edit/delete messages)
+- Bootstraps dialogs on startup (seed `chats_cache` + `chat_sync_state`)
 - Schedules message sync jobs (forward catchup + backfill)
 - Writes only to local cache/sync tables (read-only to Telegram)
 
@@ -89,11 +90,14 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
 - Forward catchup for missed messages
 - Backward history for older messages
 - Priority-based execution (P0–P4)
+- Periodic refresh to pick up newly discovered chats
+  - Refresh interval: ~30 seconds (daemon loop)
 
 Key files:
 - `src/daemon/scheduler.ts`
 - `src/daemon/daemon-scheduler.ts`
 - `src/db/sync-jobs.ts`
+- `src/daemon/daemon-bootstrap.ts`
 
 ### Sync Worker
 
@@ -115,7 +119,11 @@ Key files:
 - `pid`
 - `uptime`
 - `connectedAccounts` / `totalAccounts`
-- `messagesSynced`
+- `messagesSynced` (since daemon start, realtime + backfill)
+- `messagesSyncedTotal` (sum of `chat_sync_state.synced_messages`)
+- `messagesCached` (rows in `messages_cache`)
+- `chatsEnabled`
+- `chatsHistoryComplete`
 - `lastUpdate`
 
 ---

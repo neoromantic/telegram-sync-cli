@@ -174,6 +174,39 @@ const statusCommand = defineCommand({
         ? formatDuration(Date.now() - info.startedAt)
         : null
 
+      let messagesTrackedTotal: number | null = null
+      let messagesCached: number | null = null
+      let chatsEnabled: number | null = null
+      let chatsHistoryComplete: number | null = null
+
+      try {
+        const trackedRow = cacheDb
+          .query(
+            'SELECT COALESCE(SUM(synced_messages), 0) as count FROM chat_sync_state',
+          )
+          .get() as { count: number } | null
+        const cachedRow = cacheDb
+          .query('SELECT COUNT(*) as count FROM messages_cache')
+          .get() as { count: number } | null
+        const enabledRow = cacheDb
+          .query(
+            'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1',
+          )
+          .get() as { count: number } | null
+        const completeRow = cacheDb
+          .query(
+            'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 1',
+          )
+          .get() as { count: number } | null
+
+        messagesTrackedTotal = trackedRow?.count ?? 0
+        messagesCached = cachedRow?.count ?? 0
+        chatsEnabled = enabledRow?.count ?? 0
+        chatsHistoryComplete = completeRow?.count ?? 0
+      } catch {
+        // Ignore progress query failures
+      }
+
       success({
         status: 'running',
         pid,
@@ -181,6 +214,10 @@ const statusCommand = defineCommand({
         connectedAccounts: info.connectedAccounts,
         totalAccounts: info.totalAccounts,
         messagesSynced: info.messagesSynced,
+        messagesSyncedTotal: messagesTrackedTotal,
+        messagesCached,
+        chatsEnabled,
+        chatsHistoryComplete,
         lastUpdate: info.lastUpdate
           ? new Date(info.lastUpdate).toISOString()
           : null,

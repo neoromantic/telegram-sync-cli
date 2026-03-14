@@ -18,6 +18,7 @@ import {
   disconnectAllAccounts,
   setupSignalHandlers,
 } from './daemon-accounts'
+import { bootstrapDialogs } from './daemon-bootstrap'
 import { createDaemonRuntime, type DaemonContext } from './daemon-context'
 import { createLogger } from './daemon-logger'
 import { mainLoop } from './daemon-loop'
@@ -216,6 +217,12 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
     ctx.logger.error('All accounts failed to connect')
     await performCleanup(ctx)
     return DaemonExitCode.AllAccountsFailed
+  }
+
+  try {
+    await bootstrapDialogs(ctx)
+  } catch (err) {
+    ctx.logger.warn(`Failed to bootstrap dialogs: ${formatError(err)}`)
   }
 
   try {

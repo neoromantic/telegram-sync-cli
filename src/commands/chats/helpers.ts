@@ -77,6 +77,10 @@ export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
     chatId = String(rawPeer.userId)
     title = peer.displayName || null
     username = peer.username ?? null
+    const rawUser = peer.raw
+    if (rawUser && (rawUser._ === 'user' || rawUser._ === 'userEmpty')) {
+      accessHash = rawUser.accessHash ? String(rawUser.accessHash) : null
+    }
   } else if (rawPeer._ === 'peerChat' && peer.type === 'chat') {
     chatId = String(rawPeer.chatId)
     title = peer.title ?? null

@@ -5,6 +5,7 @@ import { formatError, getErrorMessage } from './daemon-utils'
 
 const HEALTH_CHECK_INTERVAL_TICKS = 60
 const HEALTH_CHECK_COOLDOWN_MS = 60_000
+const SCHEDULER_REFRESH_INTERVAL_TICKS = 30
 
 async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
   const statusService = ctx.runtime.statusService
@@ -88,6 +89,14 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
 
     if (loopIteration % HEALTH_CHECK_INTERVAL_TICKS === 0) {
       await runHealthChecks(ctx, now)
+    }
+
+    if (loopIteration % SCHEDULER_REFRESH_INTERVAL_TICKS === 0) {
+      try {
+        ctx.runtime.scheduler?.refreshQueues()
+      } catch (err) {
+        ctx.logger.warn(`Failed to refresh sync queues: ${formatError(err)}`)
+      }
     }
 
     try {

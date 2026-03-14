@@ -49,6 +49,7 @@ function createMockScheduler(
     queueBackwardHistory: () => {},
     queueInitialLoad: () => {},
     initializeForStartup: async () => {},
+    refreshQueues: () => {},
     getNextJob: () => null,
     claimNextJob: () => null,
     startJob: () => false,

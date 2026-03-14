@@ -34,6 +34,8 @@ export interface SyncScheduler {
   queueInitialLoad(chatId: number, messageCount: number): void
   /** Initialize scheduler with startup jobs */
   initializeForStartup(): Promise<void>
+  /** Refresh job queue based on current sync state */
+  refreshQueues(): void
   /** Get next job to process (non-atomic, use claimNextJob for concurrent safety) */
   getNextJob(): SyncJobRow | null
   /** Atomically claim and start the next pending job (prevents race conditions) */
@@ -150,7 +152,10 @@ class SyncSchedulerImpl implements SyncScheduler {
 
   async initializeForStartup(): Promise<void> {
     this.recoverCrashedJobs()
+    this.refreshQueues()
+  }
 
+  refreshQueues(): void {
     const enabledChats = this.chatSyncState.getEnabledChats()
     for (const chat of enabledChats) {
       this.queueForwardCatchup(chat.chat_id)

@@ -87,6 +87,49 @@ function printSyncJobsSection(status: StatusSnapshot): void {
   }
 }
 
+function printSyncProgressSection(status: StatusSnapshot): void {
+  printHeader('Sync Progress')
+
+  printRow('Chats Tracked', c.number(status.progress.chats_total))
+  printRow('Chats Enabled', c.number(status.progress.chats_enabled))
+
+  if (status.progress.chats_enabled > 0) {
+    printRow(
+      'History Complete',
+      `${c.number(status.progress.chats_history_complete)} ${c.dim('/')} ${c.number(status.progress.chats_enabled)}`,
+    )
+  } else {
+    printRow('History Complete', c.dim('0'))
+  }
+
+  printRow(
+    'Messages Tracked',
+    c.number(status.progress.messages_tracked.toLocaleString()),
+  )
+  printRow(
+    'Messages Cached',
+    c.number(status.progress.messages_cached.toLocaleString()),
+  )
+
+  if (status.progress.chats_cached > 0) {
+    printRow('Chats Cached', c.number(status.progress.chats_cached))
+  }
+
+  if (status.progress.sample_chats.length > 0) {
+    console.log()
+    console.log(c.label('  Sample Chats:'))
+    for (const chat of status.progress.sample_chats) {
+      const state = chat.history_complete
+        ? c.success('complete')
+        : c.warning('backfill')
+      const synced = c.number(chat.synced_messages.toLocaleString())
+      console.log(
+        `    ${c.dim(icons.bullet)} ${c.value(chat.chat_type)} ${c.dim(`chat:${chat.chat_id}`)} ${c.dim(icons.arrow)} ${synced} msgs ${c.dim(icons.arrow)} ${state}`,
+      )
+    }
+  }
+}
+
 function printRateLimitsSection(status: StatusSnapshot): void {
   printHeader('Rate Limits')
   printRow('API Calls (1m)', c.number(status.rate_limits.api_calls_last_minute))
@@ -167,6 +210,7 @@ export function printPrettyStatus(status: StatusSnapshot): void {
 
   printDaemonSection(status)
   printSyncJobsSection(status)
+  printSyncProgressSection(status)
   printRateLimitsSection(status)
   printAccountsSection(status)
 

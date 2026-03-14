@@ -3,6 +3,7 @@ import type { tl } from '@mtcute/tl'
 import type { ChatsCache } from '../db/chats-cache'
 import type { MessageInput } from '../db/messages-cache'
 import { toLong } from '../utils/long'
+import { getCandidateChatIds } from '../utils/telegram-peer-ids'
 
 const MEDIA_TYPE_MAP: Record<string, string> = {
   messageMediaPhoto: 'photo',
@@ -24,47 +25,45 @@ export function buildInputPeer(
   chatId: number,
   chatsCache: ChatsCache,
 ): tl.TypeInputPeer | null {
-  const chat = chatsCache.getById(String(chatId))
-  let inputPeer: tl.TypeInputPeer | null = null
+  const candidates = getCandidateChatIds(chatId)
 
-  if (!chat) {
-    if (chatId < 0) {
-      return null
-    }
-    return {
-      _: 'inputPeerUser',
-      userId: chatId,
-      accessHash: toLong(0),
+  for (const candidateId of candidates) {
+    const chat = chatsCache.getById(String(candidateId))
+    if (!chat) continue
+
+    switch (chat.type) {
+      case 'private':
+        return {
+          _: 'inputPeerUser',
+          userId: Number(chat.chat_id),
+          accessHash: toLong(chat.access_hash),
+        }
+      case 'group':
+        return {
+          _: 'inputPeerChat',
+          chatId: Number(chat.chat_id),
+        }
+      case 'supergroup':
+      case 'channel':
+        return {
+          _: 'inputPeerChannel',
+          channelId: Number(chat.chat_id),
+          accessHash: toLong(chat.access_hash),
+        }
+      default:
+        return null
     }
   }
 
-  switch (chat.type) {
-    case 'private':
-      inputPeer = {
-        _: 'inputPeerUser',
-        userId: Number(chat.chat_id),
-        accessHash: toLong(chat.access_hash),
-      }
-      break
-    case 'group':
-      inputPeer = {
-        _: 'inputPeerChat',
-        chatId: Number(chat.chat_id),
-      }
-      break
-    case 'supergroup':
-    case 'channel':
-      inputPeer = {
-        _: 'inputPeerChannel',
-        channelId: Number(chat.chat_id),
-        accessHash: toLong(chat.access_hash),
-      }
-      break
-    default:
-      inputPeer = null
+  if (chatId < 0) {
+    return null
   }
 
-  return inputPeer
+  return {
+    _: 'inputPeerUser',
+    userId: chatId,
+    accessHash: toLong(0),
+  }
 }
 
 function bigIntReplacer(_key: string, value: unknown): unknown {
