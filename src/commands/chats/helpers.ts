@@ -45,13 +45,6 @@ export function chatRowToItem(chat: ChatRow): ChatItem {
   }
 }
 
-export function cachedChatToItem(
-  cached: ReturnType<ChatsCache['getById']>,
-): ChatItem {
-  if (!cached) throw new Error('Chat not found')
-  return chatRowToItem(cached)
-}
-
 export function filterChatsByType(
   chats: CachedChatInput[],
   typeFilter?: ChatType,
