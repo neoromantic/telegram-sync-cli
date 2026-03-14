@@ -17,19 +17,16 @@ async function handleWorkerResult(
   },
 ): Promise<number> {
   const { pollIntervalMs, onRateLimited, logger } = options
-  let delayMs = 100
 
   if (result === null) {
-    delayMs = pollIntervalMs
-    return delayMs
+    return pollIntervalMs
   }
 
   if (result.rateLimited) {
     const waitSeconds = result.waitSeconds ?? 30
-    delayMs = waitSeconds * 1000
     logger.warn(`Rate limited, waiting ${waitSeconds}s`)
     onRateLimited?.(waitSeconds)
-    return delayMs
+    return waitSeconds * 1000
   }
 
   if (result.success) {
@@ -38,7 +35,7 @@ async function handleWorkerResult(
     logger.error(`Job failed: ${result.error}`)
   }
 
-  return delayMs
+  return 100
 }
 
 /**
