@@ -20,10 +20,7 @@ import {
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import { resolveUsername } from '../../utils/telegram-resolve'
-import {
-  chatRowToItem,
-  userToPrivateChatCacheInput,
-} from './helpers'
+import { chatRowToItem, userToPrivateChatCacheInput } from './helpers'
 
 type ResolvedChat = Exclude<tl.TypeChat, tl.RawChatEmpty>
 

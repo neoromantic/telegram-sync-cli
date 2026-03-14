@@ -1,11 +1,7 @@
 import type { Dialog } from '@mtcute/bun'
 import type { tl } from '@mtcute/tl'
 
-import type {
-  CachedChat,
-  CachedChatInput,
-  ChatsCache,
-} from '../../db/chats-cache'
+import type { CachedChat, CachedChatInput } from '../../db/chats-cache'
 import type { ChatType } from '../../db/types'
 
 export interface ChatItem {
