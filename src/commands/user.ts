@@ -1,4 +1,2 @@
-import { userCommand } from './user/lookup'
-import { meCommand } from './user/me'
-
-export { meCommand, userCommand }
+export { userCommand } from './user/lookup'
+export { meCommand } from './user/me'
