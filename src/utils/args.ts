@@ -81,30 +81,6 @@ function parseValue(value: unknown): unknown {
 }
 
 /**
- * Parse a peer identifier into a format suitable for mtcute
- * Supports: @username, +phone, user_id
- */
-export function parsePeer(peer: string): string | number {
-  // Username
-  if (peer.startsWith('@')) {
-    return peer.slice(1)
-  }
-
-  // Phone number
-  if (peer.startsWith('+')) {
-    return peer
-  }
-
-  // Numeric ID
-  if (/^-?\d+$/.test(peer)) {
-    return parseInt(peer, 10)
-  }
-
-  // Assume it's a username without @
-  return peer
-}
-
-/**
  * Merge CLI arguments with JSON input
  */
 export function mergeArgs(
