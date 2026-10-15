@@ -38,7 +38,7 @@ Available on the root command:
 ### Authentication
 
 ```bash
-tg auth login --phone +79261408252
+tg auth login --phone +15551234567
 tg auth login-qr
 tg auth logout
 tg auth status

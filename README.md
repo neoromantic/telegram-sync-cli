@@ -26,48 +26,44 @@ Agent-friendly Telegram Sync CLI with a local cache and full API access. Built o
 - APIs & UX: [API design](docs/api-design.md), [Contacts](docs/contacts.md)
 - Build & test: [Build & distribution](docs/build-distribution.md), [Testing](docs/testing.md)
 
-## Installation
-
-```bash
-# Install from npm/bun registry
-bun install -g @goodit/telegram-sync-cli
-# or
-npm install -g @goodit/telegram-sync-cli
-
-# Clone the repository
-git clone <repo-url>
-cd telegram-sync-cli
-
-# Install dependencies
-bun install
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your API credentials from https://my.telegram.org/apps
-```
-
-Note: the npm package does not include `dist/tg`. Global installs build a native
-binary during `postinstall`, so Bun must be available on the system.
-
 ## Quick Start
 
 ```bash
-# Login to your Telegram account (dev)
-bun run src/index.ts auth login --phone +79261408252
+# Install the published package (Bun is required)
+bun install -g @goodit/telegram-sync-cli
 
-# List your contacts
-bun run src/index.ts contacts list
+# Telegram API credentials from https://my.telegram.org/apps
+export TELEGRAM_API_ID=123456
+export TELEGRAM_API_HASH=your_api_hash
 
-# Call any Telegram API method
-bun run src/index.ts api account.checkUsername --username myuser
+# Log in, then use the cache
+tg auth login --phone +15551234567
+tg chats list --limit 20 --format pretty
+tg messages search --query "hello" --format pretty
 ```
 
+`npm install -g @goodit/telegram-sync-cli` works too, as long as `bun` is on your
+`PATH`. The npm package does not ship `dist/tg`: npm builds the native binary
+in `postinstall`; Bun blocks dependency postinstall scripts by default, so with
+`bun install -g` the binary is built on the first `tg` run instead (a few
+seconds, once).
+
+## Run from Source
+
 ```bash
-# Same commands when installed as a binary
-# (see build/installation docs)
-tg auth login --phone +79261408252
-tg contacts list
-tg api account.checkUsername --username myuser
+git clone https://github.com/neoromantic/telegram-sync-cli.git
+cd telegram-sync-cli
+bun install
+
+# Bun auto-loads .env: fill in TELEGRAM_API_ID and TELEGRAM_API_HASH
+cp .env.example .env
+
+bun run src/index.ts auth login --phone +15551234567
+bun run src/index.ts contacts list
+bun run src/index.ts api account.checkUsername --username myuser
+
+# Or compile the binary to dist/tg
+bun run build
 ```
 
 ## Usage

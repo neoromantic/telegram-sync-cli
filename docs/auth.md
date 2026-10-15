@@ -16,8 +16,8 @@ Set the API credentials in your environment (Bun auto-loads `.env`):
 ### Phone Login
 
 ```bash
-tg auth login --phone +79261408252
-tg auth login --phone +79261408252 --label "Work"
+tg auth login --phone +15551234567
+tg auth login --phone +15551234567 --label "Work"
 ```
 
 Flow:

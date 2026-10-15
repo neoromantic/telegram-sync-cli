@@ -51,7 +51,7 @@ High-level commands for common operations:
 
 ```bash
 # Authentication
-tg auth login --phone +79261408252
+tg auth login --phone +15551234567
 tg auth login-qr
 tg auth logout
 tg auth status
@@ -219,7 +219,7 @@ tg api messages.getHistory --account 2 --peer @user
 
 Peers can be specified in multiple formats:
 - Username: `@username`
-- Phone: `+79261408252`
+- Phone: `+15551234567`
 - User ID: `123456789`
 - Chat ID: `-123456789`
 - Channel ID: `-1001234567890`

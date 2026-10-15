@@ -453,7 +453,7 @@ export const loginCommand = defineCommand({
   args: {
     phone: {
       type: 'string',
-      description: 'Phone number in international format (e.g., +79261408252)',
+      description: 'Phone number in international format (e.g., +15551234567)',
       required: true,
     },
     label: {
