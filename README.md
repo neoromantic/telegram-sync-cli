@@ -2,6 +2,8 @@
 
 Agent-friendly Telegram Sync CLI with a local cache and full API access. Built on Bun + mtcute.
 
+<img src="docs/images/telegram-sync-cli@2x.png" width="800" alt="A terminal split in two: the top pane shows tg daemon start logging that it bootstrapped 186 dialogs and initialized sync jobs; the bottom pane runs tg messages search --query lisbon piped through jq, column and grep, listing four matches from different chats (Weekend Crew, Ana Ribeiro, Climbing Club, Product Team) with the word Lisbon highlighted">
+
 ## Features
 
 - 🧑‍💻 Multi-account management (`tg accounts`, `--account`)

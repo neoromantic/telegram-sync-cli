@@ -1,0 +1,87 @@
+<!doctype html>
+<!--
+  Source for docs/images/telegram-sync-cli.png (1600x1000, 2x for the README).
+  All chats, names and numbers are fictional. The output is what the commands
+  print against a cache seeded with these messages: `tg daemon start` log lines
+  (src/daemon/*.ts) and `tg messages search` JSON piped through jq/column/grep.
+  Render: open in Chrome at a 1600x1000 viewport and screenshot (DPR 1 and 2).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>telegram-sync-cli</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=block" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e131b;
+    --bg-top: #0b1017;
+    --border: #223044;
+    --fg: #dbe2ec;
+    --dim: #5f6f86;
+    --muted: #8796ab;
+    --blue: #2aabee;
+    --green: #7ee0a8;
+    --amber: #f3c672;
+    --violet: #b9a3ff;
+    --match: #ff6b7d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1600px; height: 1000px; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+    font-size: 27px;
+    line-height: 1.74;
+    color: var(--fg);
+    font-variant-ligatures: none;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
+  }
+  .pane { padding: 0 64px; white-space: pre; }
+  .pane.top { background: var(--bg-top); padding-top: 44px; padding-bottom: 42px; }
+  .pane.bottom {
+    flex: 1; padding-top: 44px;
+    background: radial-gradient(1200px 520px at 100% 100%, rgba(42,171,238,.075), transparent 70%);
+  }
+  .title {
+    display: flex; align-items: center; gap: 14px;
+    font-size: 23px; color: var(--muted); margin-bottom: 22px;
+  }
+  .title .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(126,224,168,.14); }
+  .title .dot.blue { background: var(--blue); box-shadow: 0 0 0 4px rgba(42,171,238,.16); }
+  .title b { color: var(--fg); font-weight: 500; }
+  .divider { height: 2px; background: var(--border); }
+  .log { color: var(--muted); }
+  .log .ts { color: #46556b; }
+  .log .info { color: var(--blue); }
+  .log .hl { color: var(--fg); }
+  .p { color: var(--blue); font-weight: 700; }
+  .cwd { color: var(--violet); }
+  .cmd { color: var(--green); }
+  .str { color: var(--amber); }
+  .op { color: var(--muted); }
+  .out { color: var(--fg); }
+  .m { color: var(--match); font-weight: 700; }
+  .cursor { display: inline-block; width: 16px; height: 34px; background: var(--fg); vertical-align: -6px; opacity: .85; }
+</style>
+</head>
+<body>
+<section class="pane top"><div class="title"><span class="dot"></span><b>tg daemon start</b>  syncing a local cache, read-only</div><div class="log"><span class="ts">[2026-10-15T09:41:03.118Z]</span> <span class="info">[INFO]</span> [Account 1] Real-time updates active
+<span class="ts">[2026-10-15T09:41:03.120Z]</span> <span class="info">[INFO]</span> 1/1 account(s) connected
+<span class="ts">[2026-10-15T09:41:03.121Z]</span> <span class="info">[INFO]</span> [Account 1] Bootstrapping dialogs...
+<span class="ts">[2026-10-15T09:41:10.874Z]</span> <span class="info">[INFO]</span> <span class="hl">[Account 1] Bootstrapped 186 dialogs, 1204 users in 7s</span>
+<span class="ts">[2026-10-15T09:41:10.875Z]</span> <span class="info">[INFO]</span> Initializing sync scheduler...
+<span class="ts">[2026-10-15T09:41:10.903Z]</span> <span class="info">[INFO]</span> <span class="hl">Scheduler initialized with 41 pending jobs</span></div></section>
+<div class="divider"></div>
+<section class="pane bottom"><div class="title"><span class="dot blue"></span><b>zsh</b>  where did someone mention Lisbon?</div><span class="cwd">~</span> <span class="p">❯</span> <span class="cmd">tg</span> messages search --query <span class="str">"lisbon"</span> --limit 4 <span class="op">\</span>
+    <span class="op">|</span> <span class="cmd">jq</span> -r <span class="str">'.data.results[] | [.chat.title, .sender.firstName, .text] | @tsv'</span> <span class="op">\</span>
+    <span class="op">|</span> <span class="cmd">column</span> -t -s <span class="str">$'\t'</span> <span class="op">|</span> <span class="cmd">grep</span> -i --color <span class="str">lisbon</span>
+<span class="out">Weekend Crew   Maya   Booked the <span class="m">Lisbon</span> flat for Nov 6–9, keys after 3pm
+Ana Ribeiro    Ana    In <span class="m">Lisbon</span> skip tram 28, walk up to Graça at sunset
+Climbing Club  Tomás  Sintra boulders on the <span class="m">Lisbon</span> weekend, who’s in?
+Product Team   Priya  <span class="m">Lisbon</span> offsite agenda is up, comments by Friday</span>
+<span class="cwd">~</span> <span class="p">❯</span> <span class="cursor"></span></section>
+</body>
+</html>
