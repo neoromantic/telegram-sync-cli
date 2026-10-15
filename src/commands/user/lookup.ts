@@ -37,8 +37,8 @@ async function resolveUserByUsername(
 ): Promise<tl.RawUser | undefined> {
   return (
     await client.call({
-    _: 'contacts.resolveUsername',
-    username,
+      _: 'contacts.resolveUsername',
+      username,
     } as tl.contacts.RawResolveUsernameRequest)
   ).users?.find(isRawUser)
 }
@@ -49,8 +49,8 @@ async function resolveUserByPhone(
 ): Promise<tl.RawUser | undefined> {
   return (
     await client.call({
-    _: 'contacts.resolvePhone',
-    phone,
+      _: 'contacts.resolvePhone',
+      phone,
     } as tl.contacts.RawResolvePhoneRequest)
   ).users?.find(isRawUser)
 }
@@ -61,14 +61,14 @@ async function resolveUserById(
 ): Promise<tl.RawUser | undefined> {
   return (
     await client.call({
-    _: 'users.getUsers',
-    id: [
-      {
-        _: 'inputUser',
-        userId: Number.parseInt(identifier, 10),
-        accessHash: toLong(0),
-      },
-    ],
+      _: 'users.getUsers',
+      id: [
+        {
+          _: 'inputUser',
+          userId: Number.parseInt(identifier, 10),
+          accessHash: toLong(0),
+        },
+      ],
     } as tl.users.RawGetUsersRequest)
   ).find(isRawUser)
 }

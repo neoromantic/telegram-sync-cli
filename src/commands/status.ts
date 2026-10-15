@@ -91,9 +91,7 @@ export const statusCommand = defineCommand({
 /**
  * Collect all status information
  */
-export async function collectStatus(
-  pidFile: ReturnType<typeof createPidFile>,
-) {
+export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
   const pid = pidFile.read()
   const isRunning = pid !== null && pidFile.isRunning()
 
