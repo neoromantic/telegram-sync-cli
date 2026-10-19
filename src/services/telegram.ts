@@ -25,6 +25,7 @@ import { join } from 'node:path'
 import { TelegramClient } from '@mtcute/bun'
 import { type FloodWaiterOptions, networkMiddlewares } from '@mtcute/core'
 
+import { ConfigError } from '../config'
 import {
   type AccountsDbInterface,
   accountsDb as defaultAccountsDb,
@@ -34,16 +35,6 @@ import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
 
 // Store active clients by account ID
 const clients = new Map<number, TelegramClient>()
-
-// API credentials from environment
-const API_ID = parseInt(process.env.TELEGRAM_API_ID ?? '0', 10)
-const API_HASH = process.env.TELEGRAM_API_HASH ?? ''
-
-// Verbose/debug mode - set via VERBOSE=1 or MTCUTE_LOG_LEVEL env var
-const LOG_LEVEL = parseInt(
-  process.env.MTCUTE_LOG_LEVEL ?? (process.env.VERBOSE === '1' ? '5' : '2'),
-  10,
-)
 
 /**
  * Configuration for telegram service
@@ -84,10 +75,16 @@ const DEFAULT_FLOOD_WAITER_OPTIONS: FloodWaiterOptions = {
  * Get default configuration from environment
  */
 export function getDefaultConfig(): TelegramConfig {
+  // Read lazily so commands that never talk to Telegram (help, version,
+  // cache queries, config) work without credentials.
   return {
-    apiId: API_ID,
-    apiHash: API_HASH,
-    logLevel: LOG_LEVEL,
+    apiId: parseInt(process.env.TELEGRAM_API_ID ?? '0', 10),
+    apiHash: process.env.TELEGRAM_API_HASH ?? '',
+    // Verbose/debug mode - set via VERBOSE=1 or MTCUTE_LOG_LEVEL env var
+    logLevel: parseInt(
+      process.env.MTCUTE_LOG_LEVEL ?? (process.env.VERBOSE === '1' ? '5' : '2'),
+      10,
+    ),
   }
 }
 
@@ -111,6 +108,32 @@ export function validateConfig(config: TelegramConfig): {
     }
   }
   return { valid: true }
+}
+
+export const CREDENTIALS_HELP_URL = 'https://my.telegram.org/apps'
+
+/**
+ * Thrown when a command needs Telegram but API credentials are not set
+ */
+export class MissingCredentialsError extends ConfigError {
+  constructor(message: string) {
+    super(`${message}. Get credentials at ${CREDENTIALS_HELP_URL}`, [
+      { path: 'env', message },
+    ])
+    this.name = 'MissingCredentialsError'
+  }
+}
+
+/**
+ * Get config from environment, throwing if credentials are missing
+ */
+export function requireDefaultConfig(): TelegramConfig {
+  const config = getDefaultConfig()
+  const validation = validateConfig(config)
+  if (!validation.valid) {
+    throw new MissingCredentialsError(validation.error ?? 'Invalid config')
+  }
+  return config
 }
 
 /**
@@ -256,25 +279,20 @@ export async function isAuthorized(client: TelegramClient): Promise<boolean> {
   }
 }
 
-// Validate credentials at startup (only warn, don't exit - for tests)
-const defaultConfig = getDefaultConfig()
-const validation = validateConfig(defaultConfig)
-if (!validation.valid && process.env.NODE_ENV !== 'test') {
-  console.error(`Error: ${validation.error}`)
-  console.error('Get them from https://my.telegram.org/apps')
-  if (process.env.BUN_ENV !== 'test') {
-    process.exit(1)
-  }
-}
+// Default client factory, created on first use so credentials are only
+// required by commands that actually connect to Telegram
+let defaultFactory: ClientFactory | null = null
 
-// Default client factory
-const defaultFactory = createDefaultClientFactory(defaultConfig)
+function getDefaultFactory(): ClientFactory {
+  defaultFactory ??= createDefaultClientFactory(requireDefaultConfig())
+  return defaultFactory
+}
 
 /**
  * Create a new Telegram client for an account (uses global manager)
  */
 export function createClient(accountId: number): TelegramClient {
-  const client = defaultFactory.create(accountId)
+  const client = getDefaultFactory().create(accountId)
   clients.set(accountId, client)
   return client
 }
@@ -326,5 +344,3 @@ export function removeClient(accountId: number): void {
 export function removeAllClients(): void {
   clients.clear()
 }
-
-export { API_ID, API_HASH }

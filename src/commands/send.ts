@@ -1,6 +1,7 @@
 import type { tl } from '@mtcute/tl'
 import { defineCommand } from 'citty'
 
+import { ConfigError } from '../config'
 import { getCacheDb } from '../db'
 import { createChatsCache } from '../db/chats-cache'
 import { createUsersCache } from '../db/users-cache'
@@ -177,6 +178,9 @@ export const sendCommand = defineCommand({
         silent,
       })
     } catch (err) {
+      if (err instanceof ConfigError) {
+        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+      }
       if (isRateLimitError(err)) {
         error(
           ErrorCodes.RATE_LIMITED,

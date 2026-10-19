@@ -8,11 +8,17 @@ import * as readline from 'node:readline/promises'
 import type { TelegramClient } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
+import { ConfigError } from '../config'
 import {
   type AccountsDbInterface,
   accountsDb as defaultAccountsDb,
 } from '../db'
-import { createClient, getClient, isAuthorized } from '../services/telegram'
+import {
+  createClient,
+  getClient,
+  isAuthorized,
+  requireDefaultConfig,
+} from '../services/telegram'
 import { ErrorCodes } from '../types'
 import {
   ACCOUNT_SELECTOR_DESCRIPTION,
@@ -443,6 +449,27 @@ export async function getAuthStatus(
 }
 
 /**
+ * Report missing/invalid API credentials as INVALID_ARGS instead of crashing
+ */
+function exitOnConfigError(err: unknown): void {
+  if (err instanceof ConfigError) {
+    error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+  }
+}
+
+/**
+ * Fail fast before touching the accounts database when credentials are missing
+ */
+function ensureCredentials(): void {
+  try {
+    requireDefaultConfig()
+  } catch (err) {
+    exitOnConfigError(err)
+    throw err
+  }
+}
+
+/**
  * Login command - authenticate a new or existing account
  */
 export const loginCommand = defineCommand({
@@ -465,6 +492,7 @@ export const loginCommand = defineCommand({
     const phone = args.phone
     const label = args.label
 
+    ensureCredentials()
     info(`Logging in with phone: ${phone}`)
     const result = await loginWithPhone(phone, getDefaultDependencies(), {
       label,
@@ -498,6 +526,7 @@ export const loginQrCommand = defineCommand({
     },
   },
   async run({ args }) {
+    ensureCredentials()
     console.log('\n=== QR Code Login ===\n')
     console.log('Scan this QR code with your Telegram mobile app:')
     console.log('(Settings → Devices → Link Desktop Device)\n')
@@ -532,7 +561,13 @@ export const logoutCommand = defineCommand({
   async run({ args }) {
     const accountId = resolveAccountSelector(args.account)
 
-    const result = await logout(accountId, getDefaultDependencies())
+    let result: Awaited<ReturnType<typeof logout>>
+    try {
+      result = await logout(accountId, getDefaultDependencies())
+    } catch (err) {
+      exitOnConfigError(err)
+      throw err
+    }
 
     if (result.success) {
       success({
@@ -567,7 +602,13 @@ export const statusCommand = defineCommand({
   async run({ args }) {
     const accountId = resolveAccountSelector(args.account)
 
-    const result = await getAuthStatus(accountId, getDefaultDependencies())
+    let result: Awaited<ReturnType<typeof getAuthStatus>>
+    try {
+      result = await getAuthStatus(accountId, getDefaultDependencies())
+    } catch (err) {
+      exitOnConfigError(err)
+      throw err
+    }
 
     success(result)
   },
