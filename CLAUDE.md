@@ -481,7 +481,8 @@ env.cleanup()
 ### Integration Tests (Online)
 - Location: `src/__integration__/*.integration.test.ts`
 - Run: `bun run test:integration`
-- Required env: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`,
+- Required env: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` (or
+  `TELEGRAM_TEST_API_ID`, `TELEGRAM_TEST_API_HASH`),
   `TELEGRAM_TEST_ACCOUNT`, `TELEGRAM_TEST_SESSION_PATH` (or
   `TELEGRAM_TEST_SESSION`)
 - Optional env: `TELEGRAM_TEST_RECIPIENT`

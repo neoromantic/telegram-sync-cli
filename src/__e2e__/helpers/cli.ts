@@ -6,7 +6,7 @@
 
 export interface CliOptions {
   /** Environment variables to pass to the CLI */
-  env?: Record<string, string>
+  env?: Record<string, string | undefined>
   /** Timeout in milliseconds (default: 10000) */
   timeout?: number
   /** Working directory */
@@ -40,7 +40,8 @@ export async function runCli(
 
   const startTime = performance.now()
 
-  const proc = Bun.spawn(['bun', 'run', CLI_PATH, ...args], {
+  // --no-env-file: never pick up a developer's .env from the working directory
+  const proc = Bun.spawn(['bun', '--no-env-file', 'run', CLI_PATH, ...args], {
     env: {
       ...process.env,
       // Don't throw on errors - let the CLI handle them and exit with codes

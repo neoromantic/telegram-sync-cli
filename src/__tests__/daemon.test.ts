@@ -48,8 +48,30 @@ function createAccountsDb(
 const tempDir = join(process.cwd(), '.tmp', 'daemon-tests')
 const pidPath = join(tempDir, `daemon-${process.pid}.pid`)
 
+const originalCredentials = {
+  apiId: process.env.TELEGRAM_API_ID,
+  apiHash: process.env.TELEGRAM_API_HASH,
+}
+
+function setEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key]
+  } else {
+    process.env[key] = value
+  }
+}
+
+function withCredentials(
+  apiId: string | undefined,
+  apiHash: string | undefined,
+): void {
+  setEnv('TELEGRAM_API_ID', apiId)
+  setEnv('TELEGRAM_API_HASH', apiHash)
+}
+
 afterEach(() => {
   rmSync(pidPath, { force: true })
+  withCredentials(originalCredentials.apiId, originalCredentials.apiHash)
 })
 
 describe('daemon start', () => {
@@ -67,7 +89,10 @@ describe('daemon start', () => {
     expect(exitCode).toBe(DaemonExitCode.AlreadyRunning)
   })
 
-  it('returns NoAccounts when no accounts configured', async () => {
+  it('returns NoAccounts when credentials are set but no accounts configured', async () => {
+    // Credentials come from test-setup.ts; set them explicitly so this test
+    // does not depend on preload order or the developer's .env
+    withCredentials('12345', 'test-api-hash')
     const daemon = createDaemon(
       { pidPath, shutdownTimeoutMs: 1_000_000 },
       createAccountsDb([]),
@@ -76,6 +101,18 @@ describe('daemon start', () => {
     const exitCode = await daemon.start()
 
     expect(exitCode).toBe(DaemonExitCode.NoAccounts)
+  })
+
+  it('returns Error when Telegram API credentials are missing', async () => {
+    withCredentials(undefined, undefined)
+    const daemon = createDaemon(
+      { pidPath, shutdownTimeoutMs: 1_000_000 },
+      createAccountsDb([{ id: 1, phone: '+1' }]),
+    )
+
+    const exitCode = await daemon.start()
+
+    expect(exitCode).toBe(DaemonExitCode.Error)
   })
 })
 

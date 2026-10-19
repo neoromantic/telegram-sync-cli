@@ -8,8 +8,10 @@ import {
 const TEST_ACCOUNT = process.env.TELEGRAM_TEST_ACCOUNT
 const TEST_SESSION_PATH =
   process.env.TELEGRAM_TEST_SESSION_PATH ?? process.env.TELEGRAM_TEST_SESSION
-const API_ID = process.env.TELEGRAM_API_ID
-const API_HASH = process.env.TELEGRAM_API_HASH
+// test-setup.ts replaces TELEGRAM_API_* with dummies and stashes the real
+// values under TELEGRAM_TEST_API_*
+const API_ID = process.env.TELEGRAM_TEST_API_ID
+const API_HASH = process.env.TELEGRAM_TEST_API_HASH
 const SHOULD_RUN = Boolean(
   TEST_ACCOUNT && TEST_SESSION_PATH && API_ID && API_HASH,
 )
