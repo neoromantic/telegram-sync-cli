@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
+import packageJson from '../../package.json' with { type: 'json' }
 import { runCli, runCliSuccess } from './helpers/cli'
 
 describe('E2E: Help Commands', () => {
@@ -31,7 +32,7 @@ describe('E2E: Help Commands', () => {
     it('should show version with exit code 0', async () => {
       const result = await runCliSuccess(['--version'])
 
-      expect(result.stdout).toContain('0.1.1')
+      expect(result.stdout.trim()).toBe(packageJson.version)
     })
   })
 

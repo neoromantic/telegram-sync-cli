@@ -8,8 +8,7 @@ import { defineCommand } from 'citty'
 
 import { ErrorCodes } from '../types'
 import { error, success } from '../utils/output'
-
-const CLI_VERSION = '0.1.1'
+import { VERSION } from '../version'
 
 export interface SkillManifest {
   name: string
@@ -74,7 +73,7 @@ export function buildSkillManifest(): SkillManifest {
     description: 'Agent-friendly Telegram Sync CLI',
     install_command: 'bun install -g @goodit/telegram-sync-cli',
     entrypoint: 'tg',
-    version: CLI_VERSION,
+    version: VERSION,
     output: 'json',
   }
 }

@@ -367,6 +367,7 @@ for await (const dialog of client.iterDialogs({ limit: 100 })) {
 
 src/
 ├── index.ts              # CLI entry point
+├── version.ts            # CLI version (read from package.json)
 ├── __tests__/            # Unit tests (bun:test)
 │   ├── auth.test.ts      # Authentication tests
 │   ├── db.test.ts        # Database tests

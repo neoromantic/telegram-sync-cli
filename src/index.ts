@@ -21,11 +21,12 @@ import { meCommand, userCommand } from './commands/user'
 import { ConfigError, syncActiveAccountFromConfig } from './config'
 import { ErrorCodes, type OutputFormat } from './types'
 import { error, setOutputFormat } from './utils/output'
+import { VERSION } from './version'
 
 const main = defineCommand({
   meta: {
     name: 'tg',
-    version: '0.1.1',
+    version: VERSION,
     description: 'Telegram Sync CLI - Agent-friendly Telegram client',
   },
   args: {

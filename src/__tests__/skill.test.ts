@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { chmodSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import packageJson from '../../package.json' with { type: 'json' }
 
 let skillModule: typeof import('../commands/skill')
 let dataDir: string
@@ -63,7 +64,7 @@ describe('Skill Command Helpers', () => {
       description: 'Agent-friendly Telegram Sync CLI',
       install_command: 'bun install -g @goodit/telegram-sync-cli',
       entrypoint: 'tg',
-      version: '0.1.1',
+      version: packageJson.version,
       output: 'json',
     })
   })
