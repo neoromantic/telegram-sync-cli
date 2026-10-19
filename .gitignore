@@ -52,6 +52,10 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Claude Code local files
 .claude/*.local.md
+.claude/settings.local.json
+
+# Test scratch data
+.tmp/
 
 # Test artifacts
 test-results/

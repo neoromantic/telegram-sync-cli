@@ -10,7 +10,7 @@ This document covers the implemented testing infrastructure for telegram-sync-cl
 | E2E Tests | `src/__e2e__/*.e2e.test.ts` | CLI execution + exit code behavior |
 | Integration Tests | `src/__integration__/*.integration.test.ts` | Real Telegram API validation (optional) |
 
-> For current test counts and coverage, see `progress.md`.
+> For current coverage, run `bun run test:coverage`.
 
 ## Running Tests
 

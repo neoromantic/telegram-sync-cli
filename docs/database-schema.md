@@ -10,7 +10,7 @@ This document defines the current on-disk schema used by telegram-sync-cli. It f
 2. **raw_json for future-proofing** — cached entities keep the original TL object
 3. **Stale-while-revalidate** — cached data is returned immediately, refreshed on demand
 
-> **Note:** Per-account directory layout is planned (see `docs/plans/multi-account.md`).
+> **Note:** A per-account directory layout is not implemented yet.
 > The current implementation uses a single data directory with per-account session files.
 
 ## File Structure
