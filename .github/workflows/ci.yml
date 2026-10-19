@@ -92,9 +92,10 @@ jobs:
           bun update
           bun pm ls
 
-      - name: Check and test
+      # No lint here: a newer Biome changes style rules, which Renovate PRs handle.
+      - name: Typecheck and test
         run: |
-          bun run check
+          bun run typecheck
           bun run test
           bun run test:e2e
 

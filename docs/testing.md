@@ -191,7 +191,8 @@ By default fixtures are stored under:
 - `pack` — compiles the binary, packs the npm tarball, installs it globally and runs `tg` with
   no Telegram credentials.
 - `latest-deps` — weekly (Monday) and on manual runs: `bun update` within the declared ranges,
-  then check and the offline suites. The weekly run also builds with Bun canary.
+  then typecheck and the offline suites (no lint: Biome style updates come through Renovate).
+  The weekly run also builds with Bun canary.
 - `ci` — the gate job and the one required check.
 
 CI has no Telegram secrets; integration tests never run there.
