@@ -72,10 +72,11 @@ GitHub Actions runs on every push to `main` and on all PRs:
 |-----|--------------|---------|
 | **lint** | `bun run lint` (Biome) | 5 min |
 | **typecheck** | `bun run typecheck:tsc` | 5 min |
-| **test** | `bun test` | 10 min |
-| **build-test** | Compile binary and verify it runs | 5 min |
+| **unit** | `bun run test` | 10 min |
+| **e2e** | `bun run test:e2e` | 10 min |
+| **build-test** | Compile binary, `bun pm pack`, install the tarball globally and run `tg --help`/`--version` without credentials | 5 min |
 
-All jobs run in parallel with Bun dependency caching. See `.github/workflows/ci.yml`.
+All jobs run in parallel on a pinned Bun version with dependency caching and no Telegram secrets. See `.github/workflows/ci.yml`.
 
 ---
 
