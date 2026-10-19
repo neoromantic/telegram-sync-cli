@@ -52,7 +52,7 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 | CLI | Citty | Lightweight, TypeScript-first |
 | Storage | bun:sqlite | Native, zero deps |
 | Linting | Biome | Fast, all-in-one linter + formatter |
-| Type Checker | tsgo | 10x faster than tsc, Go-based |
+| Type Checker | TypeScript 7 (`tsc`) | Native Go compiler, fast `--noEmit` checks |
 | Git Hooks | lefthook | Simple, parallel hook execution |
 
 ## Core Components

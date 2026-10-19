@@ -309,7 +309,7 @@ describe('signal/cleanup helpers', () => {
 
     process.on = ((signal: string, handler: (...args: unknown[]) => void) => {
       calls.push(signal)
-      return originalOn.call(process, signal, handler)
+      return Reflect.apply(originalOn, process, [signal, handler])
     }) as typeof process.on
 
     try {
