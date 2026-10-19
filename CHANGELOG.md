@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.2] - 2026-10-19
+## [0.1.3] - 2026-10-19
+
+Version 0.1.2 was never published (the npm registry reserved the number after an interrupted staged publish). This release contains everything planned for 0.1.2.
 
 ### Added
 
@@ -36,5 +38,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/neoromantic/telegram-sync-cli/releases/tag/v0.1.2
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/neoromantic/telegram-sync-cli/releases/tag/v0.1.3
