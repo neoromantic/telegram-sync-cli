@@ -1,5 +1,5 @@
 # Based on devkit's templates/ci.bun.yml (https://github.com/neoromantic/devkit), plus the
-# repo-specific `pack` smoke test and a weekly canary. Not managed by devkit sync.
+# repo-specific `pack` smoke test and a weekly canary. Repo-owned: devkit sync leaves this file alone.
 name: ci
 
 on:
