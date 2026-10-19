@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report missing credentials as `INVALID_ARGS` (exit code 3).
 - `bun install -g` and `npm install -g` produce a working `tg` command (the
   0.1.1 `postinstall` build was blocked by Bun and skipped by newer npm).
+- The "No active account" error now points to `tg auth login` instead of the
+  nonexistent `tg accounts add`.
 
 ## [0.1.1] - 2026-02-04
 

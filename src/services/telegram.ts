@@ -225,7 +225,7 @@ export function createClientManager(
     getActiveClient(): TelegramClient {
       const account = accountsDb.getActive()
       if (!account) {
-        throw new Error('No active account. Use "tg accounts add" to add one.')
+        throw new Error('No active account. Use "tg auth login" to add one.')
       }
       return this.getClient(account.id)
     },
@@ -312,7 +312,7 @@ export function getClient(accountId: number): TelegramClient {
 export function getActiveClient(): TelegramClient {
   const account = defaultAccountsDb.getActive()
   if (!account) {
-    throw new Error('No active account. Use "tg accounts add" to add one.')
+    throw new Error('No active account. Use "tg auth login" to add one.')
   }
   return getClient(account.id)
 }
