@@ -65,8 +65,7 @@ and raw access to any MTProto method. It runs on Bun and is built on
 
 ```bash
 bun run src/index.ts <command>   # run the CLI from source
-bun run lint                     # Biome
-bun run typecheck                # tsgo (typecheck:tsc runs tsc)
+bun run check                    # lint (Biome) + typecheck
 bun run test                     # unit tests, offline
 bun run test:e2e                 # CLI e2e tests, offline
 bun run build                    # compile dist/tg for this platform
@@ -80,10 +79,13 @@ bun run lint:fix                 # Biome autofix (also the pre-commit hook)
 - The version lives only in `package.json` (read by `src/version.ts`).
 - The compiled binary (~60 MB, embedded Bun + SQLite) is built locally or in CI, never shipped
   in the npm tarball. Targets: darwin arm64/x64, linux x64/arm64, windows x64.
-- Git hooks: `lefthook.yml` runs `lint:fix` and `typecheck` on commit.
-- CI: `.github/workflows/ci.yml` runs lint, typecheck, unit, e2e and a build job that compiles
-  the binary, packs the tarball, installs it globally and runs `tg --help`/`--version` with no
-  Telegram credentials.
+- Git hooks: `lefthook.yml` runs `lint:fix` and `typecheck` on commit, plus devkit's gitleaks
+  and privacy scan (needs `gitleaks` on `PATH`).
+- CI: `.github/workflows/ci.yml` calls devkit's `ci-bun` (check, build, test, test:e2e) and
+  `hygiene` workflows and adds a `pack` job that compiles the binary, packs the tarball,
+  installs it globally and runs `tg --help`/`--version` with no Telegram credentials. A weekly
+  run (Monday) uses Bun canary and refreshes dependencies within their ranges. The required
+  check is `ci`.
 
 ### Architecture rules
 

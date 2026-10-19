@@ -182,18 +182,19 @@ By default fixtures are stored under:
 
 ## CI/CD
 
-GitHub Actions runs tests on every push and PR:
+`.github/workflows/ci.yml` runs on every push to `main`, on pull requests and weekly:
 
-```yaml
-# .github/workflows/ci.yml
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun test  # Runs unit + E2E
-```
+- `build` — devkit's reusable `ci-bun.yml`: `bun run check`, `bun run build`, `bun run test`,
+  `bun run test:e2e`.
+- `hygiene` — devkit's `hygiene.yml`: actionlint, zizmor, gitleaks and a privacy scan of added
+  lines.
+- `pack` — compiles the binary, packs the npm tarball, installs it globally and runs `tg` with
+  no Telegram credentials.
+- `latest-deps` — weekly (Monday) and on manual runs: `bun update` within the declared ranges,
+  then check and the offline suites. The weekly run also builds with Bun canary.
+- `ci` — the gate job and the one required check.
+
+CI has no Telegram secrets; integration tests never run there.
 
 ## Troubleshooting
 
