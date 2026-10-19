@@ -22,8 +22,11 @@ if (!(globalThis as Record<symbol, boolean>)[timeoutPatchKey]) {
  */
 
 import { join } from 'node:path'
-import { TelegramClient } from '@mtcute/bun'
-import { type FloodWaiterOptions, networkMiddlewares } from '@mtcute/core'
+import {
+  type FloodWaiterOptions,
+  networkMiddlewares,
+  TelegramClient,
+} from '@mtcute/bun'
 
 import { ConfigError } from '../config'
 import {

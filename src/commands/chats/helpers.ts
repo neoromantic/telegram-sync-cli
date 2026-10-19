@@ -1,5 +1,4 @@
-import type { Dialog } from '@mtcute/bun'
-import type { tl } from '@mtcute/tl'
+import type { Dialog, tl } from '@mtcute/bun'
 
 import type { CachedChat, CachedChatInput } from '../../db/chats-cache'
 import type { ChatType } from '../../db/types'

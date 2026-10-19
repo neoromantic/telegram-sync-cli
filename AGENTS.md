@@ -145,6 +145,9 @@ src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integratio
 
 New commands use `defineCommand` from citty and report through `success()`/`error()` in
 `src/utils/output.ts`.
+Import mtcute values and types (`tl`, `TelegramClient`, `networkMiddlewares`) from
+`@mtcute/bun`, the only mtcute package in `package.json`; `@mtcute/core` and `@mtcute/tl` are
+not direct dependencies (and `@mtcute/tl` no longer exists since mtcute 0.29).
 
 ### Testing
 

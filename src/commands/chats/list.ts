@@ -1,5 +1,4 @@
-import type { Dialog, TelegramClient } from '@mtcute/bun'
-import type { tl } from '@mtcute/tl'
+import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
 import { getCacheDb } from '../../db'

@@ -1,5 +1,4 @@
-import type { Dialog, TelegramClient } from '@mtcute/bun'
-import type { tl } from '@mtcute/tl'
+import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { getCacheDb } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'

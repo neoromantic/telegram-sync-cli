@@ -1,5 +1,4 @@
-import type { TelegramClient } from '@mtcute/bun'
-import type { tl } from '@mtcute/tl'
+import type { TelegramClient, tl } from '@mtcute/bun'
 
 import type { CachedChat, ChatsCache } from '../../db/chats-cache'
 import type { CachedUser, UsersCache } from '../../db/users-cache'

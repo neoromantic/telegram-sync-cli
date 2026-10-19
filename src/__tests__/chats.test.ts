@@ -9,7 +9,7 @@
 
 import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { tl } from '@mtcute/tl'
+import type { tl } from '@mtcute/bun'
 
 import {
   type CachedChatInput,
