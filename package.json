@@ -4,15 +4,15 @@
   "description": "Agent-friendly Telegram sync CLI with full API support",
   "type": "module",
   "bin": {
-    "tg": "bin/tg.cjs"
+    "tg": "bin/tg.js"
   },
   "files": [
-    "bin/tg.cjs",
+    "bin/tg.js",
     "src/**/*.ts",
     "!src/__tests__/**",
     "!src/__e2e__/**",
     "!src/__integration__/**",
-    "scripts/postinstall.ts"
+    "CHANGELOG.md"
   ],
   "scripts": {
     "start": "bun run src/index.ts",
@@ -20,7 +20,6 @@
     "build": "bun build ./src/index.ts --compile --outfile dist/tg",
     "build:minify": "bun build ./src/index.ts --compile --minify --sourcemap --outfile dist/tg",
     "build:all": "bun run scripts/build-all.ts",
-    "postinstall": "bun run scripts/postinstall.ts",
     "typecheck": "tsgo --noEmit",
     "typecheck:tsc": "tsc --noEmit",
     "test": "bun test src/__tests__",
@@ -33,7 +32,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "prepare": "lefthook install"
+    "prepare": "bunx lefthook install"
   },
   "keywords": [
     "telegram",
@@ -57,7 +56,7 @@
     "access": "public"
   },
   "engines": {
-    "bun": ">=1.0.0"
+    "bun": ">=1.4.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",

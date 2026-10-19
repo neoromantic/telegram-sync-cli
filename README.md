@@ -30,9 +30,10 @@ Agent-friendly Telegram Sync CLI with a local cache and full API access. Built o
 
 ## Quick Start
 
+Requires [Bun](https://bun.sh) >= 1.4.
+
 ```bash
-# Install the published package (Bun is required)
-bun install -g @goodit/telegram-sync-cli
+bun i -g @goodit/telegram-sync-cli
 
 # Telegram API credentials from https://my.telegram.org/apps
 export TELEGRAM_API_ID=123456
@@ -44,11 +45,9 @@ tg chats list --limit 20 --format pretty
 tg messages search --query "hello" --format pretty
 ```
 
-`npm install -g @goodit/telegram-sync-cli` works too, as long as `bun` is on your
-`PATH`. The npm package does not ship `dist/tg`: npm builds the native binary
-in `postinstall`; Bun blocks dependency postinstall scripts by default, so with
-`bun install -g` the binary is built on the first `tg` run instead (a few
-seconds, once).
+`tg` runs the TypeScript source with Bun; nothing is compiled at install time.
+`npm i -g @goodit/telegram-sync-cli` also works, as long as `bun` is on your
+`PATH`. `tg --help` and `tg --version` work before you set any credentials.
 
 ## Run from Source
 

@@ -91,8 +91,10 @@ bun install -g @goodit/telegram-sync-cli
 bun link
 ```
 
-The npm package does not include `dist/tg`. The `postinstall` script
-automatically compiles a native binary to `dist/tg` locally (Bun required).
+The npm package does not include `dist/tg`. The `tg` bin is an ESM shim
+(`bin/tg.js`, `#!/usr/bin/env bun`) that runs `src/index.ts` directly; there is
+no `postinstall` step. Requires Bun >= 1.4. The version lives only in
+`package.json` (read by `src/version.ts`).
 
 ### Build Scripts
 
