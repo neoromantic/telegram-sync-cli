@@ -448,6 +448,14 @@ src/
 
 ## Testing Strategy
 
+### Test Isolation
+- `test-setup.ts` (preloaded via `bunfig.toml`) always overwrites
+  `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` with dummies, because Bun auto-loads the
+  developer's `.env` first. Real values are stashed as `TELEGRAM_TEST_API_ID`/
+  `TELEGRAM_TEST_API_HASH` for the integration suite.
+- E2E spawns the CLI with `bun --no-env-file`, so `.env` never leaks in.
+- CI runs without any Telegram secrets.
+
 ### Unit Tests (Offline)
 - Location: `src/__tests__/*.test.ts`
 - Mock mtcute client
