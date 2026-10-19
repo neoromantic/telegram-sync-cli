@@ -1,5 +1,4 @@
-import type { TelegramClient } from '@mtcute/bun'
-import type { tl } from '@mtcute/tl'
+import type { TelegramClient, tl } from '@mtcute/bun'
 
 import { normalizeUsername } from './identifiers'
 

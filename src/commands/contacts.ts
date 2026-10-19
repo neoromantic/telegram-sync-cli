@@ -2,7 +2,7 @@
  * Contact management commands with caching
  * Uses UsersCache for stale-while-revalidate pattern
  */
-import type { tl } from '@mtcute/tl'
+import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../config'
 import { getCacheDb } from '../db'

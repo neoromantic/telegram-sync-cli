@@ -12,8 +12,7 @@
 
 import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { TelegramClient } from '@mtcute/bun'
-import type { tl } from '@mtcute/tl'
+import type { TelegramClient, tl } from '@mtcute/bun'
 
 type MockCall = <T extends tl.RpcMethod>(
   request: T,

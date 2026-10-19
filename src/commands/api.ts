@@ -4,7 +4,7 @@
  * This enables full access to Telegram's API without manually
  * mapping every method to a CLI command.
  */
-import type { tl } from '@mtcute/tl'
+import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
 import { ConfigError } from '../config'

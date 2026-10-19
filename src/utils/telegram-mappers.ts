@@ -1,4 +1,4 @@
-import type { tl } from '@mtcute/tl'
+import type { tl } from '@mtcute/bun'
 
 import type { CachedUser, UserCacheInput } from '../db/users-cache'
 import type { Contact } from '../types'
