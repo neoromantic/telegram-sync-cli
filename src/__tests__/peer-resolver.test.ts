@@ -299,24 +299,29 @@ describe('resolvePeer with numeric IDs', () => {
       expect(call).not.toHaveBeenCalled()
     })
 
-    it('takes a bare channel row from an older binary for the channel', async () => {
-      chatsCache.upsert(
-        legacyChatRow({ kind: 'channel', id: 4242, title: 'Example News' }),
-      )
-      const { call, client } = throwingClient()
+    it.each([
+      ['channel', 4242, 'Example News'],
+      ['supergroup', 1234567890, 'Team Chat'],
+    ] as const)(
+      'takes a bare %s row %d from an older binary for that chat, with no phone lookup',
+      async (kind, id, title) => {
+        chatsCache.upsert(legacyChatRow({ kind, id, title }))
+        // 10+ digits also read as a phone number, which no account has
+        const { call, client } = throwingClient(phoneNotOccupied)
 
-      const peer = await resolve('4242', client)
+        const peer = await resolve(String(id), client)
 
-      expect(peer).toEqual({
-        inputPeer: {
-          _: 'inputPeerChannel',
-          channelId: 4242,
-          accessHash: toLong(777),
-        },
-        name: 'Example News',
-      })
-      expect(call).not.toHaveBeenCalled()
-    })
+        expect(peer).toEqual({
+          inputPeer: {
+            _: 'inputPeerChannel',
+            channelId: id,
+            accessHash: toLong(777),
+          },
+          name: title,
+        })
+        expect(call).not.toHaveBeenCalled()
+      },
+    )
 
     it('rejects a bare ID that names a cached group and a cached channel', async () => {
       cacheChat('-4242', 'group', 'Book Club')
