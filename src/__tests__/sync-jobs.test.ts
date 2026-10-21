@@ -396,6 +396,56 @@ describe('SyncJobsService', () => {
     })
   })
 
+  describe('failOrDrop', () => {
+    function runningJob(chatId = 100) {
+      const job = service.create({
+        chat_id: chatId,
+        job_type: SyncJobType.InitialLoad,
+        priority: SyncPriority.High,
+      })
+      service.markRunning(job.id)
+      return job
+    }
+
+    it('marks the job failed and counts the attempt', () => {
+      enableChat(100)
+      const job = runningJob()
+
+      expect(service.failOrDrop(job.id, 'CHANNEL_PRIVATE')).toBe('failed')
+
+      expect(service.getById(job.id)).toMatchObject({
+        status: SyncJobStatus.Failed,
+        attempts: 1,
+        error_message: 'CHANNEL_PRIVATE',
+        completed_at: expect.any(Number),
+      })
+    })
+
+    it('deletes the job of a chat that was turned off while it ran', () => {
+      enableChat(100, false)
+      const off = runningJob(100)
+      const unknown = runningJob(200)
+
+      for (const job of [off, unknown]) {
+        expect(service.failOrDrop(job.id, 'CHANNEL_PRIVATE')).toBe('cancelled')
+        expect(service.getById(job.id)).toBeNull()
+      }
+      expect(service.countJobs().failed).toBe(0)
+    })
+
+    it('changes nothing for a job that is not running', () => {
+      enableChat(100)
+      const job = service.create({
+        chat_id: 100,
+        job_type: SyncJobType.InitialLoad,
+        priority: SyncPriority.High,
+      })
+
+      expect(service.failOrDrop(job.id, 'CHANNEL_PRIVATE')).toBe('not_running')
+      expect(service.getById(job.id)).toEqual(job)
+    })
+  })
+
   describe('retryLater', () => {
     const now = 1_700_000_000_000
 
