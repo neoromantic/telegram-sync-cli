@@ -93,6 +93,18 @@ tg contacts get --id @someone
 3. Store in cache with `fetched_at`
 4. Return result with `source: "api"`
 
+### Sent Messages
+
+```bash
+tg send --to me -m "Note to self"
+```
+
+`tg send` writes the sent message to `messages_cache` from Telegram's response,
+with the same `chat_id` format as the daemon. Telegram doesn't push an update
+for it to the session that sent it, and the daemon shares that session, so
+without this the message would reach the cache only on a later sync. If the
+cache write fails, the send still reports success.
+
 ### Cache-Only Commands
 
 Some commands only query cache:

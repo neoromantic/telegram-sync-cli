@@ -6,7 +6,6 @@ The list is in priority order.
 
 - [Daemon loses messages that arrive while it is stopped](https://github.com/neoromantic/telegram-sync-cli/issues/15)
 - [Reconnect doesn't restore real-time updates](https://github.com/neoromantic/telegram-sync-cli/issues/16)
-- [tg send doesn't add the sent message to the cache](https://github.com/neoromantic/telegram-sync-cli/issues/19)
 - [Backfill sync doesn't run](https://github.com/neoromantic/telegram-sync-cli/issues/6)
 - [Retry failed sync jobs with backoff](https://github.com/neoromantic/telegram-sync-cli/issues/9)
 - [Messages and chats are cached with different peer ID formats](https://github.com/neoromantic/telegram-sync-cli/issues/18)

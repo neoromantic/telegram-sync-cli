@@ -1,3 +1,5 @@
+import type { tl } from '@mtcute/bun'
+
 export const CHANNEL_PEER_ID_OFFSET = 1_000_000_000_000
 
 type RawPeerLike = {
@@ -20,6 +22,34 @@ export function toPeerIdFromRawPeer(
       return typeof peer.channelId === 'number'
         ? -CHANNEL_PEER_ID_OFFSET - peer.channelId
         : null
+    default:
+      return null
+  }
+}
+
+/**
+ * Marked peer ID for an input peer, in the same format as
+ * `toPeerIdFromRawPeer`. `inputPeerSelf` carries no ID, so the caller passes
+ * its own user ID.
+ */
+export function toPeerIdFromInputPeer(
+  peer: tl.TypeInputPeer,
+  selfId: number | null,
+): number | null {
+  switch (peer._) {
+    case 'inputPeerSelf':
+      return selfId
+    case 'inputPeerUser':
+    case 'inputPeerUserFromMessage':
+      return toPeerIdFromRawPeer({ _: 'peerUser', userId: peer.userId })
+    case 'inputPeerChat':
+      return toPeerIdFromRawPeer({ _: 'peerChat', chatId: peer.chatId })
+    case 'inputPeerChannel':
+    case 'inputPeerChannelFromMessage':
+      return toPeerIdFromRawPeer({
+        _: 'peerChannel',
+        channelId: peer.channelId,
+      })
     default:
       return null
   }
