@@ -118,22 +118,26 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
 
     setDaemonRunning(pid: number, version: string): void {
       const now = Date.now()
-      // The version goes first, so a reader never sees the new daemon_pid
-      // without its version. daemon_version_pid ties the version to this
-      // daemon: an older one that starts later rewrites only daemon_pid.
-      service.set('daemon_version', version)
-      service.set('daemon_version_pid', pid.toString())
-      service.set('daemon_pid', pid.toString())
-      service.set('daemon_started_at', now.toString())
-      service.set('daemon_status', 'running')
+      // One transaction, so a reader never sees the new daemon_pid without
+      // its version. daemon_version_pid ties the version to this daemon: an
+      // older one that starts later rewrites only daemon_pid.
+      db.transaction(() => {
+        service.set('daemon_version', version)
+        service.set('daemon_version_pid', pid.toString())
+        service.set('daemon_pid', pid.toString())
+        service.set('daemon_started_at', now.toString())
+        service.set('daemon_status', 'running')
+      })()
     },
 
     setDaemonStopped(): void {
-      service.delete('daemon_pid')
-      service.delete('daemon_started_at')
-      service.delete('daemon_version')
-      service.delete('daemon_version_pid')
-      service.set('daemon_status', 'stopped')
+      db.transaction(() => {
+        service.delete('daemon_pid')
+        service.delete('daemon_started_at')
+        service.delete('daemon_version')
+        service.delete('daemon_version_pid')
+        service.set('daemon_status', 'stopped')
+      })()
     },
 
     isDaemonRunning(): boolean {
@@ -154,28 +158,32 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
     },
 
     getDaemonInfo(): DaemonInfo {
-      const pidStr = service.get('daemon_pid')
-      const startedAtStr = service.get('daemon_started_at')
-      const lastUpdateStr = service.get('last_update')
-      const connectedStr = service.get('connected_accounts')
-      const totalStr = service.get('total_accounts')
-      const syncedStr = service.get('messages_synced')
-      const versionPidStr = service.get('daemon_version_pid')
+      // One read transaction gives one snapshot (WAL), so a daemon that is
+      // starting or stopping is never seen half written
+      return db.transaction((): DaemonInfo => {
+        const pidStr = service.get('daemon_pid')
+        const startedAtStr = service.get('daemon_started_at')
+        const lastUpdateStr = service.get('last_update')
+        const connectedStr = service.get('connected_accounts')
+        const totalStr = service.get('total_accounts')
+        const syncedStr = service.get('messages_synced')
+        const versionPidStr = service.get('daemon_version_pid')
 
-      return {
-        status:
-          service.get('daemon_status') === 'running' ? 'running' : 'stopped',
-        pid: pidStr ? parseInt(pidStr, 10) : null,
-        version:
-          pidStr !== null && versionPidStr === pidStr
-            ? service.get('daemon_version')
-            : null,
-        startedAt: startedAtStr ? parseInt(startedAtStr, 10) : null,
-        lastUpdate: lastUpdateStr ? parseInt(lastUpdateStr, 10) : null,
-        connectedAccounts: connectedStr ? parseInt(connectedStr, 10) : 0,
-        totalAccounts: totalStr ? parseInt(totalStr, 10) : 0,
-        messagesSynced: syncedStr ? parseInt(syncedStr, 10) : 0,
-      }
+        return {
+          status:
+            service.get('daemon_status') === 'running' ? 'running' : 'stopped',
+          pid: pidStr ? parseInt(pidStr, 10) : null,
+          version:
+            pidStr !== null && versionPidStr === pidStr
+              ? service.get('daemon_version')
+              : null,
+          startedAt: startedAtStr ? parseInt(startedAtStr, 10) : null,
+          lastUpdate: lastUpdateStr ? parseInt(lastUpdateStr, 10) : null,
+          connectedAccounts: connectedStr ? parseInt(connectedStr, 10) : 0,
+          totalAccounts: totalStr ? parseInt(totalStr, 10) : 0,
+          messagesSynced: syncedStr ? parseInt(syncedStr, 10) : 0,
+        }
+      })()
     },
   }
 
