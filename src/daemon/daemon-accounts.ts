@@ -178,6 +178,9 @@ export function setupEventHandlers(
       const data: NewMessageData = {
         chatId: msg.chat.id,
         chatType,
+        // Basic groups always carry it; supergroups often don't.
+        memberCount:
+          msg.chat.type === 'chat' ? msg.chat.membersCount : undefined,
         messageId: msg.id,
         fromId: msg.sender?.id,
         text: msg.text,

@@ -396,7 +396,7 @@ export enum SyncPriority {
   High = 1,
   /** P2 - Medium groups (20-100 members), partial sync */
   Medium = 2,
-  /** P3 - Large groups (>100 members) and channels, on-demand only */
+  /** P3 - Groups of unknown size or over 100 members and channels, on request only */
   Low = 3,
   /** P4 - Background history backfill */
   Background = 4,
@@ -426,11 +426,20 @@ export enum SyncJobStatus {
 export type SyncChatType = 'private' | 'group' | 'supergroup' | 'channel'
 
 /**
- * Determine sync policy based on chat type and member count
+ * Determine sync policy based on chat type and member count:
+ * - private chats and groups under 20 members: High, full history
+ * - groups of 20-100 members: Medium, the newest 100 messages, then history
+ *   after the small chats
+ * - groups of unknown size or over 100 members, and channels: off, synced
+ *   only on request
+ *
+ * Telegram often leaves the member count out of a supergroup's dialog, and
+ * such a group may have thousands of members, so an unknown count is treated
+ * as large.
  */
 export function determineSyncPolicy(
   chatType: SyncChatType,
-  memberCount?: number,
+  memberCount?: number | null,
 ): { priority: SyncPriority; enabled: boolean } {
   switch (chatType) {
     case 'private':
@@ -438,7 +447,14 @@ export function determineSyncPolicy(
 
     case 'group':
     case 'supergroup':
-      if (memberCount === undefined || memberCount < 20) {
+      if (
+        memberCount === undefined ||
+        memberCount === null ||
+        memberCount <= 0
+      ) {
+        return { priority: SyncPriority.Low, enabled: false }
+      }
+      if (memberCount < 20) {
         return { priority: SyncPriority.High, enabled: true }
       }
       if (memberCount <= 100) {

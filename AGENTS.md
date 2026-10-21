@@ -124,9 +124,10 @@ CLI mode (tg <cmd>)            Daemon mode (tg daemon start)
 - Telegram `Long` values (`hash`, `accessHash`) are `BigInt`.
 
 Sync uses two cursors per chat: forward (every message up to it is cached; only sync jobs
-move it, never live updates) and backward (history backfill). Priorities: real-time first; DMs and groups under 20 members get full
-history; groups of 20–100 get the last 10 messages, then gradual backfill; larger groups and
-channels sync only on request. Details: [docs/sync-strategy.md](docs/sync-strategy.md).
+move it, never live updates) and backward (history backfill). Priorities: real-time first; DMs
+and groups under 20 members get full history; groups of 20–100 get the newest 100 messages,
+then history after the small chats; groups of unknown size or over 100 members and channels
+sync only on request. Details: [docs/sync-strategy.md](docs/sync-strategy.md).
 
 ### Bun-native APIs
 

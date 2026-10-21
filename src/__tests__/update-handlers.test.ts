@@ -12,7 +12,7 @@ import type { DaemonLogger } from '../daemon/types'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
+import { initSyncSchema, SyncPriority } from '../db/sync-schema'
 
 describe('UpdateHandlers', () => {
   let db: Database
@@ -133,6 +133,45 @@ describe('UpdateHandlers', () => {
 
       const state = chatSyncState.get(200)
       expect(state?.chat_type).toBe('channel')
+      expect(state?.sync_enabled).toBe(0)
+    })
+
+    it('gives a small basic group first seen live its tier', async () => {
+      await handlers.handleNewMessage(
+        { accountId: 1, receivedAt: Date.now() },
+        {
+          chatId: -4001,
+          chatType: 'group',
+          memberCount: 10,
+          messageId: 1,
+          text: 'Hi all',
+          date: 1_700_000_000,
+          isOutgoing: false,
+        },
+      )
+
+      const state = chatSyncState.get(-4001)
+      expect(state?.member_count).toBe(10)
+      expect(state?.sync_priority).toBe(SyncPriority.High)
+      expect(state?.sync_enabled).toBe(1)
+    })
+
+    it('leaves a supergroup without a member count off', async () => {
+      await handlers.handleNewMessage(
+        { accountId: 1, receivedAt: Date.now() },
+        {
+          chatId: -1001234567890,
+          chatType: 'supergroup',
+          messageId: 1,
+          text: 'Hi all',
+          date: 1_700_000_000,
+          isOutgoing: false,
+        },
+      )
+
+      const state = chatSyncState.get(-1001234567890)
+      expect(state?.member_count).toBeNull()
+      expect(state?.sync_priority).toBe(SyncPriority.Low)
       expect(state?.sync_enabled).toBe(0)
     })
 

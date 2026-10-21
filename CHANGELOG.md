@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Groups whose member count Telegram doesn't report are off by default, like
+  groups over 100 members, instead of getting a full-history sync. The daemon
+  keeps the last known count when a dialog leaves it out.
+
 ## [0.1.4] - 2026-10-21
 
 ### Fixed

@@ -25,6 +25,8 @@ export interface UpdateContext {
 export interface NewMessageData {
   chatId: number
   chatType?: SyncChatType
+  /** Member count of a group, if the update carries it */
+  memberCount?: number | null
   messageId: number
   fromId?: number
   text?: string
@@ -142,14 +144,16 @@ function ensureSyncState(
   chatSyncState: ChatSyncStateService,
   chatId: number,
   chatType?: SyncChatType,
+  memberCount?: number | null,
 ): void {
   const existing = chatSyncState.get(chatId)
   if (!existing) {
     const resolvedChatType = chatType ?? 'private'
-    const policy = determineSyncPolicy(resolvedChatType)
+    const policy = determineSyncPolicy(resolvedChatType, memberCount)
     chatSyncState.upsert({
       chat_id: chatId,
       chat_type: resolvedChatType,
+      member_count: memberCount,
       sync_priority: policy.priority,
       sync_enabled: policy.enabled,
     })
@@ -157,7 +161,12 @@ function ensureSyncState(
 }
 
 async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
-  ensureSyncState(deps.chatSyncState, data.chatId, data.chatType)
+  ensureSyncState(
+    deps.chatSyncState,
+    data.chatId,
+    data.chatType,
+    data.memberCount,
+  )
 
   const input = toMessageInput(data)
   deps.messagesCache.upsert(input)
@@ -225,7 +234,10 @@ function processChatBatch(
 ): void {
   const chatType =
     chatMessages.find((message) => message.chatType)?.chatType ?? undefined
-  ensureSyncState(deps.chatSyncState, chatId, chatType)
+  const memberCount = chatMessages.find(
+    (message) => message.memberCount,
+  )?.memberCount
+  ensureSyncState(deps.chatSyncState, chatId, chatType, memberCount)
 
   const inputs = chatMessages.map(toMessageInput)
   deps.messagesCache.upsertBatch(inputs)
