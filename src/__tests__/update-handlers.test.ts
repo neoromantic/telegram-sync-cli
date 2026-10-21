@@ -3,16 +3,24 @@
  */
 import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
+import type { tl } from '@mtcute/bun'
 import {
   createUpdateHandlers,
   type UpdateContext,
   type UpdateHandlers,
 } from '../daemon/handlers'
+import { buildInputPeer } from '../daemon/sync-worker-real-helpers'
 import type { DaemonLogger } from '../daemon/types'
 import { createChatSyncStateService } from '../db/chat-sync-state'
+import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import {
+  initSyncSchema,
+  type SyncChatType,
+  SyncPriority,
+} from '../db/sync-schema'
+import { toLong } from '../utils/long'
 
 describe('UpdateHandlers', () => {
   let db: Database
@@ -349,6 +357,133 @@ describe('UpdateHandlers', () => {
 
       const state = chatSyncState.get(100)
       expect(state?.synced_messages).toBe(2)
+    })
+  })
+
+  describe('handleNewMessage in a chat no dialog pass listed', () => {
+    let chatsCache: ReturnType<typeof createChatsCache>
+
+    beforeEach(() => {
+      chatsCache = createChatsCache(db)
+      handlers = createUpdateHandlers({
+        db,
+        messagesCache,
+        chatSyncState,
+        chatsCache,
+      })
+    })
+
+    function receive(
+      chatId: number,
+      chatType: SyncChatType,
+      rawChat: tl.TypeUser | tl.TypeChat,
+    ) {
+      return handlers.handleNewMessage(
+        { accountId: 1, receivedAt: Date.now() },
+        {
+          chatId,
+          chatType,
+          memberCount: rawChat._ === 'chat' ? rawChat.participantsCount : null,
+          messageId: 1,
+          text: 'Hello',
+          date: 1_700_000_000,
+          isOutgoing: false,
+          rawChat,
+        },
+      )
+    }
+
+    it('caches a new DM, so its first page can build an InputPeer', async () => {
+      // Without a chats_cache row the access hash would be 0
+      expect(buildInputPeer(5550001, chatsCache)).toMatchObject({
+        accessHash: toLong(0),
+      })
+
+      await receive(5550001, 'private', {
+        _: 'user',
+        id: 5550001,
+        accessHash: toLong(777),
+        firstName: 'Alex',
+        username: 'alex_example',
+      } as tl.RawUser)
+
+      expect(chatSyncState.get(5550001)?.sync_enabled).toBe(1)
+      expect(buildInputPeer(5550001, chatsCache)).toEqual({
+        _: 'inputPeerUser',
+        userId: 5550001,
+        accessHash: toLong(777),
+      })
+      expect(chatsCache.getById('5550001')).toMatchObject({
+        type: 'private',
+        title: 'Alex',
+        username: 'alex_example',
+      })
+    })
+
+    it('caches a new basic group and channel', async () => {
+      await receive(-4001, 'group', {
+        _: 'chat',
+        id: 4001,
+        title: 'Book Club',
+        participantsCount: 12,
+      } as tl.RawChat)
+      await receive(-1001234567890, 'channel', {
+        _: 'channel',
+        id: 1234567890,
+        accessHash: toLong(888),
+        title: 'Example News',
+      } as tl.RawChannel)
+
+      expect(buildInputPeer(-4001, chatsCache)).toEqual({
+        _: 'inputPeerChat',
+        chatId: 4001,
+      })
+      expect(buildInputPeer(-1001234567890, chatsCache)).toEqual({
+        _: 'inputPeerChannel',
+        channelId: 1234567890,
+        accessHash: toLong(888),
+      })
+    })
+
+    it('skips a min user, whose access hash works only in its update', async () => {
+      await receive(5550002, 'private', {
+        _: 'user',
+        id: 5550002,
+        min: true,
+        accessHash: toLong(999),
+      } as tl.RawUser)
+
+      expect(chatsCache.getById('5550002')).toBeNull()
+      expect(messagesCache.get(5550002, 1)).not.toBeNull()
+    })
+
+    it('leaves a row a dialog pass wrote alone', async () => {
+      chatsCache.upsert({
+        chat_id: '5550003',
+        type: 'private',
+        title: 'Sam',
+        username: null,
+        member_count: null,
+        access_hash: '555',
+        is_creator: 0,
+        is_admin: 0,
+        last_message_id: 9,
+        last_message_at: null,
+        fetched_at: Date.now(),
+        raw_json: '{}',
+      })
+
+      await receive(5550003, 'private', {
+        _: 'user',
+        id: 5550003,
+        accessHash: toLong(111),
+        firstName: 'Sam',
+      } as tl.RawUser)
+
+      expect(chatsCache.getById('5550003')).toMatchObject({
+        access_hash: '555',
+        last_message_id: 9,
+      })
     })
   })
 

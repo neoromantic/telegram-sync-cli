@@ -68,7 +68,9 @@ Telegram often leaves the member count out of a supergroup's dialog, and such a 
 thousands of members, so a group without a count is treated as large. The dialog pass keeps the
 last known count when a dialog omits it, so a chat doesn't flip on or off between starts. A
 live message in a chat the daemon hasn't seen yet creates its state from the message's chat:
-basic groups always carry their member count, supergroups often don't.
+basic groups always carry their member count, supergroups often don't. It also caches the chat
+in `chats_cache` if it has no row there, so the first page can reach it before the next dialog
+pass (see [real-time.md](real-time.md)).
 
 ## Data Model
 

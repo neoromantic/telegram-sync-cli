@@ -41,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dozen chats, because catch-up for every chat always went first (#6).
 - A chat whose first message arrived live never got its first page, so it had
   no cursors and no history. Every enabled chat without a forward cursor now
-  gets one.
+  gets one, and the daemon caches such a chat from the message, so the first
+  page of a new DM or group works before the next dialog pass.
 - An empty chat was marked complete without a cursor and never caught up. Its
   cursors now start at 0, so its first message is caught up like any other.
 - The first page and history pages counted messages that were already cached.

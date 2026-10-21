@@ -3,7 +3,7 @@ import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
 import { getCacheDb } from '../../db'
 import { createChatsCache } from '../../db/chats-cache'
-import { type ChatType, isCacheStale } from '../../db/types'
+import { isCacheStale } from '../../db/types'
 import { getClientForAccount } from '../../services/telegram'
 import { ErrorCodes } from '../../types'
 import {
@@ -20,27 +20,15 @@ import {
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import { resolveUsername } from '../../utils/telegram-resolve'
-import { chatRowToItem, userToPrivateChatCacheInput } from './helpers'
-
-type ResolvedChat = Exclude<tl.TypeChat, tl.RawChatEmpty>
-
-function isChannelPeer(
-  peer: tl.TypeChat,
-): peer is tl.RawChannel | tl.RawChannelForbidden {
-  return peer._ === 'channel' || peer._ === 'channelForbidden'
-}
+import {
+  chatRowToItem,
+  type ResolvedChat,
+  rawChatToCacheInput,
+  userToPrivateChatCacheInput,
+} from './helpers'
 
 function isResolvedChat(peer: tl.TypeChat | undefined): peer is ResolvedChat {
   return Boolean(peer && peer._ !== 'chatEmpty')
-}
-
-function peerToChatType(peer: ResolvedChat): ChatType {
-  if (isChannelPeer(peer)) {
-    const isMega = 'megagroup' in peer && Boolean(peer.megagroup)
-    const isGiga = 'gigagroup' in peer && Boolean(peer.gigagroup)
-    return isMega || isGiga ? 'supergroup' : 'channel'
-  }
-  return 'group'
 }
 
 function getCachedChat(
@@ -110,29 +98,7 @@ async function fetchChatFromApi(
     )
   }
 
-  const type = peerToChatType(resolvedChat)
-
-  const cacheInput = {
-    chat_id: String(resolvedChat.id),
-    type,
-    title: 'title' in resolvedChat ? (resolvedChat.title ?? null) : null,
-    username:
-      'username' in resolvedChat ? (resolvedChat.username ?? null) : null,
-    member_count:
-      'participantsCount' in resolvedChat
-        ? (resolvedChat.participantsCount ?? null)
-        : null,
-    access_hash:
-      isChannelPeer(resolvedChat) && resolvedChat.accessHash
-        ? String(resolvedChat.accessHash)
-        : null,
-    is_creator: 'creator' in resolvedChat && resolvedChat.creator ? 1 : 0,
-    is_admin: 'adminRights' in resolvedChat && resolvedChat.adminRights ? 1 : 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: Date.now(),
-    raw_json: JSON.stringify(resolvedChat),
-  }
+  const cacheInput = rawChatToCacheInput(resolvedChat)
 
   chatsCache.upsert(cacheInput)
   verbose('Cached chat data')

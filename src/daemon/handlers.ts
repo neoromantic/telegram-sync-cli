@@ -3,7 +3,10 @@
  * Handles new messages, edits, deletions, and other updates
  */
 import type { Database } from 'bun:sqlite'
+import type { tl } from '@mtcute/bun'
+import { rawPeerToCacheInput } from '../commands/chats/helpers'
 import type { ChatSyncStateService } from '../db/chat-sync-state'
+import type { ChatsCache } from '../db/chats-cache'
 import type { MessageInput, MessagesCache } from '../db/messages-cache'
 import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
 import { bigIntReplacer, formatError } from './daemon-utils'
@@ -39,6 +42,8 @@ export interface NewMessageData {
   isPinned?: boolean
   /** Raw message object from Telegram API for future-proofing */
   rawMessage?: unknown
+  /** Raw user or chat the message is in, as the update carries it */
+  rawChat?: tl.TypeUser | tl.TypeChat
 }
 
 /**
@@ -100,6 +105,8 @@ export interface UpdateHandlersOptions {
   db: Database
   messagesCache: MessagesCache
   chatSyncState: ChatSyncStateService
+  /** Caches the chat of a message from a chat no dialog pass listed yet */
+  chatsCache?: ChatsCache
   logger?: DaemonLogger
   onMessagesSynced?: (count: number) => void
 }
@@ -107,6 +114,7 @@ export interface UpdateHandlersOptions {
 interface HandlerDeps {
   messagesCache: MessagesCache
   chatSyncState: ChatSyncStateService
+  chatsCache?: ChatsCache
   logger: DaemonLogger
   onMessagesSynced?: (count: number) => void
 }
@@ -160,6 +168,23 @@ function ensureSyncState(
   }
 }
 
+/**
+ * Only dialog passes and some CLI commands fill chats_cache, so a chat new
+ * to this run (a new DM, say) has no row there. Without one the sync jobs
+ * can't build an InputPeer with its access hash, and its first page would
+ * fail until the next dialog pass.
+ */
+function ensureChatCached(
+  chatsCache: ChatsCache | undefined,
+  rawChat: NewMessageData['rawChat'],
+): void {
+  if (!chatsCache || !rawChat) return
+  if (chatsCache.getById(String(rawChat.id))) return
+
+  const input = rawPeerToCacheInput(rawChat)
+  if (input) chatsCache.upsert(input)
+}
+
 async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
   ensureSyncState(
     deps.chatSyncState,
@@ -167,6 +192,7 @@ async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
     data.chatType,
     data.memberCount,
   )
+  ensureChatCached(deps.chatsCache, data.rawChat)
 
   const input = toMessageInput(data)
   deps.messagesCache.upsert(input)
@@ -293,6 +319,7 @@ export function createUpdateHandlers(
   const deps: HandlerDeps = {
     messagesCache: options.messagesCache,
     chatSyncState: options.chatSyncState,
+    chatsCache: options.chatsCache,
     logger: options.logger ?? noopLogger,
     onMessagesSynced: options.onMessagesSynced,
   }

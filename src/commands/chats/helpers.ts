@@ -135,3 +135,61 @@ export function userToPrivateChatCacheInput(user: tl.RawUser): CachedChatInput {
     raw_json: JSON.stringify(user),
   }
 }
+
+/** A chat that a resolved username or an update can carry */
+export type ResolvedChat = Exclude<tl.TypeChat, tl.RawChatEmpty>
+
+function isChannelPeer(
+  peer: tl.TypeChat,
+): peer is tl.RawChannel | tl.RawChannelForbidden {
+  return peer._ === 'channel' || peer._ === 'channelForbidden'
+}
+
+function rawChatType(peer: ResolvedChat): ChatType {
+  if (isChannelPeer(peer)) {
+    const isMega = 'megagroup' in peer && Boolean(peer.megagroup)
+    const isGiga = 'gigagroup' in peer && Boolean(peer.gigagroup)
+    return isMega || isGiga ? 'supergroup' : 'channel'
+  }
+  return 'group'
+}
+
+export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
+  return {
+    chat_id: String(chat.id),
+    type: rawChatType(chat),
+    title: 'title' in chat ? (chat.title ?? null) : null,
+    username: 'username' in chat ? (chat.username ?? null) : null,
+    member_count:
+      'participantsCount' in chat ? (chat.participantsCount ?? null) : null,
+    access_hash:
+      isChannelPeer(chat) && chat.accessHash ? String(chat.accessHash) : null,
+    is_creator: 'creator' in chat && chat.creator ? 1 : 0,
+    is_admin: 'adminRights' in chat && chat.adminRights ? 1 : 0,
+    last_message_id: null,
+    last_message_at: null,
+    fetched_at: Date.now(),
+    raw_json: JSON.stringify(chat),
+  }
+}
+
+/**
+ * A chats_cache row for the chat of a live message, so sync jobs can build
+ * an InputPeer before a dialog pass lists it. Null for a peer that can't
+ * give one: an empty peer, or a "min" user or channel, whose access hash
+ * works only in the update that carried it.
+ */
+export function rawPeerToCacheInput(
+  peer: tl.TypeUser | tl.TypeChat,
+): CachedChatInput | null {
+  switch (peer._) {
+    case 'user':
+      return peer.min ? null : userToPrivateChatCacheInput(peer)
+    case 'chat':
+      return rawChatToCacheInput(peer)
+    case 'channel':
+      return peer.min ? null : rawChatToCacheInput(peer)
+    default:
+      return null
+  }
+}
