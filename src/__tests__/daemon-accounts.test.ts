@@ -323,14 +323,20 @@ describe('signal/cleanup helpers', () => {
     expect(calls.filter((signal) => signal === 'SIGTERM').length).toBe(1)
   })
 
-  it('closeClientSafe ignores missing close and logs errors', async () => {
+  it('closeClientSafe destroys the client', async () => {
     const ctx = createContext()
-    const clientWithoutClose = asTelegramClient({})
+    const client = { destroy: mock(async () => {}) }
 
-    await closeClientSafe(ctx, clientWithoutClose, 'noop')
+    await closeClientSafe(ctx, asTelegramClient(client), 'test')
 
+    expect(client.destroy).toHaveBeenCalledTimes(1)
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+  })
+
+  it('closeClientSafe logs errors instead of throwing', async () => {
+    const ctx = createContext()
     const errorClient = {
-      close: () => {
+      destroy: () => {
         throw new Error('boom')
       },
     }

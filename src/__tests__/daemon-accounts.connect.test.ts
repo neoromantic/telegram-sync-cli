@@ -82,7 +82,7 @@ class MockTelegramClient {
     async () =>
       undefined as Awaited<ReturnType<TelegramClient['startUpdatesLoop']>>,
   )
-  close = mock(async () => {})
+  destroy = mock(async () => {})
 
   constructor(options: Record<string, unknown>) {
     this.options = options
@@ -391,7 +391,7 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(accountsDb.setActive).toHaveBeenCalledWith(1)
     expect(accountsDb.delete).toHaveBeenCalledWith(2)
     expect(ctx.state.accounts.has(2)).toBe(false)
-    expect(createdClients[0]?.close).toHaveBeenCalled()
+    expect(createdClients[0]?.destroy).toHaveBeenCalled()
   })
 
   it('attemptReconnect resets attempts on success', async () => {
