@@ -10,11 +10,12 @@ import { join } from 'node:path'
 process.env.BUN_ENV = 'test'
 process.env.NODE_ENV = 'test'
 
-if (!process.env.TELEGRAM_SYNC_CLI_DATA_DIR) {
-  const testDataDir = join(process.cwd(), '.tmp', `test-data-${process.pid}`)
-  process.env.TELEGRAM_SYNC_CLI_DATA_DIR = testDataDir
-  mkdirSync(testDataDir, { recursive: true })
-}
+// Always use a temp data dir. Some tests write and clear the file-backed
+// cache database, so a data dir exported in the shell or set in .env (a copy
+// of a real one, say) must never reach them.
+const testDataDir = join(process.cwd(), '.tmp', `test-data-${process.pid}`)
+process.env.TELEGRAM_SYNC_CLI_DATA_DIR = testDataDir
+mkdirSync(testDataDir, { recursive: true })
 
 // Always use dummy Telegram API credentials. Bun auto-loads the developer's
 // .env before this preload runs, so overwrite (never fall back to) real values
@@ -32,8 +33,11 @@ process.env.TELEGRAM_API_HASH = 'test-api-hash'
 
 // Pre-import modules with barrel exports to ensure they're properly resolved
 // This helps prevent race conditions during parallel test loading
-// Import order matters - import modules without side effects first
-import './src/types/index'
-import './src/db/index'
-import './src/utils/output'
-import './src/services/telegram'
+// Import order matters - import modules without side effects first.
+// Dynamic imports, because static ones are hoisted above the code that sets
+// the environment: src/db/index reads the data dir and opens data.db as it
+// loads, so a static import would open the real ~/.telegram-sync-cli.
+await import('./src/types/index')
+await import('./src/db/index')
+await import('./src/utils/output')
+await import('./src/services/telegram')

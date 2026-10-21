@@ -2,6 +2,7 @@
  * Tests for daemon scheduler logic (no module mocks)
  */
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { sep } from 'node:path'
 import type { TelegramClient } from '@mtcute/bun'
 import type { DaemonContext } from '../daemon/daemon-context'
 import { createDaemonRuntime } from '../daemon/daemon-context'
@@ -13,7 +14,7 @@ import {
 } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import type { RealSyncWorker } from '../daemon/sync-worker'
-import { getCacheDb } from '../db'
+import { getCacheDb, getDataDir } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache } from '../db/messages-cache'
@@ -191,6 +192,10 @@ describe('rebuildSyncWorker dialog pass', () => {
   const jobsService = createSyncJobsService(cacheDb)
 
   beforeEach(() => {
+    // The deletes below clear the file-backed cache database
+    if (!getDataDir().includes(`${sep}.tmp${sep}test-data-`)) {
+      throw new Error(`Refusing to clear a non-test data dir: ${getDataDir()}`)
+    }
     initCacheSchema(cacheDb)
     initSyncSchema(cacheDb)
     // The cache database file is shared by the tests in this process
