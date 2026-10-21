@@ -31,6 +31,7 @@ function createMockStatusService(
     getDaemonInfo: () => ({
       status: 'running',
       pid: null,
+      version: null,
       startedAt: null,
       lastUpdate: null,
       connectedAccounts: 0,

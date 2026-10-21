@@ -165,7 +165,9 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `chats-sync.e2e.test.ts` — `tg chats sync` against a seeded cache, without credentials
 - `status.e2e.test.ts` — `tg status` counts and lists running, pending, retrying and failed
   sync jobs from a seeded cache, in JSON and pretty output, without credentials; the retry
-  commands it prints delete the failed jobs and keep each chat's mode
+  commands it prints delete the failed jobs and keep each chat's mode; it shows the daemon's
+  version, and a restart hint for a running daemon of another, newer or unrecorded version;
+  none for the same version, a stopped daemon or one still starting
 
 ### E2E Helpers
 
@@ -201,7 +203,7 @@ real Telegram API. It is skipped unless the variables below are set, and it neve
 | send to Saved Messages | `send --to me` delivers a message; `tg api messages.getMessages` reads it back |
 | send caches for search | with no daemon running, `messages search` finds a message right after `send --to me`, under the own user ID |
 | messages list and get | after two sends whose cache rows are dropped, `messages list --chat me --fresh` returns them newest first from the API under the own user ID; the next read comes from the cache with equal items, `messages search` finds them, `--after` pages forward, and `messages get --context 1` reads one in context from the API, then from the cache; a cache-first `get --context 2` returns it with the newer message and up to two older ones |
-| daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs), syncs messages into the cache, shows up in `tg status` and stops cleanly with `tg daemon stop` |
+| daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` |
 
 Each test copies the session into its own temp data dir. Messages go only to the account's
 Saved Messages and are deleted after each test. A run takes about a minute.

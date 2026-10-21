@@ -5,9 +5,11 @@
 
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { createChatSyncStateService } from '../db/chat-sync-state'
+import { createDaemonStatusService } from '../db/daemon-status'
 import { initCacheSchema } from '../db/schema'
 import {
   initSyncSchema,
@@ -15,6 +17,7 @@ import {
   type SyncMode,
   SyncPriority,
 } from '../db/sync-schema'
+import { VERSION } from '../version'
 import { runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
@@ -378,5 +381,182 @@ describe('E2E: status', () => {
     )
 
     expect(stripAnsi(result.stdout)).toMatch(/Queue\s+Empty/)
+  })
+})
+
+describe('E2E: status, daemon version', () => {
+  const OTHER = '0.0.1'
+  const NEWER = '99.0.0'
+
+  let env: TestEnvironment
+  let cacheDb: Database
+
+  beforeEach(() => {
+    env = createTestEnvironment('status-daemon-version')
+    env.initDatabase()
+    cacheDb = new Database(join(env.dataDir, 'cache.db'))
+    initCacheSchema(cacheDb)
+    initSyncSchema(cacheDb)
+  })
+
+  afterEach(() => {
+    cacheDb.close()
+    env.cleanup()
+  })
+
+  function options() {
+    return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } }
+  }
+
+  /** The test runner is alive, so tg status sees a running daemon */
+  function writePidFile() {
+    writeFileSync(join(env.dataDir, 'daemon.pid'), String(process.pid))
+  }
+
+  const daemonStatus = () => createDaemonStatusService(cacheDb)
+
+  /** The rows a daemon that records no version writes at start */
+  function seedUnversionedDaemon(pid: number) {
+    const service = daemonStatus()
+    service.set('daemon_pid', String(pid))
+    service.set('daemon_started_at', String(Date.now()))
+    service.set('daemon_status', 'running')
+  }
+
+  interface DaemonVersionResult {
+    success: boolean
+    data: {
+      daemon: {
+        status: string
+        pid: number | null
+        version: string | null
+        version_mismatch: boolean
+      }
+      cli_version: string
+    }
+  }
+
+  async function status() {
+    const result = await runCliSuccess(['status'], options())
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+    return result.json as DaemonVersionResult
+  }
+
+  async function prettyStatus() {
+    const result = await runCliSuccess(
+      ['status', '--format', 'pretty'],
+      options(),
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+    return stripAnsi(result.stdout)
+  }
+
+  const escapeRegex = (text: string) =>
+    text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const RESTART_STOP = /^\s+tg daemon stop$/m
+  const RESTART_START = /^\s+tg daemon start$/m
+
+  it('reports an older daemon and how to restart it', async () => {
+    writePidFile()
+    daemonStatus().setDaemonRunning(process.pid, OTHER)
+
+    const { data } = await status()
+    expect(data.daemon).toMatchObject({
+      status: 'running',
+      pid: process.pid,
+      version: OTHER,
+      version_mismatch: true,
+    })
+    expect(data.cli_version).toBe(VERSION)
+
+    const output = await prettyStatus()
+    expect(output).toMatch(/Version\s+0\.0\.1/)
+    expect(output).toContain(`this tg is ${VERSION}`)
+    expect(output).toMatch(RESTART_STOP)
+    expect(output).toMatch(RESTART_START)
+  })
+
+  it('shows the version and no hint for a daemon of this version', async () => {
+    writePidFile()
+    daemonStatus().setDaemonRunning(process.pid, VERSION)
+
+    const { data } = await status()
+    expect(data.daemon.version).toBe(VERSION)
+    expect(data.daemon.version_mismatch).toBe(false)
+    expect(data.cli_version).toBe(VERSION)
+
+    const output = await prettyStatus()
+    expect(output).toMatch(
+      new RegExp(`^\\s+Version\\s+${escapeRegex(VERSION)}$`, 'm'),
+    )
+    expect(output).not.toContain('⚠ The daemon')
+    expect(output).not.toContain('tg daemon stop')
+  })
+
+  it('counts a running daemon that recorded no version as older', async () => {
+    writePidFile()
+    seedUnversionedDaemon(process.pid)
+
+    const { data } = await status()
+    expect(data.daemon).toMatchObject({
+      status: 'running',
+      version: null,
+      version_mismatch: true,
+    })
+
+    const output = await prettyStatus()
+    expect(output).toMatch(/Version\s+not recorded/)
+    expect(output).toContain('started by an older tg')
+    expect(output).toMatch(RESTART_STOP)
+    expect(output).toMatch(RESTART_START)
+  })
+
+  it('says to use the newer tg rather than restart a newer daemon', async () => {
+    writePidFile()
+    daemonStatus().setDaemonRunning(process.pid, NEWER)
+
+    const { data } = await status()
+    expect(data.daemon.version).toBe(NEWER)
+    expect(data.daemon.version_mismatch).toBe(true)
+
+    const output = await prettyStatus()
+    expect(output).toMatch(/Version\s+99\.0\.0/)
+    expect(output).toContain('newer than this tg')
+    expect(output).not.toContain('tg daemon stop')
+  })
+
+  it('reports no version for a stopped daemon', async () => {
+    daemonStatus().setDaemonRunning(4242, OTHER)
+
+    const { data } = await status()
+    expect(data.daemon).toMatchObject({
+      status: 'stopped',
+      version: null,
+      version_mismatch: false,
+    })
+
+    const output = await prettyStatus()
+    expect(output).not.toMatch(/^\s+Version\s/m)
+    expect(output).not.toContain('⚠ The daemon')
+  })
+
+  it('compares nothing while the daemon is still starting', async () => {
+    // The PID file is written, but the rows are still the previous daemon's
+    writePidFile()
+    daemonStatus().setDaemonRunning(process.pid + 1, OTHER)
+
+    const { data } = await status()
+    expect(data.daemon).toMatchObject({
+      status: 'running',
+      pid: process.pid,
+      version: null,
+      version_mismatch: false,
+    })
+
+    const output = await prettyStatus()
+    expect(output).not.toMatch(/^\s+Version\s/m)
+    expect(output).not.toContain('⚠ The daemon')
   })
 })

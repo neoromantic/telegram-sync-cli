@@ -779,7 +779,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       columns: {
         key: {
           description:
-            'Status key (state, started_at, last_sync, connected_accounts)',
+            'Status key: daemon_status, daemon_pid, daemon_started_at, daemon_version, daemon_version_pid, connected_accounts, total_accounts, messages_synced, last_update, pending_jobs, running_jobs',
           nullable: false,
         },
         value: {

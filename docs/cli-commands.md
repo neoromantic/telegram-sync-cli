@@ -294,6 +294,35 @@ the daemon's sync jobs and lists some of them:
 }
 ```
 
+The `daemon` part of `tg status` says which version the running daemon is, so you can tell
+when it needs a restart after an upgrade:
+
+- `daemon.version` is the version the running daemon recorded when it started. It is `null`
+  when the daemon is stopped, still starting, or was started by tg 0.3.0 or older, which record
+  none.
+- `daemon.version_mismatch` is `true` when a running daemon's version differs from
+  `cli_version` or it recorded none.
+- `cli_version` is this tg's version.
+- A daemon keeps the code it started with, so after an upgrade restart it (`tg daemon stop`,
+  then `tg daemon start`). If `version` is newer than `cli_version`, this tg is the older
+  install: use the newer one rather than restarting the daemon with this one.
+- `--format pretty` shows a Version row and the same advice.
+
+```json
+{
+  "daemon": {
+    "status": "running",
+    "pid": 4242,
+    "version": "0.3.0",
+    "version_mismatch": true,
+    "uptime_seconds": 86400,
+    ...
+  },
+  ...
+  "cli_version": "0.3.1"
+}
+```
+
 ## Output Shape
 
 All commands use a consistent wrapper in JSON mode:
