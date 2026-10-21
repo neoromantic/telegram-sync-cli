@@ -1375,7 +1375,7 @@ describe('Error handling', () => {
       }
 
       const user = result.users?.[0]
-      const notFound = !user || user?._ !== 'user'
+      const notFound = user?._ !== 'user'
 
       expect(notFound).toBe(true)
     })
