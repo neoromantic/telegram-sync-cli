@@ -4,6 +4,7 @@
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import type { TelegramClient, tl } from '@mtcute/bun'
+import { dialogToCacheInput } from '../commands/chats/helpers'
 import {
   canMakeApiCall,
   getInputPeer,
@@ -27,6 +28,7 @@ import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema } from '../db/sync-schema'
 import { toLong } from '../utils/long'
+import { fakeDialog } from './helpers/fake-dialogs'
 
 type MockCall = <T extends tl.RpcMethod>(
   request: T,
@@ -89,7 +91,7 @@ describe('sync-worker real helpers/context', () => {
   })
 
   describe('buildInputPeer', () => {
-    it('returns inputPeerUser for missing chat', () => {
+    it('builds a user peer with hash 0 for an uncached user', () => {
       const chatsCache = createChatsCache(db)
       const peer = buildInputPeer(123, chatsCache)
 
@@ -99,72 +101,65 @@ describe('sync-worker real helpers/context', () => {
       expect(peer.accessHash?.toString()).toBe(toLong(0).toString())
     })
 
-    it('returns null for negative chatId without cache entry', () => {
-      const chatsCache = createChatsCache(db)
-      const peer = buildInputPeer(-42, chatsCache)
-      expect(peer).toBeNull()
+    it('builds an uncached basic group, which needs no access hash', () => {
+      const peer = buildInputPeer(-42, createChatsCache(db))
+
+      expect(peer).toEqual({ _: 'inputPeerChat', chatId: 42 })
     })
 
-    it('builds input peers based on cached chat type', () => {
+    it('returns null for an uncached channel, which needs its access hash', () => {
+      expect(buildInputPeer(-1001234567890, createChatsCache(db))).toBeNull()
+    })
+
+    it('builds peers from the marked IDs and access hashes it cached', () => {
       const chatsCache = createChatsCache(db)
-      const now = Date.now()
-
-      chatsCache.upsert({
-        chat_id: '1',
-        type: 'private',
-        title: 'Alice',
-        username: 'alice',
-        member_count: null,
-        access_hash: '999',
-        is_creator: 0,
-        is_admin: 0,
-        last_message_id: null,
-        last_message_at: null,
-        fetched_at: now,
-        raw_json: '{}',
-      })
-
-      chatsCache.upsert({
-        chat_id: '2',
-        type: 'group',
-        title: 'Group',
-        username: null,
-        member_count: 10,
-        access_hash: null,
-        is_creator: 0,
-        is_admin: 0,
-        last_message_id: null,
-        last_message_at: null,
-        fetched_at: now,
-        raw_json: '{}',
-      })
-
-      chatsCache.upsert({
-        chat_id: '3',
-        type: 'channel',
-        title: 'Channel',
-        username: 'channel',
-        member_count: 100,
-        access_hash: '555',
-        is_creator: 0,
-        is_admin: 0,
-        last_message_id: null,
-        last_message_at: null,
-        fetched_at: now,
-        raw_json: '{}',
-      })
+      chatsCache.upsertMany(
+        [
+          fakeDialog({ kind: 'user', id: 1, title: 'Alice' }),
+          fakeDialog({ kind: 'group', id: 2, title: 'Group' }),
+          fakeDialog({ kind: 'channel', id: 3, title: 'Channel' }),
+          fakeDialog({ kind: 'supergroup', id: 1234567890, title: 'Team' }),
+        ].map(dialogToCacheInput),
+      )
 
       const privatePeer = buildInputPeer(1, chatsCache)
-      const groupPeer = buildInputPeer(2, chatsCache)
-      const channelPeer = buildInputPeer(3, chatsCache)
+      const groupPeer = buildInputPeer(-2, chatsCache)
+      const channelPeer = buildInputPeer(-1000000000003, chatsCache)
 
       assertInputPeerUser(privatePeer)
-      expect(privatePeer.accessHash?.toString()).toBe(toLong(999).toString())
+      expect(privatePeer.accessHash?.toString()).toBe(toLong(777).toString())
       assertInputPeerChat(groupPeer)
       expect(groupPeer.chatId).toBe(2)
       assertInputPeerChannel(channelPeer)
       expect(channelPeer.channelId).toBe(3)
-      expect(channelPeer.accessHash?.toString()).toBe(toLong(555).toString())
+      expect(channelPeer.accessHash?.toString()).toBe(toLong(777).toString())
+      expect(buildInputPeer(-1001234567890, chatsCache)).toEqual({
+        _: 'inputPeerChannel',
+        channelId: 1234567890,
+        accessHash: toLong(777),
+      })
+    })
+
+    it('keeps user N and basic group N apart', () => {
+      const chatsCache = createChatsCache(db)
+      chatsCache.upsertMany(
+        [
+          fakeDialog({ kind: 'user', id: 4001, title: 'Alice' }),
+          fakeDialog({ kind: 'group', id: 4001, title: 'Book Club' }),
+        ].map(dialogToCacheInput),
+      )
+
+      expect(chatsCache.getById('4001')?.title).toBe('Alice')
+      expect(chatsCache.getById('-4001')?.title).toBe('Book Club')
+      expect(buildInputPeer(4001, chatsCache)).toEqual({
+        _: 'inputPeerUser',
+        userId: 4001,
+        accessHash: toLong(777),
+      })
+      expect(buildInputPeer(-4001, chatsCache)).toEqual({
+        _: 'inputPeerChat',
+        chatId: 4001,
+      })
     })
   })
 

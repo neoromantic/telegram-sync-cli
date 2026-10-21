@@ -21,6 +21,7 @@ import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { type FakeDialogInput, fakeDialogClient } from './helpers/fake-dialogs'
+import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 let testCacheDb: Database
 
@@ -196,9 +197,49 @@ describe('bootstrapDialogs', () => {
 
     const chatsCache = createChatsCache(testCacheDb)
     expect(chatsCache.getById('1001')?.access_hash).toBe('777')
-    expect(chatsCache.getById('4001')?.type).toBe('group')
+    expect(chatsCache.getById('-4001')?.type).toBe('group')
     expect(chatSyncState.get(1001)).toBeNull()
     expect(chatSyncState.get(-4001)).toBeNull()
+  })
+
+  it('caches each chat under the marked ID its sync state has', async () => {
+    await runPass([
+      { kind: 'user', id: 1001, topMessage: 5 },
+      { kind: 'group', id: 4001, membersCount: 5, topMessage: 9 },
+      {
+        kind: 'supergroup',
+        id: 1234567890,
+        title: 'Team Chat',
+        membersCount: 12,
+        topMessage: 7,
+      },
+      { kind: 'channel', id: 2002, membersCount: 5000, topMessage: 3 },
+    ])
+
+    const cachedIds = testCacheDb
+      .query('SELECT chat_id FROM chats_cache ORDER BY chat_id')
+      .all()
+      .map((row) => Number((row as { chat_id: string }).chat_id))
+    const syncedIds = testCacheDb
+      .query('SELECT chat_id FROM chat_sync_state ORDER BY chat_id')
+      .all()
+      .map((row) => (row as { chat_id: number }).chat_id)
+    expect(cachedIds.sort()).toEqual(
+      [1001, -4001, -1001234567890, -1000000002002].sort(),
+    )
+    expect(syncedIds.sort()).toEqual(cachedIds.sort())
+
+    const chatsCache = createChatsCache(testCacheDb)
+    expect(chatsCache.getById('-4001')?.type).toBe('group')
+    expect(chatsCache.getById('-1001234567890')).toMatchObject({
+      type: 'supergroup',
+      title: 'Team Chat',
+      access_hash: '777',
+    })
+    // A bare ID names no chat any more
+    expect(chatsCache.getById('4001')).toBeNull()
+    expect(chatsCache.getById('1234567890')).toBeNull()
+    assertPeerIdInvariants(testCacheDb)
   })
 
   it('updates an archived chat that already syncs', async () => {

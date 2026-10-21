@@ -18,7 +18,7 @@ import {
   isRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
-import { resolvePeer } from './send/peer-resolver'
+import { AmbiguousPeerError, resolvePeer } from './send/peer-resolver'
 import { cacheSentMessage, resolveSelfId } from './send/sent-message-cache'
 
 function extractMessageInfo(result: tl.TypeUpdates): {
@@ -191,6 +191,12 @@ export const sendCommand = defineCommand({
         silent,
       })
     } catch (err) {
+      if (err instanceof AmbiguousPeerError) {
+        error(ErrorCodes.INVALID_ARGS, err.message, {
+          to: err.identifier,
+          candidates: err.candidates,
+        })
+      }
       if (err instanceof ConfigError) {
         error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
       }

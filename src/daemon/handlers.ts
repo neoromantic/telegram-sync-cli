@@ -26,6 +26,7 @@ export interface UpdateContext {
  * New message update data
  */
 export interface NewMessageData {
+  /** Marked peer ID of the chat, as every cache table stores it */
   chatId: number
   chatType?: SyncChatType
   /** Member count of a group, if the update carries it */
@@ -176,10 +177,11 @@ function ensureSyncState(
  */
 function ensureChatCached(
   chatsCache: ChatsCache | undefined,
+  chatId: number,
   rawChat: NewMessageData['rawChat'],
 ): void {
   if (!chatsCache || !rawChat) return
-  if (chatsCache.getById(String(rawChat.id))) return
+  if (chatsCache.getById(String(chatId))) return
 
   const input = rawPeerToCacheInput(rawChat)
   if (input) chatsCache.upsert(input)
@@ -192,7 +194,7 @@ async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
     data.chatType,
     data.memberCount,
   )
-  ensureChatCached(deps.chatsCache, data.rawChat)
+  ensureChatCached(deps.chatsCache, data.chatId, data.rawChat)
 
   const input = toMessageInput(data)
   deps.messagesCache.upsert(input)

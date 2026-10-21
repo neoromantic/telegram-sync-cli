@@ -236,6 +236,43 @@ describe('SQL Commands', () => {
       })
     })
 
+    it('describes every chat ID column as a marked peer ID', async () => {
+      initSyncSchema(testCacheDb)
+      const { printSchemaCommand } = await import(
+        '../commands/sql/print-schema'
+      )
+      const run = printSchemaCommand.run as CommandRun
+      const tables = [
+        'chats_cache',
+        'messages_cache',
+        'chat_sync_state',
+        'sync_jobs',
+        'history_ranges',
+      ]
+
+      const descriptions: Record<string, string> = {}
+      for (const [index, table] of tables.entries()) {
+        await run({ args: { table, format: 'json', _: [] } })
+        const parsed = JSON.parse(logSpy.mock.calls[index]?.[0] as string)
+        const chatId = (
+          parsed.data.columns as Array<{ name: string; description: string }>
+        ).find((col) => col.name === 'chat_id')
+        descriptions[table] = chatId?.description ?? ''
+      }
+
+      expect(descriptions).toEqual({
+        chats_cache:
+          'Marked peer ID, as messages_cache.chat_id holds it: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel',
+        messages_cache:
+          'Marked peer ID of the chat: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel. Joins chats_cache on chats_cache.chat_id = CAST(chat_id AS TEXT)',
+        chat_sync_state:
+          'Marked peer ID of the chat being synchronized, as in messages_cache',
+        sync_jobs: 'Marked peer ID of the chat to sync, as in messages_cache',
+        history_ranges:
+          'Marked peer ID of the chat the range belongs to, as in messages_cache',
+      })
+    })
+
     it('prints text schema for a table', async () => {
       const { printSchemaCommand } = await import(
         '../commands/sql/print-schema'

@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS search_meta (
 |--------|---------|
 | `text` | Message text |
 | `sender` | Username + name + user_id search blob |
-| `chat` | Chat title + username + chat_id search blob |
+| `chat` | Chat title + username + chat_id search blob (groups and channels too) |
 | `files` | Media path (when available) |
 
 ## Triggered Indexing
@@ -112,6 +112,13 @@ On startup, `initSyncSchema()` checks:
 
 If either check fails, it drops and recreates `message_search` and rebuilds the
 index from `messages_cache`.
+
+The `chat` column reads the chat's `chats_cache` row, which has the same marked
+peer ID as the message. Up to 0.2.0, `chats_cache` kept groups and channels under
+bare IDs, so their messages were indexed without a title. The first open of such
+a cache moves those rows to marked IDs and rebuilds the index once, so a query such
+as `tg messages search --query "Team Chat"` finds the messages of that chat (see
+[database-schema.md](database-schema.md#migrations)).
 
 ## Query Pattern
 

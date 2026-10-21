@@ -12,6 +12,13 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import type { tl } from '@mtcute/bun'
 
 import {
+  chatRowToItem,
+  dialogToCacheInput,
+  rawChatToCacheInput,
+  rawPeerToCacheInput,
+  userToPrivateChatCacheInput,
+} from '../commands/chats/helpers'
+import {
   type CachedChatInput,
   type ChatsCache,
   createChatsCache,
@@ -20,6 +27,7 @@ import { createTestCacheDatabase } from '../db/schema'
 import type { ChatType } from '../db/types'
 import { getDefaultCacheConfig, isCacheStale } from '../db/types'
 import { toLong } from '../utils/long'
+import { fakeDialog } from './helpers/fake-dialogs'
 
 // =============================================================================
 // Test Helpers
@@ -33,17 +41,17 @@ function createTestChat(
 ): CachedChatInput {
   return {
     chat_id: '123456',
-    type: 'group' as ChatType,
-    title: 'Test Group',
-    username: 'testgroup',
-    member_count: 10,
+    type: 'private' as ChatType,
+    title: 'Test Chat',
+    username: 'testchat',
+    member_count: null,
     access_hash: 'abc123',
     is_creator: 0,
-    is_admin: 1,
+    is_admin: 0,
     last_message_id: 100,
     last_message_at: Date.now() - 1000,
     fetched_at: Date.now(),
-    raw_json: JSON.stringify({ id: 123456, title: 'Test Group' }),
+    raw_json: JSON.stringify({ _: 'user', id: 123456, firstName: 'Test' }),
     ...overrides,
   }
 }
@@ -71,31 +79,31 @@ function seedChatsWithTypes(chatsCache: ChatsCache): void {
       lastMessageAt: Date.now() - 2000,
     },
     {
-      id: '3',
+      id: '-3',
       type: 'group',
       title: 'Team Chat',
       lastMessageAt: Date.now() - 3000,
     },
     {
-      id: '4',
+      id: '-1000000000004',
       type: 'supergroup',
       title: 'Community',
       lastMessageAt: Date.now() - 4000,
     },
     {
-      id: '5',
+      id: '-1000000000005',
       type: 'supergroup',
       title: 'Developers',
       lastMessageAt: Date.now() - 5000,
     },
     {
-      id: '6',
+      id: '-1000000000006',
       type: 'channel',
       title: 'News',
       lastMessageAt: Date.now() - 6000,
     },
     {
-      id: '7',
+      id: '-1000000000007',
       type: 'channel',
       title: 'Updates',
       lastMessageAt: Date.now() - 7000,
@@ -228,82 +236,48 @@ function createMockClient() {
 // =============================================================================
 
 describe('Chat Item Conversion', () => {
-  describe('cachedChatToItem logic', () => {
-    it('should convert cached chat with all fields', () => {
-      const cached = {
-        chat_id: '123',
-        type: 'group' as ChatType,
+  it('should convert cached chat with all fields', () => {
+    const item = chatRowToItem(
+      createTestChat({
+        chat_id: '-123',
+        type: 'group',
         title: 'My Group',
         username: 'mygroup',
         member_count: 50,
-        last_message_at: Date.now(),
         is_creator: 1,
         is_admin: 1,
-        access_hash: 'hash123',
-        last_message_id: 100,
-        fetched_at: Date.now(),
-        raw_json: '{}',
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      }
+      }),
+    )
 
-      // Simulate conversion logic from chats.ts
-      const item = {
-        id: Number(cached.chat_id),
-        type: cached.type,
-        title: cached.title ?? '',
-        username: cached.username,
-        memberCount: cached.member_count,
-        lastMessageAt: cached.last_message_at,
-        isCreator: cached.is_creator === 1,
-        isAdmin: cached.is_admin === 1,
-      }
-
-      expect(item.id).toBe(123)
-      expect(item.type).toBe('group')
-      expect(item.title).toBe('My Group')
-      expect(item.username).toBe('mygroup')
-      expect(item.memberCount).toBe(50)
-      expect(item.isCreator).toBe(true)
-      expect(item.isAdmin).toBe(true)
+    expect(item).toMatchObject({
+      id: -123,
+      type: 'group',
+      title: 'My Group',
+      username: 'mygroup',
+      memberCount: 50,
+      isCreator: true,
+      isAdmin: true,
     })
+  })
 
-    it('should handle null fields gracefully', () => {
-      const cached = {
+  it('should handle null fields gracefully', () => {
+    const item = chatRowToItem(
+      createTestChat({
         chat_id: '456',
-        type: 'private' as ChatType,
         title: null,
         username: null,
         member_count: null,
         last_message_at: null,
-        is_creator: 0,
-        is_admin: 0,
-        access_hash: null,
-        last_message_id: null,
-        fetched_at: Date.now(),
-        raw_json: '{}',
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      }
+      }),
+    )
 
-      const item = {
-        id: Number(cached.chat_id),
-        type: cached.type,
-        title: cached.title ?? '',
-        username: cached.username,
-        memberCount: cached.member_count,
-        lastMessageAt: cached.last_message_at,
-        isCreator: cached.is_creator === 1,
-        isAdmin: cached.is_admin === 1,
-      }
-
-      expect(item.id).toBe(456)
-      expect(item.title).toBe('')
-      expect(item.username).toBeNull()
-      expect(item.memberCount).toBeNull()
-      expect(item.lastMessageAt).toBeNull()
-      expect(item.isCreator).toBe(false)
-      expect(item.isAdmin).toBe(false)
+    expect(item).toMatchObject({
+      id: 456,
+      title: '',
+      username: null,
+      memberCount: null,
+      lastMessageAt: null,
+      isCreator: false,
     })
   })
 })
@@ -672,7 +646,7 @@ describe('searchChatsCommand', () => {
     )
     chatsCache.upsert(
       createTestChat({
-        chat_id: '4',
+        chat_id: '-1000000000004',
         title: 'Tech News Channel',
         username: 'technews',
         type: 'channel',
@@ -973,128 +947,103 @@ describe('getChatCommand', () => {
 // Dialog Conversion Tests
 // =============================================================================
 
-describe('Dialog Conversion', () => {
-  describe('dialogToCacheInput logic', () => {
-    it('should convert peerUser dialog to private chat', () => {
-      const dialog = {
-        peer: { _: 'peerUser', userId: 123 },
-        chat: {
-          firstName: 'John',
-          lastName: 'Doe',
-          username: 'johndoe',
-        },
-        topMessage: 100,
-        date: Math.floor(Date.now() / 1000),
-        raw: {
-          peer: { _: 'peerUser', userId: 123 },
-        },
-      }
+describe('Chat cache rows', () => {
+  it('stores each dialog under its marked peer ID', () => {
+    const rows = [
+      fakeDialog({ kind: 'user', id: 1001, title: 'John Doe' }),
+      fakeDialog({ kind: 'group', id: 4001, title: 'My Group' }),
+      fakeDialog({
+        kind: 'supergroup',
+        id: 1234567890,
+        title: 'Big Community',
+        username: 'bigcommunity',
+        membersCount: 10000,
+      }),
+      fakeDialog({ kind: 'channel', id: 9876543210, title: 'News Channel' }),
+    ].map(dialogToCacheInput)
 
-      // Simulate conversion logic
-      const type: ChatType = 'private'
-      const chatId = String(dialog.peer.userId)
-      const title = [dialog.chat.firstName, dialog.chat.lastName]
-        .filter(Boolean)
-        .join(' ')
-      const username = dialog.chat.username ?? null
+    expect(
+      rows.map(({ chat_id, type, title, access_hash }) => ({
+        chat_id,
+        type,
+        title,
+        access_hash,
+      })),
+    ).toEqual([
+      {
+        chat_id: '1001',
+        type: 'private',
+        title: 'John Doe',
+        access_hash: '777',
+      },
+      { chat_id: '-4001', type: 'group', title: 'My Group', access_hash: null },
+      {
+        chat_id: '-1001234567890',
+        type: 'supergroup',
+        title: 'Big Community',
+        access_hash: '777',
+      },
+      {
+        chat_id: '-1009876543210',
+        type: 'channel',
+        title: 'News Channel',
+        access_hash: '777',
+      },
+    ])
+  })
 
-      expect(type).toBe('private')
-      expect(chatId).toBe('123')
-      expect(title).toBe('John Doe')
-      expect(username).toBe('johndoe')
+  it('stores a raw chat or user under its marked peer ID', () => {
+    const base = { photo: { _: 'chatPhotoEmpty' }, date: 1_700_000_000 }
+    const user: tl.RawUser = {
+      _: 'user',
+      id: 1001,
+      firstName: 'John',
+      accessHash: toLong('777'),
+    }
+    const group = {
+      ...base,
+      _: 'chat',
+      id: 4001,
+      title: 'My Group',
+      participantsCount: 5,
+      version: 1,
+    } as tl.RawChat
+    const supergroup = {
+      ...base,
+      _: 'channel',
+      id: 1234567890,
+      title: 'Big Community',
+      megagroup: true,
+      accessHash: toLong('888'),
+    } as tl.RawChannel
+
+    expect(userToPrivateChatCacheInput(user).chat_id).toBe('1001')
+    expect(rawChatToCacheInput(group)).toMatchObject({
+      chat_id: '-4001',
+      type: 'group',
     })
-
-    it('should convert peerChat dialog to group chat', () => {
-      const dialog = {
-        peer: { _: 'peerChat', chatId: 456 },
-        chat: {
-          title: 'My Group',
-          participantsCount: 25,
-        },
-        topMessage: 200,
-        date: Math.floor(Date.now() / 1000),
-        raw: {
-          peer: { _: 'peerChat', chatId: 456 },
-        },
-      }
-
-      // Simulate conversion logic
-      const type: ChatType = 'group'
-      const chatId = String(dialog.peer.chatId)
-      const title = dialog.chat.title ?? null
-      const memberCount = dialog.chat.participantsCount ?? null
-
-      expect(type).toBe('group')
-      expect(chatId).toBe('456')
-      expect(title).toBe('My Group')
-      expect(memberCount).toBe(25)
+    expect(rawChatToCacheInput(supergroup)).toMatchObject({
+      chat_id: '-1001234567890',
+      type: 'supergroup',
+      access_hash: '888',
     })
+    expect(rawPeerToCacheInput(supergroup)?.chat_id).toBe('-1001234567890')
+    expect(rawPeerToCacheInput(user)?.chat_id).toBe('1001')
+  })
 
-    it('should convert peerChannel with megagroup to supergroup', () => {
-      const dialog = {
-        peer: { _: 'peerChannel', channelId: 789 },
-        chat: {
-          title: 'Big Community',
-          username: 'bigcommunity',
-          megagroup: true,
-          participantsCount: 10000,
-          accessHash: toLong('123456'),
-        },
-        topMessage: 300,
-        date: Math.floor(Date.now() / 1000),
-        raw: {
-          peer: { _: 'peerChannel', channelId: 789 },
-        },
-      }
-
-      // Simulate conversion logic
-      const type: ChatType = dialog.chat.megagroup ? 'supergroup' : 'channel'
-      const chatId = String(dialog.peer.channelId)
-      const title = dialog.chat.title ?? null
-      const username = dialog.chat.username ?? null
-      const memberCount = dialog.chat.participantsCount ?? null
-      const accessHash = dialog.chat.accessHash
-        ? String(dialog.chat.accessHash)
-        : null
-
-      expect(type).toBe('supergroup')
-      expect(chatId).toBe('789')
-      expect(title).toBe('Big Community')
-      expect(username).toBe('bigcommunity')
-      expect(memberCount).toBe(10000)
-      expect(accessHash).toBe('123456')
-    })
-
-    it('should convert peerChannel without megagroup to channel', () => {
-      const dialog = {
-        peer: { _: 'peerChannel', channelId: 999 },
-        chat: {
-          title: 'News Channel',
-          username: 'news',
-          megagroup: false,
-          gigagroup: false,
-          broadcast: true,
-          participantsCount: 50000,
-        },
-        topMessage: 400,
-        date: Math.floor(Date.now() / 1000),
-        raw: {
-          peer: { _: 'peerChannel', channelId: 999 },
-        },
-      }
-
-      // Simulate conversion logic
-      const type: ChatType =
-        dialog.chat.megagroup || dialog.chat.gigagroup
-          ? 'supergroup'
-          : 'channel'
-      const chatId = String(dialog.peer.channelId)
-      const title = dialog.chat.title ?? null
-
-      expect(type).toBe('channel')
-      expect(chatId).toBe('999')
-      expect(title).toBe('News Channel')
-    })
+  it('marks chats the user lost access to as well', () => {
+    expect(
+      rawChatToCacheInput({ _: 'chatForbidden', id: 4001, title: 'Old Group' })
+        .chat_id,
+    ).toBe('-4001')
+    expect(
+      rawChatToCacheInput({
+        _: 'channelForbidden',
+        id: 1234567890,
+        accessHash: toLong('888'),
+        title: 'Old Channel',
+      }),
+    ).toMatchObject({ chat_id: '-1001234567890', access_hash: '888' })
   })
 })
 

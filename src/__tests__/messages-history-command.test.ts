@@ -265,13 +265,13 @@ describe('resolveHistoryChat', () => {
     cacheChat(cacheDb, '10', 'private', 'Alice Able', 'alice', '1111')
     cacheChat(
       cacheDb,
-      String(TEAM_CHAT_RAW_ID),
+      String(TEAM_CHAT_ID),
       'supergroup',
       'Team Chat',
       'teamchat',
       '2222',
     )
-    cacheChat(cacheDb, '4242', 'group', 'Book Club', null, null)
+    cacheChat(cacheDb, String(BOOK_CLUB_ID), 'group', 'Book Club', null, null)
     // A private chat the daemon cached with no users_cache or chats_cache row
     const newDm = [NEW_USER_ID, LONG_NEW_USER_ID]
     for (const chatId of [

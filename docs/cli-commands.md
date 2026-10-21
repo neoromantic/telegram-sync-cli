@@ -66,7 +66,7 @@ tg contacts get --id @username
 ```bash
 tg chats list --type private --limit 50
 tg chats search --query "team"   # cache-only
-tg chats get --id @username       # username only
+tg chats get --id @username       # or the ID of a cached chat
 tg chats sync @examplenews        # sync this chat in the background
 ```
 
@@ -78,8 +78,8 @@ members and channels get catch-up and history only on request:
 
 ```bash
 tg chats sync @examplenews        # turn sync on
-tg chats sync 1234567890          # the ID that tg chats list shows
-tg chats sync -1001234567890      # or a marked ID (-100… for channels, -N for basic groups)
+tg chats sync -1001234567890      # the ID tg chats list shows (-100… for channels, -N for basic groups)
+tg chats sync 1234567890          # the bare ID 0.2.0 showed works too
 tg chats sync @examplenews --off  # stop catch-up and history for it
 tg chats sync @examplenews --auto # follow the default policy again
 ```
@@ -88,6 +88,9 @@ tg chats sync @examplenews --auto # follow the default policy again
   dialog passes.
 - `--off` and the default policy control catch-up, first pages and history. While the daemon
   runs, it caches messages that arrive live in every chat, including one that is off.
+- `id` and `peerId` are the same marked ID; `peerId` stays for scripts written against 0.2.0,
+  where `id` was the bare one. A bare ID that names both a cached basic group and a cached
+  channel is `INVALID_ARGS`, with both marked IDs in `details.candidates`.
 - Cache-only: the chat must be in `chats_cache` or have sync state from the daemon. No Telegram
   credentials needed. A daemon start caches every chat, archived ones too;
   `tg chats get --id @username` caches one chat; `tg chats list --fresh` caches only the 200
@@ -112,7 +115,7 @@ tg chats sync @examplenews --auto # follow the default policy again
 {
   "success": true,
   "data": {
-    "id": 1234567890,
+    "id": -1001234567890,
     "peerId": -1001234567890,
     "type": "channel",
     "title": "Example News",
@@ -190,9 +193,13 @@ tg send --to me -m "Note to self"   # Saved Messages
 tg send --to -1001234567890 -m "Hi" # a chat ID as tg messages search prints it
 ```
 
-`--to` takes an `@username`, a user or chat ID (raw, as `tg chats list` prints it, or marked,
-as `tg messages search` and `tg sql` print it: `-100…` for channels and supergroups, `-N` for
-basic groups), a phone number with `+` (spaces, dashes and brackets are fine), or `me`.
+`--to` takes an `@username`, a user or chat ID as any `tg` command prints it (`tg chats list`,
+`tg messages search` and `tg sql` print the same marked IDs: `-100…` for channels and
+supergroups, `-N` for basic groups, the user ID for a private chat), a phone number with `+`
+(spaces, dashes and brackets are fine), or `me`. The bare group or channel ID that 0.2.0
+printed still works when the cache knows the chat; if it names both a cached basic group and a
+cached channel, the command fails with `INVALID_ARGS` and lists both marked IDs in
+`details.candidates`.
 
 A sent message goes into the message cache right away, so `tg messages search`
 finds it without the daemon.

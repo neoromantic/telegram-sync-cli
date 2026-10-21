@@ -417,9 +417,16 @@ let cacheDb: Database | null = null
  */
 export function getCacheDb(): Database {
   if (!cacheDb) {
-    cacheDb = new Database(CACHE_DB_PATH)
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
+    const db = new Database(CACHE_DB_PATH)
+    try {
+      initCacheSchema(db)
+      initSyncSchema(db)
+    } catch (err) {
+      // A failed migration rolled back; the next call opens and retries it
+      db.close()
+      throw err
+    }
+    cacheDb = db
   }
   return cacheDb
 }

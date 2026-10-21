@@ -10,8 +10,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { applySyncMode } from '../commands/chats/sync'
 import { createChatSyncStateService } from '../db/chat-sync-state'
+import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
+import { seedLegacyCache } from './helpers/legacy-cache'
+import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 const SCHEMA_MODULE = join(import.meta.dir, '../db/schema.ts')
 const SYNC_SCHEMA_MODULE = join(import.meta.dir, '../db/sync-schema.ts')
@@ -111,7 +114,7 @@ describe('cache database lock', () => {
     const db = new Database(path)
     initCacheSchema(db)
     const chat = {
-      id: 1234567890,
+      id: -1001234567890,
       peerId: -1001234567890,
       type: 'channel' as const,
       title: 'Example News',
@@ -131,6 +134,41 @@ describe('cache database lock', () => {
 
     expect(await holder.exited).toBe(0)
   }, 20_000)
+
+  it('lets several processes move a 0.2.0 cache to marked IDs at once', async () => {
+    const legacy = new Database(path)
+    seedLegacyCache(legacy)
+    legacy.close()
+
+    const env = {
+      LOCK_DB_PATH: path,
+      SCHEMA_MODULE,
+      SYNC_SCHEMA_MODULE,
+    }
+    const children = Array.from({ length: 4 }, () => spawnBun(INIT_SCHEMA, env))
+    const results = await Promise.all(
+      children.map(async (child) => ({
+        code: await child.exited,
+        stderr: await new Response(child.stderr).text(),
+      })),
+    )
+
+    expect(results).toEqual(results.map(() => ({ code: 0, stderr: '' })))
+
+    const migrated = new Database(path)
+    expect(migrated.query('PRAGMA user_version').get()).toEqual({
+      user_version: PEER_ID_USER_VERSION,
+    })
+    expect(
+      migrated
+        .query('SELECT chat_id FROM chats_cache ORDER BY chat_id')
+        .all()
+        .map((row) => (row as { chat_id: string }).chat_id)
+        .sort(),
+    ).toEqual(['-1001234567890', '-1002222222222', '-4242', '10'])
+    assertPeerIdInvariants(migrated)
+    migrated.close()
+  }, 30_000)
 
   it('lets several processes migrate a 0.1.4 database at once', async () => {
     // Turn the database back into what 0.1.4 left

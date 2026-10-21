@@ -5,6 +5,7 @@ import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import type { tl } from '@mtcute/bun'
 
+import { dialogToCacheInput } from '../commands/chats/helpers'
 import {
   buildSentMessageInputs,
   cacheSentMessage,
@@ -12,20 +13,22 @@ import {
   type SentMessageRequest,
 } from '../commands/send/sent-message-cache'
 import { createTestDatabase } from '../db'
+import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { toLong } from '../utils/long'
-import {
-  CHANNEL_PEER_ID_OFFSET,
-  toPeerIdFromInputPeer,
-} from '../utils/telegram-peer-ids'
+import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
+import { fakeDialog } from './helpers/fake-dialogs'
+import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 const SELF_ID = 5550001
 const OTHER_USER_ID = 5550002
 const GROUP_ID = 4440001
+const GROUP_PEER_ID = -4440001
 const CHANNEL_ID = 3330001
+const CHANNEL_PEER_ID = -1000003330001
 const DATE = 1_760_000_000
 
 function shortSent(
@@ -94,7 +97,7 @@ describe('toPeerIdFromInputPeer', () => {
     ).toBe(OTHER_USER_ID)
     expect(
       toPeerIdFromInputPeer({ _: 'inputPeerChat', chatId: GROUP_ID }, null),
-    ).toBe(-GROUP_ID)
+    ).toBe(GROUP_PEER_ID)
     expect(
       toPeerIdFromInputPeer(
         {
@@ -104,7 +107,7 @@ describe('toPeerIdFromInputPeer', () => {
         },
         null,
       ),
-    ).toBe(-CHANNEL_PEER_ID_OFFSET - CHANNEL_ID)
+    ).toBe(CHANNEL_PEER_ID)
     expect(toPeerIdFromInputPeer({ _: 'inputPeerEmpty' }, SELF_ID)).toBeNull()
   })
 })
@@ -160,7 +163,7 @@ describe('buildSentMessageInputs', () => {
         SELF_ID,
       )
       expect(input).toMatchObject({
-        chat_id: -GROUP_ID,
+        chat_id: GROUP_PEER_ID,
         message_id: 7,
         reply_to_id: 5,
       })
@@ -207,7 +210,7 @@ describe('buildSentMessageInputs', () => {
 
       expect(inputs).toHaveLength(1)
       expect(inputs[0]).toMatchObject({
-        chat_id: -CHANNEL_PEER_ID_OFFSET - CHANNEL_ID,
+        chat_id: CHANNEL_PEER_ID,
         message_id: 202,
         from_id: SELF_ID,
         text: 'hello channel',
@@ -235,7 +238,10 @@ describe('buildSentMessageInputs', () => {
         null,
       )
       expect(inputs).toHaveLength(1)
-      expect(inputs[0]).toMatchObject({ chat_id: -GROUP_ID, message_id: 303 })
+      expect(inputs[0]).toMatchObject({
+        chat_id: GROUP_PEER_ID,
+        message_id: 303,
+      })
     })
 
     it('maps a Saved Messages updateNewMessage to the own user ID', () => {
@@ -318,9 +324,44 @@ describe('cacheSentMessage', () => {
 
     expect(cached).toBe(1)
     expect(getSelfId).not.toHaveBeenCalled()
-    expect(
-      createMessagesCache(db).get(-CHANNEL_PEER_ID_OFFSET - CHANNEL_ID, 202),
-    ).not.toBeNull()
+    expect(createMessagesCache(db).get(CHANNEL_PEER_ID, 202)).not.toBeNull()
+  })
+
+  it('caches a message sent to a supergroup under the ID its chats_cache row has', async () => {
+    createChatsCache(db).upsert(
+      dialogToCacheInput(
+        fakeDialog({
+          kind: 'supergroup',
+          id: CHANNEL_ID,
+          title: 'Example Team',
+          username: 'exampleteam',
+        }),
+      ),
+    )
+
+    await cacheSentMessage(
+      { cacheDb: db, getSelfId: async () => SELF_ID },
+      updatesWith([
+        {
+          _: 'updateNewChannelMessage',
+          message: rawMessage({ message: 'sendcachemarker for the team' }),
+          pts: 1,
+          ptsCount: 1,
+        },
+      ]),
+      selfRequest,
+    )
+
+    const [hit] = createMessagesSearch(db).search('sendcachemarker')
+    expect(hit).toMatchObject({
+      chat_id: CHANNEL_PEER_ID,
+      chat_title: 'Example Team',
+      chat_username: 'exampleteam',
+      chat_type: 'supergroup',
+    })
+    // The search index has the chat title too
+    expect(createMessagesSearch(db).search('Example Team')).toHaveLength(1)
+    assertPeerIdInvariants(db)
   })
 
   it('swallows a failing cache write', async () => {

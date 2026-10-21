@@ -2,8 +2,13 @@ import type { Dialog, tl } from '@mtcute/bun'
 
 import type { CachedChat, CachedChatInput } from '../../db/chats-cache'
 import type { ChatType } from '../../db/types'
+import {
+  toPeerIdFromRawChat,
+  toPeerIdFromRawPeer,
+} from '../../utils/telegram-peer-ids'
 
 export interface ChatItem {
+  /** Marked peer ID, as messages_cache and `tg messages search` use it */
   id: number
   type: ChatType
   title: string
@@ -60,20 +65,22 @@ export function getChatType(dialog: Dialog): ChatType {
   return 'group'
 }
 
+/**
+ * A chats_cache row for a dialog, under its marked peer ID: the user ID for
+ * a private chat, -N for basic group N and -100…N for channel N.
+ */
 export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
   const rawPeer = dialog.raw.peer
   const peer = dialog.peer
   const type = getChatType(dialog)
   const lastMessageAt = dialog.lastMessage?.date ?? null
 
-  let chatId: string
   let title: string | null = null
   let username: string | null = null
   let memberCount: number | null = null
   let accessHash: string | null = null
 
   if (rawPeer._ === 'peerUser' && peer.type === 'user') {
-    chatId = String(rawPeer.userId)
     title = peer.displayName || null
     username = peer.username ?? null
     const rawUser = peer.raw
@@ -81,11 +88,9 @@ export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
       accessHash = rawUser.accessHash ? String(rawUser.accessHash) : null
     }
   } else if (rawPeer._ === 'peerChat' && peer.type === 'chat') {
-    chatId = String(rawPeer.chatId)
     title = peer.title ?? null
     memberCount = peer.membersCount ?? null
   } else if (rawPeer._ === 'peerChannel' && peer.type === 'chat') {
-    chatId = String(rawPeer.channelId)
     title = peer.title ?? null
     username = peer.username ?? null
     memberCount = peer.membersCount ?? null
@@ -93,18 +98,10 @@ export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
     if (rawChat._ === 'channel' || rawChat._ === 'channelForbidden') {
       accessHash = rawChat.accessHash ? String(rawChat.accessHash) : null
     }
-  } else {
-    chatId = String(
-      rawPeer._ === 'peerUser'
-        ? rawPeer.userId
-        : rawPeer._ === 'peerChat'
-          ? rawPeer.chatId
-          : rawPeer.channelId,
-    )
   }
 
   return {
-    chat_id: chatId,
+    chat_id: String(toPeerIdFromRawPeer(rawPeer)),
     type,
     title,
     username,
@@ -154,9 +151,10 @@ function rawChatType(peer: ResolvedChat): ChatType {
   return 'group'
 }
 
+/** A chats_cache row for a raw chat, under its marked peer ID */
 export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
   return {
-    chat_id: String(chat.id),
+    chat_id: String(toPeerIdFromRawChat(chat)),
     type: rawChatType(chat),
     title: 'title' in chat ? (chat.title ?? null) : null,
     username: 'username' in chat ? (chat.username ?? null) : null,

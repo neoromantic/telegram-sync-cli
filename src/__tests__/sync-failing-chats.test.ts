@@ -10,6 +10,7 @@
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { type TelegramClient, tl } from '@mtcute/bun'
+import { dialogToCacheInput } from '../commands/chats/helpers'
 import {
   createDaemonRuntime,
   type DaemonContext,
@@ -30,6 +31,7 @@ import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
+import { fakeDialog } from './helpers/fake-dialogs'
 import {
   createMultiChatHistory,
   type GetHistoryRequest,
@@ -253,20 +255,17 @@ describe('chats whose sync pages keep failing', () => {
   })
 
   it('fails a CHANNEL_PRIVATE chat at once and tries it again a day later', async () => {
-    createChatsCache(db).upsert({
-      chat_id: String(PRIVATE_CHANNEL_ID),
-      type: 'channel',
-      title: 'Example News',
-      username: 'examplenews',
-      member_count: 5000,
-      access_hash: '777',
-      is_creator: 0,
-      is_admin: 0,
-      last_message_id: null,
-      last_message_at: null,
-      fetched_at: T0,
-      raw_json: '{}',
-    })
+    createChatsCache(db).upsert(
+      dialogToCacheInput(
+        fakeDialog({
+          kind: 'channel',
+          id: PRIVATE_CHANNEL_ID,
+          title: 'Example News',
+          username: 'examplenews',
+          membersCount: 5000,
+        }),
+      ),
+    )
     chatSyncState.upsert({
       chat_id: PRIVATE_CHANNEL,
       chat_type: 'channel',

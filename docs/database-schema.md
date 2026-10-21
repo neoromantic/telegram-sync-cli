@@ -57,6 +57,23 @@ CREATE INDEX idx_accounts_active ON accounts(is_active);
 
 All timestamps in cache/sync tables are **milliseconds since epoch** unless noted.
 
+### Peer IDs
+
+Every column that holds a chat holds its **marked peer ID**, the format mtcute uses and every
+`tg` command prints:
+
+| Chat | Marked ID | Example |
+|------|-----------|---------|
+| Private chat | the user ID | `5550001` |
+| Basic group N | `-N` | `-4242` |
+| Supergroup or channel N | `-1000000000000 - N` (`-100…`) | `-1001234567890` |
+
+That covers `chats_cache.chat_id`, `messages_cache.chat_id`, `chat_sync_state.chat_id`,
+`sync_jobs.chat_id` and `history_ranges.chat_id`. `users_cache.user_id` is the same number as the
+`chat_id` of the private chat with that user. `chats_cache.chat_id` is TEXT and the others are
+INTEGER, so a join compares `chats_cache.chat_id = CAST(m.chat_id AS TEXT)`, which uses the
+primary key. All conversions live in `src/utils/telegram-peer-ids.ts`.
+
 ### Table: users_cache
 
 ```sql
@@ -86,7 +103,7 @@ CREATE INDEX idx_users_cache_fetched_at ON users_cache(fetched_at);
 
 ```sql
 CREATE TABLE chats_cache (
-  chat_id TEXT PRIMARY KEY,
+  chat_id TEXT PRIMARY KEY,      -- marked peer ID: user ID, -N, or -100… (see Peer IDs)
   type TEXT NOT NULL,            -- 'private', 'group', 'supergroup', 'channel'
   title TEXT,
   username TEXT,
@@ -334,12 +351,28 @@ the other process's write lock instead of failing with "database is locked".
 
 ## Migrations
 
-There is no `schema_version` table yet. The schema is created with `CREATE TABLE IF NOT EXISTS`
-on startup, indexes with `CREATE INDEX IF NOT EXISTS`. Columns added after 0.1.4
-(`chat_sync_state.top_message_id`, `chat_sync_state.sync_mode`) are added with
+The schema is created with `CREATE TABLE IF NOT EXISTS` on startup, indexes with
+`CREATE INDEX IF NOT EXISTS`. Columns added after 0.1.4 (`chat_sync_state.top_message_id`,
+`chat_sync_state.sync_mode`, `sync_jobs.attempts`, `sync_jobs.next_run_at`) are added with
 `ALTER TABLE … ADD COLUMN` when missing; a "duplicate column name" error is ignored, because
 the CLI and the daemon can both run the migration on the first start. Older binaries ignore
 the new columns.
+
+`PRAGMA user_version` records the one-time data migrations of `cache.db`
+(`src/db/peer-id-migration.ts`):
+
+- `1`: up to 0.2.0, `chats_cache` stored groups and channels under their bare positive IDs. Each
+  such row moves to its marked ID, taken from its `raw_json` (a dialog's peer or a raw chat) when
+  that names the same chat, otherwise from its `type`. When a chat is cached under both IDs, the
+  row fetched later wins and keeps the other's access hash if it has none. The search index is
+  then rebuilt, so its `chat` column holds group and channel titles.
+
+The first open after an upgrade runs the steps in one `BEGIN IMMEDIATE` transaction, waiting up
+to 60 seconds for another process's write lock. A failure rolls everything back, `user_version`
+included, and the next open tries again. The move of bare `chats_cache` rows also runs on every
+later open that finds one, which repairs rows that an older daemon still running writes. Opens
+with nothing to do only read. Going back to an older version after the migration is not
+supported: it would not find groups and channels in `chats_cache`.
 
 ## Usage Notes
 

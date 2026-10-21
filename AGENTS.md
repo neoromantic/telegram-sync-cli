@@ -122,6 +122,8 @@ CLI mode (tg <cmd>)            Daemon mode (tg daemon start)
 - Cache-first: return cached data and refresh in the background; `--fresh` bypasses the cache.
   Never block on stale data.
 - Telegram `Long` values (`hash`, `accessHash`) are `BigInt`.
+- Every cache table stores a chat under its marked peer ID (user ID, `-N` for basic groups,
+  `-100…` for supergroups and channels). Convert IDs only in `src/utils/telegram-peer-ids.ts`.
 
 Sync uses two cursors per chat: forward (every message up to it is cached; only sync jobs
 move it, never live updates) and backward (history backfill). Catch-up runs only for chats

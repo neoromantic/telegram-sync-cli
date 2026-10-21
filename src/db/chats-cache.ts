@@ -4,6 +4,7 @@
  */
 import type { Database } from 'bun:sqlite'
 
+import { legacyChatIdCandidates } from '../utils/telegram-peer-ids'
 import { ChatCacheRow } from './schema'
 import type { CacheConfig, ChatType } from './types'
 
@@ -133,6 +134,17 @@ export class ChatsCache {
   getById(chatId: string): CachedChat | null {
     const row = this.getByIdStmt.get({ $chat_id: chatId })
     return row ? this.rowToChat(row) : null
+  }
+
+  /**
+   * The cached chats a bare positive ID from 0.2.0 or older can name:
+   * basic group N (-N) and channel N (-100…N). Cache-only; usually none or
+   * one, two only when both are cached.
+   */
+  getByLegacyId(bareId: number): CachedChat[] {
+    return legacyChatIdCandidates(bareId)
+      .map((peerId) => this.getById(String(peerId)))
+      .filter((chat): chat is CachedChat => chat !== null)
   }
 
   /**
