@@ -14,11 +14,11 @@ import {
 } from 'bun:test'
 import { join } from 'node:path'
 
-import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
+import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import { initSyncSchema } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import type { MessageSearchItem } from '../types'
@@ -323,7 +323,7 @@ describe('E2E: Messages List', () => {
     pages.push(data.items.map((item) => item.messageId))
     expect(pages[2]).toEqual([1])
 
-    // Chat 10 is fully synced, so the end of history needs no Telegram call
+    // Message IDs start at 1, so the end of history needs no Telegram call
     const end = await list('--chat', '@alice', '--limit', '3', '--before', '1')
     expect(end.items).toEqual([])
     expect(end.source).toBe('cache')
@@ -340,8 +340,17 @@ describe('E2E: Messages List', () => {
       await ids('--chat', '@alice', '--limit', '3', '--after', '3'),
     ).toEqual([6, 5, 4])
     expect(
-      await ids('--chat', '@alice', '--limit', '3', '--after', '6'),
-    ).toEqual([7])
+      await ids(
+        '--chat',
+        '@alice',
+        '--limit',
+        '3',
+        '--after',
+        '5',
+        '--before',
+        '8',
+      ),
+    ).toEqual([7, 6])
     expect(
       await ids(
         '--chat',
@@ -356,12 +365,12 @@ describe('E2E: Messages List', () => {
     ).toEqual([5, 4, 3])
   })
 
-  it('asks Telegram when the cache has nothing in the window', async () => {
-    // Nothing newer than 7 is cached (8 is deleted), and @teamchat isn't
-    // fully synced: both need Telegram, so both need credentials
+  it('asks Telegram when the cache cannot vouch for the window', async () => {
+    // Nothing newer than 7 is cached (8 is deleted), and no cached page
+    // covers the message of the DM: both need Telegram, so credentials
     for (const args of [
       ['--chat', '@alice', '--after', '7'],
-      ['--chat', '@teamchat', '--before', '1'],
+      ['--chat', String(NEW_DM_ID)],
     ]) {
       const { exitCode, json } = await listFailure(...args)
       expect(exitCode).toBe(3)
@@ -553,7 +562,7 @@ describe('E2E: Messages Get', () => {
     expect(json.error.message).toContain('TELEGRAM_API_ID')
   })
 
-  it('serves no older context for the first message of a fully synced chat', async () => {
+  it('serves no older context for the first message of a chat', async () => {
     const data = await get('--chat', '@alice', '--id', '1', '--context', '2')
 
     expect(ids(data.newer)).toEqual([3, 2])
@@ -566,15 +575,15 @@ describe('E2E: Messages Get', () => {
       '--chat',
       '@alice',
       '--id',
-      '7',
+      '6',
       '--context',
       '2',
       '--includeDeleted',
     )
 
-    expect(ids(data.newer)).toEqual([8])
+    expect(ids(data.newer)).toEqual([8, 7])
     expect(data.newer[0]?.isDeleted).toBe(true)
-    expect(ids(data.older)).toEqual([6, 5])
+    expect(ids(data.older)).toEqual([5, 4])
     expect(data.source).toBe('cache')
   })
 
@@ -796,14 +805,17 @@ function seedHistory(db: Database): void {
     message(NEW_DM_ID, 1, NEW_DM_ID, 'one kiwi smoothie, please'),
   ])
 
-  const syncState = createChatSyncStateService(db)
-  syncState.upsert({
-    chat_id: ALICE_ID,
-    chat_type: 'private',
-    sync_priority: SyncPriority.High,
-    sync_enabled: true,
-    forward_cursor: 8,
-    backward_cursor: 1,
-  })
-  syncState.markHistoryComplete(ALICE_ID)
+  // The pages the daemon cached, each a run from message 1. No page covers
+  // the DM's message, as when a live update cached it.
+  const ranges = createHistoryRanges(db)
+  for (const [chatId, high] of [
+    [ALICE_ID, 8],
+    [TEAM_CHAT_ID, 3],
+    [BOOK_CLUB_ID, 1],
+    [SELF_ID, 2],
+    [SECOND_SELF_ID, 5],
+    [BOB_ID, 1],
+  ] as const) {
+    ranges.add(chatId, { low: 1, high })
+  }
 }

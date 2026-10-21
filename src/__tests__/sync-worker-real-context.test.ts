@@ -20,6 +20,7 @@ import {
 import type { RealSyncWorkerContext } from '../daemon/sync-worker-real-types'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
+import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
@@ -246,6 +247,7 @@ describe('sync-worker real helpers/context', () => {
       const ctx: RealSyncWorkerContext = {
         client: createMockClient(),
         messagesCache: createMessagesCache(db),
+        historyRanges: createHistoryRanges(db),
         chatSyncState: createChatSyncStateService(db),
         jobsService: createSyncJobsService(db),
         rateLimits,
@@ -263,6 +265,7 @@ describe('sync-worker real helpers/context', () => {
       const ctx: RealSyncWorkerContext = {
         client: createMockClient(),
         messagesCache: createMessagesCache(db),
+        historyRanges: createHistoryRanges(db),
         chatSyncState: createChatSyncStateService(db),
         jobsService: createSyncJobsService(db),
         rateLimits,
@@ -283,6 +286,7 @@ describe('sync-worker real helpers/context', () => {
       const ctx: RealSyncWorkerContext = {
         client: createMockClient(),
         messagesCache: createMessagesCache(db),
+        historyRanges: createHistoryRanges(db),
         chatSyncState: createChatSyncStateService(db),
         jobsService: createSyncJobsService(db),
         rateLimits,
@@ -299,6 +303,7 @@ describe('sync-worker real helpers/context', () => {
       const ctx: RealSyncWorkerContext = {
         client: createMockClient(),
         messagesCache: createMessagesCache(db),
+        historyRanges: createHistoryRanges(db),
         chatSyncState: createChatSyncStateService(db),
         jobsService: createSyncJobsService(db),
         rateLimits: createRateLimitsService(db),

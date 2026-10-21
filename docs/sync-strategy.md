@@ -82,6 +82,8 @@ Core tables (see `docs/database-schema.md` for full schema):
 - `chat_sync_state` — per-chat cursors + priority + progress
 - `sync_jobs` — persistent job queue
 - `messages_cache` — message storage
+- `history_ranges` — the message ID ranges each cached page covers, so reads can tell a gap from
+  a run of messages (see [caching.md](caching.md#chat-history))
 
 ## Job Types
 
@@ -187,6 +189,16 @@ the oldest cached message.
 A chat without either cursor starts at the newest page, not at the oldest cached message:
 `tg send` caches what it sends and `tg messages list` and `get` cache any page of a chat, all
 without moving the cursors, so the oldest cached message says nothing about how far history got.
+
+### History ranges
+
+Every page a sync job caches records the message ID range it covers in `history_ranges`, as the
+pages `tg messages list` and `get` fetch do: a first page from its oldest to its newest message,
+a catch-up page from just above its cursor, a history page up to its cursor, and a page that
+reaches the first message down to 1. Touching ranges merge, so a chat synced without gaps ends
+up with one range. Live updates record none. `tg messages list` and `get` read from the cache
+only inside a range (see [caching.md](caching.md#chat-history)), so the newest messages that
+arrived live come from Telegram until the next catch-up covers them.
 
 ### Scheduling
 

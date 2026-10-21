@@ -59,6 +59,7 @@ export function createRealSyncWorker(deps: RealSyncWorkerDeps) {
   const ctx: RealSyncWorkerContext = {
     client: deps.client,
     messagesCache: deps.messagesCache,
+    historyRanges: deps.historyRanges,
     chatSyncState: deps.chatSyncState,
     jobsService: deps.jobsService,
     rateLimits: deps.rateLimits,

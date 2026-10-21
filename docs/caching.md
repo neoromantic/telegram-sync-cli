@@ -99,22 +99,32 @@ tg contacts get --id @someone
 tg messages list --chat @username --before 1200
 ```
 
-1. Read the window (`--before`, `--after`, `--limit`) from `messages_cache`
-2. If it holds any message: return it with `source: "cache"`
-3. If it is empty, reaches only back (`--before` without `--after`) and the chat has
-   `history_complete = 1` in `chat_sync_state`: return an empty page from the cache, since the
-   chat has nothing older
-4. Otherwise fetch that window with `messages.getHistory`, store the messages (and their senders
-   in `users_cache`) with `raw_json` and `fetched_at`, and return the page read back from the
-   cache with `source: "api"`
+The cache can have gaps, so it answers only inside a range it holds without one.
+`history_ranges` records them: a `messages.getHistory` page is a run of consecutive messages, so
+every page the daemon or the CLI caches adds the range of message IDs it covers, and touching
+ranges merge. A page of the newest messages below an ID also covers up to that ID, and a page
+that ran out of older messages covers down to message 1. Messages from live updates and
+`tg send` add no range, because nothing says what sits next to them.
 
-`tg messages get --chat @username --id 1200 --context 3` follows the same rule for one message
-and each side of its context: if the message is cached and the cache holds something on both
-sides (or the chat has `history_complete = 1` and the older side is empty), all of it comes from
-the cache; otherwise one `messages.getHistory` call fetches the message with the messages around
-it. A cached deleted message comes from the cache with whatever context the cache holds.
+1. Find the page's anchor: just below `--before`, or the newest cached message, when paging back;
+   just above `--after` when paging forward
+2. If a recorded range holds the anchor and `--limit` messages of the window, or fewer because
+   the range reaches the chat's first message (paging back) or `--before` (paging forward):
+   return them with `source: "cache"`. `--before 1` is always an empty page.
+3. Otherwise fetch that window with `messages.getHistory`, store the messages (and their senders
+   in `users_cache`) with `raw_json` and `fetched_at`, record the range, and return the page read
+   back from the cache with `source: "api"`
 
-`--fresh` always takes step 4. Fetched pages are searchable right away. The CLI doesn't move the
+So a page never skips a gap, and a short page past the newest cached message asks Telegram.
+Messages that arrived live after a chat's last catch-up have no range yet, so while the daemon
+runs, the newest page of an active chat comes from Telegram, and is cached as a range.
+
+`tg messages get --chat @username --id 1200 --context 3` treats each side of the context as a
+window next to the message: if the message is cached and both sides pass step 2, all of it comes
+from the cache; otherwise one `messages.getHistory` call fetches the message with the messages
+around it. A cached deleted message comes from the cache with the context its ranges hold.
+
+`--fresh` always takes step 3. Fetched pages are searchable right away. The CLI doesn't move the
 daemon's sync cursors and never infers deletions, and backfill doesn't read progress from cached
 pages (see [sync-strategy.md](sync-strategy.md#history)). Without a running daemon the cache stops at
 the last sync, so the newest page can be behind Telegram; `--fresh` reads Telegram's view.
@@ -149,6 +159,7 @@ The cache uses a separate SQLite database (`cache.db`) initialized lazily on fir
 
 **Sync tables (also in cache.db):**
 - `messages_cache`
+- `history_ranges`
 - `chat_sync_state`
 - `sync_jobs`
 - `daemon_status`

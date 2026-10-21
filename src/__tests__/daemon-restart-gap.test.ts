@@ -22,6 +22,7 @@ import {
   createChatSyncStateService,
 } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
+import { createHistoryRanges } from '../db/history-ranges'
 import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache, type MessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
@@ -126,6 +127,7 @@ describe('daemon restart with messages missed while stopped', () => {
       createRealSyncWorker({
         client: history.client,
         messagesCache,
+        historyRanges: createHistoryRanges(db),
         chatSyncState,
         jobsService,
         rateLimits,
@@ -226,6 +228,7 @@ describe('daemon restart with messages missed while stopped', () => {
       createRealSyncWorker({
         client,
         messagesCache,
+        historyRanges: createHistoryRanges(db),
         chatSyncState,
         jobsService: createSyncJobsService(db),
         rateLimits: createRateLimitsService(db),

@@ -9,6 +9,7 @@ import type {
 } from '../daemon/sync-worker-real-types'
 import type { ChatSyncStateService } from '../db/chat-sync-state'
 import type { ChatsCache } from '../db/chats-cache'
+import type { HistoryRanges } from '../db/history-ranges'
 import type { MessagesCache } from '../db/messages-cache'
 import type { RateLimitsService } from '../db/rate-limits'
 import type { SyncJobsService } from '../db/sync-jobs'
@@ -82,6 +83,7 @@ describe('createRealSyncWorker', () => {
     const worker = createRealSyncWorker({
       client: {} as unknown as TelegramClient,
       messagesCache: {} as unknown as MessagesCache,
+      historyRanges: {} as unknown as HistoryRanges,
       chatSyncState: {} as unknown as ChatSyncStateService,
       jobsService: jobsService as unknown as SyncJobsService,
       rateLimits: rateLimits as unknown as RateLimitsService,
@@ -117,6 +119,7 @@ describe('createRealSyncWorker', () => {
     const worker = createRealSyncWorker({
       client: {} as unknown as TelegramClient,
       messagesCache: {} as unknown as MessagesCache,
+      historyRanges: {} as unknown as HistoryRanges,
       chatSyncState: {} as unknown as ChatSyncStateService,
       jobsService: jobsService as unknown as SyncJobsService,
       rateLimits: rateLimits as unknown as RateLimitsService,
@@ -140,6 +143,7 @@ describe('createRealSyncWorker', () => {
     const worker = createRealSyncWorker({
       client: {} as unknown as TelegramClient,
       messagesCache: {} as unknown as MessagesCache,
+      historyRanges: {} as unknown as HistoryRanges,
       chatSyncState: {} as unknown as ChatSyncStateService,
       jobsService: { getNextPending: mock(() => null) } as Pick<
         SyncJobsService,
@@ -166,6 +170,7 @@ describe('createRealSyncWorker', () => {
     const worker = createRealSyncWorker({
       client: {} as unknown as TelegramClient,
       messagesCache: {} as unknown as MessagesCache,
+      historyRanges: {} as unknown as HistoryRanges,
       chatSyncState: {} as unknown as ChatSyncStateService,
       jobsService: { getNextPending: mock(() => null) } as Pick<
         SyncJobsService,

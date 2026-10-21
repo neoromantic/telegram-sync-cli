@@ -115,6 +115,13 @@ export async function processForwardCatchupReal(
     if (inputs.length > 0) {
       ctx.messagesCache.upsertBatch(inputs)
     }
+    ctx.historyRanges.recordPage(
+      chatId,
+      above.map(rawMessageId),
+      cursor !== null
+        ? { after: cursor }
+        : { reachedStart: messages.length < ctx.config.batchSize },
+    )
 
     const hasMore = cursor !== null && above.length >= ctx.config.batchSize
     ctx.chatSyncState.recordCatchupPage(chatId, {
@@ -210,7 +217,14 @@ export async function processBackwardHistoryReal(
       limit: ctx.config.batchSize,
     })
 
+    // The newest messages below the cursor, or the newest page without one
+    const bounds = {
+      before: backwardCursor || undefined,
+      reachedStart: messages.length < ctx.config.batchSize,
+    }
+
     if (messages.length === 0) {
+      ctx.historyRanges.recordPage(chatId, [], bounds)
       ctx.chatSyncState.markHistoryComplete(chatId)
       ctx.chatSyncState.updateLastSync(chatId, 'backward')
       result = { success: true, messagesFetched: 0, historyComplete: true }
@@ -226,6 +240,7 @@ export async function processBackwardHistoryReal(
       if (inputs.length > 0) {
         ctx.messagesCache.upsertBatch(inputs)
       }
+      ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), bounds)
 
       ctx.chatSyncState.updateCursors(chatId, { backward_cursor: minId })
       ctx.chatSyncState.incrementSyncedMessages(chatId, newCount)
@@ -346,6 +361,10 @@ export async function processInitialLoadReal(
     }
 
     const historyComplete = minId <= 1 || messages.length < ctx.config.batchSize
+    ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), {
+      reachedStart: historyComplete,
+    })
+
     ctx.chatSyncState.recordFirstPage(chatId, {
       forward_cursor: maxId,
       backward_cursor: minId,

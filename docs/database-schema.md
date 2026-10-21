@@ -183,6 +183,23 @@ CREATE TABLE search_meta (
 );
 ```
 
+### Table: history_ranges
+
+The message ID ranges of a chat that `messages_cache` holds without a gap. Each
+`messages.getHistory` page the daemon or the CLI caches adds the range it covers; touching or
+overlapping ranges merge, so the ranges of one chat never touch. `tg messages list` and `get`
+answer from the cache only inside a range (see `docs/caching.md`).
+
+```sql
+CREATE TABLE history_ranges (
+  chat_id INTEGER NOT NULL,
+  low INTEGER NOT NULL,
+  high INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+  PRIMARY KEY (chat_id, low)
+);
+```
+
 ### Table: chat_sync_state
 
 ```sql

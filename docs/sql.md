@@ -22,6 +22,7 @@ The command operates on the **cache database**:
 | `users_cache` | Cached Telegram user information | 1 week |
 | `chats_cache` | Cached chat/group/channel information | 1 week |
 | `messages_cache` | Synced messages from enabled chats | Eternal |
+| `history_ranges` | Message ID ranges cached without gaps | Eternal |
 | `sync_state` | Global sync progress tracking | N/A |
 | `chat_sync_state` | Per-chat sync progress | N/A |
 | `sync_jobs` | Background sync job queue | N/A |
