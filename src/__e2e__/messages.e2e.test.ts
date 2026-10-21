@@ -222,6 +222,9 @@ interface ErrorData {
 }
 
 const SELF_ID = 999
+/** The own user ID of the second, inactive account */
+const SECOND_SELF_ID = 998
+const SECOND_ACCOUNT_ID = 2
 const ALICE_ID = 10
 const TEAM_CHAT_ID = -1001234567890
 const BOOK_CLUB_ID = -4242
@@ -247,6 +250,12 @@ function useSeededHistory(name: string) {
         user_id: SELF_ID,
         name: 'Test Account',
         is_active: true,
+      },
+      {
+        phone: '+15550000001',
+        user_id: SECOND_SELF_ID,
+        name: 'Second Account',
+        is_active: false,
       },
     ])
 
@@ -371,6 +380,28 @@ describe('E2E: Messages List', () => {
     },
   )
 
+  it('asks Telegram with --fresh even when the cache holds the page', async () => {
+    expect((await list('--chat', '@alice')).source).toBe('cache')
+
+    const { exitCode, json } = await listFailure('--chat', '@alice', '--fresh')
+
+    expect(exitCode).toBe(3)
+    expect(json.error.code).toBe('INVALID_ARGS')
+    expect(json.error.message).toContain('TELEGRAM_API_ID')
+  })
+
+  it('reads Saved Messages of the account that --account selects', async () => {
+    const data = await list(
+      '--chat',
+      'me',
+      '--account',
+      String(SECOND_ACCOUNT_ID),
+    )
+
+    expect(data.chatId).toBe(SECOND_SELF_ID)
+    expect(data.items.map((item) => item.messageId)).toEqual([5])
+  })
+
   it('skips deleted messages unless --includeDeleted', async () => {
     expect(await ids('--chat', '@alice')).not.toContain(8)
 
@@ -440,6 +471,12 @@ describe('E2E: Messages List', () => {
     )
     expect(exitCode).toBe(3)
     expect(json.error.code).toBe('INVALID_ARGS')
+    // A cache miss without credentials is INVALID_ARGS too: make sure the
+    // flag was rejected before any Telegram call
+    expect(json.error.message).not.toContain('TELEGRAM_API_ID')
+    expect(json.error.message).toMatch(
+      /^Invalid --(limit|before|after):|must be smaller than --before/,
+    )
   })
 
   it.each(['--chat=', '--chat=-12.5', '--chat=1e1', '--chat=0x10'])(
@@ -524,6 +561,53 @@ describe('E2E: Messages Get', () => {
     expect(data.source).toBe('cache')
   })
 
+  it('includes deleted context with --includeDeleted', async () => {
+    const data = await get(
+      '--chat',
+      '@alice',
+      '--id',
+      '7',
+      '--context',
+      '2',
+      '--includeDeleted',
+    )
+
+    expect(ids(data.newer)).toEqual([8])
+    expect(data.newer[0]?.isDeleted).toBe(true)
+    expect(ids(data.older)).toEqual([6, 5])
+    expect(data.source).toBe('cache')
+  })
+
+  it('asks Telegram with --fresh even when the message is cached', async () => {
+    expect((await get('--chat', '@alice', '--id', '4')).source).toBe('cache')
+
+    const { exitCode, json } = await getFailure(
+      '--chat',
+      '@alice',
+      '--id',
+      '4',
+      '--fresh',
+    )
+
+    expect(exitCode).toBe(3)
+    expect(json.error.code).toBe('INVALID_ARGS')
+    expect(json.error.message).toContain('TELEGRAM_API_ID')
+  })
+
+  it('reads Saved Messages of the account that --account selects', async () => {
+    const data = await get(
+      '--chat',
+      'me',
+      '--id',
+      '5',
+      '--account',
+      String(SECOND_ACCOUNT_ID),
+    )
+
+    expect(data.chatId).toBe(SECOND_SELF_ID)
+    expect(data.message.text).toBe('renew the passport')
+  })
+
   it('returns no context by default', async () => {
     const data = await get('--chat', '@alice', '--id', '4')
 
@@ -599,6 +683,8 @@ describe('E2E: Messages Get', () => {
     )
     expect(exitCode).toBe(3)
     expect(json.error.code).toBe('INVALID_ARGS')
+    expect(json.error.message).not.toContain('TELEGRAM_API_ID')
+    expect(json.error.message).toMatch(/^Invalid --(id|context):/)
   })
 
   it('requires --id', async () => {
@@ -703,6 +789,9 @@ function seedHistory(db: Database): void {
     message(BOOK_CLUB_ID, 1, 11, 'next book: a short one'),
     message(SELF_ID, 1, SELF_ID, 'buy milk', { is_outgoing: true }),
     message(SELF_ID, 2, SELF_ID, 'call the dentist', { is_outgoing: true }),
+    message(SECOND_SELF_ID, 5, SECOND_SELF_ID, 'renew the passport', {
+      is_outgoing: true,
+    }),
     message(BOB_ID, 1, BOB_ID, 'got the tickets'),
     message(NEW_DM_ID, 1, NEW_DM_ID, 'one kiwi smoothie, please'),
   ])
