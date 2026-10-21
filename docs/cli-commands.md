@@ -99,8 +99,10 @@ tg chats sync @examplenews --auto # follow the default policy again
   jobs; a job that is running finishes.
 - In any mode, and even when the mode didn't change, the command deletes the chat's failed
   sync jobs (`clearedFailedJobs` counts them). A failed job keeps the daemon from queueing its
-  chat again until it is cleaned up a day later, so running `tg chats sync <chat>` again
-  retries it at the next refresh.
+  chat again until it is cleaned up a day later, so running the command again with the chat's
+  current mode retries it at the next refresh: `--auto` for a chat that follows the policy (the
+  default), no flag for one turned on. Without a flag the command turns the chat on.
+  `tg status` prints the command for each failed job.
 - `--account` is checked like in `chats search`; all accounts share one cache.
 - A chat you haven't joined, such as a public channel cached by `tg chats get --id @username`,
   gets its first page and history, but new messages only on daemon start and after reconnects:
@@ -223,18 +225,33 @@ the daemon's sync jobs and lists some of them:
 - `pending_jobs` includes the jobs waiting for a retry, `running_jobs`, `failed_jobs` (jobs that
   failed for good) and `retrying_jobs` (pending jobs that failed at least once).
 - `jobs` lists the running jobs, the next 5 pending ones and the 5 newest failed ones, each with
-  `attempts`, `error` (the last error, or `null`) and `next_run_at` (when a waiting job runs
-  again, or `null` if it is due).
-- A failed job is retried after 24 hours or a daemon restart; `tg chats sync <chat>` retries the
-  chat's failed jobs at once. `--format pretty` shows the same, with a Retrying and a Failed row.
+  `attempts`, `error` (the last error, or `null`), `next_run_at` (when a waiting job runs
+  again, or `null` if it is due) and `sync_mode` (the chat's mode, or `null` if the chat has no
+  sync state).
+- A failed job is retried after 24 hours or a daemon restart. `tg chats sync <chat_id>` with
+  the flag of its `sync_mode` (`--auto` for `auto`, none for `on`) deletes the chat's failed
+  jobs, so a running daemon retries them at its next refresh (30 seconds or less). Without a
+  flag the command turns an `auto` chat on. `--format pretty` shows the same, with a Retrying
+  and a Failed row and the command for each chat with a failed job.
 
 ```json
 {
-  "pending_jobs": 2,
-  "running_jobs": 1,
+  "pending_jobs": 1,
+  "running_jobs": 0,
   "failed_jobs": 1,
   "retrying_jobs": 1,
   "jobs": [
+    {
+      "id": 41,
+      "chat_id": 1234567890,
+      "type": "backward_history",
+      "status": "pending",
+      "messages_fetched": 0,
+      "attempts": 2,
+      "error": "connection reset",
+      "next_run_at": "2026-01-01T00:04:00.000Z",
+      "sync_mode": "auto"
+    },
     {
       "id": 42,
       "chat_id": -1001234567890,
@@ -243,7 +260,8 @@ the daemon's sync jobs and lists some of them:
       "messages_fetched": 0,
       "attempts": 1,
       "error": "Telegram API error 400: CHANNEL_PRIVATE",
-      "next_run_at": null
+      "next_run_at": null,
+      "sync_mode": "auto"
     }
   ]
 }

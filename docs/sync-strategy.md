@@ -65,7 +65,9 @@ the dialog pass and live updates never overwrite it: an upsert keeps `sync_enabl
 count still update. A chat turned on gets the High tier and its first page at P0.
 
 Running `tg chats sync <chat>` again, even with the same mode, deletes the chat's failed jobs,
-so the daemon retries them at its next refresh (see [Retries](#retries)).
+so the daemon retries them at its next refresh (see [Retries](#retries)). To retry without
+changing the mode, pass the current one: `--auto` for a chat that follows the policy, no flag
+for one turned on.
 
 The mode and the policy control catch-up, first pages and history only. While the daemon runs,
 it caches messages that arrive live in every chat, including one that is off.
@@ -119,8 +121,9 @@ priority at that time (a chat turned on while its first page ran gets the retry 
   and database errors.
 - **Failed jobs**: a `failed` row blocks its chat's jobs of that type, so no refresh queues the
   chat for it again. The daemon deletes failed rows after 24 hours, and all of them on start;
-  `tg chats sync <chat>` deletes the chat's failed rows at once, in any mode. The next refresh
-  then queues the chat again.
+  `tg chats sync <chat>` deletes the chat's failed rows at once, in any mode, so pass the
+  chat's current mode to keep it (`tg status` prints the command). The next refresh then
+  queues the chat again.
 - **A chat turned off** while its job runs: if the job fails or hits a FLOOD_WAIT, it is
   dropped, not retried or kept as `failed`, whatever the error and attempt.
 - **A crash** doesn't count as an attempt: on start, the jobs it left running are pending again.

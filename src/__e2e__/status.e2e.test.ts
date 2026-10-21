@@ -7,8 +7,14 @@ import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { join } from 'node:path'
 
+import { createChatSyncStateService } from '../db/chat-sync-state'
 import { initCacheSchema } from '../db/schema'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import {
+  initSyncSchema,
+  SyncJobType,
+  type SyncMode,
+  SyncPriority,
+} from '../db/sync-schema'
 import { runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
@@ -28,6 +34,7 @@ interface StatusJob {
   attempts: number
   error: string | null
   next_run_at: string | null
+  sync_mode: SyncMode | null
 }
 
 interface StatusResult {
@@ -97,8 +104,30 @@ describe('E2E: status', () => {
     ).id
   }
 
+  /** Give a chat sync state with a mode, as tg chats sync leaves it */
+  function seedChat(
+    chatId: number,
+    chatType: 'private' | 'channel',
+    mode: SyncMode,
+  ) {
+    const chatSyncState = createChatSyncStateService(cacheDb)
+    chatSyncState.upsert({
+      chat_id: chatId,
+      chat_type: chatType,
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+    })
+    chatSyncState.setSyncMode(chatId, mode)
+  }
+
+  const modeOf = (chatId: number) =>
+    createChatSyncStateService(cacheDb).get(chatId)?.sync_mode
+
+  /** A channel turned on with CHANNEL_PRIVATE, and an auto DM out of attempts */
   function seedFailed() {
     const now = Date.now()
+    seedChat(-1001234567890, 'channel', 'on')
+    seedChat(1001, 'private', 'auto')
     return [
       seedJob({
         chat_id: -1001234567890,
@@ -160,6 +189,7 @@ describe('E2E: status', () => {
       attempts: 0,
       error: null,
       next_run_at: null,
+      sync_mode: null,
     })
     expect(byId.get(due!)).toMatchObject({
       status: 'pending',
@@ -181,11 +211,13 @@ describe('E2E: status', () => {
       attempts: 1,
       error: 'Telegram API error 400: CHANNEL_PRIVATE',
       next_run_at: null,
+      sync_mode: 'on',
     })
     expect(byId.get(chatFailed!)).toMatchObject({
       status: 'failed',
       attempts: 5,
       error: 'connection reset',
+      sync_mode: 'auto',
     })
   })
 
@@ -201,22 +233,55 @@ describe('E2E: status', () => {
     })
   })
 
-  it('shows failed jobs and their errors in pretty output', async () => {
-    seedFailed()
-
+  async function prettyStatus() {
     const result = await runCliSuccess(
       ['status', '--format', 'pretty'],
       options(),
     )
-    const output = stripAnsi(result.stdout)
+    return stripAnsi(result.stdout)
+  }
+
+  /** The retry commands the pretty output prints, one per line */
+  const retryCommands = (output: string) =>
+    [...output.matchAll(/^\s+tg (chats sync .+)$/gm)].map((match) =>
+      match[1]!.split(' '),
+    )
+
+  it('shows failed jobs and their errors in pretty output', async () => {
+    seedFailed()
+
+    const output = await prettyStatus()
 
     expect(output).toMatch(/Failed\s+2 jobs/)
     expect(output).toContain(
       'failed after 1 attempt: Telegram API error 400: CHANNEL_PRIVATE',
     )
     expect(output).toContain('failed after 5 attempts: connection reset')
-    expect(output).toContain('tg chats sync <chat> retries now')
+    expect(output).toContain("retry at the daemon's next refresh")
+    expect(retryCommands(output)).toEqual([
+      ['chats', 'sync', '-1001234567890'],
+      ['chats', 'sync', '1001', '--auto'],
+    ])
     expect(output).not.toContain('Empty')
+  })
+
+  it("prints retry commands that keep each chat's mode", async () => {
+    seedFailed()
+    const commands = retryCommands(await prettyStatus())
+    expect(commands).toHaveLength(2)
+
+    for (const command of commands) {
+      const result = await runCliSuccess(command, options())
+      expect(result.json).toMatchObject({
+        success: true,
+        data: { changed: false, clearedFailedJobs: 1 },
+      })
+    }
+
+    expect(modeOf(-1001234567890)).toBe('on')
+    expect(modeOf(1001)).toBe('auto')
+    const { data } = await status()
+    expect(data.sync.failed_jobs).toBe(0)
   })
 
   it('shows an empty queue in pretty output', async () => {

@@ -1,5 +1,5 @@
 import { SYNC_RETRY_CONFIG } from '../../daemon/sync-retry'
-import { SyncJobStatus } from '../../db/sync-schema'
+import { SyncJobStatus, type SyncMode } from '../../db/sync-schema'
 import { formatBytes, formatRelativeTime } from '../../utils/formatting'
 import { formatDuration } from '../../utils/time'
 import type { collectStatus } from '../status'
@@ -80,6 +80,15 @@ function jobRetryDetail(job: StatusJob): string {
   return next ? c.dim(` ${next}`) : ''
 }
 
+/**
+ * The tg chats sync command that deletes a chat's failed jobs and keeps its
+ * mode: without a flag the command turns the chat on
+ */
+function retrySyncCommand(chatId: number, mode: SyncMode | null): string {
+  const flag = mode === 'on' ? '' : mode === 'off' ? ' --off' : ' --auto'
+  return `tg chats sync ${chatId}${flag}`
+}
+
 function printSyncJobsSection(status: StatusSnapshot): void {
   printHeader('Sync Jobs')
 
@@ -117,10 +126,21 @@ function printSyncJobsSection(status: StatusSnapshot): void {
   if (failed_jobs > 0) {
     console.log()
     console.log(
-      c.dim(
-        '  Retried after 24 h or a daemon restart; tg chats sync <chat> retries now',
-      ),
+      c.dim('  Failed jobs are retried after 24 h or a daemon restart.'),
     )
+    const commands = new Set(
+      status.sync.jobs
+        .filter((job) => job.status === SyncJobStatus.Failed)
+        .map((job) => retrySyncCommand(job.chat_id, job.sync_mode)),
+    )
+    if (commands.size > 0) {
+      console.log(
+        c.dim(
+          "  To retry at the daemon's next refresh, keeping the chat's mode:",
+        ),
+      )
+      for (const command of commands) console.log(`    ${c.value(command)}`)
+    }
   }
 }
 

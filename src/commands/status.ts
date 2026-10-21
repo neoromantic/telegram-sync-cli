@@ -9,9 +9,11 @@ import { join } from 'node:path'
 import { defineCommand } from 'citty'
 import { createPidFile } from '../daemon'
 import { accountsDb, getCacheDb, getDataDir } from '../db'
+import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createDaemonStatusService } from '../db/daemon-status'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
+import type { SyncMode } from '../db/sync-schema'
 import { getOutputFormat, success } from '../utils/output'
 import { printPrettyStatus } from './status/pretty'
 
@@ -137,6 +139,8 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
       error: string | null
       /** When a waiting job runs again (ISO); null if it is due */
       next_run_at: string | null
+      /** The chat's sync mode; null if the chat has no sync state */
+      sync_mode: SyncMode | null
     }>
   } = {
     pending_jobs: 0,
@@ -234,6 +238,7 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
       ...syncService.getPendingJobs().slice(0, 5),
       ...syncService.getFailedJobs(5),
     ]
+    const chatSyncState = createChatSyncStateService(cacheDb)
     const nowMs = Date.now()
     syncStatus.jobs = listedJobs.map((job) => ({
       id: job.id,
@@ -247,6 +252,7 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
         job.next_run_at > nowMs
           ? new Date(job.next_run_at).toISOString()
           : null,
+      sync_mode: chatSyncState.get(job.chat_id)?.sync_mode ?? null,
     }))
 
     // Rate limits
