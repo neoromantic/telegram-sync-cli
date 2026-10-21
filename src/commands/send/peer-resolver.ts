@@ -8,6 +8,11 @@ import {
 } from '../../utils/identifiers'
 import { toLong } from '../../utils/long'
 import { verbose } from '../../utils/output'
+import {
+  CHANNEL_PEER_ID_OFFSET,
+  getCandidateChatIds,
+  toPeerIdFromInputPeer,
+} from '../../utils/telegram-peer-ids'
 import { resolveUsername } from '../../utils/telegram-resolve'
 
 export type ResolvedPeer = { inputPeer: tl.TypeInputPeer; name: string }
@@ -176,44 +181,93 @@ async function resolveByPhone(
   throw new Error(`Could not resolve phone number ${identifier}`)
 }
 
-function resolveByNumericId(
+/** The input peer for a chats_cache row, which holds raw (unmarked) IDs */
+function peerFromCachedChat(chat: CachedChat): ResolvedPeer {
+  const id = Number(chat.chat_id)
+  switch (chat.type) {
+    case 'private':
+      return {
+        inputPeer: {
+          _: 'inputPeerUser',
+          userId: id,
+          accessHash: toLong(chat.access_hash),
+        },
+        name: chat.title || `User ${id}`,
+      }
+    case 'group':
+      return buildGroupPeer(id, chat.title || `Group ${id}`)
+    default:
+      return buildChannelPeerFromCache(chat, `Channel ${id}`)
+  }
+}
+
+/** A bare ID from users_cache (with an access hash) or chats_cache */
+function resolveCachedId(
   identifier: string,
   { usersCache, chatsCache }: CacheDeps,
-): ResolvedPeer {
-  const numericId = Number.parseInt(identifier, 10)
-  if (Number.isNaN(numericId)) {
-    throw new Error(`Invalid peer identifier: ${identifier}`)
-  }
-
+): ResolvedPeer | null {
   const cachedUser = usersCache.getById(identifier)
   if (cachedUser?.access_hash) {
     verbose(`Found user ID ${identifier} in cache`)
-    return buildUserPeerFromCache(cachedUser, `User ${numericId}`)
+    return buildUserPeerFromCache(cachedUser, `User ${identifier}`)
   }
 
   const cachedChat = chatsCache.getById(identifier)
   if (cachedChat) {
     verbose(`Found chat ID ${identifier} in cache`)
-    if (cachedChat.type === 'private') {
-      return {
-        inputPeer: {
-          _: 'inputPeerUser',
-          userId: Number(cachedChat.chat_id),
-          accessHash: toLong(cachedChat.access_hash),
-        },
-        name: cachedChat.title || `User ${numericId}`,
-      }
-    }
-    if (cachedChat.type === 'group') {
-      return buildGroupPeer(numericId, cachedChat.title || `Group ${numericId}`)
-    }
-    return buildChannelPeerFromCache(
-      cachedChat,
-      cachedChat.title || `Channel ${numericId}`,
-    )
+    return peerFromCachedChat(cachedChat)
   }
 
+  return null
+}
+
+/** An ID the cache doesn't know is taken as a basic group */
+function resolveUncachedId(identifier: string): ResolvedPeer {
+  const numericId = Number.parseInt(identifier, 10)
+  if (Number.isNaN(numericId)) {
+    throw new Error(`Invalid peer identifier: ${identifier}`)
+  }
   return buildGroupPeer(numericId, `Chat ${numericId}`)
+}
+
+/**
+ * A marked ID, as messages_cache stores it: -N is basic group N and
+ * -100… is a channel or supergroup. chats_cache holds raw IDs, so try each
+ * raw candidate and keep a row only if it maps back to the same marked ID;
+ * that stops user 4242 from answering for group -4242. Without a cached row
+ * the peer is built from the ID alone, with no API call.
+ */
+function resolveByMarkedId(
+  identifier: string,
+  { chatsCache }: CacheDeps,
+): ResolvedPeer {
+  const marked = Number(identifier)
+  if (!Number.isSafeInteger(marked)) {
+    throw new Error(`Invalid peer identifier: ${identifier}`)
+  }
+
+  for (const candidate of getCandidateChatIds(marked)) {
+    const cachedChat = chatsCache.getById(String(candidate))
+    if (!cachedChat) continue
+    const peer = peerFromCachedChat(cachedChat)
+    if (toPeerIdFromInputPeer(peer.inputPeer, null) === marked) {
+      verbose(`Found chat ID ${identifier} in cache`)
+      return peer
+    }
+  }
+
+  const abs = Math.abs(marked)
+  if (abs > CHANNEL_PEER_ID_OFFSET) {
+    return {
+      inputPeer: {
+        _: 'inputPeerChannel',
+        channelId: abs - CHANNEL_PEER_ID_OFFSET,
+        accessHash: toLong(0),
+      },
+      name: `Chat ${identifier}`,
+    }
+  }
+  return buildGroupPeer(abs, `Chat ${identifier}`)
 }
 
 const SELF_IDENTIFIERS = new Set(['me', 'self'])
@@ -236,10 +290,21 @@ export async function resolvePeer(
     return resolveByUsername(client, username, deps)
   }
 
+  if (/^-\d+$/.test(normalized)) {
+    return resolveByMarkedId(normalized, deps)
+  }
+
+  // A bare number is an ID when the cache knows it. Otherwise 10+ digits
+  // are still a phone number; `+` always means a phone number.
+  const cached = /^\d+$/.test(normalized)
+    ? resolveCachedId(normalized, deps)
+    : null
+  if (cached) return cached
+
   const phone = normalizePhone(normalized)
   if (phone) {
     return resolveByPhone(client, normalized, phone, deps)
   }
 
-  return resolveByNumericId(normalized, deps)
+  return resolveUncachedId(normalized)
 }

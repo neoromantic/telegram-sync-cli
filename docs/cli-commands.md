@@ -134,7 +134,12 @@ tg messages search --query "hello" --includeDeleted
 tg send --to @username --message "Hello"
 tg send --to @username -m "Reply" --reply-to 123
 tg send --to me -m "Note to self"   # Saved Messages
+tg send --to -1001234567890 -m "Hi" # a chat ID as tg messages search prints it
 ```
+
+`--to` takes an `@username`, a user or chat ID (raw, as `tg chats list` prints it, or marked,
+as `tg messages search` and `tg sql` print it: `-100…` for channels and supergroups, `-N` for
+basic groups), a phone number with `+`, or `me`.
 
 A sent message goes into the message cache right away, so `tg messages search`
 finds it without the daemon.

@@ -61,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A CLI command that writes the cache (for example `tg send` or
   `tg chats list --fresh`) failed with "database is locked" if the daemon was
   writing at that moment. It now waits up to 5 seconds for the lock.
+- `tg send --to` accepts the marked chat IDs that `tg messages search` and
+  `tg sql` print (`-100…` for channels and supergroups, `-N` for basic
+  groups), and a cached 10-digit user or chat ID is no longer looked up as a
+  phone number.
 
 ## [0.1.4] - 2026-10-21
 
