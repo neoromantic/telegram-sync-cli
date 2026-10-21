@@ -335,7 +335,36 @@ function printAccountsSection(status: StatusSnapshot): void {
     console.log(
       `    ${activeMarker} ${c.cyan(`#${acc.id}`)} ${c.value(acc.phone)}${name}${username}${label}`,
     )
+    console.log(`      ${accountSummary(acc)}`)
   }
+}
+
+type StatusAccount = StatusSnapshot['accounts']['accounts'][number]
+
+/** One account's own figures, on the line under it */
+function accountSummary(acc: StatusAccount): string {
+  if (acc.cache.status === 'error') {
+    return c.red(`cache error: ${acc.cache.error ?? 'unknown'}`)
+  }
+  if (acc.cache.status === 'missing') return c.dim('no cache yet')
+
+  const parts: string[] = []
+  if (acc.connection) {
+    const color = acc.connection.status === 'connected' ? c.success : c.warning
+    parts.push(color(acc.connection.status))
+  }
+  const { pending_jobs, running_jobs, failed_jobs } = acc.sync
+  parts.push(
+    `${c.number(pending_jobs + running_jobs)} queued`,
+    ...(failed_jobs > 0 ? [c.red(`${failed_jobs} failed`)] : []),
+    `history ${c.number(acc.progress.chats_history_complete)}${c.dim('/')}${c.number(acc.progress.chats_enabled)}`,
+    `${c.number(acc.progress.messages_cached.toLocaleString())} msgs`,
+    `${c.number(acc.rate_limits.api_calls_last_minute)} calls/min`,
+  )
+  if (acc.rate_limits.active_flood_waits > 0) {
+    parts.push(c.warning(`${acc.rate_limits.active_flood_waits} flood waits`))
+  }
+  return parts.join(c.dim(' · '))
 }
 
 /**

@@ -153,6 +153,8 @@ Key files:
 - `chatsEnabled`
 - `chatsHistoryComplete`
 - `lastUpdate`
+- `accounts[]`: each account's `id`, `connection` and `lastError` (from a live daemon, else
+  `null`), `messagesSynced`, `messagesCached`, `chatsEnabled` and `chatsHistoryComplete`
 
 The daemon writes each account's figures to that account's `daemon_status` rows every second,
 in one transaction per account (keys: [database-schema.md](database-schema.md#table-daemon_status)),

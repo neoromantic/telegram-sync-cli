@@ -15,7 +15,11 @@ import { summarizeDaemonStatus } from '../db/daemon-status'
 import { ErrorCodes } from '../types'
 import { error, info, success } from '../utils/output'
 import { formatDuration } from '../utils/time'
-import { collectStorageStatus, readAccountStatus } from './status'
+import {
+  collectStorageStatus,
+  liveConnection,
+  readAccountStatus,
+} from './status'
 
 /**
  * Start subcommand - starts daemon in foreground
@@ -153,11 +157,12 @@ const statusCommand = defineCommand({
     const snapshots = accountsDb
       .getAll()
       .map((account) => readAccountStatus(account.id))
+    const livePid = pidFile.isRunning() ? pid : null
     const summary = summarizeDaemonStatus(
       snapshots.flatMap((snapshot) =>
         snapshot.daemon ? [snapshot.daemon] : [],
       ),
-      pidFile.isRunning() ? pid : null,
+      livePid,
     )
     const sum = (pick: (snapshot: (typeof snapshots)[number]) => number) =>
       snapshots.reduce((total, snapshot) => total + pick(snapshot), 0)
@@ -178,6 +183,22 @@ const statusCommand = defineCommand({
       lastUpdate: summary.lastUpdate
         ? new Date(summary.lastUpdate).toISOString()
         : null,
+      // Each account's share; connection and messagesSynced come from the
+      // rows the live daemon wrote
+      accounts: snapshots.map((snapshot) => {
+        const connection = liveConnection(snapshot, livePid)
+        return {
+          id: snapshot.accountId,
+          connection: connection?.status ?? null,
+          lastError: connection?.last_error ?? null,
+          messagesSynced: connection
+            ? (snapshot.daemon?.messagesSynced ?? 0)
+            : 0,
+          messagesCached: snapshot.progress.messages_cached,
+          chatsEnabled: snapshot.progress.chats_enabled,
+          chatsHistoryComplete: snapshot.progress.chats_history_complete,
+        }
+      }),
     })
   },
 })
