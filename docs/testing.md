@@ -41,6 +41,11 @@ bun test src/__tests__/auth.test.ts
 
 Unit tests run without network access using mocked dependencies.
 
+The test scripts pass `--isolate`, so each file gets a fresh module registry. `mock.module()`
+replaces a module for the whole process and `mock.restore()` doesn't undo it, so without
+isolation a module mock would leak into every file that runs after it, and the file order
+differs between macOS and Linux.
+
 ### Test Patterns
 
 **In-memory database**: Each test gets an isolated SQLite instance.
