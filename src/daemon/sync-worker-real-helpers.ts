@@ -2,7 +2,10 @@ import type { TelegramClient, tl } from '@mtcute/bun'
 import type { ChatsCache } from '../db/chats-cache'
 import type { MessageInput } from '../db/messages-cache'
 import { toLong } from '../utils/long'
-import { toInputPeerFromPeerId } from '../utils/telegram-peer-ids'
+import {
+  toInputPeerFromPeerId,
+  toPeerIdFromRawPeer,
+} from '../utils/telegram-peer-ids'
 import { bigIntReplacer } from './daemon-utils'
 
 const MEDIA_TYPE_MAP: Record<string, string> = {
@@ -57,22 +60,6 @@ function resolveMessageType(message: Record<string, unknown>): {
   return { messageType: 'text', hasMedia: false }
 }
 
-function extractPeerId(
-  peer: Record<string, unknown> | null | undefined,
-): number | null {
-  if (!peer) return null
-  switch (peer._) {
-    case 'peerUser':
-      return peer.userId as number
-    case 'peerChannel':
-      return peer.channelId as number
-    case 'peerChat':
-      return peer.chatId as number
-    default:
-      return null
-  }
-}
-
 function extractReplyToId(message: Record<string, unknown>): number | null {
   const replyToObj = message.replyTo as Record<string, unknown> | undefined
   if (replyToObj?.replyToMsgId) {
@@ -81,10 +68,12 @@ function extractReplyToId(message: Record<string, unknown>): number | null {
   return null
 }
 
+type RawPeerField = Parameters<typeof toPeerIdFromRawPeer>[0]
+
+/** Marked ID of the original sender of a forwarded message */
 function extractForwardFromId(message: Record<string, unknown>): number | null {
-  const fwdFromObj = message.fwdFrom as Record<string, unknown> | undefined
-  const fwdFromIdObj = fwdFromObj?.fromId as Record<string, unknown> | undefined
-  return extractPeerId(fwdFromIdObj)
+  const fwdFrom = message.fwdFrom as { fromId?: RawPeerField } | undefined
+  return toPeerIdFromRawPeer(fwdFrom?.fromId)
 }
 
 export function parseRawMessage(
@@ -98,7 +87,8 @@ export function parseRawMessage(
   }
 
   const { messageType, hasMedia } = resolveMessageType(m)
-  const fromId = extractPeerId(m.fromId as Record<string, unknown> | undefined)
+  // A channel or group that posts as itself gets its marked ID, like chats
+  const fromId = toPeerIdFromRawPeer(m.fromId as RawPeerField)
   const replyToId = extractReplyToId(m)
   const forwardFromId = extractForwardFromId(m)
 

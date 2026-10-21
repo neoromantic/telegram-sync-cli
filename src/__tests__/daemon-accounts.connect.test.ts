@@ -23,6 +23,7 @@ import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import type { Account } from '../types'
 import { toLong } from '../utils/long'
+import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 type AccountCreateInput = Parameters<AccountsDbInterface['create']>[0]
 type AccountUpdateInput = Parameters<AccountsDbInterface['update']>[1]
@@ -45,7 +46,12 @@ type MessageLike = {
   raw?: {
     fwdFrom?: {
       _: string
-      fromId?: { _: string; userId?: number }
+      fromId?: {
+        _: string
+        userId?: number
+        chatId?: number
+        channelId?: number
+      }
       date?: number
     }
   }
@@ -277,9 +283,11 @@ describe('daemon-accounts: connection + event wiring', () => {
     setupEventHandlers(ctx, accountState)
 
     const now = new Date('2024-01-01T00:00:00Z')
+    // mtcute gives the chat and the sender as marked IDs
+    const channelId = -1000000001000
     const message = {
       id: 42,
-      chat: { id: 1000, type: 'chat', chatType: 'channel' },
+      chat: { id: channelId, type: 'chat', chatType: 'channel' },
       sender: { id: 777 },
       text: 'Photo message',
       date: now,
@@ -300,7 +308,7 @@ describe('daemon-accounts: connection + event wiring', () => {
     const messagesCache = createMessagesCache(testCacheDb)
     const chatSyncState = createChatSyncStateService(testCacheDb)
 
-    const cached = messagesCache.get(1000, 42)
+    const cached = messagesCache.get(channelId, 42)
     expect(cached).not.toBeNull()
     expect(cached?.message_type).toBe('photo')
     expect(cached?.has_media).toBe(1)
@@ -310,11 +318,53 @@ describe('daemon-accounts: connection + event wiring', () => {
       333,
     )
 
-    const state = chatSyncState.get(1000)
+    const state = chatSyncState.get(channelId)
     expect(state?.chat_type).toBe('channel')
     expect(state?.sync_enabled).toBe(0)
     expect(accountState.lastActivity).toBeDefined()
     expect(client.onNewMessage.add).toHaveBeenCalled()
+  })
+
+  it('stores a live forward from a channel or a group under its marked ID', async () => {
+    const ctx = createContext(
+      createAccountsDb([{ id: 1, phone: '+111', user_id: null }]),
+    )
+    const { setupEventHandlers } = await import('../daemon/daemon-accounts')
+    const accountState: AccountConnectionState = {
+      accountId: 1,
+      phone: '+111',
+      name: null,
+      status: 'connected',
+      client: createClient(),
+    }
+    setupEventHandlers(ctx, accountState)
+
+    const forwarded = (
+      id: number,
+      fromId: NonNullable<NonNullable<MessageLike['raw']>['fwdFrom']>['fromId'],
+    ) =>
+      asMessage({
+        id,
+        chat: { id: 5550001, type: 'user' },
+        sender: { id: 5550001 },
+        text: 'Forwarded',
+        date: new Date('2024-01-01T00:00:00Z'),
+        isOutgoing: false,
+        raw: {
+          fwdFrom: { _: 'messageFwdHeader', fromId, date: 1_704_067_200 },
+        },
+      })
+    accountState.eventHandlers?.onNewMessage(
+      forwarded(1, { _: 'peerChannel', channelId: 333 }),
+    )
+    accountState.eventHandlers?.onNewMessage(
+      forwarded(2, { _: 'peerChat', chatId: 222 }),
+    )
+
+    const messagesCache = createMessagesCache(testCacheDb)
+    expect(messagesCache.get(5550001, 1)?.forward_from_id).toBe(-1000000000333)
+    expect(messagesCache.get(5550001, 2)?.forward_from_id).toBe(-222)
+    assertPeerIdInvariants(testCacheDb)
   })
 
   it('passes a live group message member count to the sync policy', async () => {

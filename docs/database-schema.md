@@ -69,10 +69,12 @@ Every column that holds a chat holds its **marked peer ID**, the format mtcute u
 | Supergroup or channel N | `-1000000000000 - N` (`-100…`) | `-1001234567890` |
 
 That covers `chats_cache.chat_id`, `messages_cache.chat_id`, `chat_sync_state.chat_id`,
-`sync_jobs.chat_id` and `history_ranges.chat_id`. `users_cache.user_id` is the same number as the
-`chat_id` of the private chat with that user. `chats_cache.chat_id` is TEXT and the others are
-INTEGER, so a join compares `chats_cache.chat_id = CAST(m.chat_id AS TEXT)`, which uses the
-primary key. All conversions live in `src/utils/telegram-peer-ids.ts`.
+`sync_jobs.chat_id` and `history_ranges.chat_id`, and the senders in `messages_cache.from_id`
+and `forward_from_id`: a group or channel that posts as itself has its marked ID there too.
+`users_cache.user_id` is the same number as the `chat_id` of the private chat with that user.
+`chats_cache.chat_id` is TEXT and the others are INTEGER, so a join compares
+`chats_cache.chat_id = CAST(m.chat_id AS TEXT)`, which uses the primary key. All conversions live
+in `src/utils/telegram-peer-ids.ts`.
 
 ### Table: users_cache
 
@@ -145,11 +147,11 @@ CREATE TABLE sync_state (
 
 ```sql
 CREATE TABLE messages_cache (
-  chat_id INTEGER NOT NULL,
+  chat_id INTEGER NOT NULL,      -- marked peer ID (see Peer IDs)
   message_id INTEGER NOT NULL,
-  from_id INTEGER,
+  from_id INTEGER,               -- marked peer ID of the sender
   reply_to_id INTEGER,
-  forward_from_id INTEGER,
+  forward_from_id INTEGER,       -- marked peer ID of the original sender
   text TEXT,
   message_type TEXT NOT NULL DEFAULT 'text',
   has_media INTEGER DEFAULT 0,
@@ -366,6 +368,11 @@ the new columns.
   that names the same chat, otherwise from its `type`. When a chat is cached under both IDs, the
   row fetched later wins and keeps the other's access hash if it has none. The search index is
   then rebuilt, so its `chat` column holds group and channel titles.
+- `2`: history pages, `tg send` and live forwards stored a group or channel sender in
+  `messages_cache.from_id` and `forward_from_id` under its bare ID. A row moves to the marked ID
+  when its `raw_json` names that group or channel (`fromId`, `fwdFrom.fromId`) with the stored
+  bare ID; rows whose `raw_json` is `{}` or malformed stay as they are. The update trigger
+  re-indexes each row.
 
 The first open after an upgrade runs the steps in one `BEGIN IMMEDIATE` transaction, waiting up
 to 60 seconds for another process's write lock. A failure rolls everything back, `user_version`

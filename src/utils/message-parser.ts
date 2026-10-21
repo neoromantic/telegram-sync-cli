@@ -4,6 +4,7 @@
  */
 
 import type { NewMessageData } from '../daemon/handlers'
+import { toPeerIdFromRawPeer } from './telegram-peer-ids'
 
 /**
  * Raw Telegram peer types
@@ -79,51 +80,21 @@ export interface RawMessage {
 }
 
 /**
- * Extract peer ID from a raw peer object
- * Handles peerUser, peerChat, and peerChannel types
+ * Marked ID of a raw peer: the user ID, -N for basic group N and -100…N for
+ * channel N, the format of every cache table
  */
 export function extractPeerId(peer: RawPeer | undefined): number | undefined {
-  if (!peer) return undefined
-
-  switch (peer._) {
-    case 'peerUser':
-      return peer.userId
-    case 'peerChat':
-      return peer.chatId
-    case 'peerChannel':
-      return peer.channelId
-    default:
-      return undefined
-  }
+  return toPeerIdFromRawPeer(peer) ?? undefined
 }
 
 /**
- * Extract the forward_from_id from a message's forward header
- * Handles all peer types: peerUser, peerChat, and peerChannel
+ * Marked ID of the original sender in a message's forward header: a user,
+ * a basic group or a channel
  */
 export function extractForwardFromId(
   fwdFrom: RawMessageFwdHeader | undefined,
 ): number | undefined {
-  if (!fwdFrom?.fromId) return undefined
-
-  const { fromId } = fwdFrom
-
-  // Handle peerUser - forwarded from a user
-  if (fromId._ === 'peerUser') {
-    return fromId.userId
-  }
-
-  // Handle peerChat - forwarded from a basic group
-  if (fromId._ === 'peerChat') {
-    return fromId.chatId
-  }
-
-  // Handle peerChannel - forwarded from a channel or supergroup
-  if (fromId._ === 'peerChannel') {
-    return fromId.channelId
-  }
-
-  return undefined
+  return toPeerIdFromRawPeer(fwdFrom?.fromId) ?? undefined
 }
 
 /**
