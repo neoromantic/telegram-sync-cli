@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   updates, left the old connection open on the same session and kept syncing
   through it, so it quietly stopped caching new messages. A reconnect now
   closes the old client and restores updates and sync on the new one.
+- `tg send` didn't add the sent message to the cache, so `tg messages search`
+  missed it until a later sync, even with the daemon running.
 
 ## [0.1.3] - 2026-10-21
 

@@ -2,7 +2,7 @@ import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
 import { ConfigError } from '../config'
-import { getCacheDb } from '../db'
+import { accountsDb, getCacheDb } from '../db'
 import { createChatsCache } from '../db/chats-cache'
 import { createUsersCache } from '../db/users-cache'
 import { getClientForAccount } from '../services/telegram'
@@ -18,6 +18,7 @@ import {
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
 import { resolvePeer } from './send/peer-resolver'
+import { cacheSentMessage, resolveSelfId } from './send/sent-message-cache'
 
 function extractMessageInfo(result: tl.TypeUpdates): {
   messageId: number | null
@@ -166,6 +167,15 @@ export const sendCommand = defineCommand({
 
       const result = await client.call(request)
       const { messageId, timestamp } = extractMessageInfo(result)
+
+      await cacheSentMessage(
+        {
+          cacheDb,
+          getSelfId: () => resolveSelfId(client, accountId, accountsDb),
+        },
+        result,
+        { peer: inputPeer, text: messageText, replyTo },
+      )
 
       success({
         sent: true,

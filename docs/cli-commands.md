@@ -85,6 +85,9 @@ tg send --to @username -m "Reply" --reply-to 123
 tg send --to me -m "Note to self"   # Saved Messages
 ```
 
+A sent message goes into the message cache right away, so `tg messages search`
+finds it without the daemon.
+
 ### API
 
 ```bash
