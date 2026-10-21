@@ -214,11 +214,11 @@ CI has no Telegram secrets; integration tests never run there.
 
 ### Tests Hanging
 
-Ensure all Telegram clients are closed:
+Ensure all Telegram clients are closed. mtcute closes a client with `destroy()`:
 
 ```typescript
-// In tests, mock the close method
-close: mock(() => Promise.resolve())
+// In tests, mock the destroy method
+destroy: mock(() => Promise.resolve())
 ```
 
 ### Database Locked

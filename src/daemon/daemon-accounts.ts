@@ -115,10 +115,8 @@ export async function closeClientSafe(
   client: TelegramClient,
   reason: string,
 ): Promise<void> {
-  const closeFn = (client as unknown as { close?: () => Promise<void> }).close
-  if (!closeFn) return
   try {
-    await closeFn.call(client)
+    await client.destroy()
     ctx.logger.debug(`Closed client (${reason})`)
   } catch (err) {
     ctx.logger.warn(`Failed to close client (${reason}): ${formatError(err)}`)
