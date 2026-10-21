@@ -48,7 +48,7 @@ interface ExtendedTestEnvironment {
   seedChats(
     chats: Array<{
       chat_id: string
-      type: 'private' | 'group' | 'supergroup' | 'channel'
+      type: 'private' | 'group' | 'supergroup' | 'channel' | 'community'
       title?: string | null
       username?: string | null
       member_count?: number | null
@@ -920,6 +920,36 @@ describe('E2E: Chats Commands', () => {
       )
     })
 
+    it('should filter by chat type - community', async () => {
+      env.seedChats([
+        {
+          chat_id: '-1005555555555',
+          type: 'community',
+          title: 'Example Community',
+        },
+        { chat_id: '-300', type: 'group', title: 'Group Chat' },
+        { chat_id: '-1000000000100', type: 'channel', title: 'Channel' },
+      ])
+
+      const result = await runCliSuccess(
+        ['chats', 'list', '--type', 'community'],
+        env.getCliOptions(),
+      )
+
+      const response = result.json as {
+        success: boolean
+        data: {
+          items: Array<{ id: number; type: string }>
+          total: number
+        }
+      }
+
+      expect(response.success).toBe(true)
+      expect(response.data.items).toHaveLength(1)
+      expect(response.data.items[0]?.type).toBe('community')
+      expect(response.data.items[0]?.id).toBe(-1005555555555)
+    })
+
     it('should fail for invalid chat type', async () => {
       const result = await runCliFailure(
         ['chats', 'list', '--type', 'invalid'],
@@ -935,6 +965,7 @@ describe('E2E: Chats Commands', () => {
       expect(response.success).toBe(false)
       expect(response.error.code).toBe('INVALID_ARGS')
       expect(response.error.message).toContain('invalid')
+      expect(response.error.message).toContain('community')
     })
 
     it('should respect limit and offset parameters', async () => {

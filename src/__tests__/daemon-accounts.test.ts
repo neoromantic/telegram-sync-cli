@@ -277,6 +277,11 @@ describe('resolveSyncChatType', () => {
     expect(result).toBe('channel')
   })
 
+  it('returns community for community chatType', () => {
+    const result = resolveSyncChatType({ type: 'chat', chatType: 'community' })
+    expect(result).toBe('community')
+  })
+
   it('returns group for unknown chatType (default case)', () => {
     const result = resolveSyncChatType({
       type: 'chat',

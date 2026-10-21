@@ -4,7 +4,10 @@
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import type { TelegramClient, tl } from '@mtcute/bun'
-import { dialogToCacheInput } from '../commands/chats/helpers'
+import {
+  dialogToCacheInput,
+  rawChatToCacheInput,
+} from '../commands/chats/helpers'
 import {
   canMakeApiCall,
   getInputPeer,
@@ -28,7 +31,7 @@ import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema } from '../db/sync-schema'
 import { toLong } from '../utils/long'
-import { fakeDialog } from './helpers/fake-dialogs'
+import { communityDialog, fakeDialog } from './helpers/fake-dialogs'
 
 type MockCall = <T extends tl.RpcMethod>(
   request: T,
@@ -137,6 +140,34 @@ describe('sync-worker real helpers/context', () => {
         _: 'inputPeerChannel',
         channelId: 1234567890,
         accessHash: toLong(777),
+      })
+    })
+
+    it("builds a community's channel peer with the access hash it cached", () => {
+      const chatsCache = createChatsCache(db)
+      chatsCache.upsertMany([
+        dialogToCacheInput(
+          communityDialog({ id: 5555555555, accessHash: '777' }),
+        ),
+        rawChatToCacheInput({
+          _: 'community',
+          id: 5555555556,
+          accessHash: toLong(888),
+          title: 'Example Community',
+          photo: { _: 'chatPhotoEmpty' },
+          date: 1_700_000_000,
+        }),
+      ])
+
+      expect(buildInputPeer(-1005555555555, chatsCache)).toEqual({
+        _: 'inputPeerChannel',
+        channelId: 5555555555,
+        accessHash: toLong(777),
+      })
+      expect(buildInputPeer(-1005555555556, chatsCache)).toEqual({
+        _: 'inputPeerChannel',
+        channelId: 5555555556,
+        accessHash: toLong(888),
       })
     })
 

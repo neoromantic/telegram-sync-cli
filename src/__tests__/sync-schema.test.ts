@@ -453,6 +453,11 @@ describe('determineSyncPolicy', () => {
     expect(determineSyncPolicy('channel')).toEqual(off)
     expect(determineSyncPolicy('channel', 10)).toEqual(off)
   })
+
+  it('keeps communities off until synced on request', () => {
+    expect(determineSyncPolicy('community')).toEqual(off)
+    expect(determineSyncPolicy('community', 10)).toEqual(off)
+  })
 })
 
 describe('migration from 0.1.4', () => {

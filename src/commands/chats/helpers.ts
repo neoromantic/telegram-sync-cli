@@ -24,6 +24,7 @@ export const CHAT_TYPE_VALUES = [
   'group',
   'supergroup',
   'channel',
+  'community',
 ] as const satisfies ChatType[]
 
 export function isValidChatType(value: string | undefined): value is ChatType {
@@ -56,6 +57,7 @@ export function filterChatsByType(
 export function getChatType(dialog: Dialog): ChatType {
   const peer = dialog.peer
   if (peer.type === 'user') return 'private'
+  if (peer.chatType === 'community') return 'community'
   if (peer.chatType === 'supergroup' || peer.chatType === 'gigagroup') {
     return 'supergroup'
   }
@@ -67,7 +69,7 @@ export function getChatType(dialog: Dialog): ChatType {
 
 /**
  * A chats_cache row for a dialog, under its marked peer ID: the user ID for
- * a private chat, -N for basic group N and -100…N for channel N.
+ * a private chat, -N for basic group N and -100…N for channel or community N.
  */
 export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
   const rawPeer = dialog.raw.peer
@@ -95,7 +97,7 @@ export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
     username = peer.username ?? null
     memberCount = peer.membersCount ?? null
     const rawChat = peer.raw
-    if (rawChat._ === 'channel' || rawChat._ === 'channelForbidden') {
+    if (hasChannelId(rawChat)) {
       accessHash = rawChat.accessHash ? String(rawChat.accessHash) : null
     }
   }
@@ -136,14 +138,30 @@ export function userToPrivateChatCacheInput(user: tl.RawUser): CachedChatInput {
 /** A chat that a resolved username or an update can carry */
 export type ResolvedChat = Exclude<tl.TypeChat, tl.RawChatEmpty>
 
-function isChannelPeer(
-  peer: tl.TypeChat,
-): peer is tl.RawChannel | tl.RawChannelForbidden {
-  return peer._ === 'channel' || peer._ === 'channelForbidden'
+/**
+ * A chat with a channel ID (-100…), reached with its access hash: a channel
+ * or a community
+ */
+function hasChannelId(
+  chat: tl.TypeChat,
+): chat is
+  | tl.RawChannel
+  | tl.RawChannelForbidden
+  | tl.RawCommunity
+  | tl.RawCommunityForbidden {
+  return (
+    chat._ === 'channel' ||
+    chat._ === 'channelForbidden' ||
+    chat._ === 'community' ||
+    chat._ === 'communityForbidden'
+  )
 }
 
 function rawChatType(peer: ResolvedChat): ChatType {
-  if (isChannelPeer(peer)) {
+  if (peer._ === 'community' || peer._ === 'communityForbidden') {
+    return 'community'
+  }
+  if (peer._ === 'channel' || peer._ === 'channelForbidden') {
     const isMega = 'megagroup' in peer && Boolean(peer.megagroup)
     const isGiga = 'gigagroup' in peer && Boolean(peer.gigagroup)
     return isMega || isGiga ? 'supergroup' : 'channel'
@@ -161,7 +179,7 @@ export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
     member_count:
       'participantsCount' in chat ? (chat.participantsCount ?? null) : null,
     access_hash:
-      isChannelPeer(chat) && chat.accessHash ? String(chat.accessHash) : null,
+      hasChannelId(chat) && chat.accessHash ? String(chat.accessHash) : null,
     is_creator: 'creator' in chat && chat.creator ? 1 : 0,
     is_admin: 'adminRights' in chat && chat.adminRights ? 1 : 0,
     last_message_id: null,
@@ -174,8 +192,8 @@ export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
 /**
  * A chats_cache row for the chat of a live message, so sync jobs can build
  * an InputPeer before a dialog pass lists it. Null for a peer that can't
- * give one: an empty peer, or a "min" user or channel, whose access hash
- * works only in the update that carried it.
+ * give one: an empty peer, or a "min" user, channel or community, whose
+ * access hash works only in the update that carried it.
  */
 export function rawPeerToCacheInput(
   peer: tl.TypeUser | tl.TypeChat,
@@ -186,6 +204,7 @@ export function rawPeerToCacheInput(
     case 'chat':
       return rawChatToCacheInput(peer)
     case 'channel':
+    case 'community':
       return peer.min ? null : rawChatToCacheInput(peer)
     default:
       return null

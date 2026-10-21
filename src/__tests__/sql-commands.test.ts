@@ -271,7 +271,7 @@ describe('SQL Commands', () => {
         'messages_cache.forward_from_id':
           'Marked peer ID of the original sender of a forwarded message: a user ID, or -N / -100… for a group or channel',
         chats_cache:
-          'Marked peer ID, as messages_cache.chat_id holds it: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel',
+          'Marked peer ID, as messages_cache.chat_id holds it: the user ID for a private chat, -N for basic group N, -100… for a supergroup, channel or community',
         messages_cache:
           'Marked peer ID of the chat: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel. Joins chats_cache on chats_cache.chat_id = CAST(chat_id AS TEXT)',
         chat_sync_state:

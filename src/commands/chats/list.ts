@@ -62,8 +62,7 @@ export const listChatsCommand = defineCommand({
     },
     type: {
       type: 'string',
-      description:
-        'Filter by chat type: private, group, supergroup, channel (default: all)',
+      description: `Filter by chat type: ${CHAT_TYPE_VALUES.join(', ')} (default: all)`,
     },
     account: {
       type: 'string',

@@ -2,7 +2,9 @@
  * Fake mtcute dialogs and a client that lists them, for dialog pass tests.
  * Only the fields the daemon reads are filled in.
  */
-import type { Dialog, TelegramClient } from '@mtcute/bun'
+import { Dialog, PeersIndex, type TelegramClient, type tl } from '@mtcute/bun'
+
+import { toLong } from '../../utils/long'
 
 export interface FakeDialogInput {
   kind: 'user' | 'group' | 'supergroup' | 'channel'
@@ -54,6 +56,52 @@ export function fakeDialog(input: FakeDialogInput): Dialog {
     lastMessage: null,
     isArchived: input.archived ?? false,
   } as unknown as Dialog
+}
+
+export interface CommunityDialogInput {
+  /** Raw community ID, a channel ID */
+  id: number
+  title?: string
+  accessHash: string
+}
+
+/**
+ * A real mtcute Dialog for a community, so `peer.chatType` is what mtcute
+ * reports. It always has an access hash: `lastMessage` reads `peer.id`,
+ * which throws without one.
+ */
+export function communityDialog({
+  id,
+  title = 'Example Community',
+  accessHash,
+}: CommunityDialogInput): Dialog {
+  return new Dialog(
+    {
+      _: 'dialog',
+      peer: { _: 'peerChannel', channelId: id },
+      topMessage: 0,
+      readInboxMaxId: 0,
+      readOutboxMaxId: 0,
+      unreadCount: 0,
+      unreadMentionsCount: 0,
+      unreadReactionsCount: 0,
+      notifySettings: { _: 'peerNotifySettings' },
+    } as tl.RawDialog,
+    PeersIndex.from({
+      users: [],
+      chats: [
+        {
+          _: 'community',
+          id,
+          accessHash: toLong(accessHash),
+          title,
+          photo: { _: 'chatPhotoEmpty' },
+          date: 1_700_000_000,
+        },
+      ],
+    }),
+    new Map(),
+  )
 }
 
 export interface FakeDialogClientOptions {

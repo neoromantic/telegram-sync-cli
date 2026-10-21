@@ -70,6 +70,9 @@ tg chats get --id @username       # or the ID of a cached chat (cache-only, no c
 tg chats sync @examplenews        # sync this chat in the background
 ```
 
+`--type` takes `private`, `group`, `supergroup`, `channel` or `community` (a Telegram
+community, a collection of linked chats).
+
 `tg chats get --id` reads an ID like `tg chats sync` does. A bare 0.2.0 ID that names both a
 cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
 `details: { identifier, candidates }`.
@@ -78,7 +81,7 @@ cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
 
 The daemon syncs DMs and groups of up to 100 members by default. Archived ones start when a
 message arrives in them live, or with `tg chats sync`. Groups of unknown size or over 100
-members and channels get catch-up and history only on request:
+members, channels and communities get catch-up and history only on request:
 
 ```bash
 tg chats sync @examplenews        # turn sync on

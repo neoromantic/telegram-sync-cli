@@ -127,7 +127,12 @@ export class CachedUserRow {
 // =============================================================================
 
 /** Chat type enumeration */
-export type ChatType = 'private' | 'group' | 'supergroup' | 'channel'
+export type ChatType =
+  | 'private'
+  | 'group'
+  | 'supergroup'
+  | 'channel'
+  | 'community'
 
 /**
  * Cached chat/dialog information

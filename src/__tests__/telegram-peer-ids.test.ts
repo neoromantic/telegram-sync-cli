@@ -19,6 +19,7 @@ const SAMPLES = [
   { type: 'supergroup', raw: 1234567890, marked: -1001234567890 },
   { type: 'channel', raw: 1, marked: -1_000_000_000_001 },
   { type: 'channel', raw: 9876543210, marked: -1009876543210 },
+  { type: 'community', raw: 5555555555, marked: -1005555555555 },
 ] as const
 
 const RAW_PEERS = SAMPLES.map(({ type, raw }) =>

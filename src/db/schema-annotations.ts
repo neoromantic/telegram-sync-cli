@@ -161,13 +161,19 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       columns: {
         chat_id: {
           description:
-            'Marked peer ID, as messages_cache.chat_id holds it: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel',
+            'Marked peer ID, as messages_cache.chat_id holds it: the user ID for a private chat, -N for basic group N, -100… for a supergroup, channel or community',
           semanticType: 'bigint_string',
           nullable: false,
         },
         type: {
           description: 'Type of chat',
-          enumValues: ['private', 'group', 'supergroup', 'channel'],
+          enumValues: [
+            'private',
+            'group',
+            'supergroup',
+            'channel',
+            'community',
+          ],
           semanticType: 'enum',
           nullable: false,
         },
@@ -497,7 +503,13 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         chat_type: {
           description: 'Type of chat (for sync policy decisions)',
-          enumValues: ['private', 'group', 'supergroup', 'channel'],
+          enumValues: [
+            'private',
+            'group',
+            'supergroup',
+            'channel',
+            'community',
+          ],
           semanticType: 'enum',
           nullable: false,
         },
