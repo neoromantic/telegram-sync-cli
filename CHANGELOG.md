@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- After a failed connection check the daemon reconnected without real-time
+  updates, left the old connection open on the same session and kept syncing
+  through it, so it quietly stopped caching new messages. A reconnect now
+  closes the old client and restores updates and sync on the new one.
+
 ## [0.1.3] - 2026-10-21
 
 ### Added

@@ -67,6 +67,8 @@ export function createRealSyncWorker(deps: RealSyncWorkerDeps) {
   }
 
   return {
+    /** The client this worker calls; a reconnect replaces the worker */
+    client: ctx.client,
     processJobReal: (job: SyncJobRow) => processJobReal(ctx, job),
     processForwardCatchupReal: (job: SyncJobRow) =>
       processForwardCatchupReal(ctx, job),
