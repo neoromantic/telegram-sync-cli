@@ -12,8 +12,11 @@
  *
  * The re-key itself runs on every open that finds a bare group or channel
  * row, so it also repairs rows that an older binary still running writes
- * after the upgrade. Everything runs in one write transaction: a failure
- * rolls all of it back, user_version included, and the next open retries.
+ * after the upgrade. Step 2 runs once, because finding bare sender IDs means
+ * reading every message's raw_json: the ones an older binary caches later
+ * stay bare until the message is fetched again. Everything runs in one
+ * write transaction: a failure rolls all of it back, user_version included,
+ * and the next open retries.
  */
 import type { Database } from 'bun:sqlite'
 
