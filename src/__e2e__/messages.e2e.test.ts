@@ -225,6 +225,10 @@ const SELF_ID = 999
 const ALICE_ID = 10
 const TEAM_CHAT_ID = -1001234567890
 const BOOK_CLUB_ID = -4242
+/** Bob is in users_cache without an access hash */
+const BOB_ID = 11
+/** A private chat with cached messages and no users_cache or chats_cache row */
+const NEW_DM_ID = 7_000_000_001
 
 /**
  * One seeded cache for a describe block. The commands under test only read
@@ -398,6 +402,11 @@ describe('E2E: Messages List', () => {
     const bookClub = await list('--chat', '-4242')
     expect(bookClub.chatId).toBe(BOOK_CLUB_ID)
     expect(bookClub.items.map((item) => item.messageId)).toEqual([1])
+
+    // A user with no access hash is user 11, not basic group -11
+    const bob = await list('--chat', String(BOB_ID))
+    expect(bob.chatId).toBe(BOB_ID)
+    expect(bob.items.map((item) => item.text)).toEqual(['got the tickets'])
   })
 
   it('prints exactly the items that messages search prints', async () => {
@@ -509,6 +518,27 @@ describe('E2E: Messages Get', () => {
 
     expect(data.chatId).toBe(TEAM_CHAT_ID)
     expect(data.message).toEqual(items.find((item) => item.messageId === 2)!)
+  })
+
+  it('opens a search hit in a private chat that only the message cache knows', async () => {
+    const search = await runCliSuccess(
+      ['messages', 'search', '--query', 'kiwi'],
+      options(),
+    )
+    const [hit] = (search.json as { data: { results: MessageSearchItem[] } })
+      .data.results
+    expect(hit?.chatId).toBe(NEW_DM_ID)
+
+    const data = await get(
+      '--chat',
+      String(hit!.chatId),
+      '--id',
+      String(hit!.messageId),
+    )
+
+    expect(data.chatId).toBe(NEW_DM_ID)
+    expect(data.message).toEqual(hit!)
+    expect(data.source).toBe('cache')
   })
 
   it('asks Telegram for a message the cache does not hold', async () => {
@@ -639,6 +669,8 @@ function seedHistory(db: Database): void {
     message(BOOK_CLUB_ID, 1, 11, 'next book: a short one'),
     message(SELF_ID, 1, SELF_ID, 'buy milk', { is_outgoing: true }),
     message(SELF_ID, 2, SELF_ID, 'call the dentist', { is_outgoing: true }),
+    message(BOB_ID, 1, BOB_ID, 'got the tickets'),
+    message(NEW_DM_ID, 1, NEW_DM_ID, 'one kiwi smoothie, please'),
   ])
 
   const syncState = createChatSyncStateService(db)

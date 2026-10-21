@@ -1,6 +1,8 @@
 import { type TelegramClient, tl } from '@mtcute/bun'
 
+import { getErrorMessage } from '../../daemon/daemon-utils'
 import type { CachedChat, ChatsCache } from '../../db/chats-cache'
+import type { MessagesCache } from '../../db/messages-cache'
 import type { CachedUser, UsersCache } from '../../db/users-cache'
 import {
   isUsernameIdentifier,
@@ -8,6 +10,7 @@ import {
 } from '../../utils/identifiers'
 import { toLong } from '../../utils/long'
 import { verbose } from '../../utils/output'
+import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import {
   CHANNEL_PEER_ID_OFFSET,
   getCandidateChatIds,
@@ -19,9 +22,13 @@ export type ResolvedPeer = { inputPeer: tl.TypeInputPeer; name: string }
 
 type TelegramClientLike = Pick<TelegramClient, 'call'>
 
+/** The cache lookups a bare ID needs */
+export type HistoryLookup = Pick<MessagesCache, 'getOldestMessageId'>
+
 type CacheDeps = {
   usersCache: UsersCache
   chatsCache: ChatsCache
+  messagesCache?: HistoryLookup
 }
 
 type CachedUserRef = Pick<
@@ -55,6 +62,16 @@ function buildUserPeerFromApi(
     },
     name:
       [user.firstName, user.lastName].filter(Boolean).join(' ') || fallbackName,
+  }
+}
+
+/** Keep a full user from Telegram, so the next lookup by ID hits the cache */
+function cacheResolvedUser(usersCache: UsersCache, user: tl.RawUser): void {
+  if (user.min) return
+  try {
+    usersCache.upsert(apiUserToCacheInput(user))
+  } catch (err) {
+    verbose(`Could not cache user ${user.id}: ${getErrorMessage(err)}`)
   }
 }
 
@@ -131,6 +148,7 @@ async function resolveByUsername(
     (user): user is tl.RawUser => user._ === 'user',
   )
   if (resolvedUser) {
+    cacheResolvedUser(usersCache, resolvedUser)
     return buildUserPeerFromApi(resolvedUser, `@${username}`)
   }
 
@@ -179,6 +197,7 @@ async function resolveByPhone(
   }
 
   if (resolvedUser) {
+    cacheResolvedUser(usersCache, resolvedUser)
     return buildUserPeerFromApi(resolvedUser, identifier)
   }
 
@@ -205,10 +224,16 @@ function peerFromCachedChat(chat: CachedChat): ResolvedPeer {
   }
 }
 
-/** A bare ID from users_cache (with an access hash) or chats_cache */
+/**
+ * A bare ID the cache knows: a user with an access hash, then a chats_cache
+ * row, then a user known without one. messages_cache stores a private chat
+ * under the positive user ID, so messages cached under N also make N a user.
+ * Telegram may refuse a user peer without an access hash, but the peer is
+ * the right one, and cache reads need no hash.
+ */
 function resolveCachedId(
   identifier: string,
-  { usersCache, chatsCache }: CacheDeps,
+  { usersCache, chatsCache, messagesCache }: CacheDeps,
 ): ResolvedPeer | null {
   const cachedUser = usersCache.getById(identifier)
   if (cachedUser?.access_hash) {
@@ -220,6 +245,22 @@ function resolveCachedId(
   if (cachedChat) {
     verbose(`Found chat ID ${identifier} in cache`)
     return peerFromCachedChat(cachedChat)
+  }
+
+  const id = Number(identifier)
+  if (
+    cachedUser ||
+    (Number.isSafeInteger(id) && messagesCache?.getOldestMessageId(id) != null)
+  ) {
+    verbose(`Found private chat ${identifier} in cache, without an access hash`)
+    return buildUserPeerFromCache(
+      cachedUser ?? {
+        user_id: identifier,
+        access_hash: null,
+        display_name: null,
+      },
+      `User ${identifier}`,
+    )
   }
 
   return null
@@ -281,9 +322,10 @@ export async function resolvePeer(
   identifier: string,
   usersCache: UsersCache,
   chatsCache: ChatsCache,
+  messagesCache?: HistoryLookup,
 ): Promise<ResolvedPeer> {
   const normalized = identifier.trim()
-  const deps = { usersCache, chatsCache }
+  const deps = { usersCache, chatsCache, messagesCache }
 
   if (SELF_IDENTIFIERS.has(normalized.toLowerCase())) {
     return { inputPeer: { _: 'inputPeerSelf' }, name: 'Saved Messages' }
@@ -298,8 +340,9 @@ export async function resolvePeer(
     return resolveByMarkedId(normalized, deps)
   }
 
-  // A bare number is an ID when the cache knows it. Otherwise 10+ digits
-  // are still a phone number; `+` always means a phone number.
+  // A bare number is an ID when the cache knows it, as a user, a chat or a
+  // private chat with cached messages. Otherwise 10+ digits are still a
+  // phone number; `+` always means a phone number.
   const cached = /^\d+$/.test(normalized)
     ? resolveCachedId(normalized, deps)
     : null
