@@ -7,15 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-21
+
 ### Added
 
 - `tg send --to me` (or `self`) sends to Saved Messages.
 - A live smoke suite (`bun run test:integration`) covers auth, the profile,
   chats, contacts, sending and the daemon against the real API.
+- Standalone binaries for macOS, Linux and Windows on every GitHub Release,
+  and a Homebrew formula: `brew install neoromantic/tap/tg`.
 
 ### Changed
 
 - Upgraded mtcute to 0.32.6 and switched type checking to TypeScript 7.
+- CI runs on the shared devkit reusable workflows; git hooks run gitleaks and
+  a privacy scan.
+- `AGENTS.md` is the canonical agent guide; the roadmap became a known-gaps
+  list linking GitHub issues.
 
 ### Fixed
 
@@ -28,10 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were cached.
 - Messages received in real time were stored without `raw_json`.
 - `tg daemon stop` printed a progress line to stdout before the JSON.
-- CI runs on the shared devkit reusable workflows; git hooks run gitleaks and
-  a privacy scan.
-- `AGENTS.md` is the canonical agent guide; the roadmap became a known-gaps
-  list linking GitHub issues.
 
 ## [0.1.2] - 2026-10-19
 
@@ -62,5 +66,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/neoromantic/telegram-sync-cli/releases/tag/v0.1.2

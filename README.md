@@ -10,14 +10,22 @@ Agent-friendly Telegram CLI with a local cache, a read-only sync daemon and full
 
 ## Install
 
-Requires [Bun](https://bun.sh) >= 1.4.
+With [Homebrew](https://brew.sh) on macOS or Linux, a standalone binary:
+
+```bash
+brew install neoromantic/tap/tg
+```
+
+With [Bun](https://bun.sh) >= 1.4:
 
 ```bash
 bun i -g @goodit/telegram-sync-cli
 ```
 
-`tg` runs the TypeScript source with Bun; nothing is compiled at install time.
-`npm i -g @goodit/telegram-sync-cli` also works, as long as `bun` is on your `PATH`.
+The npm package runs the TypeScript source with Bun; nothing is compiled at install time.
+`npm i -g @goodit/telegram-sync-cli` also works, as long as `bun` is on your `PATH`. Binaries
+for every platform, Windows included, are attached to each
+[GitHub Release](https://github.com/neoromantic/telegram-sync-cli/releases).
 
 From source:
 
