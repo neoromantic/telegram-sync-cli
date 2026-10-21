@@ -15,6 +15,7 @@ import {
 } from '../utils/message-parser'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
 import type { DaemonContext } from './daemon-context'
+import { rebuildSyncWorker } from './daemon-scheduler'
 import {
   calculateReconnectDelay,
   formatError,
@@ -447,6 +448,24 @@ export function scheduleReconnect(
   )
 }
 
+/**
+ * Detach the account's client: remove its handlers, drop the sync worker
+ * bound to it and close it.
+ */
+async function releaseClient(
+  ctx: DaemonContext,
+  accountState: AccountConnectionState,
+  reason: string,
+): Promise<void> {
+  const { client, accountId } = accountState
+  if (!client) return
+
+  removeEventHandlers(ctx, accountState)
+  accountState.client = undefined
+  ctx.runtime.syncWorkers.delete(accountId)
+  await closeClientSafe(ctx, client, reason)
+}
+
 export async function attemptReconnect(
   ctx: DaemonContext,
   accountState: AccountConnectionState,
@@ -458,9 +477,8 @@ export async function attemptReconnect(
   accountState.status = 'reconnecting'
   accountState.nextReconnectAt = undefined
 
-  if (accountState.client) {
-    accountState.client = undefined
-  }
+  // Close the old client before opening a new one on the same session file.
+  await releaseClient(ctx, accountState, 'reconnecting')
 
   try {
     const sessionPath = join(
@@ -472,6 +490,8 @@ export async function attemptReconnect(
     )
 
     const client = createDaemonClient(ctx, accountState.accountId, sessionPath)
+    // Track it right away, so a failed attempt below closes it too.
+    accountState.client = client
 
     await client.start({
       phone: async () => {
@@ -490,11 +510,18 @@ export async function attemptReconnect(
       `Reconnected account ${accountState.phone} (${me.firstName ?? ''} ${me.lastName ?? ''})`.trim(),
     )
 
-    accountState.client = client
+    setupEventHandlers(ctx, accountState)
+    await client.startUpdatesLoop()
+
     accountState.status = 'connected'
     accountState.lastActivity = Date.now()
     accountState.reconnectAttempts = 0
     accountState.lastError = undefined
+
+    rebuildSyncWorker(ctx, accountState.accountId, client)
+    ctx.logger.info(
+      `[Account ${accountState.accountId}] Real-time updates active`,
+    )
 
     return true
   } catch (err) {
@@ -502,6 +529,8 @@ export async function attemptReconnect(
     ctx.logger.error(
       `Reconnection failed for ${accountState.phone}: ${formatError(err)}`,
     )
+
+    await releaseClient(ctx, accountState, 'reconnect failed')
 
     accountState.status = 'error'
     accountState.lastError = errorMessage

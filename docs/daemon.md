@@ -146,7 +146,12 @@ Scheduler → sync_jobs → worker → messages_cache + chat_sync_state
 
 ## Error Handling & Resilience
 
-- Reconnects with exponential backoff
+- Checks each idle account's connection about once a minute; a failed check
+  schedules a reconnect with exponential backoff
+- A reconnect closes the old client before it opens a new one on the same
+  session file, registers the update handlers on the new client, starts its
+  updates loop and rebuilds the account's sync worker; a failed attempt closes
+  the new client and schedules the next retry
 - Tracks last activity to avoid noisy health checks
 - Validates sync job state transitions
 - Uses rate limit service with flood wait tracking

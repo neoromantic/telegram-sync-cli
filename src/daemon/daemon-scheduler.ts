@@ -1,3 +1,4 @@
+import type { TelegramClient } from '@mtcute/bun'
 import { getCacheDb } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
@@ -11,33 +12,34 @@ import { DEFAULT_JOB_EXECUTOR_CONFIG } from './job-executor'
 import { createSyncScheduler } from './scheduler'
 import { createRealSyncWorker, type RealSyncWorker } from './sync-worker'
 
+function createAccountSyncWorker(client: TelegramClient): RealSyncWorker {
+  const cacheDb = getCacheDb()
+  return createRealSyncWorker({
+    client,
+    messagesCache: createMessagesCache(cacheDb),
+    chatSyncState: createChatSyncStateService(cacheDb),
+    jobsService: createSyncJobsService(cacheDb),
+    rateLimits: createRateLimitsService(cacheDb),
+    chatsCache: createChatsCache(cacheDb),
+  })
+}
+
 export async function initializeScheduler(ctx: DaemonContext): Promise<void> {
   const cacheDb = getCacheDb()
-  const messagesCache = createMessagesCache(cacheDb)
-  const chatSyncState = createChatSyncStateService(cacheDb)
-  const jobsService = createSyncJobsService(cacheDb)
-  const rateLimits = createRateLimitsService(cacheDb)
-  const chatsCache = createChatsCache(cacheDb)
 
   ctx.runtime.scheduler = createSyncScheduler({
     db: cacheDb,
-    jobsService,
-    chatSyncState,
-    messagesCache,
+    jobsService: createSyncJobsService(cacheDb),
+    chatSyncState: createChatSyncStateService(cacheDb),
+    messagesCache: createMessagesCache(cacheDb),
   })
 
   for (const [accountId, accountState] of ctx.state.accounts) {
     if (accountState.status === 'connected' && accountState.client) {
-      const worker = createRealSyncWorker({
-        client: accountState.client,
-        messagesCache,
-        chatSyncState,
-        jobsService,
-        rateLimits,
-        chatsCache,
-      })
-
-      ctx.runtime.syncWorkers.set(accountId, worker)
+      ctx.runtime.syncWorkers.set(
+        accountId,
+        createAccountSyncWorker(accountState.client),
+      )
       ctx.logger.debug(`Created sync worker for account ${accountId}`)
     }
   }
@@ -49,6 +51,21 @@ export async function initializeScheduler(ctx: DaemonContext): Promise<void> {
   ctx.logger.info(
     `Scheduler initialized with ${status.pendingJobs} pending jobs`,
   )
+}
+
+/**
+ * Give the account a sync worker bound to its new client after a reconnect.
+ * Does nothing before the scheduler starts or after it shuts down.
+ */
+export function rebuildSyncWorker(
+  ctx: DaemonContext,
+  accountId: number,
+  client: TelegramClient,
+): void {
+  if (!ctx.runtime.scheduler) return
+
+  ctx.runtime.syncWorkers.set(accountId, createAccountSyncWorker(client))
+  ctx.logger.debug(`Rebuilt sync worker for account ${accountId}`)
 }
 
 function selectAvailableWorker(ctx: DaemonContext): {

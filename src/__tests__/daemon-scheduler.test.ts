@@ -9,6 +9,7 @@ import {
   cleanupScheduler,
   initializeScheduler,
   processJobs,
+  rebuildSyncWorker,
 } from '../daemon/daemon-scheduler'
 import type { SyncScheduler } from '../daemon/scheduler'
 import type { RealSyncWorker } from '../daemon/sync-worker'
@@ -68,6 +69,7 @@ const createWorkerStub = (
   overrides: Partial<RealSyncWorker> = {},
 ): RealSyncWorker => {
   const worker = {
+    client: asTelegramClient({}),
     processJobReal: mock(async () => ({
       success: true,
       messagesFetched: 0,
@@ -146,6 +148,33 @@ describe('initializeScheduler', () => {
 
     expect(ctx.runtime.scheduler).not.toBeNull()
     expect(ctx.runtime.syncWorkers.size).toBe(1)
+  })
+})
+
+describe('rebuildSyncWorker', () => {
+  it('replaces the account worker while the scheduler runs', () => {
+    const ctx = createContext()
+    const cacheDb = getCacheDb()
+    initCacheSchema(cacheDb)
+    initSyncSchema(cacheDb)
+    const oldWorker = createWorkerStub()
+    ctx.runtime.scheduler = createSchedulerStub()
+    ctx.runtime.syncWorkers.set(1, oldWorker)
+
+    const newClient = asTelegramClient({})
+    rebuildSyncWorker(ctx, 1, newClient)
+
+    const worker = ctx.runtime.syncWorkers.get(1)
+    expect(worker).not.toBe(oldWorker)
+    expect(worker?.client).toBe(newClient)
+  })
+
+  it('does nothing without a scheduler', () => {
+    const ctx = createContext()
+
+    rebuildSyncWorker(ctx, 1, asTelegramClient({}))
+
+    expect(ctx.runtime.syncWorkers.size).toBe(0)
   })
 })
 

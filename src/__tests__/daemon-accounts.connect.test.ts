@@ -50,6 +50,11 @@ class MockEvent<TArgs extends unknown[]> {
   remove = mock((handler: (...args: TArgs) => void) => {
     this.handlers = this.handlers.filter((entry) => entry !== handler)
   })
+  emit(...args: TArgs) {
+    for (const handler of this.handlers) {
+      handler(...args)
+    }
+  }
 }
 
 let testCacheDb: Database
@@ -58,16 +63,21 @@ let testCacheDb: Database
 let nextGetMe = { id: 555, firstName: 'Test', lastName: 'User' }
 let startError: Error | null = null
 let getMeError: Error | null = null
+let updatesLoopError: Error | null = null
 
 const createdClients: MockTelegramClient[] = []
+// Client lifecycle calls in order, e.g. 'start:0', 'destroy:0'
+const lifecycle: string[] = []
 
 class MockTelegramClient {
   options: Record<string, unknown>
+  index: number
   onNewMessage = new MockEvent<[Message]>()
   onEditMessage = new MockEvent<[Message]>()
   onDeleteMessage = new MockEvent<[DeleteMessageUpdate]>()
 
   start = mock(async (_opts?: Parameters<TelegramClient['start']>[0]) => {
+    lifecycle.push(`start:${this.index}`)
     if (startError) throw startError
     return {
       id: nextGetMe.id,
@@ -78,14 +88,16 @@ class MockTelegramClient {
     if (getMeError) throw getMeError
     return nextGetMe as Awaited<ReturnType<TelegramClient['getMe']>>
   })
-  startUpdatesLoop = mock(
-    async () =>
-      undefined as Awaited<ReturnType<TelegramClient['startUpdatesLoop']>>,
-  )
-  destroy = mock(async () => {})
+  startUpdatesLoop = mock(async () => {
+    if (updatesLoopError) throw updatesLoopError
+  })
+  destroy = mock(async () => {
+    lifecycle.push(`destroy:${this.index}`)
+  })
 
   constructor(options: Record<string, unknown>) {
     this.options = options
+    this.index = createdClients.length
     createdClients.push(this)
   }
 }
@@ -222,7 +234,9 @@ describe('daemon-accounts: connection + event wiring', () => {
     nextGetMe = { id: 555, firstName: 'Test', lastName: 'User' }
     startError = null
     getMeError = null
+    updatesLoopError = null
     createdClients.length = 0
+    lifecycle.length = 0
   })
 
   afterEach(() => {
@@ -444,5 +458,103 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(accountState.status).toBe('error')
     expect(accountState.lastError).toBe('boom')
     expect(accountState.nextReconnectAt).toBeGreaterThan(now)
+    expect(accountState.client).toBeUndefined()
+    expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('attemptReconnect restores real-time updates and sync on a new client', async () => {
+    const accountsDb = createAccountsDb([
+      { id: 1, phone: '+15550000001', user_id: 555 },
+    ])
+    const ctx = createContext(accountsDb)
+
+    const { attemptReconnect, connectAccount } = await import(
+      '../daemon/daemon-accounts'
+    )
+    const { initializeScheduler } = await import('../daemon/daemon-scheduler')
+
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
+    await initializeScheduler(ctx)
+
+    const oldClient = createdClients[0]!
+    const oldWorker = ctx.runtime.syncWorkers.get(1)
+    expect(oldClient.onNewMessage.handlers).toHaveLength(1)
+    expect(oldWorker?.client).toBe(oldClient as unknown as TelegramClient)
+
+    // What a failed health check leaves behind
+    const accountState = ctx.state.accounts.get(1)!
+    accountState.status = 'error'
+
+    expect(await attemptReconnect(ctx, accountState)).toBe(true)
+
+    expect(createdClients).toHaveLength(2)
+    const newClient = createdClients[1]!
+    const reconnected = ctx.state.accounts.get(1)
+    expect(reconnected?.client).toBe(newClient as unknown as TelegramClient)
+    expect(reconnected?.status).toBe('connected')
+
+    // The old client is detached and closed before the new one opens the session
+    expect(oldClient.onNewMessage.handlers).toHaveLength(0)
+    expect(oldClient.onEditMessage.handlers).toHaveLength(0)
+    expect(oldClient.onDeleteMessage.handlers).toHaveLength(0)
+    expect(oldClient.destroy).toHaveBeenCalledTimes(1)
+    expect(lifecycle).toEqual(['start:0', 'destroy:0', 'start:1'])
+
+    // The new client has one set of handlers and a running updates loop
+    expect(newClient.onNewMessage.handlers).toHaveLength(1)
+    expect(newClient.onEditMessage.handlers).toHaveLength(1)
+    expect(newClient.onDeleteMessage.handlers).toHaveLength(1)
+    expect(newClient.startUpdatesLoop).toHaveBeenCalledTimes(1)
+    expect(newClient.destroy).not.toHaveBeenCalled()
+
+    // A live message on the new client reaches the cache
+    newClient.onNewMessage.emit(
+      asMessage({
+        id: 7,
+        chat: { id: 2000, type: 'user' },
+        sender: { id: 2000 },
+        text: 'After reconnect',
+        date: new Date('2024-01-02T00:00:00Z'),
+        isOutgoing: false,
+      }),
+    )
+    const cached = createMessagesCache(testCacheDb).get(2000, 7)
+    expect(cached?.text).toBe('After reconnect')
+
+    // The sync worker was rebuilt on the new client
+    const worker = ctx.runtime.syncWorkers.get(1)
+    expect(worker).not.toBe(oldWorker)
+    expect(worker?.client).toBe(newClient as unknown as TelegramClient)
+  })
+
+  it('attemptReconnect cleans up the new client when updates fail to start', async () => {
+    const accountsDb = createAccountsDb([
+      { id: 1, phone: '+15550000001', user_id: 555 },
+    ])
+    const ctx = createContext(accountsDb)
+
+    const { attemptReconnect } = await import('../daemon/daemon-accounts')
+
+    updatesLoopError = new Error('updates unavailable')
+
+    const accountState: AccountConnectionState = {
+      accountId: 1,
+      phone: '+15550000001',
+      name: null,
+      status: 'error',
+      reconnectAttempts: 0,
+    }
+
+    expect(await attemptReconnect(ctx, accountState)).toBe(false)
+
+    const client = createdClients[0]!
+    expect(client.onNewMessage.handlers).toHaveLength(0)
+    expect(client.destroy).toHaveBeenCalledTimes(1)
+    expect(accountState.client).toBeUndefined()
+    expect(accountState.eventHandlers).toBeUndefined()
+    expect(accountState.status).toBe('error')
+    expect(accountState.lastError).toBe('updates unavailable')
+    expect(accountState.reconnectAttempts).toBe(1)
+    expect(accountState.nextReconnectAt).toBeDefined()
   })
 })
