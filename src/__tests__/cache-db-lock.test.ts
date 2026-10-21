@@ -282,8 +282,12 @@ describe('cache database lock', () => {
     )
 
     expect(results).toEqual(results.map(() => ({ code: 0, stderr: '' })))
+    // A process that exits closes its connection, which may checkpoint the
+    // WAL under an exclusive lock: read once every other process is gone
+    expect(await holder.exited).toBe(0)
 
     const migrated = new Database(path)
+    migrated.run('PRAGMA busy_timeout = 5000')
     expect(migrated.query('PRAGMA user_version').get()).toEqual({
       user_version: PEER_ID_USER_VERSION,
     })
@@ -296,7 +300,6 @@ describe('cache database lock', () => {
     ).toEqual(['-1001234567890', '-1002222222222', '-4242', '10'])
     assertPeerIdInvariants(migrated)
     migrated.close()
-    expect(await holder.exited).toBe(0)
   }, 30_000)
 
   it('opens the cache again after a migration that failed', async () => {
