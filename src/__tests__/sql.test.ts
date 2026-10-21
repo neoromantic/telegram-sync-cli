@@ -1,9 +1,11 @@
 /**
  * SQL command tests
  */
+import { Database } from 'bun:sqlite'
 import { describe, expect, it } from 'bun:test'
 
 import { applyQueryLimit, isReadOnlyQuery } from '../commands/sql/helpers'
+import { initCacheSchema } from '../db/schema'
 import {
   getColumnAnnotation,
   getColumnNames,
@@ -11,6 +13,7 @@ import {
   getTableNames,
   SCHEMA_REGISTRY,
 } from '../db/schema-annotations'
+import { initSyncSchema } from '../db/sync-schema'
 import { stringify as stringifyCsv } from '../utils/csv'
 
 describe('SQL Command', () => {
@@ -200,6 +203,20 @@ describe('SQL Command', () => {
       expect(tables).toContain('chats_cache')
       expect(tables).toContain('messages_cache')
       expect(tables).toContain('sync_state')
+    })
+
+    it('describes every column of history_ranges', () => {
+      const db = new Database(':memory:')
+      initCacheSchema(db)
+      initSyncSchema(db)
+      const columns = (
+        db.query('PRAGMA table_info(history_ranges)').all() as Array<{
+          name: string
+        }>
+      ).map((column) => column.name)
+      db.close()
+
+      expect(getColumnNames('history_ranges').sort()).toEqual(columns.sort())
     })
 
     it('returns column names for table', () => {

@@ -359,6 +359,33 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     },
 
     // -------------------------------------------------------------------------
+    // History Ranges Table
+    // -------------------------------------------------------------------------
+    history_ranges: {
+      description:
+        'Message ID ranges of a chat that messages_cache holds without a gap. Every cached getHistory page (daemon or CLI) adds the range it covers; touching ranges merge. tg messages list and get read from the cache only inside a range.',
+      primaryKey: ['chat_id', 'low'],
+      columns: {
+        chat_id: {
+          description: 'Chat the range belongs to, as in messages_cache',
+          nullable: false,
+        },
+        low: {
+          description: 'Lowest message ID of the range (inclusive)',
+          nullable: false,
+        },
+        high: {
+          description: 'Highest message ID of the range (inclusive)',
+          nullable: false,
+        },
+        updated_at: {
+          description: 'When the range was last recorded or merged',
+          semanticType: 'timestamp',
+        },
+      },
+    },
+
+    // -------------------------------------------------------------------------
     // Message Search Index (FTS5)
     // -------------------------------------------------------------------------
     message_search: {
