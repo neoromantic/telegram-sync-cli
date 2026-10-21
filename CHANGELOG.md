@@ -85,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   phone number.
 - `tg send --to +<phone>` reported a rate limit on the phone lookup as a
   number it couldn't resolve. It now fails with `RATE_LIMITED`.
+- A `FLOOD_WAIT` too long for the client to wait out failed a command with
+  `TELEGRAM_ERROR`; only later calls to the blocked method got
+  `RATE_LIMITED`. Every command that calls Telegram now reports it as
+  `RATE_LIMITED` with `wait_seconds` right away.
 - `tg send --to <user ID>` resolves a user the cache knows without an access
   hash, or whose private chat has cached messages, as that user. Before, a
   short ID became the basic group with the same number and a 10-digit one a

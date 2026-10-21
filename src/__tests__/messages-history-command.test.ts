@@ -11,7 +11,7 @@ import {
   mock,
   spyOn,
 } from 'bun:test'
-import type { TelegramClient, tl } from '@mtcute/bun'
+import { type TelegramClient, tl } from '@mtcute/bun'
 
 import {
   createLazyClient,
@@ -41,12 +41,16 @@ import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges, type HistoryRange } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
+import { createRateLimitsService } from '../db/rate-limits'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema, SyncPriority } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
-import { RateLimitError } from '../utils/telegram-rate-limits'
+import {
+  RateLimitError,
+  wrapClientCallWithRateLimits,
+} from '../utils/telegram-rate-limits'
 import {
   createFakeHistory,
   type GetHistoryRequest,
@@ -1174,6 +1178,31 @@ describe('reportHistoryError', () => {
     expect(codeOf(new RateLimitError('messages.getHistory', 30)).code).toBe(
       'RATE_LIMITED',
     )
+  })
+
+  it('maps the first FLOOD_WAIT from Telegram to RATE_LIMITED with the wait', async () => {
+    const cacheDb = createCacheDb()
+    const call = mock(async () => {
+      throw tl.RpcError.fromTl({
+        _: 'rpc_error',
+        errorCode: 420,
+        errorMessage: 'FLOOD_WAIT_30',
+      })
+    })
+    const client = wrapClientCallWithRateLimits(
+      { call } as unknown as TelegramClient,
+      { rateLimits: createRateLimitsService(cacheDb) },
+    )
+
+    const failure = await fetchHistoryPage(client, cacheDb, TEAM_CHAT, {
+      limit: 3,
+    }).catch((err: unknown) => err)
+
+    expect(codeOf(failure)).toMatchObject({
+      code: 'RATE_LIMITED',
+      details: { method: 'messages.getHistory', wait_seconds: 30 },
+    })
+    cacheDb.close()
   })
 
   it('maps a missing message to TELEGRAM_ERROR with its IDs', () => {

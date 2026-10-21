@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite'
-import type { TelegramClient } from '@mtcute/bun'
+import { type TelegramClient, tl } from '@mtcute/bun'
 import { getCacheDb } from '../db'
 import {
   createRateLimitsService,
@@ -10,8 +10,8 @@ export class RateLimitError extends Error {
   readonly method: string
   readonly waitSeconds: number
 
-  constructor(method: string, waitSeconds: number) {
-    super(`Rate limited for ${method}: wait ${waitSeconds}s`)
+  constructor(method: string, waitSeconds: number, options?: ErrorOptions) {
+    super(`Rate limited for ${method}: wait ${waitSeconds}s`, options)
     this.name = 'RateLimitError'
     this.method = method
     this.waitSeconds = waitSeconds
@@ -53,6 +53,12 @@ function extractFloodWaitSeconds(error: unknown): number | null {
   }
 
   return null
+}
+
+/** A FLOOD_WAIT from Telegram, as opposed to another error that has seconds */
+function isFloodWait(error: unknown): boolean {
+  if (tl.RpcError.is(error)) return error.code === tl.RpcError.FLOOD
+  return error instanceof Error && /FLOOD_WAIT_\d+/.test(error.message)
 }
 
 function getErrorMessage(error: unknown): string {
@@ -108,6 +114,10 @@ async function callWithRateLimits<T>({
       response_ms: Date.now() - start,
       context: getErrorMessage(err),
     })
+    // The first flood wait reads like a call to a method that is blocked
+    if (waitSeconds && isFloodWait(err)) {
+      throw new RateLimitError(method, waitSeconds, { cause: err })
+    }
     throw err
   }
 }
