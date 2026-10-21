@@ -235,10 +235,11 @@ then a user known without an access hash, or a DM with sync state or cached mess
 a group or channel ID as 0.2.0 printed it (N for basic group -N or channel -100…N), when the
 cache knows that chat; a number that names both is `INVALID_ARGS`. If the cache doesn't know the
 number, one with 10 or more digits is tried as a phone number and a shorter one is taken as a
-basic group ID. Write phone numbers with `+` to skip the ID lookup. Negative IDs resolve from
-the cache, with the chat's access hash, or from the ID alone with no API call. Telegram may
-refuse a user or channel found without an access hash; cache reads don't need one. Users that an
-`@username` or phone lookup returns are cached, so the next lookup by ID needs no API call.
+user ID without an access hash, never as a basic group: basic group N is always `-N`. Write
+phone numbers with `+` to skip the ID lookup. Negative IDs resolve from the cache, with the
+chat's access hash, or from the ID alone with no API call. Telegram may refuse a user or channel
+peer built without an access hash; cache reads don't need one. Users that an `@username` or
+phone lookup returns are cached, so the next lookup by ID needs no API call.
 
 Note: `tg chats get` fetches from Telegram by **@username only**; an ID works for a cached chat.
 An ID the cache doesn't hold, or any ID with `--fresh`, is `INVALID_ARGS` (exit 3) before any

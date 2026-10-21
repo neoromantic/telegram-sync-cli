@@ -905,8 +905,8 @@ describe('Peer Resolution - By Numeric ID', () => {
   })
 
   describe('fallback behavior', () => {
-    it('should fallback to inputPeerChat for unknown numeric ID', async () => {
-      // No cache entries
+    it('should take an unknown positive ID as a user with access hash 0', async () => {
+      // No cache entries: a positive ID is a user, basic group 12345 is -12345
       const mockClient = createMockClient()
       const result = await resolvePeer(
         mockClient,
@@ -915,9 +915,11 @@ describe('Peer Resolution - By Numeric ID', () => {
         chatsCache,
       )
 
-      assertInputPeerChat(result.inputPeer)
-      expect(result.inputPeer.chatId).toBe(12345)
-      expect(result.name).toBe('Chat 12345')
+      assertInputPeerUser(result.inputPeer)
+      expect(result.inputPeer.userId).toBe(12345)
+      expectLongEqual(result.inputPeer.accessHash, 0)
+      expect(result.name).toBe('User 12345')
+      expect(mockClient.call).not.toHaveBeenCalled()
     })
 
     it('should throw error for invalid numeric identifier', async () => {
@@ -1631,5 +1633,36 @@ describe('send command', () => {
       errorSpy.mockRestore()
     }
     expect(commandCall).not.toHaveBeenCalled()
+  })
+
+  it('sends to user 4242, not basic group 4242, when the cache does not know the ID', async () => {
+    commandCall.mockImplementationOnce(async () => ({
+      _: 'updates',
+      updates: [],
+      users: [],
+      chats: [],
+      date: 1_760_000_000,
+      seq: 0,
+    }))
+    const { sendCommand } = await import('../commands/send')
+    const run = sendCommand.run as (input: {
+      args: Record<string, unknown>
+    }) => Promise<void>
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+
+    try {
+      await run({ args: { to: '4242', message: 'hi', silent: false, _: [] } })
+    } finally {
+      logSpy.mockRestore()
+    }
+    expect(commandCall).toHaveBeenCalledTimes(1)
+    const request = commandCall.mock.calls[0]?.[0] as {
+      _: string
+      peer: tl.TypeInputPeer
+    }
+    expect(request._).toBe('messages.sendMessage')
+    assertInputPeerUser(request.peer)
+    expect(request.peer.userId).toBe(4242)
+    expectLongEqual(request.peer.accessHash, 0)
   })
 })
