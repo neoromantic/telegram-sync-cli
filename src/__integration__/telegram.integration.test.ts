@@ -8,6 +8,7 @@
 
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   type CliOptions,
@@ -286,7 +287,7 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
       const idB = await sendToSavedMessages(`tg smoke test ${markerB}`)
 
       // tg send caches what it sends; drop that so the read has to fetch
-      const cacheDb = new Database(join(env.dataDir, 'cache.db'))
+      const cacheDb = new Database(env.cachePath())
       cacheDb.run('DELETE FROM messages_cache WHERE message_id IN (?, ?)', [
         idA,
         idB,
@@ -377,7 +378,9 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
 
         // Real dialogs land under marked IDs (#18). Read the file directly:
         // every CLI open re-keys bare rows first, so tg sql would hide them.
-        const cacheFile = new Database(join(env.dataDir, 'cache.db'), {
+        // Each account has its own cache; nothing writes the shared one
+        expect(existsSync(join(env.dataDir, 'cache.db'))).toBe(false)
+        const cacheFile = new Database(env.cachePath(), {
           readonly: true,
         })
         try {

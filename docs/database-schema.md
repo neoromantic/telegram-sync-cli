@@ -10,21 +10,26 @@ This document defines the current on-disk schema used by telegram-sync-cli. It f
 2. **raw_json for future-proofing** — cached entities keep the original TL object
 3. **Stale-while-revalidate** — cached data is returned immediately, refreshed on demand
 
-> **Note:** A per-account directory layout is not implemented yet.
-> The current implementation uses a single data directory with per-account session files.
-
 ## File Structure
 
 Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI_DATA_DIR`).
 
 ```
 ~/.telegram-sync-cli/
-├── data.db            # Accounts table
-├── cache.db           # Cache + sync tables
-├── session_<id>.db    # mtcute session per account
-├── daemon.pid         # PID file when daemon is running
-└── config.json        # User config (cache TTLs, active account)
+├── data.db              # Accounts table, nothing else
+├── session_<id>.db      # mtcute session per account
+├── accounts/<id>/       # One directory per account (mode 0700)
+│   └── cache.db         # The account's cache, sync state, jobs and rate limits
+├── shared-cache.db      # Only after an upgrade with several accounts (see Migrations)
+├── daemon.pid           # PID file when daemon is running
+└── config.json          # User config (cache TTLs, active account)
 ```
+
+`<id>` is `accounts.id` in `data.db`, the ID `tg accounts list` prints. Every account has its
+own `cache.db` with the same tables and no account column: the file is the account. IDs are
+unique only within one account's cache; a message ID or a basic group ID can mean something
+else in another account's file. A command creates the file on first use; `tg status` and
+`tg sql print-schema` never create one.
 
 ---
 
@@ -53,7 +58,7 @@ CREATE INDEX idx_accounts_active ON accounts(is_active);
 
 ---
 
-## cache.db Schema (Cache + Sync)
+## accounts/&lt;id&gt;/cache.db Schema (Cache + Sync)
 
 All timestamps in cache/sync tables are **milliseconds since epoch** unless noted.
 
@@ -315,14 +320,25 @@ CREATE TABLE daemon_status (
 );
 ```
 
-Keys: `daemon_status`, `daemon_pid`, `daemon_started_at`, `daemon_version`,
-`daemon_version_pid`, `connected_accounts`, `total_accounts`, `messages_synced`, `last_update`,
-`pending_jobs`, `running_jobs`.
+The daemon writes each account's own rows, every second in one transaction per account:
 
-- Daemons from 0.3.0 and older write neither version key.
+| Key | Value |
+|-----|-------|
+| `daemon_pid`, `daemon_started_at`, `daemon_status` | The daemon that runs the account: its PID, start time, `running` or `stopped` |
+| `daemon_version`, `daemon_version_pid` | The version of the daemon that started, and the PID that wrote it |
+| `connection_status`, `last_error` | The account's connection (`connected`, `reconnecting`, `error`, `disconnected`) and its last error |
+| `messages_synced` | Messages the daemon cached for this account since it started |
+| `pending_jobs`, `running_jobs` | The account's queue |
+| `last_update` | When the daemon last wrote these rows |
+
+`tg status` and `tg daemon status` count only rows whose `daemon_pid` is the PID in
+`daemon.pid` of a live daemon. The `connected_accounts` and `total_accounts` rows that 0.3
+wrote are ignored.
+
+- Daemons from 0.3.0 and older write neither version key, and none to `accounts/<id>/cache.db`.
 - Stopping clears the PID, start time and version keys.
 - Starting and stopping each write their keys in one transaction, and `tg status` reads them in
-  one, so it never sees a daemon half started or half stopped.
+  one query, so it never sees a daemon half started or half stopped.
 - `tg status` uses `daemon_version` only while `daemon_version_pid` equals `daemon_pid`.
 
 ### Table: rate_limits
@@ -357,6 +373,26 @@ CREATE INDEX idx_api_activity_timestamp ON api_activity(timestamp DESC);
 CREATE INDEX idx_api_activity_method ON api_activity(method);
 ```
 
+`rate_limits` and `api_activity` are per account, like every table here: one account's
+FLOOD_WAIT doesn't block another.
+
+### Table: cache_meta
+
+```sql
+CREATE TABLE cache_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+);
+```
+
+The owner stamp: `account_id` (the directory's `<id>`) and `user_id` (the Telegram user ID,
+once the account knows it). The first open writes what is missing. A file stamped for another
+account ID or another Telegram user is not opened; the command fails with `CACHE_UNAVAILABLE`
+(`details.reason`: `owner_mismatch`), so a directory moved by hand, or a `data.db` recreated
+with reused IDs, can't mix two accounts' data. The check needs `accounts.user_id`, which tg
+fills in at login.
+
 ---
 
 ## Initialization
@@ -365,11 +401,13 @@ At startup the CLI/daemon ensures:
 
 ```sql
 PRAGMA journal_mode = WAL;
-PRAGMA busy_timeout = 5000;  -- cache.db only
+PRAGMA busy_timeout = 5000;  -- data.db and every accounts/<id>/cache.db
 ```
 
-The CLI and the daemon write `cache.db` at the same time, so a write waits up to 5 seconds for
-the other process's write lock instead of failing with "database is locked".
+The CLI and the daemon write the same account's `cache.db` at the same time, so a write waits
+up to 5 seconds for the other process's write lock instead of failing with "database is
+locked". `data.db` sets its timeout before any write, because the move of a shared cache (see
+below) holds its write lock.
 
 ## Migrations
 
@@ -380,8 +418,8 @@ The schema is created with `CREATE TABLE IF NOT EXISTS` on startup, indexes with
 the CLI and the daemon can both run the migration on the first start. Older binaries ignore
 the new columns.
 
-`PRAGMA user_version` records the one-time data migrations of `cache.db`
-(`src/db/peer-id-migration.ts`):
+`PRAGMA user_version` records the one-time data migrations of each account's `cache.db`
+(`src/db/peer-id-migration.ts`); they run on every account's file on its first open:
 
 - `1`: up to 0.2.0, `chats_cache` stored groups and channels under their bare positive IDs. Each
   such row moves to its marked ID, taken from its `raw_json` (a dialog's peer or a raw chat) when
@@ -413,6 +451,51 @@ lock, and that daemon waits only 5 seconds for it before a write fails. Stop the
 upgrading and start it again after, so the old daemon neither loses writes to the one-time fill
 nor stores new messages without a sender. Opens with nothing to do only read. Going back to an older version after the migration is not supported: it would not
 find groups and channels in `chats_cache`.
+
+### From the shared cache of 0.3 and older
+
+Up to 0.3 every account shared one `<dataDir>/cache.db`. Its rows have no account column, so
+they can't be split by account. The first command that needs a cache (and `tg status`,
+`tg daemon status`, `tg daemon start`) moves it, once per process (`src/db/cache-layout.ts`):
+
+1. Without a root `cache.db` nothing happens: one `stat`, no lock, no write.
+2. The process takes `data.db`'s write lock (`BEGIN IMMEDIATE`, waiting up to 60 seconds), so
+   processes of this version take turns and the accounts can't change mid-way, and checks for
+   the file again.
+3. It opens the file without creating it and switches it to `journal_mode = DELETE`. That folds
+   the WAL into the file and works only while no other process has it open, even an idle one,
+   so it also proves no older tg is using it. A non-empty `-wal` left afterwards means the same.
+   It then deletes the empty `-wal` and the `-shm`.
+4. It decides:
+   - **Adopt**: with exactly one account and no `accounts/*/cache.db` yet, it renames the file
+     to `accounts/<id>/cache.db`. Every cursor, history range, job, retry, sync mode, rate limit
+     and search row carries over; the first open stamps `cache_meta` and runs the
+     `user_version` steps above.
+   - **Delete**: otherwise, a file with no rows in `messages_cache`, `chats_cache`,
+     `users_cache`, `chat_sync_state`, `history_ranges` and `sync_jobs` is deleted.
+   - **Set aside**: any other file is renamed to the first free name of `shared-cache.db`,
+     `shared-cache-2.db`, … (rename would overwrite, so the name is checked under the lock).
+     It is never merged into an account. One line on stderr says where it went (none with
+     `--format quiet`), the daemon logs it, and `tg status` lists it under `storage`.
+5. It commits. The file is renamed, never copied.
+
+A file that a newer run finds after `accounts/<id>/cache.db` already exists (an older binary
+wrote it after the move) is set aside or deleted the same way, never merged.
+
+When another process still has the shared file open, adopting fails the command with
+`CACHE_UNAVAILABLE` (`details.reason`: `shared_cache_in_use`) and changes nothing: creating an
+empty per-account cache first would force the shared file aside later. Setting aside waits
+instead: the command goes on and a later run moves the file. A failed rename (`EXDEV`,
+`EACCES`) is `move_failed`. `tg status` reports a waiting move under `storage.migration`.
+
+Handing a set-aside file to an account by hand: stop the daemon, move the account's
+`accounts/<id>/cache.db`, `-wal` and `-shm` away, then move `shared-cache.db` to
+`accounts/<id>/cache.db`. The folded file has no sidecars. tg stamps it for that account on
+the next open.
+
+A single account that adopts the shared file may inherit rows that accounts removed earlier
+left in it; they can't be told apart. Going back to 0.3 or older after the move is not
+supported: it would start an empty shared cache.
 
 ## Usage Notes
 

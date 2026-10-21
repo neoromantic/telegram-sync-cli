@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { type TelegramClient, tl } from '@mtcute/bun'
-import { getCacheDb } from '../db'
+import { getAccountCacheDb } from '../db'
 import {
   createRateLimitsService,
   type RateLimitsService,
@@ -22,16 +22,19 @@ export function isRateLimitError(err: unknown): err is RateLimitError {
   return err instanceof RateLimitError
 }
 
-let cachedDb: Database | null = null
-let cachedService: RateLimitsService | null = null
+const services = new Map<number, { db: Database; service: RateLimitsService }>()
 
-export function getRateLimitsService(): RateLimitsService {
-  const db = getCacheDb()
-  if (!cachedService || cachedDb !== db) {
-    cachedDb = db
-    cachedService = createRateLimitsService(db)
-  }
-  return cachedService
+/**
+ * The account's rate limits, kept in its own cache: the CLI and the daemon
+ * coordinate per account, and one account's FLOOD_WAIT never blocks another
+ */
+export function getRateLimitsService(accountId: number): RateLimitsService {
+  const db = getAccountCacheDb(accountId)
+  const cached = services.get(accountId)
+  if (cached && cached.db === db) return cached.service
+  const service = createRateLimitsService(db)
+  services.set(accountId, { db, service })
+  return service
 }
 
 function extractFloodWaitSeconds(error: unknown): number | null {
@@ -125,14 +128,23 @@ async function callWithRateLimits<T>({
 type ClientCallRequest = Parameters<TelegramClient['call']>[0]
 type ClientCallOptions = Parameters<TelegramClient['call']>[1]
 
+export type RateLimitsTarget = { context?: string } & (
+  | { accountId: number; rateLimits?: undefined }
+  | { rateLimits: RateLimitsService; accountId?: undefined }
+)
+
+/**
+ * Check and record every call of the client in the rate limits of the
+ * account it belongs to
+ */
 export function wrapClientCallWithRateLimits(
   client: TelegramClient,
-  options: {
-    context?: string
-    rateLimits?: RateLimitsService
-  } = {},
+  options: RateLimitsTarget,
 ): TelegramClient {
-  const rateLimits = options.rateLimits ?? getRateLimitsService()
+  const rateLimits =
+    options.rateLimits === undefined
+      ? getRateLimitsService(options.accountId)
+      : options.rateLimits
   const clientAny = client as TelegramClient & {
     __rateLimitWrapped?: boolean
     __rateLimitContext?: string

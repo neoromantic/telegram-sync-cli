@@ -92,7 +92,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Groups, channels, admin rights | partial: via `tg api` | ✅ |
 | Contacts | list, search, get; the rest via `tg api` | ✅ add, import, block, export |
 | Reactions, polls, drafts, scheduled, folders | partial: via `tg api` | ✅ |
-| Multi-account | partial: `--account`, one shared cache ([#17](https://github.com/neoromantic/telegram-sync-cli/issues/17)) | ✅ |
+| Multi-account | ✅ `--account`; one cache per account, the daemon syncs each account with its own client | ✅ |
 | Guardrails for agents | partial: daemon and SQL are read-only ([#26](https://github.com/neoromantic/telegram-sync-cli/issues/26)) | ✅ read-only mode, chat allowlist |
 | Install | Homebrew binary, or bun/npm with Bun | git clone + uv, pip from git, Docker |
 | Runtime, license | TypeScript on Bun ([mtcute](https://mtcute.dev)), MIT | Python ([Telethon](https://docs.telethon.dev)), Apache-2.0 |
@@ -118,7 +118,9 @@ tg config path
 ```
 
 Global options: `--format json|pretty|quiet`, `--verbose`, `--quiet`. Many commands accept
-`--account`; cache-aware commands accept `--fresh`. See `tg <command> --help`.
+`--account` (each account has its own cache; without the flag a command uses the active
+account); cache-aware commands accept `--fresh`. See `tg <command> --help`. Upgrading from 0.3
+with several accounts: see [per-account caches](docs/configuration.md#upgrading-to-per-account-caches).
 
 | Variable | Description |
 |----------|-------------|
@@ -147,8 +149,8 @@ Reference: [CLI commands](docs/cli-commands.md), [authentication](docs/auth.md),
   `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}}}`.
 - Exit codes: `0` ok, `1` general error, `2` auth required, `3` invalid arguments,
   `4` network error, `5` Telegram error or rate limit, `6` account not found.
-- `tg sql --query "…"` runs read-only SQL over the cache; `tg sql print-schema` prints the
-  annotated schema.
+- `tg sql --query "…"` runs read-only SQL over the selected account's cache (`--account`, else
+  the active account); `tg sql print-schema` prints the annotated schema.
 - `tg skill manifest` prints a skill manifest, `tg skill validate` checks the environment and
   `tg skill install` writes the manifest to the default location.
 - The daemon never sends or edits anything, so it is safe to leave running.

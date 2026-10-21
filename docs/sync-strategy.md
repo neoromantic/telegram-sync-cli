@@ -183,13 +183,13 @@ no calls. What writes `top_message_id`:
 A full page leaves the top alone and queues the next page. A page that fails or hits a
 FLOOD_WAIT leaves it alone too, and the same job runs again once it is due.
 
-On start, after the dialog passes: if every account connected and every pass listed all its
-dialogs, an enabled chat with a cursor that no pass listed (left, deleted or migrated) is
-marked caught up (`top_message_id = forward_cursor`). Otherwise those chats get
-`top_message_id = NULL`, so each gets one checking page. After a reconnect, a pass that fails
-part-way does the same for the chats it didn't list; all accounts share one cache (#17), so
-that is a safe superset. A complete reconnect pass covers one account and marks none of them
-caught up.
+Each account's dialog pass covers its own cache only. On start, if an account's pass listed
+all its dialogs, an enabled chat with a cursor in that account's cache that the pass didn't
+list (left, deleted or migrated) is marked caught up (`top_message_id = forward_cursor`).
+After a pass that fails part-way those chats get `top_message_id = NULL`, so each gets one
+checking page. Another account's failed pass doesn't change that, and an account that didn't
+connect keeps its sync state as it is. After a reconnect, a pass that fails part-way does the
+same for the chats it didn't list; a complete reconnect pass marks none of them caught up.
 
 A chat turned on with `tg chats sync` that no pass listed gets `top_message_id = NULL` after
 every pass, complete or not, so it gets one checking page on start and after each reconnect.
@@ -255,8 +255,9 @@ is archived), or when `tg chats sync` turns it on.
 
 ## Job lanes
 
-The daemon runs at most one job every 3 seconds, and all jobs share one `messages.getHistory`
-budget. Jobs are split into three lanes:
+Each account has its own queue and scheduler. The daemon runs one job per tick, taking turns
+between accounts, and each account runs at most one job every 3 seconds, so its jobs share one
+`messages.getHistory` budget. An account's jobs are split into three lanes:
 
 | Lane | Job types |
 |------|-----------|

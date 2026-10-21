@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg sql --account <id|@username|label>` queries that account's cache;
+  without it `tg sql` reads the active account's. `tg sql print-schema` needs
+  no account and creates no file.
+- `CACHE_UNAVAILABLE` (exit 1), with `details: { reason, path }`, when an
+  account's cache can't be opened yet: an older tg still holds the shared
+  cache (`shared_cache_in_use`), the move failed (`move_failed`), or the file
+  belongs to another account (`owner_mismatch`, from the new `cache_meta`
+  stamp).
+- `tg status` has a `storage` section (`legacy_caches`: shared caches set
+  aside; `migration`: a move that waits), and every item in `sync.jobs`,
+  `progress.sample_chats` and `rate_limits.active_flood_waits` has
+  `account_id`. With several accounts, pretty output tags jobs with
+  `acct:<id>` and the retry commands add `--account <id>`.
+
+### Changed
+
+- **Breaking:** each account has its own cache, `accounts/<id>/cache.db`:
+  cached chats, users and messages, sync state, jobs, rate limits and
+  `api_activity`. `data.db` keeps only the accounts. Stop the daemon before
+  upgrading. The first command that needs a cache moves the shared
+  `cache.db` of 0.3 and older: with one account it becomes that account's
+  cache and everything carries over; with several (or none) its rows can't
+  be split by account, so it is kept as `shared-cache.db` and each account
+  syncs again from an empty cache; an empty one is deleted. While an older
+  tg still has the file open, a single account's commands fail with
+  `CACHE_UNAVAILABLE` until it exits. Going back to 0.3 after the move is not
+  supported. Scripts that open `cache.db` directly must open
+  `accounts/<id>/cache.db` or use `tg sql --account`. See "Upgrading to
+  per-account caches" in `docs/configuration.md`.
+- **Breaking:** a command that reads a cache works on one account:
+  `--account`, else the active account, else the only one. With no account
+  it fails with `AUTH_REQUIRED` (exit 2), so `tg chats get --id <ID>` without
+  an account is no longer the `INVALID_ARGS` cache miss of 0.3.0. With
+  several accounts and none active it fails with `NO_ACTIVE_ACCOUNT`
+  (exit 1) and lists them in `details.accounts`.
+- The daemon runs each account with its own cache, scheduler and sync
+  worker, taking turns between accounts; each account waits 3 seconds
+  between its own jobs. An account whose cache doesn't open is logged and
+  left out. `daemon_status` rows are per account; `tg status` and
+  `tg daemon status` sum them and count only rows the live daemon wrote.
+
+### Fixed
+
+- `tg chats list`, `chats search`, `contacts list`, `messages search` and
+  `tg sql` mixed every account's data, and message IDs and basic group IDs
+  that two accounts share collided in one cache (#17).
+- The daemon ran a sync job on the first connected account's client, with
+  another account's access hashes; a job now runs only on its own account's
+  client, and a disconnected account's jobs wait for it.
+- `tg send` resolved recipients with access hashes that another account
+  cached.
+- A delete without chat context could mark another account's message with
+  the same ID as deleted (the cross-account part of #7).
+- One account's FLOOD_WAIT blocked API calls of every account.
+- `tg chats search`, `messages search` and `chats sync` ignored `--account`.
+
 ## [0.3.0] - 2026-10-22
 
 ### Added

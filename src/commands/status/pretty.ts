@@ -8,6 +8,18 @@ import { c, icons, jobStatusIcon, printHeader, printRow } from './formatters'
 export type StatusSnapshot = Awaited<ReturnType<typeof collectStatus>>
 type StatusJob = StatusSnapshot['sync']['jobs'][number]
 
+/**
+ * With several accounts each listed item says whose cache it is in; with
+ * one the output stays as it was
+ */
+function hasSeveralAccounts(status: StatusSnapshot): boolean {
+  return status.accounts.total > 1
+}
+
+function accountTag(status: StatusSnapshot, accountId: number): string {
+  return hasSeveralAccounts(status) ? ` ${c.dim(`acct:${accountId}`)}` : ''
+}
+
 function printDaemonSection(status: StatusSnapshot): void {
   printHeader('Daemon')
 
@@ -136,11 +148,17 @@ function jobRetryDetail(job: StatusJob): string {
 
 /**
  * The tg chats sync command that deletes a chat's failed jobs and keeps its
- * mode: without a flag the command turns the chat on
+ * mode: without a flag the command turns the chat on. With several accounts
+ * it names the account whose cache holds the job.
  */
-function retrySyncCommand(chatId: number, mode: SyncMode | null): string {
+function retrySyncCommand(
+  chatId: number,
+  mode: SyncMode | null,
+  accountId: number | null,
+): string {
   const flag = mode === 'on' ? '' : mode === 'off' ? ' --off' : ' --auto'
-  return `tg chats sync ${chatId}${flag}`
+  const account = accountId === null ? '' : ` --account ${accountId}`
+  return `tg chats sync ${chatId}${flag}${account}`
 }
 
 function printSyncJobsSection(status: StatusSnapshot): void {
@@ -172,7 +190,7 @@ function printSyncJobsSection(status: StatusSnapshot): void {
       const fetched =
         job.messages_fetched > 0 ? c.dim(` (${job.messages_fetched} msgs)`) : ''
       console.log(
-        `    ${statusIcon} ${c.cyan(`#${job.id}`)} ${c.value(job.type)} ${c.dim(`chat:${job.chat_id}`)}${fetched}${jobRetryDetail(job)}`,
+        `    ${statusIcon} ${c.cyan(`#${job.id}`)} ${c.value(job.type)} ${c.dim(`chat:${job.chat_id}`)}${accountTag(status, job.account_id)}${fetched}${jobRetryDetail(job)}`,
       )
     }
   }
@@ -185,7 +203,13 @@ function printSyncJobsSection(status: StatusSnapshot): void {
     const commands = new Set(
       status.sync.jobs
         .filter((job) => job.status === SyncJobStatus.Failed)
-        .map((job) => retrySyncCommand(job.chat_id, job.sync_mode)),
+        .map((job) =>
+          retrySyncCommand(
+            job.chat_id,
+            job.sync_mode,
+            hasSeveralAccounts(status) ? job.account_id : null,
+          ),
+        ),
     )
     if (commands.size > 0) {
       console.log(
@@ -235,7 +259,7 @@ function printSyncProgressSection(status: StatusSnapshot): void {
         : c.warning('backfill')
       const synced = c.number(chat.synced_messages.toLocaleString())
       console.log(
-        `    ${c.dim(icons.bullet)} ${c.value(chat.chat_type)} ${c.dim(`chat:${chat.chat_id}`)} ${c.dim(icons.arrow)} ${synced} msgs ${c.dim(icons.arrow)} ${state}`,
+        `    ${c.dim(icons.bullet)} ${c.value(chat.chat_type)} ${c.dim(`chat:${chat.chat_id}`)}${accountTag(status, chat.account_id)} ${c.dim(icons.arrow)} ${synced} msgs ${c.dim(icons.arrow)} ${state}`,
       )
     }
   }
@@ -268,7 +292,7 @@ function printRateLimitsSection(status: StatusSnapshot): void {
       const remainingStr =
         remaining > 0 ? `${remaining}s remaining` : 'expiring soon'
       console.log(
-        `    ${c.red(icons.bullet)} ${c.value(fw.method)} ${c.dim(icons.arrow)} ${c.warning(remainingStr)}`,
+        `    ${c.red(icons.bullet)} ${c.value(fw.method)}${accountTag(status, fw.account_id)} ${c.dim(icons.arrow)} ${c.warning(remainingStr)}`,
       )
     }
   } else {
@@ -314,6 +338,35 @@ function printAccountsSection(status: StatusSnapshot): void {
   }
 }
 
+/**
+ * Shared caches of an older version that were set aside, and a move that
+ * waits; shown only when there is one
+ */
+function printStorageSection(status: StatusSnapshot): void {
+  const { legacy_caches, migration } = status.storage
+  if (legacy_caches.length === 0 && !migration) return
+
+  printHeader('Storage')
+  if (migration) {
+    printRow('Shared cache', c.warning(`not moved yet (${migration.reason})`))
+    console.log(`    ${c.dim(migration.path)}`)
+    console.log(`    ${c.dim(migration.suggestion)}`)
+  }
+  for (const file of legacy_caches) {
+    printRow(
+      'Set aside',
+      `${c.value(file.path)} ${c.dim(formatBytes(file.size_bytes))}`,
+    )
+  }
+  if (legacy_caches.length > 0) {
+    console.log(
+      c.dim(
+        "  A shared cache from an older version can't be split by account; see docs/configuration.md",
+      ),
+    )
+  }
+}
+
 export function printPrettyStatus(status: StatusSnapshot): void {
   console.log()
   console.log(c.bold('  Telegram Sync CLI Status'))
@@ -324,6 +377,7 @@ export function printPrettyStatus(status: StatusSnapshot): void {
   printSyncProgressSection(status)
   printRateLimitsSection(status)
   printAccountsSection(status)
+  printStorageSection(status)
 
   console.log()
 }

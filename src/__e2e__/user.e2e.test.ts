@@ -86,19 +86,17 @@ describe('E2E: User Commands', () => {
     })
 
     it('should require authentication for lookup', async () => {
-      // No accounts seeded, so should fail with TELEGRAM_ERROR (exit code 5)
+      // No accounts seeded, so there is no cache to read either
       const result = await runCliFailure(
         ['user', '@testuser'],
-        5,
+        2,
         env.getCliOptions(),
       )
 
-      expect(result.exitCode).toBe(5)
-      const response = result.json as {
-        success: boolean
-        error: { code: string }
-      }
-      expect(response.success).toBe(false)
+      expect(result.json).toMatchObject({
+        success: false,
+        error: { code: 'AUTH_REQUIRED' },
+      })
     })
   })
 

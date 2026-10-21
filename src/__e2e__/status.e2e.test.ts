@@ -3,20 +3,14 @@
  * cache, without Telegram credentials
  */
 
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createDaemonStatusService } from '../db/daemon-status'
-import { initCacheSchema } from '../db/schema'
-import {
-  initSyncSchema,
-  SyncJobType,
-  type SyncMode,
-  SyncPriority,
-} from '../db/sync-schema'
+import { SyncJobType, type SyncMode, SyncPriority } from '../db/sync-schema'
 import { VERSION } from '../version'
 import { runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
@@ -29,6 +23,7 @@ const NO_CREDENTIALS = {
 const HOUR = 60 * 60 * 1000
 
 interface StatusJob {
+  account_id: number
   id: number
   chat_id: number
   type: string
@@ -63,13 +58,11 @@ describe('E2E: status', () => {
   beforeEach(() => {
     env = createTestEnvironment('status')
     env.initDatabase()
-    cacheDb = new Database(join(env.dataDir, 'cache.db'))
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
+    env.seedAccounts([{ phone: '+15550000001', is_active: true }])
+    cacheDb = env.openCacheDb(1)
   })
 
   afterEach(() => {
-    cacheDb.close()
     env.cleanup()
   })
 
@@ -206,6 +199,7 @@ describe('E2E: status', () => {
       next_run_at: new Date(nextRunAt).toISOString(),
     })
     expect(byId.get(channelFailed!)).toEqual({
+      account_id: 1,
       id: channelFailed!,
       chat_id: -1001234567890,
       type: SyncJobType.InitialLoad,
@@ -394,13 +388,12 @@ describe('E2E: status, daemon version', () => {
   beforeEach(() => {
     env = createTestEnvironment('status-daemon-version')
     env.initDatabase()
-    cacheDb = new Database(join(env.dataDir, 'cache.db'))
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
+    env.seedAccounts([{ phone: '+15550000001', is_active: true }])
+    // The daemon writes its rows to each account's own cache
+    cacheDb = env.openCacheDb(1)
   })
 
   afterEach(() => {
-    cacheDb.close()
     env.cleanup()
   })
 

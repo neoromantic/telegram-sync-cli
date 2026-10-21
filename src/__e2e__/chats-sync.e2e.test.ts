@@ -2,18 +2,16 @@
  * E2E tests for tg chats sync: cache-only, no Telegram credentials
  */
 
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
-import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { SyncJobType, SyncPriority } from '../db/sync-schema'
 import { runCliFailure, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
@@ -55,10 +53,9 @@ describe('E2E: chats sync', () => {
   beforeEach(() => {
     env = createTestEnvironment('chats-sync')
     env.initDatabase()
+    env.seedAccounts([{ phone: '+15550000001', is_active: true }])
 
-    cacheDb = new Database(join(env.dataDir, 'cache.db'))
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
+    cacheDb = env.openCacheDb(1)
     createChatsCache(cacheDb).upsertMany(
       [
         fakeDialog({
@@ -80,7 +77,6 @@ describe('E2E: chats sync', () => {
 
   afterEach(() => {
     assertPeerIdInvariants(cacheDb)
-    cacheDb.close()
     env.cleanup()
   })
 
@@ -430,7 +426,7 @@ describe('E2E: chats sync', () => {
       error: {
         code: 'INVALID_ARGS',
         message: 'Chat not found in the cache: @unknownchat',
-        details: { chat: '@unknownchat' },
+        details: { chat: '@unknownchat', account_id: 1 },
         suggestion:
           'Start the daemon (its dialog pass lists every chat, archived ones too) or run tg chats get --id @username, then retry',
       },

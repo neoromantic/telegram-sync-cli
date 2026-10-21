@@ -1,8 +1,9 @@
 import { defineCommand, runCommand } from 'citty'
 
-import { getCacheDb } from '../../db'
 import { getTableNames } from '../../db/schema-annotations'
 import { ErrorCodes } from '../../types'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { stringify as stringifyCsv } from '../../utils/csv'
 import { error, success } from '../../utils/output'
 import { applyQueryLimit, isReadOnlyQuery } from './helpers'
@@ -13,6 +14,7 @@ type QueryArgs = {
   query?: string
   output?: string
   limit?: string
+  account?: string
   _?: string[]
 }
 
@@ -84,7 +86,8 @@ function formatSqlError(message: string, query: string): never {
 export const sqlQueryCommand = defineCommand({
   meta: {
     name: 'sql',
-    description: 'Execute read-only SQL queries on the cache database',
+    description:
+      "Execute read-only SQL queries on an account's cache database (--account, else the active account)",
   },
   args: {
     command: {
@@ -108,6 +111,10 @@ export const sqlQueryCommand = defineCommand({
       alias: 'l',
       description: 'Maximum rows to return (default: 1000, 0 = unlimited)',
       default: '1000',
+    },
+    account: {
+      type: 'string',
+      description: `${ACCOUNT_SELECTOR_DESCRIPTION}; the cache to query`,
     },
   },
   async run({ args, rawArgs }) {
@@ -141,8 +148,11 @@ export const sqlQueryCommand = defineCommand({
     const { query, output, limit, limitStr } = parseQueryArgs(sqlArgs)
     validateQueryArgs(query, output, limit, limitStr)
 
+    // Each account has its own cache; ATTACH stays blocked, so a query never
+    // reads two accounts
+    const { db } = openAccountCache(sqlArgs.account)
+
     try {
-      const db = getCacheDb()
       const finalQuery = applyQueryLimit(query!, limit)
       const rows = db.query(finalQuery).all() as Record<string, unknown>[]
       const columns = rows.length > 0 ? Object.keys(rows[0]!) : []

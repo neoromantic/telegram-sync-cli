@@ -1,30 +1,55 @@
+import { SyncJobStatus } from '../db/sync-schema'
 import { attemptReconnect, scheduleReconnect } from './daemon-accounts'
-import type { DaemonContext } from './daemon-context'
-import { processJobs } from './daemon-scheduler'
+import type { AccountRuntime, DaemonContext } from './daemon-context'
+import {
+  cleanupOldJobs,
+  processJobs,
+  refreshAllQueues,
+} from './daemon-scheduler'
 import { formatError, getErrorMessage } from './daemon-utils'
 
 const HEALTH_CHECK_INTERVAL_TICKS = 60
 const HEALTH_CHECK_COOLDOWN_MS = 60_000
 const SCHEDULER_REFRESH_INTERVAL_TICKS = 30
 
-async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
-  const statusService = ctx.runtime.statusService
-  if (!statusService) {
-    return
+function jobCounts(rt: AccountRuntime): { pending: number; running: number } {
+  if (rt.scheduler) {
+    const status = rt.scheduler.getStatus()
+    return { pending: status.pendingJobs, running: status.runningJobs }
   }
+  // An account that didn't connect keeps its queue; db.query caches the
+  // statement
+  const row = rt.db
+    .query(
+      `SELECT COALESCE(SUM(status = $pending), 0) AS pending,
+              COALESCE(SUM(status = $running), 0) AS running
+       FROM sync_jobs`,
+    )
+    .get({
+      $pending: SyncJobStatus.Pending,
+      $running: SyncJobStatus.Running,
+    }) as { pending: number; running: number } | null
+  return { pending: row?.pending ?? 0, running: row?.running ?? 0 }
+}
 
-  const connectedCount = Array.from(ctx.state.accounts.values()).filter(
-    (a) => a.status === 'connected',
-  ).length
-
-  statusService.setConnectedAccounts(connectedCount, ctx.state.accounts.size)
-  statusService.setMessagesSynced(ctx.runtime.totalMessagesSynced)
-  statusService.updateLastUpdate()
-
-  if (ctx.runtime.scheduler) {
-    const schedulerStatus = ctx.runtime.scheduler.getStatus()
-    statusService.set('pending_jobs', String(schedulerStatus.pendingJobs))
-    statusService.set('running_jobs', String(schedulerStatus.runningJobs))
+/** Write each account's figures to its own cache, one transaction each */
+async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
+  for (const rt of ctx.runtime.accounts.values()) {
+    const accountState = ctx.state.accounts.get(rt.accountId)
+    try {
+      const { pending, running } = jobCounts(rt)
+      rt.statusService.writeTick({
+        connectionStatus: accountState?.status ?? 'disconnected',
+        lastError: accountState?.lastError ?? null,
+        messagesSynced: rt.messagesSynced,
+        pendingJobs: pending,
+        runningJobs: running,
+      })
+    } catch (err) {
+      ctx.logger.warn(
+        `[Account ${rt.accountId}] Failed to update daemon status: ${formatError(err)}`,
+      )
+    }
   }
 }
 
@@ -62,15 +87,6 @@ async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
   }
 }
 
-async function cleanupOldJobs(ctx: DaemonContext): Promise<void> {
-  if (!ctx.runtime.scheduler) return
-
-  const cleaned = ctx.runtime.scheduler.cleanup(24 * 60 * 60 * 1000)
-  if (cleaned > 0) {
-    ctx.logger.debug(`Cleaned up ${cleaned} old jobs`)
-  }
-}
-
 export async function mainLoop(ctx: DaemonContext): Promise<void> {
   ctx.logger.debug('Starting main event loop...')
 
@@ -92,11 +108,7 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     }
 
     if (loopIteration % SCHEDULER_REFRESH_INTERVAL_TICKS === 0) {
-      try {
-        ctx.runtime.scheduler?.refreshQueues()
-      } catch (err) {
-        ctx.logger.warn(`Failed to refresh sync queues: ${formatError(err)}`)
-      }
+      refreshAllQueues(ctx)
     }
 
     try {
@@ -106,11 +118,7 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     }
 
     if (loopIteration % cleanupInterval === 0) {
-      try {
-        await cleanupOldJobs(ctx)
-      } catch (err) {
-        ctx.logger.warn(`Failed to cleanup old jobs: ${formatError(err)}`)
-      }
+      cleanupOldJobs(ctx)
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1000))

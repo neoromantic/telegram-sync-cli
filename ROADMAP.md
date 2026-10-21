@@ -8,7 +8,6 @@ The list is in priority order.
 
 - [Delete events without chat context can skip valid deletions](https://github.com/neoromantic/telegram-sync-cli/issues/7)
 - [Daemon doesn't sync contacts](https://github.com/neoromantic/telegram-sync-cli/issues/8)
-- [All accounts share one cache database](https://github.com/neoromantic/telegram-sync-cli/issues/17)
 - [Database size management](https://github.com/neoromantic/telegram-sync-cli/issues/1)
 
 ## Features

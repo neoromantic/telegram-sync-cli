@@ -2,15 +2,13 @@ import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
 import { ConfigError } from '../config'
-import { accountsDb, getCacheDb } from '../db'
+import { accountsDb } from '../db'
 import { createChatsCache } from '../db/chats-cache'
 import { createUsersCache } from '../db/users-cache'
 import { getClientForAccount } from '../services/telegram'
 import { ErrorCodes } from '../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../utils/account-selector'
+import { openAccountCache } from '../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
 import { toLong } from '../utils/long'
 import { error, success, verbose } from '../utils/output'
 import {
@@ -121,7 +119,6 @@ export const sendCommand = defineCommand({
   async run({ args }) {
     const recipient = args.to
     const messageText = args.message
-    const accountId = resolveAccountSelector(args.account)
     const silent = args.silent
     const replyTo = args['reply-to']
       ? Number.parseInt(args['reply-to'], 10)
@@ -131,14 +128,17 @@ export const sendCommand = defineCommand({
       error(ErrorCodes.INVALID_ARGS, 'Message text cannot be empty')
     }
 
+    // The recipient resolves with this account's access hashes
+    const { account, db: cacheDb } = openAccountCache(args.account)
+    const accountId = account.id
+
     try {
-      const cacheDb = getCacheDb()
       const usersCache = createUsersCache(cacheDb)
       const chatsCache = createChatsCache(cacheDb)
 
       const client = wrapClientCallWithRateLimits(
         getClientForAccount(accountId),
-        { context: 'cli:send' },
+        { context: 'cli:send', accountId },
       )
 
       verbose(`Resolving recipient: ${recipient}`)

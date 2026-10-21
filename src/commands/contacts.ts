@@ -5,15 +5,12 @@
 import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../config'
-import { getCacheDb } from '../db'
 import { isCacheStale } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { getClientForAccount } from '../services/telegram'
 import { type Contact, ErrorCodes, type PaginatedResult } from '../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../utils/account-selector'
+import { openAccountCache } from '../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
 import { buildCachePaginatedResponse } from '../utils/cache-pagination'
 import { toLong } from '../utils/long'
 import { error, success, verbose } from '../utils/output'
@@ -69,11 +66,10 @@ export const listContactsCommand = defineCommand({
   async run({ args }) {
     const limit = Number.parseInt(args.limit ?? '50', 10)
     const offset = Number.parseInt(args.offset ?? '0', 10)
-    const accountId = resolveAccountSelector(args.account)
     const fresh = args.fresh ?? false
+    const { account, db: cacheDb } = openAccountCache(args.account)
 
     try {
-      const cacheDb = getCacheDb()
       const usersCache = createUsersCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
@@ -101,8 +97,8 @@ export const listContactsCommand = defineCommand({
       // Fetch from API
       verbose('Fetching contacts from Telegram API...')
       const client = wrapClientCallWithRateLimits(
-        getClientForAccount(accountId),
-        { context: 'cli:contacts.list' },
+        getClientForAccount(account.id),
+        { context: 'cli:contacts.list', accountId: account.id },
       )
 
       const request: tl.contacts.RawGetContactsRequest = {
@@ -202,11 +198,10 @@ export const searchContactsCommand = defineCommand({
   async run({ args }) {
     const query = args.query
     const limit = Number.parseInt(args.limit ?? '20', 10)
-    const accountId = resolveAccountSelector(args.account)
     const fresh = args.fresh ?? false
+    const { account, db: cacheDb } = openAccountCache(args.account)
 
     try {
-      const cacheDb = getCacheDb()
       const usersCache = createUsersCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
@@ -233,8 +228,8 @@ export const searchContactsCommand = defineCommand({
       // Search via API
       verbose(`Searching Telegram API for "${query}"...`)
       const client = wrapClientCallWithRateLimits(
-        getClientForAccount(accountId),
-        { context: 'cli:contacts.search' },
+        getClientForAccount(account.id),
+        { context: 'cli:contacts.search', accountId: account.id },
       )
 
       const request: tl.contacts.RawSearchRequest = {
@@ -304,11 +299,10 @@ export const getContactCommand = defineCommand({
   },
   async run({ args }) {
     const identifier = args.id
-    const accountId = resolveAccountSelector(args.account)
     const fresh = args.fresh ?? false
+    const { account, db: cacheDb } = openAccountCache(args.account)
 
     try {
-      const cacheDb = getCacheDb()
       const usersCache = createUsersCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
@@ -347,8 +341,8 @@ export const getContactCommand = defineCommand({
       // Fetch from API
       verbose(`Fetching user "${identifier}" from Telegram API...`)
       const client = wrapClientCallWithRateLimits(
-        getClientForAccount(accountId),
-        { context: 'cli:contacts.get' },
+        getClientForAccount(account.id),
+        { context: 'cli:contacts.get', accountId: account.id },
       )
 
       let result: tl.TypeUser[]

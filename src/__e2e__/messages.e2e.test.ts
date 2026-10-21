@@ -12,23 +12,19 @@ import {
   expect,
   it,
 } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
-import {
-  initLegacySchema,
-  LEGACY,
-  seedLegacyCache,
-} from '../__tests__/helpers/legacy-cache'
+import { LEGACY } from '../__tests__/helpers/legacy-cache'
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
+import { seedInChild } from '../__tests__/helpers/seed-in-child'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import type { MessageSearchItem } from '../types'
 import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
@@ -37,7 +33,6 @@ import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
 describe('E2E: Messages Search', () => {
   let env: TestEnvironment
-  let cacheDb: Database | null = null
 
   beforeEach(() => {
     env = createTestEnvironment('messages-search')
@@ -46,19 +41,10 @@ describe('E2E: Messages Search', () => {
       { phone: '+1111111111', name: 'Test Account', is_active: true },
     ])
 
-    const cacheDbPath = join(env.dataDir, 'cache.db')
-    cacheDb = new Database(cacheDbPath)
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
-
-    seedCacheData(cacheDb)
+    seedCacheData(env.openCacheDb(1))
   })
 
   afterEach(() => {
-    if (cacheDb) {
-      cacheDb.close()
-      cacheDb = null
-    }
     env.cleanup()
   })
 
@@ -205,12 +191,7 @@ describe('E2E: Messages Search', () => {
   it('leaves the cache in one peer ID format', async () => {
     await search('--query', 'hello')
 
-    const db = new Database(join(env.dataDir, 'cache.db'))
-    try {
-      assertPeerIdInvariants(db)
-    } finally {
-      db.close()
-    }
+    assertPeerIdInvariants(env.openCacheDb(1))
   })
 })
 
@@ -223,10 +204,9 @@ describe('E2E: Messages Search on a cache from 0.2.0', () => {
     env.seedAccounts([
       { phone: '+15550000000', name: 'Test Account', is_active: true },
     ])
-    const cacheDb = new Database(join(env.dataDir, 'cache.db'))
-    initLegacySchema(cacheDb)
-    seedLegacyCache(cacheDb)
-    cacheDb.close()
+    // The shared cache of 0.3 and older, at the root of the data dir: the
+    // first command moves it to the only account
+    seedInChild(join(env.dataDir, 'cache.db'), 'legacySharedCache')
   })
 
   afterAll(() => {
@@ -306,8 +286,9 @@ describe('E2E: Messages Search on a cache from 0.2.0', () => {
     )
 
     expect(result.json).toMatchObject({ data: { rows: [{ orphans: 0 }] } })
+    expect(existsSync(join(env.dataDir, 'cache.db'))).toBe(false)
 
-    const db = new Database(join(env.dataDir, 'cache.db'))
+    const db = new Database(env.cachePath(1))
     try {
       expect(db.query('PRAGMA user_version').get()).toEqual({
         user_version: PEER_ID_USER_VERSION,
@@ -463,11 +444,8 @@ function useSeededHistory(name: string) {
       },
     ])
 
-    const cacheDb = new Database(join(env.dataDir, 'cache.db'))
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
-    seedHistory(cacheDb)
-    cacheDb.close()
+    seedHistory(env.openCacheDb(1))
+    seedSecondAccount(env.openCacheDb(SECOND_ACCOUNT_ID))
   })
 
   afterAll(() => {
@@ -991,9 +969,6 @@ function seedHistory(db: Database): void {
     message(BOOK_CLUB_ID, 1, 11, 'next book: a short one'),
     message(SELF_ID, 1, SELF_ID, 'buy milk', { is_outgoing: true }),
     message(SELF_ID, 2, SELF_ID, 'call the dentist', { is_outgoing: true }),
-    message(SECOND_SELF_ID, 5, SECOND_SELF_ID, 'renew the passport', {
-      is_outgoing: true,
-    }),
     message(BOB_ID, 1, BOB_ID, 'got the tickets'),
     message(NEW_DM_ID, 1, NEW_DM_ID, 'one kiwi smoothie, please'),
   ])
@@ -1006,9 +981,25 @@ function seedHistory(db: Database): void {
     [TEAM_CHAT_ID, 3],
     [BOOK_CLUB_ID, 1],
     [SELF_ID, 2],
-    [SECOND_SELF_ID, 5],
     [BOB_ID, 1],
   ] as const) {
     ranges.add(chatId, { low: 1, high })
   }
+}
+
+/** The second account's own cache: a page of its Saved Messages */
+function seedSecondAccount(db: Database): void {
+  createMessagesCache(db).upsertBatch([
+    {
+      chat_id: SECOND_SELF_ID,
+      message_id: 5,
+      from_id: SECOND_SELF_ID,
+      text: 'renew the passport',
+      message_type: 'text',
+      date: Math.floor(Date.now() / 1000) - 3600 + 5 * 60,
+      raw_json: '{}',
+      is_outgoing: true,
+    },
+  ])
+  createHistoryRanges(db).add(SECOND_SELF_ID, { low: 1, high: 5 })
 }

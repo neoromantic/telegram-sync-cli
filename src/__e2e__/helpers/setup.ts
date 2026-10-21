@@ -8,7 +8,10 @@
 import { Database } from 'bun:sqlite'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+
+import { initCacheSchema } from '../../db/schema'
+import { initSyncSchema } from '../../db/sync-schema'
 
 const E2E_TEST_BASE = join(tmpdir(), 'telegram-sync-cli-e2e-tests')
 
@@ -31,6 +34,15 @@ export interface TestEnvironment {
       session_data?: string
     }>,
   ): void
+
+  /** `accounts/<id>/cache.db`: the account's cache, where tg reads it */
+  cachePath(accountId?: number): string
+
+  /**
+   * Open the account's cache with the current schema, creating it. The
+   * handle stays open until cleanup(); a test may keep it while the CLI runs.
+   */
+  openCacheDb(accountId?: number): Database
 
   /** Clean up the test environment */
   cleanup(): void
@@ -91,9 +103,26 @@ export function createTestEnvironment(testName: string): TestEnvironment {
   mkdirSync(dataDir, { recursive: true })
 
   let db: Database | null = null
+  const cacheDbs = new Map<number, Database>()
+  const cachePath = (accountId = 1) =>
+    join(dataDir, 'accounts', String(accountId), 'cache.db')
 
   return {
     dataDir,
+
+    cachePath,
+
+    openCacheDb(accountId = 1): Database {
+      const open = cacheDbs.get(accountId)
+      if (open) return open
+      const path = cachePath(accountId)
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+      const cacheDb = new Database(path)
+      initCacheSchema(cacheDb)
+      initSyncSchema(cacheDb)
+      cacheDbs.set(accountId, cacheDb)
+      return cacheDb
+    },
 
     initDatabase(): Database {
       const dbPath = join(dataDir, 'data.db')
@@ -131,6 +160,8 @@ export function createTestEnvironment(testName: string): TestEnvironment {
         db.close()
         db = null
       }
+      for (const cacheDb of cacheDbs.values()) cacheDb.close()
+      cacheDbs.clear()
 
       // Remove the test directory
       if (existsSync(dataDir)) {

@@ -8,6 +8,16 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Account } from '../types'
+import { info } from '../utils/output'
+import {
+  accountCachePath,
+  accountDirPath,
+  type CacheLayoutMode,
+  type CacheLayoutResult,
+  createCacheLayoutGuard,
+  legacyCachePath,
+} from './cache-layout'
+import { checkCacheOwner } from './cache-meta'
 import { initCacheSchema } from './schema'
 import { initSyncSchema } from './sync-schema'
 
@@ -30,6 +40,9 @@ const DB_PATH = join(DATA_DIR, 'data.db')
  * Initialize database schema
  */
 function initSchema(db: Database): void {
+  // Several tg processes write data.db, and the move of a shared cache holds
+  // its write lock (cache-layout.ts): wait for it instead of failing at once
+  db.run('PRAGMA busy_timeout = 5000')
   db.run('PRAGMA journal_mode = WAL')
 
   db.run(`
@@ -405,30 +418,108 @@ initSchema(db)
 // Production accountsDb instance
 export const accountsDb = createAccountsDb(db)
 
-// Cache database path
-const CACHE_DB_PATH = join(DATA_DIR, 'cache.db')
-
-// Lazy-initialized cache database
-let cacheDb: Database | null = null
+const cacheLayout = createCacheLayoutGuard(() => ({
+  dataDir: DATA_DIR,
+  db,
+  accounts: accountsDb,
+  notice: info,
+}))
 
 /**
- * Get the cache database instance
- * Lazy-initializes on first call for better startup performance
+ * Move the shared cache of 0.3 and older to the per-account layout, once
+ * per process (see cache-layout.ts). `strict` throws CacheUnavailableError
+ * when the only account's cache can't be opened yet; `report` returns it.
  */
-export function getCacheDb(): Database {
-  if (!cacheDb) {
-    const db = new Database(CACHE_DB_PATH)
-    try {
-      initCacheSchema(db)
-      initSyncSchema(db)
-    } catch (err) {
-      // A failed migration rolled back; the next call opens and retries it
-      db.close()
-      throw err
-    }
-    cacheDb = db
+export function ensureCacheLayout(options: {
+  mode: CacheLayoutMode
+  notice?: (message: string) => void
+}): CacheLayoutResult {
+  return cacheLayout.ensure(options.mode, options.notice)
+}
+
+/** `<dataDir>/accounts/<id>`: everything the account has besides its session */
+export function getAccountDir(accountId: number): string {
+  return accountDirPath(DATA_DIR, accountId)
+}
+
+/** `<dataDir>/accounts/<id>/cache.db` */
+export function getAccountCachePath(accountId: number): string {
+  return accountCachePath(DATA_DIR, accountId)
+}
+
+/** The shared cache of 0.3 and older, `<dataDir>/cache.db` */
+export function getLegacyCachePath(): string {
+  return legacyCachePath(DATA_DIR)
+}
+
+// One connection per account's cache, opened on first use
+const accountCaches = new Map<number, Database>()
+
+function openAccountCacheFile(accountId: number): Database {
+  const account = accountsDb.getById(accountId)
+  if (!account) {
+    throw new Error(`Account with ID ${accountId} not found`)
   }
-  return cacheDb
+
+  mkdirSync(getAccountDir(accountId), { recursive: true, mode: 0o700 })
+  const path = getAccountCachePath(accountId)
+  const cache = new Database(path)
+  try {
+    initCacheSchema(cache)
+    initSyncSchema(cache)
+    checkCacheOwner(cache, account, path)
+  } catch (err) {
+    // A failed migration rolled back; the next call opens and retries it
+    cache.close()
+    throw err
+  }
+  accountCaches.set(accountId, cache)
+  return cache
+}
+
+/**
+ * The account's cache database, created on first use. Moves a shared cache
+ * first, so a single account's cache from 0.3 is never left behind.
+ */
+export function getAccountCacheDb(accountId: number): Database {
+  const existing = accountCaches.get(accountId)
+  if (existing) return existing
+  ensureCacheLayout({ mode: 'strict' })
+  return openAccountCacheFile(accountId)
+}
+
+/**
+ * The account's cache if its file exists, else null; never creates one.
+ * Call ensureCacheLayout first.
+ */
+export function openExistingAccountCacheDb(accountId: number): Database | null {
+  const existing = accountCaches.get(accountId)
+  if (existing) return existing
+  if (!existsSync(getAccountCachePath(accountId))) return null
+  return openAccountCacheFile(accountId)
+}
+
+/** Close every account's cache connection */
+export function closeAccountCacheDbs(): void {
+  for (const cache of accountCaches.values()) {
+    try {
+      cache.close()
+    } catch {
+      // Already closed
+    }
+  }
+  accountCaches.clear()
+}
+
+/**
+ * An in-memory database with the cache schema, for `tg sql print-schema`:
+ * needs no account and creates no file
+ */
+export function createSchemaOnlyDb(): Database {
+  const schemaDb = new Database(':memory:')
+  initCacheSchema(schemaDb)
+  initSyncSchema(schemaDb)
+  return schemaDb
 }
 
 /** Get database path for debugging */
@@ -436,16 +527,17 @@ export function getDatabasePath(): string {
   return DB_PATH
 }
 
-/** Get cache database path for debugging */
-export function getCacheDatabasePath(): string {
-  return CACHE_DB_PATH
-}
-
 /** Get data directory path */
 export function getDataDir(): string {
   return DATA_DIR
 }
 
+export {
+  type CacheLayoutResult,
+  CacheUnavailableError,
+  isCacheUnavailableError,
+  listSharedCaches,
+} from './cache-layout'
 // Re-export sync schema types and functions
 export {
   ChatSyncStateRow,

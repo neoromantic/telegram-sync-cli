@@ -1,13 +1,10 @@
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
-import { getCacheDb } from '../../db'
 import { createChatsCache } from '../../db/chats-cache'
 import { isCacheStale } from '../../db/types'
 import { ErrorCodes } from '../../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../../utils/account-selector'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success } from '../../utils/output'
 import { chatRowToItem } from './helpers'
 
@@ -35,10 +32,9 @@ export const searchChatsCommand = defineCommand({
   async run({ args }) {
     const query = args.query
     const limit = Number.parseInt(args.limit ?? '20', 10)
-    resolveAccountSelector(args.account)
+    const { db: cacheDb } = openAccountCache(args.account)
 
     try {
-      const cacheDb = getCacheDb()
       const chatsCache = createChatsCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 

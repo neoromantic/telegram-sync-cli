@@ -5,7 +5,13 @@
  */
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { applySyncMode } from '../commands/chats/sync'
@@ -15,6 +21,7 @@ import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { seedLegacyCache } from './helpers/legacy-cache'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
+import { seedInChild } from './helpers/seed-in-child'
 
 const SCHEMA_MODULE = join(import.meta.dir, '../db/schema.ts')
 const SYNC_SCHEMA_MODULE = join(import.meta.dir, '../db/sync-schema.ts')
@@ -43,15 +50,16 @@ const INIT_SCHEMA = `
 `
 
 /**
- * Another process: getCacheDb on a cache whose migration fails once, as
- * when the disk is full. The failed open must not stick: the next call
+ * Another process: getAccountCacheDb on a cache whose migration fails once,
+ * as when the disk is full. The failed open must not stick: the next call
  * opens the file again and migrates it.
  */
 const RETRY_OPEN = `
   import { Database } from 'bun:sqlite'
-  const { getCacheDb } = await import(process.env.DB_MODULE)
+  const { accountsDb, getAccountCacheDb } = await import(process.env.DB_MODULE)
+  accountsDb.create({ phone: '+15550000001', is_active: true })
   try {
-    getCacheDb()
+    getAccountCacheDb(1)
     console.log('first open: ok')
   } catch (err) {
     console.log('first open: ' + err.message)
@@ -59,9 +67,72 @@ const RETRY_OPEN = `
   const other = new Database(process.env.LOCK_DB_PATH)
   other.run('DROP TRIGGER fail_rekey')
   other.close()
-  const db = getCacheDb()
+  const db = getAccountCacheDb(1)
   console.log('second open: ' + db.query('PRAGMA user_version').get().user_version)
 `
+
+/** A tg command: opens the only account's cache, moving a shared one first */
+const OPEN_ACCOUNT_CACHE = `
+  const { getAccountCacheDb } = await import(process.env.DB_MODULE)
+  try {
+    const db = getAccountCacheDb(1)
+    const row = db.query('SELECT COUNT(*) AS count FROM chats_cache').get()
+    console.log('chats: ' + row.count)
+  } catch (err) {
+    console.log((err.reason ?? 'error') + ': ' + err.message)
+  }
+`
+
+/** An older tg: keeps the shared cache open, idle, until told to stop */
+const HOLD_OPEN = `
+  import { Database } from 'bun:sqlite'
+  const db = new Database(process.env.LOCK_DB_PATH)
+  db.query('SELECT COUNT(*) FROM chats_cache').get()
+  console.log('open')
+  await Bun.sleep(Number(process.env.LOCK_HOLD_MS))
+  db.close()
+`
+
+/** A cache.db as 0.3 left it at the root of the data dir */
+function seedSharedCache(path: string): void {
+  rmSync(path, { force: true })
+  for (const suffix of ['-wal', '-shm']) rmSync(path + suffix, { force: true })
+  seedInChild(path, 'legacySharedCache')
+}
+
+/** data.db with `count` made-up accounts, the first one active */
+function seedAccounts(dir: string, count: number): void {
+  const data = new Database(join(dir, 'data.db'))
+  data.run('PRAGMA journal_mode = WAL')
+  data.run(`
+    CREATE TABLE IF NOT EXISTS accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone TEXT UNIQUE NOT NULL,
+      user_id INTEGER,
+      name TEXT,
+      username TEXT,
+      label TEXT,
+      session_data TEXT NOT NULL DEFAULT '',
+      is_active INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  for (let i = 1; i <= count; i++) {
+    data.run('INSERT INTO accounts (phone, is_active) VALUES (?, ?)', [
+      `+1555000000${i}`,
+      i === 1 ? 1 : 0,
+    ])
+  }
+  data.close()
+}
+
+/** Every cache database under the data dir (no sidecars), relative to it */
+function listCacheFiles(dir: string): string[] {
+  return (readdirSync(dir, { recursive: true }) as string[])
+    .filter((name) => /cache[^/]*\.db$/.test(name))
+    .sort()
+}
 
 function spawnBun(script: string, env: Record<string, string>) {
   return Bun.spawn(['bun', '--no-env-file', '-e', script], {
@@ -229,7 +300,11 @@ describe('cache database lock', () => {
   }, 30_000)
 
   it('opens the cache again after a migration that failed', async () => {
-    const legacy = new Database(path)
+    const accountCache = join(dir, 'accounts', '1', 'cache.db')
+    mkdirSync(join(dir, 'accounts', '1'), { recursive: true })
+    const legacy = new Database(accountCache)
+    initCacheSchema(legacy)
+    initSyncSchema(legacy)
     seedLegacyCache(legacy)
     legacy.run(`
       CREATE TRIGGER fail_rekey BEFORE UPDATE OF chat_id ON chats_cache
@@ -239,7 +314,7 @@ describe('cache database lock', () => {
 
     const child = spawnBun(RETRY_OPEN, {
       DB_MODULE,
-      LOCK_DB_PATH: path,
+      LOCK_DB_PATH: accountCache,
       TELEGRAM_SYNC_CLI_DATA_DIR: dir,
     })
     const [code, stdout, stderr] = await Promise.all([
@@ -254,6 +329,58 @@ describe('cache database lock', () => {
       `second open: ${PEER_ID_USER_VERSION}`,
     ])
   }, 20_000)
+
+  it('lets several processes move a shared cache to its only account at once', async () => {
+    seedSharedCache(path)
+    seedAccounts(dir, 1)
+
+    const env = { DB_MODULE, TELEGRAM_SYNC_CLI_DATA_DIR: dir }
+    const children = Array.from({ length: 4 }, () =>
+      spawnBun(OPEN_ACCOUNT_CACHE, env),
+    )
+    const results = await Promise.all(
+      children.map(async (child) => ({
+        code: await child.exited,
+        stdout: (await new Response(child.stdout).text()).trim(),
+        stderr: await new Response(child.stderr).text(),
+      })),
+    )
+
+    expect(results).toEqual(
+      results.map(() => ({ code: 0, stdout: 'chats: 4', stderr: '' })),
+    )
+    expect(existsSync(path)).toBe(false)
+    expect(existsSync(`${path}-wal`)).toBe(false)
+    expect(existsSync(join(dir, 'accounts', '1', 'cache.db'))).toBe(true)
+    expect(listCacheFiles(dir)).toEqual(['accounts/1/cache.db'])
+  }, 30_000)
+
+  it('moves a shared cache only after the older process that holds it exits', async () => {
+    seedSharedCache(path)
+    seedAccounts(dir, 1)
+
+    const holder = spawnBun(HOLD_OPEN, {
+      LOCK_DB_PATH: path,
+      LOCK_HOLD_MS: '4000',
+    })
+    await waitForLine(holder.stdout, 'open')
+
+    const env = { DB_MODULE, TELEGRAM_SYNC_CLI_DATA_DIR: dir }
+    const blocked = spawnBun(OPEN_ACCOUNT_CACHE, env)
+    expect(await blocked.exited).toBe(0)
+    expect((await new Response(blocked.stdout).text()).trim()).toStartWith(
+      'shared_cache_in_use: ',
+    )
+    expect(existsSync(path)).toBe(true)
+    expect(existsSync(join(dir, 'accounts', '1'))).toBe(false)
+
+    expect(await holder.exited).toBe(0)
+
+    const opened = spawnBun(OPEN_ACCOUNT_CACHE, env)
+    expect(await opened.exited).toBe(0)
+    expect((await new Response(opened.stdout).text()).trim()).toBe('chats: 4')
+    expect(existsSync(path)).toBe(false)
+  }, 30_000)
 
   it('lets several processes migrate a 0.1.4 database at once', async () => {
     // Turn the database back into what 0.1.4 left

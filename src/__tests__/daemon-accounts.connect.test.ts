@@ -24,6 +24,10 @@ import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import type { Account } from '../types'
 import { toLong } from '../utils/long'
+import {
+  addAccountRuntime,
+  createAccountCacheDb,
+} from './helpers/daemon-runtime'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 type AccountCreateInput = Parameters<AccountsDbInterface['create']>[0]
@@ -138,10 +142,6 @@ mock.module('@mtcute/bun', () => ({
   },
 }))
 
-mock.module('../db', () => ({
-  getCacheDb: () => testCacheDb,
-}))
-
 function createLogger() {
   return {
     info: mock(() => {}),
@@ -216,7 +216,16 @@ function createAccountsDb(seed: AccountSeed[]): AccountsDbInterface {
   }
 }
 
+/** A context whose accounts all have a runtime on the test cache */
 function createContext(accountsDb: AccountsDbInterface): DaemonContext {
+  const ctx = createBareContext(accountsDb)
+  for (const account of accountsDb.getAll()) {
+    addAccountRuntime(ctx, account.id, testCacheDb)
+  }
+  return ctx
+}
+
+function createBareContext(accountsDb: AccountsDbInterface): DaemonContext {
   return {
     dataDir: '/tmp/tgcli',
     pidPath: '/tmp/tgcli.pid',
@@ -624,6 +633,9 @@ describe('daemon-accounts: connection + event wiring', () => {
     const account = accountsDb.getById(2)
     expect(account?.user_id).toBe(555)
     expect(createdClients[0]?.startUpdatesLoop).toHaveBeenCalled()
+    // The removed account stops running; its cache files stay
+    expect(ctx.runtime.accounts.has(1)).toBe(false)
+    expect(ctx.runtime.accounts.has(2)).toBe(true)
   })
 
   it('waits out long FLOOD_WAITs instead of failing daemon requests', async () => {
@@ -673,6 +685,8 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(accountsDb.delete).toHaveBeenCalledWith(2)
     expect(ctx.state.accounts.has(2)).toBe(false)
     expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1)
+    expect(ctx.runtime.accounts.has(2)).toBe(false)
+    expect(ctx.runtime.accounts.has(1)).toBe(true)
 
     const { disconnectAllAccounts } = await import('../daemon/daemon-accounts')
     await disconnectAllAccounts(ctx)
@@ -880,7 +894,7 @@ describe('daemon-accounts: connection + event wiring', () => {
     await initializeScheduler(ctx)
 
     const oldClient = createdClients[0]!
-    const oldWorker = ctx.runtime.syncWorkers.get(1)
+    const oldWorker = ctx.runtime.accounts.get(1)?.worker
     expect(oldClient.onNewMessage.handlers).toHaveLength(1)
     expect(oldWorker?.client).toBe(oldClient as unknown as TelegramClient)
 
@@ -925,7 +939,7 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(cached?.text).toBe('After reconnect')
 
     // The sync worker was rebuilt on the new client
-    const worker = ctx.runtime.syncWorkers.get(1)
+    const worker = ctx.runtime.accounts.get(1)?.worker
     expect(worker).not.toBe(oldWorker)
     expect(worker?.client).toBe(newClient as unknown as TelegramClient)
 
@@ -966,5 +980,88 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(accountState.lastError).toBe('updates unavailable')
     expect(accountState.reconnectAttempts).toBe(1)
     expect(accountState.nextReconnectAt).toBeDefined()
+  })
+
+  describe('with two accounts', () => {
+    let otherDb: Database
+
+    beforeEach(() => {
+      otherDb = createAccountCacheDb()
+    })
+
+    afterEach(() => {
+      otherDb.close()
+    })
+
+    async function wireBoth() {
+      const accountsDb = createAccountsDb([
+        { id: 1, phone: '+15550000001', user_id: 101 },
+        { id: 2, phone: '+15550000002', user_id: 202 },
+      ])
+      const ctx = createBareContext(accountsDb)
+      addAccountRuntime(ctx, 1, testCacheDb)
+      addAccountRuntime(ctx, 2, otherDb)
+      const { setupEventHandlers } = await import('../daemon/daemon-accounts')
+      const states = [1, 2].map((accountId) => {
+        const state: AccountConnectionState = {
+          accountId,
+          phone: `+1555000000${accountId}`,
+          name: null,
+          status: 'connected',
+          client: createClient(),
+        }
+        setupEventHandlers(ctx, state)
+        return state
+      })
+      return { ctx, first: states[0]!, second: states[1]! }
+    }
+
+    it("caches a live message only in the receiving account's cache", async () => {
+      const { ctx, second } = await wireBoth()
+
+      second.eventHandlers?.onNewMessage(
+        asMessage({
+          id: 7,
+          chat: { id: 4242, type: 'user' },
+          sender: { id: 4242 },
+          text: 'lunch at one',
+          date: new Date('2026-01-02T12:00:00Z'),
+          isOutgoing: false,
+        }),
+      )
+      await Bun.sleep(0)
+
+      expect(createMessagesCache(otherDb).get(4242, 7)?.text).toBe(
+        'lunch at one',
+      )
+      expect(createMessagesCache(testCacheDb).get(4242, 7)).toBeNull()
+      expect(ctx.runtime.accounts.get(2)?.messagesSynced).toBe(1)
+      expect(ctx.runtime.accounts.get(1)?.messagesSynced).toBe(0)
+    })
+
+    it("leaves the other account's message with the same ID when a delete has no chat", async () => {
+      const { first } = await wireBoth()
+      for (const [db, text] of [
+        [testCacheDb, 'lunch at noon'],
+        [otherDb, 'lunch at one'],
+      ] as const) {
+        createMessagesCache(db).upsert({
+          chat_id: 4242,
+          message_id: 7,
+          text,
+          message_type: 'text',
+          date: 1_760_000_000,
+          raw_json: '{}',
+        })
+      }
+
+      first.eventHandlers?.onDeleteMessage(
+        asDeleteUpdate({ channelId: null, messageIds: [7] }),
+      )
+      await Bun.sleep(0)
+
+      expect(createMessagesCache(testCacheDb).get(4242, 7)?.is_deleted).toBe(1)
+      expect(createMessagesCache(otherDb).get(4242, 7)?.is_deleted).toBe(0)
+    })
   })
 })

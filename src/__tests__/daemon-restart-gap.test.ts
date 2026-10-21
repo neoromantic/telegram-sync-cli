@@ -10,6 +10,7 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import type { TelegramClient } from '@mtcute/bun'
 import {
+  type AccountRuntime,
   createDaemonRuntime,
   type DaemonContext,
 } from '../daemon/daemon-context'
@@ -29,6 +30,10 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import {
+  addAccountRuntime,
+  createAccountCacheDb,
+} from './helpers/daemon-runtime'
 import { createFakeHistory, range } from './helpers/fake-history'
 
 const CHAT_ID = 4242
@@ -41,6 +46,7 @@ describe('daemon restart with messages missed while stopped', () => {
   let scheduler: SyncScheduler
   let handlers: UpdateHandlers
   let ctx: DaemonContext
+  let rt: AccountRuntime
 
   // 150 messages (1001-1150) arrived while the daemon was stopped.
   let history: ReturnType<typeof createFakeHistory>
@@ -107,12 +113,13 @@ describe('daemon restart with messages missed while stopped', () => {
     }
 
     // The restart: live updates first, then the scheduler and its worker.
+    rt = addAccountRuntime(ctx, 1, db)
     handlers = createUpdateHandlers({
       db,
       messagesCache,
       chatSyncState,
       onMessagesSynced: (count) => {
-        ctx.runtime.totalMessagesSynced += count
+        rt.messagesSynced += count
       },
     })
     scheduler = createSyncScheduler({
@@ -121,19 +128,16 @@ describe('daemon restart with messages missed while stopped', () => {
       chatSyncState,
       messagesCache,
     })
-    ctx.runtime.scheduler = scheduler
-    ctx.runtime.syncWorkers.set(
-      1,
-      createRealSyncWorker({
-        client: history.client,
-        messagesCache,
-        historyRanges: createHistoryRanges(db),
-        chatSyncState,
-        jobsService,
-        rateLimits,
-        chatsCache: createChatsCache(db),
-      }),
-    )
+    rt.scheduler = scheduler
+    rt.worker = createRealSyncWorker({
+      client: history.client,
+      messagesCache,
+      historyRanges: createHistoryRanges(db),
+      chatSyncState,
+      jobsService,
+      rateLimits,
+      chatsCache: createChatsCache(db),
+    })
     ctx.state.accounts.set(1, {
       accountId: 1,
       phone: '+15550000000',
@@ -165,7 +169,7 @@ describe('daemon restart with messages missed while stopped', () => {
   /** One pass of the daemon loop's job step, without the inter-job delay. */
   async function runNextJob(): Promise<boolean> {
     if (!scheduler.getNextJob()) return false
-    ctx.runtime.lastJobProcessTime = 0
+    rt.lastJobProcessTime = 0
     await processJobs(ctx)
     return true
   }
@@ -198,7 +202,7 @@ describe('daemon restart with messages missed while stopped', () => {
     expect(state?.forward_cursor).toBe(1151)
     // Each new message counts once, whether it came live or from catch-up.
     expect(state?.synced_messages).toBe(CURSOR + 151)
-    expect(ctx.runtime.totalMessagesSynced).toBe(151)
+    expect(rt.messagesSynced).toBe(151)
   })
 
   it('keeps up with live messages that arrive during catch-up', async () => {
@@ -223,18 +227,15 @@ describe('daemon restart with messages missed while stopped', () => {
         return call(request)
       },
     } as unknown as TelegramClient
-    ctx.runtime.syncWorkers.set(
-      1,
-      createRealSyncWorker({
-        client,
-        messagesCache,
-        historyRanges: createHistoryRanges(db),
-        chatSyncState,
-        jobsService: createSyncJobsService(db),
-        rateLimits: createRateLimitsService(db),
-        chatsCache: createChatsCache(db),
-      }),
-    )
+    rt.worker = createRealSyncWorker({
+      client,
+      messagesCache,
+      historyRanges: createHistoryRanges(db),
+      chatSyncState,
+      jobsService: createSyncJobsService(db),
+      rateLimits: createRateLimitsService(db),
+      chatsCache: createChatsCache(db),
+    })
 
     await scheduler.initializeForStartup()
     await receiveLive(1151)
@@ -256,5 +257,132 @@ describe('daemon restart with messages missed while stopped', () => {
 
     expect(missingIds(1001, 1151)).toEqual([])
     expect(chatSyncState.get(CHAT_ID)?.forward_cursor).toBe(1151)
+  })
+})
+
+describe('daemon restart with two accounts', () => {
+  /**
+   * Both accounts have a DM with user 4242. Private chat message IDs are
+   * per account, so each cache has its own cursor, top and messages.
+   */
+  function seedAccount(
+    ctx: DaemonContext,
+    accountId: number,
+    cursor: number,
+    top: number,
+  ) {
+    const db = createAccountCacheDb()
+    const messagesCache = createMessagesCache(db)
+    const chatSyncState = createChatSyncStateService(db)
+    const jobsService = createSyncJobsService(db)
+    chatSyncState.upsert({
+      chat_id: CHAT_ID,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+      forward_cursor: cursor,
+      backward_cursor: 1,
+    })
+    chatSyncState.markHistoryComplete(CHAT_ID)
+    chatSyncState.raiseTopMessageId(CHAT_ID, top)
+    messagesCache.upsertBatch(
+      range(1, cursor).map((id) => ({
+        chat_id: CHAT_ID,
+        message_id: id,
+        message_type: 'text',
+        date: 1_700_000_000 + id,
+        raw_json: '{}',
+      })),
+    )
+    const history = createFakeHistory(range(1, top))
+    const scheduler = createSyncScheduler({
+      db,
+      jobsService,
+      chatSyncState,
+      messagesCache,
+    })
+    addAccountRuntime(ctx, accountId, db, {
+      scheduler,
+      worker: createRealSyncWorker({
+        client: history.client,
+        messagesCache,
+        historyRanges: createHistoryRanges(db),
+        chatSyncState,
+        jobsService,
+        rateLimits: createRateLimitsService(db),
+        chatsCache: createChatsCache(db),
+      }),
+    })
+    ctx.state.accounts.set(accountId, {
+      accountId,
+      phone: `+1555000000${accountId}`,
+      name: null,
+      status: 'connected',
+      client: history.client,
+    })
+    return { db, messagesCache, chatSyncState, history, scheduler }
+  }
+
+  it('catches each account up from its own cursor, in its own cache', async () => {
+    const ctx: DaemonContext = {
+      dataDir: '/tmp/tgcli',
+      pidPath: '/tmp/tgcli/daemon.pid',
+      verbosity: 'normal',
+      reconnectConfig: {
+        initialDelayMs: 1000,
+        maxDelayMs: 4000,
+        maxAttempts: 3,
+        backoffMultiplier: 2,
+      },
+      shutdownTimeoutMs: 1_000_000,
+      logger: {
+        info: mock(() => {}),
+        debug: mock(() => {}),
+        warn: mock(() => {}),
+        error: mock(() => {}),
+      },
+      pidFile: {
+        acquire: () => {},
+        release: () => {},
+        read: () => null,
+        isRunning: () => false,
+        sendSignal: () => false,
+        getPath: () => '/tmp/tgcli/daemon.pid',
+      },
+      state: { running: true, accounts: new Map(), shutdownRequested: false },
+      accountsDb: createTestDatabase().accountsDb,
+      runtime: createDaemonRuntime(),
+    }
+    const first = seedAccount(ctx, 1, CURSOR, 1150)
+    const second = seedAccount(ctx, 2, 300, 320)
+    await first.scheduler.initializeForStartup()
+    await second.scheduler.initializeForStartup()
+
+    for (let i = 0; i < 40; i++) {
+      if (!first.scheduler.getNextJob() && !second.scheduler.getNextJob()) {
+        break
+      }
+      for (const rt of ctx.runtime.accounts.values()) rt.lastJobProcessTime = 0
+      await processJobs(ctx)
+    }
+
+    expect(first.chatSyncState.get(CHAT_ID)?.forward_cursor).toBe(1150)
+    expect(second.chatSyncState.get(CHAT_ID)?.forward_cursor).toBe(320)
+    for (const [account, top] of [
+      [first, 1150],
+      [second, 320],
+    ] as const) {
+      const missing = range(1, top).filter(
+        (id) => account.messagesCache.get(CHAT_ID, id) === null,
+      )
+      expect(missing).toEqual([])
+      expect(account.messagesCache.get(CHAT_ID, top + 1)).toBeNull()
+    }
+    // Account 2's catch-up started at its own cursor, on its own client
+    expect(second.history.requests.map((r) => r.minId)).toEqual([300])
+    expect(first.history.requests[0]?.minId).toBe(CURSOR)
+
+    first.db.close()
+    second.db.close()
   })
 })

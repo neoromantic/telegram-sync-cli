@@ -1,13 +1,11 @@
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
-import { accountsDb, getCacheDb } from '../../db'
+import { accountsDb } from '../../db'
 import { isCacheStale } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { ErrorCodes } from '../../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../../utils/account-selector'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success, verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import { apiUserToUserInfo, cachedUserToUserInfo } from './helpers'
@@ -29,25 +27,12 @@ export const meCommand = defineCommand({
     },
   },
   async run({ args }) {
+    // The account knows its user_id, so a cached read needs no network call
+    const { account, db: cacheDb } = openAccountCache(args.account)
+    const accountId = account.id
+
     try {
-      const accountId = resolveAccountSelector(args.account)
       const fresh = args.fresh
-
-      // Get the account to find user_id (no network call needed)
-      const account =
-        accountId !== undefined
-          ? accountsDb.getById(accountId)
-          : accountsDb.getActive()
-
-      if (!account) {
-        error(
-          ErrorCodes.AUTH_REQUIRED,
-          'No account found. Please log in first with "tg auth login"',
-        )
-        return
-      }
-
-      const cacheDb = getCacheDb()
       const usersCache = createUsersCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 

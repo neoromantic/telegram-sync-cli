@@ -21,6 +21,7 @@ import {
   type UsersCache,
 } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { mockDbModule } from './helpers/db-mock'
 
 function expectLongEqual(actual: tl.Long, expected: string | number | bigint) {
   expect(actual.toString()).toBe(toLong(expected).toString())
@@ -67,12 +68,10 @@ mock.module('../services/telegram', () => ({
   getClientForAccount: mock(() => mockClient),
 }))
 
-// Mock getCacheDb
+// Each account reads the test cache
 let testCacheDb: Database
 
-mock.module('../db', () => ({
-  getCacheDb: () => testCacheDb,
-}))
+mock.module('../db', () => mockDbModule({ cacheFor: () => testCacheDb }))
 
 // =============================================================================
 // Test Helpers

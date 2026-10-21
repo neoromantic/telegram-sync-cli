@@ -45,12 +45,58 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 
 ```
 ~/.telegram-sync-cli/
-├── data.db            # Accounts table
-├── cache.db           # Cache + sync tables
-├── session_<id>.db    # mtcute session per account
-├── daemon.pid         # PID file when daemon is running
-└── config.json        # User config
+├── data.db              # Accounts table
+├── session_<id>.db      # mtcute session per account
+├── accounts/<id>/       # One directory per account (mode 0700)
+│   └── cache.db         # The account's cache, sync state, jobs and rate limits
+├── daemon.pid           # PID file when daemon is running
+└── config.json          # User config
 ```
+
+Each account's data lives in its own `accounts/<id>/cache.db`, where `<id>` is the ID that
+`tg accounts list` prints. Back up or delete one account by its directory.
+`tg accounts remove` and `tg auth logout` keep `accounts/<id>/`; delete the directory to drop
+that account's cache. Table layouts: [database-schema.md](database-schema.md).
+
+### Which account a command uses
+
+Every command that reads or writes a cache works on one account:
+
+1. the account `--account` selects (ID, `@username` or label);
+2. otherwise the active account (`tg accounts switch`, or `activeAccount` in `config.json`);
+3. otherwise the only account, if there is exactly one.
+
+With no account, cache commands fail with `AUTH_REQUIRED` (exit 2). With several accounts and
+none active they fail with `NO_ACTIVE_ACCOUNT` (exit 1); `error.details.accounts` lists them.
+`tg status` and `tg sql print-schema` need no account.
+
+### Upgrading to per-account caches
+
+Up to 0.3 every account shared one `cache.db` at the root of the data directory. Stop the
+daemon of the older version (`tg daemon stop`) before upgrading, then run any command; the
+first one that needs a cache moves the old file:
+
+- **One account**: the file becomes `accounts/<id>/cache.db`. Every message, cursor, job and
+  rate limit carries over, and nothing is synced again.
+- **Several accounts** (or none): the old file's rows can't be split by account, so it is set
+  aside as `shared-cache.db` (`shared-cache-2.db`, … if that name is taken) and each account
+  starts an empty cache that the daemon fills again. One line on stderr says where the file
+  went, and `tg status` lists it under `storage.legacy_caches`. An old file with no data is
+  deleted instead.
+
+While an older tg still has the old file open, the move waits. With one account, cache
+commands fail with `CACHE_UNAVAILABLE` (`details.reason`: `shared_cache_in_use`) until it
+exits; with several, commands go on and a later run moves the file. `tg status` shows a
+waiting move under `storage.migration`.
+
+To hand a set-aside file to one account yourself: stop the daemon, move that account's
+`accounts/<id>/cache.db` (and its `-wal` and `-shm`, if any) away, then move
+`shared-cache.db` to `accounts/<id>/cache.db`.
+
+Going back to 0.3 or older after the move is not supported: it would start a new, empty
+shared cache. Scripts that opened `cache.db` directly should open
+`accounts/<id>/cache.db` or use `tg sql --account`. Details:
+[database-schema.md](database-schema.md#from-the-shared-cache-of-03-and-older).
 
 ## Configuration File
 
@@ -119,5 +165,6 @@ tg config set activeAccount 2
 
 ## Security
 
-- Treat `session_<id>.db`, `data.db`, and `cache.db` as sensitive.
+- Treat `session_<id>.db`, `data.db`, `accounts/<id>/cache.db` and any `shared-cache*.db` as
+  sensitive.
 - Do not embed API credentials in compiled binaries.

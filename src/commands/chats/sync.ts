@@ -1,6 +1,5 @@
 import type { Database } from 'bun:sqlite'
 import { defineCommand } from 'citty'
-import { getCacheDb } from '../../db'
 import { createChatSyncStateService } from '../../db/chat-sync-state'
 import { type CachedChat, createChatsCache } from '../../db/chats-cache'
 import { createSyncJobsService } from '../../db/sync-jobs'
@@ -10,10 +9,8 @@ import {
   type SyncMode,
 } from '../../db/sync-schema'
 import { ErrorCodes } from '../../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../../utils/account-selector'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { isUsernameIdentifier } from '../../utils/identifiers'
 import { error, success } from '../../utils/output'
 import { AmbiguousPeerError } from '../send/peer-resolver'
@@ -169,9 +166,6 @@ export const syncChatCommand = defineCommand({
     if (args.off && args.auto) {
       error(ErrorCodes.INVALID_ARGS, 'Use either --off or --auto, not both')
     }
-    // One cache serves every account (#17); the selector is only checked.
-    resolveAccountSelector(args.account)
-
     // The parser reads a marked ID such as -100… as flags and takes the
     // value of a flag it doesn't know (the global --format pretty) as the
     // positional, so a marked ID in rawArgs wins
@@ -186,13 +180,13 @@ export const syncChatCommand = defineCommand({
     }
     const mode: SyncMode = args.off ? 'off' : args.auto ? 'auto' : 'on'
 
-    const db = getCacheDb()
+    const { account, db } = openAccountCache(args.account)
     const chat = resolveChatOrFail(db, input)
     if (!chat) {
       error(
         ErrorCodes.INVALID_ARGS,
         `Chat not found in the cache: ${input}`,
-        { chat: input },
+        { chat: input, account_id: account.id },
         'Start the daemon (its dialog pass lists every chat, archived ones too) or run tg chats get --id @username, then retry',
       )
     }

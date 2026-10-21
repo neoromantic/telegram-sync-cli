@@ -5,13 +5,11 @@
  * tests of the run() function bypass.
  */
 
-import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { seedLegacyCache } from '../__tests__/helpers/legacy-cache'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
+import { seedInChild } from '../__tests__/helpers/seed-in-child'
 import { runCliFailure, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
@@ -25,6 +23,7 @@ describe('E2E: SQL Command', () => {
   beforeEach(() => {
     env = createTestEnvironment('sql')
     env.initDatabase()
+    env.seedAccounts([{ phone: '+15550000001', is_active: true }])
   })
 
   afterEach(() => {
@@ -56,18 +55,17 @@ describe('E2E: SQL Command', () => {
     })
   })
 
-  it('runs the docs example that lists messages per chat with titles', async () => {
-    const db = new Database(join(env.dataDir, 'cache.db'))
-    initCacheSchema(db)
-    initSyncSchema(db)
-    seedLegacyCache(db)
-    initSyncSchema(db)
-    db.close()
+  it('runs the docs example that lists messages per chat with titles on a cache from 0.2.0', async () => {
+    // The shared cache of 0.3 and older moves to the only account first
+    const legacyPath = join(env.dataDir, 'cache.db')
+    seedInChild(legacyPath, 'legacySharedCache')
 
     const result = await runCliSuccess(
       ['sql', '--query', MESSAGES_PER_CHAT],
       env.getCliOptions(),
     )
+    expect(existsSync(legacyPath)).toBe(false)
+    expect(existsSync(env.cachePath(1))).toBe(true)
 
     expect(result.json).toEqual({
       success: true,

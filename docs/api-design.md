@@ -206,7 +206,18 @@ Exit codes:
 
 ## Account Context
 
-Every command runs in context of an "active" account:
+Every command runs in the context of one account, and each account has its own cache
+(`accounts/<id>/cache.db`), so a command reads and writes only that account's data. The
+account is the one `--account` selects, else the active account, else the only account:
+
+- no account: `AUTH_REQUIRED` (exit 2);
+- several accounts and none active: `NO_ACTIVE_ACCOUNT` (exit 1), with `details.accounts`
+  listing `{ id, phone, username, label }` for each;
+- a selector that matches nothing: `ACCOUNT_NOT_FOUND` (exit 6);
+- an account whose cache can't be opened yet: `CACHE_UNAVAILABLE` (exit 1), with
+  `details: { reason, path }`. `reason` is `shared_cache_in_use` (an older tg still holds the
+  shared cache of 0.3 and older), `move_failed` or `owner_mismatch` (the file belongs to
+  another account).
 
 ```bash
 # Set active account

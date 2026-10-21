@@ -4,9 +4,10 @@
 
 ## Overview
 
-telegram-sync-cli coordinates rate limits across the CLI and daemon via a shared
-SQLite cache database. All API calls are recorded and FLOOD_WAITs are enforced
-before subsequent calls are made.
+telegram-sync-cli coordinates rate limits across the CLI and daemon per account, in the
+account's own cache database (`accounts/<id>/cache.db`). All API calls are recorded and
+FLOOD_WAITs are enforced before subsequent calls are made. One account's FLOOD_WAIT never
+blocks another account.
 
 Key behaviors:
 - Track per-method call counts in rolling windows
@@ -19,7 +20,7 @@ Key behaviors:
 - `src/utils/telegram-rate-limits.ts` — CLI wrapper helpers
 - `src/daemon/*` — daemon job execution uses the same service
 
-## Database Tables (cache.db)
+## Database Tables (each account's cache.db)
 
 ### rate_limits
 Tracks call counts and flood waits per method.
@@ -51,8 +52,9 @@ Columns:
 
 ## CLI Integration
 
-CLI commands wrap API calls using `wrapClientCallWithRateLimits()` so manual
-commands and the daemon share the same rate-limit state.
+CLI commands wrap API calls using `wrapClientCallWithRateLimits(client, { accountId })`
+(`getRateLimitsService(accountId)` opens that account's cache), so manual commands and the
+daemon share the same rate-limit state for each account.
 
 ## Waiting Out FLOOD_WAITs
 
@@ -70,9 +72,9 @@ later calls while the method is blocked.
 ## Daemon Sync Jobs
 
 The daemon's sync jobs make one `messages.getHistory` call each, at most one job every 3
-seconds, shared by its three lanes (catch-up, first pages, history; see
+seconds per account, shared by the account's three lanes (catch-up, first pages, history; see
 [sync-strategy.md](sync-strategy.md#job-lanes)). While a FLOOD_WAIT on `messages.getHistory`
-lasts, no lane runs a job. The job that hit it doesn't fail: it waits out the FLOOD_WAIT as a
+lasts, no lane of that account runs a job; the other accounts' jobs go on. The job that hit it doesn't fail: it waits out the FLOOD_WAIT as a
 pending job and uses no attempt, then runs again from its chat's cursor, where the last page
 left it. Other errors retry with backoff (see
 [sync-strategy.md](sync-strategy.md#retries)).
@@ -80,4 +82,6 @@ left it. Other errors retry with backoff (see
 ## Notes
 
 - Rate-limit tracking is per-method (e.g., `messages.getHistory`).
-- CLI and daemon share the same `cache.db`, so limits are coordinated.
+- CLI and daemon share each account's `cache.db`, so limits are coordinated per account.
+- mtcute's flood waiter sleeps inside the call, and the daemon runs one job at a time, so a
+  wait of up to 5 minutes inside one account's job still holds up the other accounts' jobs.

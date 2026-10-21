@@ -2,15 +2,12 @@ import type { Database } from 'bun:sqlite'
 import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
-import { getCacheDb } from '../../db'
 import { createChatsCache } from '../../db/chats-cache'
 import { isCacheStale } from '../../db/types'
 import { getClientForAccount } from '../../services/telegram'
 import { ErrorCodes } from '../../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../../utils/account-selector'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import {
   isUsernameIdentifier,
   normalizeUsername,
@@ -157,12 +154,11 @@ export const getChatCommand = defineCommand({
   },
   async run({ args }) {
     const identifier = args.id
-    const accountId = resolveAccountSelector(args.account)
     const fresh = args.fresh ?? false
     const isUsername = isUsernameIdentifier(identifier)
+    const { account, db: cacheDb } = openAccountCache(args.account)
 
     try {
-      const cacheDb = getCacheDb()
       const chatsCache = createChatsCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
@@ -182,8 +178,8 @@ export const getChatCommand = defineCommand({
       assertUsernameIdentifier(isUsername, identifier, fresh)
       verbose(`Fetching chat "${identifier}" from Telegram API...`)
       const client = wrapClientCallWithRateLimits(
-        getClientForAccount(accountId),
-        { context: 'cli:chats.get' },
+        getClientForAccount(account.id),
+        { context: 'cli:chats.get', accountId: account.id },
       )
 
       const result = await fetchChatFromApi(chatsCache, client, identifier)
