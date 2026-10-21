@@ -308,6 +308,34 @@ describe('resolvePeer with numeric IDs', () => {
       })
     })
 
+    it.each(['+1 (555) 000-0000', '+1-555-000-0000', '+1 555 000 0000'])(
+      'looks up %p as a phone number, not a username',
+      async (identifier) => {
+        const { call, client } = throwingClient(phoneNotOccupied)
+
+        await expect(resolve(identifier, client)).rejects.toThrow(
+          `Could not resolve phone number ${identifier}`,
+        )
+        expect(call).toHaveBeenCalledTimes(1)
+        expect(call.mock.calls[0]?.[0]).toEqual({
+          _: 'contacts.resolvePhone',
+          phone: '15550000000',
+        })
+      },
+    )
+
+    it.each(['+', '+alice', '+1 555 abc'])(
+      'rejects %p, which has no phone number after +',
+      async (identifier) => {
+        const { call, client } = throwingClient()
+
+        await expect(resolve(identifier, client)).rejects.toBeInstanceOf(
+          InvalidPeerError,
+        )
+        expect(call).not.toHaveBeenCalled()
+      },
+    )
+
     it.each([
       ['@alice', 'contacts.resolveUsername'],
       ['+15550000000', 'contacts.resolvePhone'],

@@ -96,6 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lookup by ID needs no API call.
 - `tg send --to` rejects a malformed number such as `-12.5`, `1e1` or `12.0`
   instead of reading its leading digits as a basic group ID.
+- `tg send --to '+1 (555) 000-0000'`, or a `+` number with spaces or dashes,
+  looked the number up as a username. A `+` now always means a phone number.
 
 ## [0.1.4] - 2026-10-21
 
