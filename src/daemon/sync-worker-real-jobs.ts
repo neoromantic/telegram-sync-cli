@@ -196,8 +196,20 @@ export async function processBackwardHistoryReal(
     return { success: true, messagesFetched: 0, historyComplete: true }
   }
 
-  let backwardCursor = state?.backward_cursor
-  if (backwardCursor === null || backwardCursor === undefined) {
+  // Older versions left a forward cursor without a backward one (0.1.4's
+  // catch-up, and every live message before it), or one above it (a first
+  // page of only empty messages). The oldest cached message then says
+  // nothing about what is cached below the forward cursor, so history pages
+  // down from just above it.
+  const forwardCursor = state?.forward_cursor ?? null
+  let backwardCursor = state?.backward_cursor ?? null
+  if (
+    forwardCursor !== null &&
+    (backwardCursor === null || backwardCursor > forwardCursor + 1)
+  ) {
+    backwardCursor = forwardCursor + 1
+  }
+  if (backwardCursor === null) {
     backwardCursor = ctx.messagesCache.getOldestMessageId(chatId) ?? 0
   }
 

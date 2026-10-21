@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The first page and history pages counted messages that were already cached.
   A page of only deleted messages set the backward cursor past every message,
   or in history left it in place, so the same page was fetched forever.
+- On a cache from 0.1.4 or earlier, a chat with a forward cursor but no
+  backward cursor would start history below its oldest cached message, so the
+  messages between that one and the cursor were never fetched, yet history
+  ended up marked complete. History now pages down from the forward cursor.
 - A CLI command that writes the cache (for example `tg send` or
   `tg chats list --fresh`) failed with "database is locked" if the daemon was
   writing at that moment. It now waits up to 5 seconds for the lock.

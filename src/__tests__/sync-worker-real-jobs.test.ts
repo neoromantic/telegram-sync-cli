@@ -1133,5 +1133,61 @@ describe('sync-worker real jobs', () => {
       const [job] = ctx.jobsService.getJobsForChat(chatId)
       expect(job?.messages_fetched).toBe(98)
     })
+
+    /** A chat as an older version left it: no backward cursor */
+    function seedLegacy(forwardCursor: number, backwardCursor: number | null) {
+      ctx.chatSyncState.delete(chatId)
+      ctx.chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: forwardCursor,
+        backward_cursor: backwardCursor,
+      })
+    }
+
+    it('pages down from the forward cursor when there is no backward cursor', async () => {
+      // 0.1.4 cached message 50 live and moved the cursor to 300 by
+      // catch-up; 51-200 were never fetched
+      seedLegacy(300, null)
+      for (const id of [50, ...range(201, 300)]) {
+        ctx.messagesCache.upsert({
+          chat_id: chatId,
+          message_id: id,
+          message_type: 'text',
+          date: 1_700_000_000 + id,
+          raw_json: '{}',
+        })
+      }
+      const history = createFakeHistory(range(1, 300))
+      ctx.client = history.client
+
+      const fetched: number[] = []
+      for (let run = 0; run < 5 && !state()?.history_complete; run++) {
+        fetched.push((await runHistory()).messagesFetched)
+      }
+
+      expect(history.requests.map((request) => request.offsetId)).toEqual([
+        301, 201, 101,
+      ])
+      expect(fetched).toEqual([0, 100, 99])
+      expect(ctx.messagesCache.countByChatId(chatId)).toBe(300)
+      expect(state()?.backward_cursor).toBe(1)
+      expect(state()?.history_complete).toBe(1)
+    })
+
+    it('ignores a backward cursor above the forward cursor', async () => {
+      // An older first page of only empty messages left these cursors
+      seedLegacy(0, Number.MAX_SAFE_INTEGER)
+      const history = createFakeHistory(range(1, 5))
+      ctx.client = history.client
+
+      const result = await runHistory()
+
+      expect(history.requests.map((request) => request.offsetId)).toEqual([1])
+      expect(result).toMatchObject({ success: true, historyComplete: true })
+      expect(state()?.history_complete).toBe(1)
+    })
   })
 })
