@@ -559,9 +559,10 @@ export async function attemptReconnect(
 }
 
 /**
- * Close every account's client on shutdown, so mtcute saves and closes each
- * session. The clients close in parallel: one slow close doesn't use up the
- * shutdown timeout for the rest.
+ * Close every account's client once on shutdown, which stops its updates loop
+ * and closes its Telegram connections. mtcute itself saves and closes the
+ * session files when the signal arrives. The clients close in parallel: one
+ * slow close doesn't use up the shutdown timeout for the rest.
  */
 export async function disconnectAllAccounts(ctx: DaemonContext): Promise<void> {
   ctx.logger.debug('Disconnecting all accounts...')
