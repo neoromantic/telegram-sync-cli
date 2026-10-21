@@ -1034,4 +1034,104 @@ describe('sync-worker real jobs', () => {
       expect(ctx.chatSyncState.get(chatId)?.forward_cursor).toBe(1000)
     })
   })
+
+  describe('backward history', () => {
+    const chatId = 5151
+
+    beforeEach(() => {
+      ctx.config.batchSize = 100
+      ctx.chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 300,
+        backward_cursor: 201,
+      })
+    })
+
+    function runHistory() {
+      const job = ctx.jobsService.create({
+        chat_id: chatId,
+        job_type: SyncJobType.BackwardHistory,
+        priority: SyncPriority.High,
+      })
+      return processJobReal(ctx, job)
+    }
+
+    const state = () => ctx.chatSyncState.get(chatId)
+
+    it('moves the cursor past a full page of empty messages', async () => {
+      ctx.config.batchSize = 2
+      const call = mock(async (request: { offsetId: number }) => ({
+        messages: [
+          { _: 'messageEmpty', id: request.offsetId - 1 },
+          { _: 'messageEmpty', id: request.offsetId - 2 },
+        ],
+      }))
+      ctx.client = { call } as unknown as TelegramClient
+
+      const first = await runHistory()
+      const second = await runHistory()
+
+      expect(first).toMatchObject({
+        success: true,
+        messagesFetched: 0,
+        hasMore: true,
+        newCursor: 199,
+      })
+      expect(call.mock.calls.map(([request]) => request.offsetId)).toEqual([
+        201, 199,
+      ])
+      expect(second).toMatchObject({ hasMore: true, newCursor: 197 })
+      expect(state()?.backward_cursor).toBe(197)
+      expect(state()?.history_complete).toBe(0)
+      expect(state()?.synced_messages).toBe(0)
+    })
+
+    it('stops on a page without message IDs instead of fetching it again', async () => {
+      ctx.config.batchSize = 2
+      ctx.client = {
+        call: mock(async () => ({
+          messages: [{ _: 'messageEmpty' }, { _: 'messageEmpty' }],
+        })),
+      } as unknown as TelegramClient
+
+      const result = await runHistory()
+
+      expect(result).toMatchObject({
+        success: true,
+        hasMore: false,
+        historyComplete: true,
+      })
+      expect(state()?.backward_cursor).toBe(201)
+      expect(state()?.history_complete).toBe(1)
+    })
+
+    it('counts only messages that were not cached yet', async () => {
+      // Live updates cached two of the page's messages
+      for (const id of [150, 200]) {
+        ctx.messagesCache.upsert({
+          chat_id: chatId,
+          message_id: id,
+          message_type: 'text',
+          date: 1_700_000_000 + id,
+          raw_json: '{}',
+        })
+      }
+      ctx.client = createFakeHistory(range(1, 300)).client
+
+      const result = await runHistory()
+
+      expect(result).toMatchObject({
+        success: true,
+        messagesFetched: 98,
+        hasMore: true,
+        newCursor: 101,
+      })
+      expect(state()?.synced_messages).toBe(98)
+      const [job] = ctx.jobsService.getJobsForChat(chatId)
+      expect(job?.messages_fetched).toBe(98)
+    })
+  })
 })

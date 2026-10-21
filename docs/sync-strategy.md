@@ -159,6 +159,14 @@ and only messages that weren't cached yet count towards `synced_messages`.
 mtcute's `catchUp` option stays off: forward catch-up already covers missed messages, and
 `getDifference` can't replay a long gap anyway (`differenceTooLong`).
 
+### History
+
+Each `backward_history` job fetches the 100 messages below `backward_cursor`
+(`offset_id = backward_cursor`), caches them and moves the cursor to the oldest one. Empty
+messages count for the cursor, so a page of deleted messages still moves it, and a page without
+any message ID ends the history. Only messages that weren't cached yet count towards
+`synced_messages`. A page that isn't full or reaches message 1 marks history complete.
+
 ### Scheduling
 
 0. **Dialog pass** on start, one per connected account: fills `chats_cache` and updates

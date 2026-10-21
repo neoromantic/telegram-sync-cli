@@ -216,35 +216,38 @@ export async function processBackwardHistoryReal(
       ctx.chatSyncState.updateLastSync(chatId, 'backward')
       result = { success: true, messagesFetched: 0, historyComplete: true }
     } else {
-      const { inputs, minId } = createMessageInputs(
-        messages,
-        chatId,
-        backwardCursor || Number.MAX_SAFE_INTEGER,
-        backwardCursor || 0,
-      )
+      // Empty messages hold no data, but the cursor still moves past them.
+      const ids = messages.map(rawMessageId).filter((id) => id > 0)
+      const minId = ids.length > 0 ? Math.min(...ids) : backwardCursor
+      const { inputs } = createMessageInputs(messages, chatId, minId, minId)
+
+      // The first page and live updates may have cached some of them.
+      const newCount = countUncached(ctx, chatId, inputs)
 
       if (inputs.length > 0) {
         ctx.messagesCache.upsertBatch(inputs)
       }
 
       ctx.chatSyncState.updateCursors(chatId, { backward_cursor: minId })
-      ctx.chatSyncState.incrementSyncedMessages(chatId, inputs.length)
+      ctx.chatSyncState.incrementSyncedMessages(chatId, newCount)
       ctx.chatSyncState.updateLastSync(chatId, 'backward')
 
       ctx.jobsService.updateProgress(job.id, {
-        messages_fetched: inputs.length,
+        messages_fetched: newCount,
         cursor_end: minId,
       })
 
+      // A page without message IDs can't move the cursor, so fetching the
+      // next one would fetch the same page again.
       const historyComplete =
-        minId === 1 || messages.length < ctx.config.batchSize
+        ids.length === 0 || minId <= 1 || messages.length < ctx.config.batchSize
       if (historyComplete) {
         ctx.chatSyncState.markHistoryComplete(chatId)
       }
 
       result = {
         success: true,
-        messagesFetched: inputs.length,
+        messagesFetched: newCount,
         hasMore: !historyComplete,
         newCursor: minId,
         historyComplete,
