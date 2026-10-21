@@ -160,14 +160,16 @@ Scheduler → sync_jobs → worker → messages_cache + chat_sync_state
 - Checks each idle account's connection about once a minute; a failed check
   schedules a reconnect with exponential backoff
 - An account whose first connect fails (login, `getMe` or the updates loop)
-  has its client closed, so the session file isn't left open
+  has its client closed right away, so its connection and session file aren't
+  left open until the daemon stops
 - A reconnect closes the old client before it opens a new one on the same
   session file, registers the update handlers on the new client, starts its
   updates loop and rebuilds the account's sync worker; a failed attempt closes
   the new client and schedules the next retry
 - On shutdown (`tg daemon stop`, SIGTERM or SIGINT) the daemon closes every
-  account's client, each once, so mtcute saves and closes the session files,
-  update state included, before the process exits
+  account's client once, which stops its updates loop and closes its Telegram
+  connections. mtcute itself saves and closes the session files when the
+  signal arrives
 - After a reconnect, a dialog pass runs on the new client in the background
   (one per account at a time), then the scheduler catches up the chats that got
   messages while the connection was down. If the pass fails part-way, every
