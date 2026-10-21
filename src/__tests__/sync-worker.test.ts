@@ -510,10 +510,10 @@ describe('SyncWorker', () => {
       expect(mockGetMessages).not.toHaveBeenCalled()
     })
 
-    it('uses oldest cached message as cursor when no backward cursor set', async () => {
+    it('starts at the newest page when no backward cursor is set', async () => {
       setupChatState(100)
 
-      // Pre-populate some cached messages
+      // Cached messages, for example from tg messages list, mark no progress
       messagesCache.upsert({
         chat_id: 100,
         message_id: 100,
@@ -542,10 +542,9 @@ describe('SyncWorker', () => {
 
       await worker.processBackwardHistory(job)
 
-      // Should have used 50 as the offset
       expect(mockGetMessages).toHaveBeenCalledWith(100, {
         limit: 100,
-        offsetId: 50,
+        offsetId: 0,
       })
     })
 

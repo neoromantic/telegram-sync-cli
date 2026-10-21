@@ -249,10 +249,9 @@ async function processBackwardHistory(
     return { success: true, messagesFetched: 0 }
   }
 
-  let backwardCursor = state?.backward_cursor
-  if (backwardCursor === null || backwardCursor === undefined) {
-    backwardCursor = ctx.messagesCache.getOldestMessageId(chatId) ?? 0
-  }
+  // Without a cursor, start at the newest page: the oldest cached message
+  // marks no progress (see processBackwardHistoryReal)
+  const backwardCursor = state?.backward_cursor ?? 0
 
   try {
     recordApiCall(ctx)

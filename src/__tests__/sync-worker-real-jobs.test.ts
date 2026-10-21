@@ -147,7 +147,7 @@ describe('sync-worker real jobs', () => {
     expect(result.messagesFetched).toBe(0)
   })
 
-  it('uses oldest cached message id when backward cursor is unset', async () => {
+  it('starts backfill at the newest page when the backward cursor is unset', async () => {
     const chatId = 99
     ctx.chatSyncState.upsert({
       chat_id: chatId,
@@ -155,40 +155,49 @@ describe('sync-worker real jobs', () => {
       sync_priority: SyncPriority.High,
       sync_enabled: true,
     })
-
-    ctx.messagesCache.upsert({
-      chat_id: chatId,
-      message_id: 20,
-      message_type: 'text',
-      date: 1700000000,
-      raw_json: '{}',
-    })
-
-    const job = ctx.jobsService.create({
-      chat_id: chatId,
-      job_type: SyncJobType.BackwardHistory,
-      priority: SyncPriority.High,
-    })
-
-    const clientCall = mock(async (payload: Record<string, unknown>) => {
-      expect(payload.offsetId).toBe(20)
-      return {
-        messages: [{ _: 'message', id: 15, date: 1699999999, message: 'old' }],
-      }
-    })
-
-    ctx.client = { call: clientCall } as unknown as TelegramClient
+    // Pages that tg messages list and get cached: the start of the chat, one
+    // message in the middle and the newest two
+    for (const id of [1, 2, 3, 20, 29, 30]) {
+      ctx.messagesCache.upsert({
+        chat_id: chatId,
+        message_id: id,
+        message_type: 'text',
+        date: 1700000000 + id,
+        raw_json: '{}',
+      })
+    }
+    const history = createFakeHistory(range(1, 30))
+    ctx.client = history.client
     ctx.config.batchSize = 5
 
-    const result = await processBackwardHistoryReal(ctx, job)
+    const job = () =>
+      ctx.jobsService.create({
+        chat_id: chatId,
+        job_type: SyncJobType.BackwardHistory,
+        priority: SyncPriority.High,
+      })
 
-    expect(result.success).toBe(true)
-    expect(result.historyComplete).toBe(true)
-    expect(result.newCursor).toBe(15)
+    const first = await processBackwardHistoryReal(ctx, job())
 
-    const state = ctx.chatSyncState.get(chatId)
-    expect(state?.backward_cursor).toBe(15)
-    expect(state?.history_complete).toBe(1)
+    expect(history.requests[0]).toMatchObject({ offsetId: 0, limit: 5 })
+    expect(first).toMatchObject({
+      success: true,
+      newCursor: 26,
+      hasMore: true,
+      historyComplete: false,
+    })
+    // 29 and 30 were cached already
+    expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(3)
+
+    for (let i = 0; i < 10; i++) {
+      const result = await processBackwardHistoryReal(ctx, job())
+      if (result.historyComplete) break
+    }
+
+    expect(ctx.chatSyncState.get(chatId)?.history_complete).toBe(1)
+    expect(ctx.messagesCache.countByChatId(chatId)).toBe(30)
+    // Every gap is filled, and only the 24 messages that weren't cached count
+    expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(24)
   })
 
   it('marks history complete when backward history returns empty', async () => {

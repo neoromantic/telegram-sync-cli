@@ -184,6 +184,10 @@ above the forward one. Such a chat's history starts just above the forward curso
 (`offset_id = forward_cursor + 1`), so every message below it is fetched, not only those below
 the oldest cached message.
 
+A chat without either cursor starts at the newest page, not at the oldest cached message:
+`tg send` caches what it sends and `tg messages list` and `get` cache any page of a chat, all
+without moving the cursors, so the oldest cached message says nothing about how far history got.
+
 ### Scheduling
 
 0. **Dialog pass** on start, one per connected account: fills `chats_cache` and updates
