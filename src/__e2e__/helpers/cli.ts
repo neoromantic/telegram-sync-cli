@@ -30,18 +30,17 @@ export interface CliResult {
 const CLI_PATH = `${import.meta.dir}/../../index.ts`
 
 /**
- * Run the CLI with given arguments
+ * Start the CLI without waiting for it to exit (for long-running commands
+ * such as `daemon start`)
  */
-export async function runCli(
+export function spawnCli(
   args: string[],
-  options: CliOptions = {},
-): Promise<CliResult> {
-  const { env = {}, timeout = 10000, cwd } = options
-
-  const startTime = performance.now()
+  options: Omit<CliOptions, 'timeout'> = {},
+) {
+  const { env = {}, cwd } = options
 
   // --no-env-file: never pick up a developer's .env from the working directory
-  const proc = Bun.spawn(['bun', '--no-env-file', 'run', CLI_PATH, ...args], {
+  return Bun.spawn(['bun', '--no-env-file', 'run', CLI_PATH, ...args], {
     env: {
       ...process.env,
       // Don't throw on errors - let the CLI handle them and exit with codes
@@ -53,6 +52,20 @@ export async function runCli(
     stdout: 'pipe',
     stderr: 'pipe',
   })
+}
+
+/**
+ * Run the CLI with given arguments
+ */
+export async function runCli(
+  args: string[],
+  options: CliOptions = {},
+): Promise<CliResult> {
+  const { timeout = 10000 } = options
+
+  const startTime = performance.now()
+
+  const proc = spawnCli(args, options)
 
   // Set up timeout
   const timeoutPromise = new Promise<never>((_, reject) => {
