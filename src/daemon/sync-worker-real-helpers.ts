@@ -163,8 +163,27 @@ export function extractFloodWaitSeconds(error: Error): number | null {
   return null
 }
 
+/** The `id` of a raw message from Telegram, or 0 if it has none */
+export function rawMessageId(message: unknown): number {
+  const id = (message as { id?: unknown } | null)?.id
+  return typeof id === 'number' ? id : 0
+}
+
+/**
+ * The page a forward catch-up fetches. With a cursor it is the oldest
+ * `limit` messages above the cursor: a negative `addOffset` makes
+ * `offsetId` inclusive, so the page starts one above the cursor, and `minId`
+ * keeps older messages out. Without a cursor it is the newest page.
+ */
+export function forwardPageRequest(cursor: number | null, limit: number) {
+  if (cursor === null) {
+    return { limit }
+  }
+  return { offsetId: cursor + 1, addOffset: -limit, limit, minId: cursor }
+}
+
 export async function fetchMessagesRaw(
-  client: TelegramClient,
+  client: Pick<TelegramClient, 'call'>,
   inputPeer: tl.TypeInputPeer,
   options: {
     offsetId?: number

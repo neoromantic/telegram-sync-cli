@@ -15,6 +15,41 @@ function escapeFts5Query(query: string): string {
   return `"${escaped}"`
 }
 
+/**
+ * The columns of a message row: the message plus its chat and sender from the
+ * cache. Every command that prints messages selects these, from
+ * `messages_cache m` joined with `MESSAGE_ROW_JOINS`, so items look the same
+ * everywhere.
+ */
+export const MESSAGE_ROW_COLUMNS = `
+  m.chat_id,
+  m.message_id,
+  m.from_id,
+  m.text,
+  m.message_type,
+  m.has_media,
+  m.media_path,
+  m.is_outgoing,
+  m.is_edited,
+  m.is_pinned,
+  m.is_deleted,
+  m.reply_to_id,
+  m.forward_from_id,
+  m.edit_date,
+  m.date,
+  m.fetched_at,
+  c.title as chat_title,
+  c.username as chat_username,
+  c.type as chat_type,
+  u.username as sender_username,
+  u.first_name as sender_first_name,
+  u.last_name as sender_last_name`
+
+/** The chat and sender joins that `MESSAGE_ROW_COLUMNS` reads from */
+export const MESSAGE_ROW_JOINS = `
+  LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT)
+  LEFT JOIN users_cache u ON u.user_id = CAST(m.from_id AS TEXT)`
+
 export interface MessageSearchOptions {
   limit?: number
   offset?: number
@@ -94,33 +129,10 @@ export function createMessagesSearch(db: Database): MessagesSearchService {
       params.push(limit, offset)
 
       const sql = `
-        SELECT
-          m.chat_id,
-          m.message_id,
-          m.from_id,
-          m.text,
-          m.message_type,
-          m.has_media,
-          m.media_path,
-          m.is_outgoing,
-          m.is_edited,
-          m.is_pinned,
-          m.is_deleted,
-          m.reply_to_id,
-          m.forward_from_id,
-          m.edit_date,
-          m.date,
-          m.fetched_at,
-          c.title as chat_title,
-          c.username as chat_username,
-          c.type as chat_type,
-          u.username as sender_username,
-          u.first_name as sender_first_name,
-          u.last_name as sender_last_name
+        SELECT ${MESSAGE_ROW_COLUMNS}
         FROM message_search
         JOIN messages_cache m ON m.rowid = message_search.rowid
-        LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT)
-        LEFT JOIN users_cache u ON u.user_id = CAST(m.from_id AS TEXT)
+        ${MESSAGE_ROW_JOINS}
         WHERE ${conditions.join(' AND ')}
         ORDER BY m.date DESC
         LIMIT ? OFFSET ?
