@@ -64,6 +64,9 @@ the dialog pass and live updates never overwrite it: an upsert keeps `sync_enabl
 `on` and 0 for `off`, and `sync_priority` at High for `on`, while the chat type and member
 count still update. A chat turned on gets the High tier and its first page at P0.
 
+The mode and the policy control catch-up, first pages and history only. While the daemon runs,
+it caches messages that arrive live in every chat, including one that is off.
+
 Telegram often leaves the member count out of a supergroup's dialog, and such a group may have
 thousands of members, so a group without a count is treated as large. The dialog pass keeps the
 last known count when a dialog omits it, so a chat doesn't flip on or off between starts. A

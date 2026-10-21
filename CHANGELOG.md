@@ -10,8 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `tg chats sync <chat>` turns background sync on for a chat the default
-  policy leaves out, such as a large group or a channel; `--off` turns it off
-  and `--auto` goes back to the policy. The choice survives daemon restarts.
+  policy leaves out, such as a large group or a channel; `--off` stops its
+  catch-up and history and `--auto` goes back to the policy. The choice
+  survives daemon restarts. Messages that arrive live are cached in every
+  chat, whatever its mode.
   The chat is found in the cache by @username, by the ID `tg chats list`
   shows or by a marked ID, without Telegram credentials; for a chat that
   isn't cached yet it suggests starting the daemon or running `tg chats get`.

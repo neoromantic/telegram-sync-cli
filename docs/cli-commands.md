@@ -79,12 +79,14 @@ over 100 members and channels sync only on request:
 tg chats sync @examplenews        # turn sync on
 tg chats sync 1234567890          # the ID that tg chats list shows
 tg chats sync -1001234567890      # or a marked ID (-100… for channels, -N for basic groups)
-tg chats sync @examplenews --off  # stop syncing it
+tg chats sync @examplenews --off  # stop catch-up and history for it
 tg chats sync @examplenews --auto # follow the default policy again
 ```
 
 - The choice is stored in `chat_sync_state.sync_mode` and kept across daemon restarts and
   dialog passes.
+- `--off` and the default policy control catch-up, first pages and history. While the daemon
+  runs, it caches messages that arrive live in every chat, including one that is off.
 - Cache-only: the chat must be in `chats_cache` or have sync state from the daemon. No Telegram
   credentials needed. A daemon start caches every chat, archived ones too;
   `tg chats get --id @username` caches one chat; `tg chats list --fresh` caches only the 200

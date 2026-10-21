@@ -56,8 +56,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 
 - Multi-account management (`tg accounts`, `--account`)
 - Phone and QR login (`tg auth`)
-- Read-only daemon for real-time sync and history backfill; large groups and channels on
-  request (`tg chats sync`); the CLI does all mutations (`tg send`)
+- Read-only daemon for real-time sync and history backfill; catch-up and history for large
+  groups and channels on request (`tg chats sync`); the CLI does all mutations (`tg send`)
 - Full Telegram API access through `tg api <method>`
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
 - Full-text search (FTS5) over cached messages
@@ -79,7 +79,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Local cache, offline queries | ✅ SQLite, cache-first, `--fresh` | ❌ live calls only |
 | Message search | ✅ full-text (FTS5) over cached messages | ✅ Telegram server search |
 | SQL over your data | ✅ read-only `tg sql` | ❌ |
-| Background sync | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; large groups and channels on request (`tg chats sync`) | partial: waits for events, stores nothing |
+| Background sync | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; catch-up and history for large groups and channels on request (`tg chats sync`) | partial: waits for events, stores nothing |
 | Any MTProto method | ✅ `tg api <method>` | ❌ fixed tool set |
 | Read chat history | partial: `tg sql` or `tg api` ([#21](https://github.com/neoromantic/telegram-sync-cli/issues/21)) | ✅ |
 | Send text | ✅ replies, silent | ✅ replies, Markdown/HTML |

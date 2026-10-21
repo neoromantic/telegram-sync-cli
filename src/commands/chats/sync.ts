@@ -135,7 +135,8 @@ export const syncChatCommand = defineCommand({
     },
     off: {
       type: 'boolean',
-      description: 'Stop syncing the chat',
+      description:
+        'Stop catch-up and history for the chat (live messages are still cached)',
       default: false,
     },
     auto: {
