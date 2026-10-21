@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
   schedule:
     # Weekly canary, Monday 04:00 UTC: Bun canary + latest in-range dependencies.
@@ -15,7 +16,7 @@ permissions: {}
 
 concurrency:
   group: ci-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   # check (lint + typecheck), build, test, test:e2e
@@ -35,7 +36,8 @@ jobs:
   # Compile the binary, pack the npm tarball, install it globally and run tg with no
   # Telegram credentials, the way a user installs it.
   pack:
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft != true
+    runs-on: ${{ fromJSON('{"true":"oss-linux","false":"ubuntu-latest"}')[format('{0}', vars.CI_SELF_HOSTED == 'true' && github.ref == 'refs/heads/main')] }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -74,7 +76,7 @@ jobs:
   # offline suites, so upstream breakage shows up before a Renovate PR or a user does.
   latest-deps:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON('{"true":"oss-linux","false":"ubuntu-latest"}')[format('{0}', vars.CI_SELF_HOSTED == 'true' && github.ref == 'refs/heads/main')] }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -102,8 +104,8 @@ jobs:
   # The one required check for the branch ruleset. It is named exactly "ci".
   ci:
     needs: [build, hygiene, pack, latest-deps]
-    if: always()
-    runs-on: ubuntu-latest
+    if: always() && github.event.pull_request.draft != true
+    runs-on: ${{ fromJSON('{"true":"oss-linux","false":"ubuntu-latest"}')[format('{0}', vars.CI_SELF_HOSTED == 'true' && github.ref == 'refs/heads/main')] }}
     permissions: {}
     steps:
       - name: All jobs passed
