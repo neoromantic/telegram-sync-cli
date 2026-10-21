@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pretty` for the chat and failed with "Chat not found in the cache:
   pretty", so the ID copied from `tg chats list` failed for every group and
   channel with that flag. The marked ID now wins.
+- `tg chats get --id <ID>` for a chat the cache doesn't hold failed with
+  "No active account" or a missing-credentials error, though Telegram is
+  asked by @username only. It now fails with `INVALID_ARGS`: the chat isn't
+  in the cache, with the suggestion to start the daemon or use @username.
 
 ## [0.2.0] - 2026-10-21
 

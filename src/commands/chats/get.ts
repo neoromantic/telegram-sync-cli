@@ -61,15 +61,29 @@ function getCachedChat(
   }
 }
 
+/**
+ * Telegram is asked by @username only, so an ID the cache doesn't answer
+ * fails before any account or credentials are needed
+ */
 function assertUsernameIdentifier(
   isUsername: boolean,
   identifier: string,
+  fresh: boolean,
 ): void {
   if (isUsername) return
+  if (fresh) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      `Fetching chat ${identifier} by ID is not supported yet; --fresh needs @username`,
+      { identifier },
+      'Use @username, or drop --fresh to read the cache',
+    )
+  }
   error(
     ErrorCodes.INVALID_ARGS,
-    'Fetching by numeric ID is not yet supported. Use @username instead.',
+    `Chat ${identifier} is not in the cache; fetching by ID is not supported yet`,
     { identifier },
+    'Start the daemon (its dialog pass caches every chat, archived ones too) or use @username',
   )
 }
 
@@ -165,13 +179,13 @@ export const getChatCommand = defineCommand({
         }
       }
 
+      assertUsernameIdentifier(isUsername, identifier, fresh)
       verbose(`Fetching chat "${identifier}" from Telegram API...`)
       const client = wrapClientCallWithRateLimits(
         getClientForAccount(accountId),
         { context: 'cli:chats.get' },
       )
 
-      assertUsernameIdentifier(isUsername, identifier)
       const result = await fetchChatFromApi(chatsCache, client, identifier)
       success(result)
     } catch (err) {

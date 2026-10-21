@@ -66,7 +66,7 @@ tg contacts get --id @username
 ```bash
 tg chats list --type private --limit 50
 tg chats search --query "team"   # cache-only
-tg chats get --id @username       # or the ID of a cached chat
+tg chats get --id @username       # or the ID of a cached chat (cache-only, no credentials)
 tg chats sync @examplenews        # sync this chat in the background
 ```
 
