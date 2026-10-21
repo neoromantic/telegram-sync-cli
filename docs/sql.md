@@ -40,7 +40,7 @@ The command operates on the **cache database**:
 ```bash
 # JSON output (default)
 tg sql --query="SELECT * FROM users_cache LIMIT 10"
-tg sql -q "SELECT user_id, username FROM users_cache WHERE is_contact = 1"
+tg sql "SELECT user_id, username FROM users_cache WHERE is_contact = 1"
 
 # CSV output
 tg sql --query="SELECT user_id, username FROM users_cache" --output=csv

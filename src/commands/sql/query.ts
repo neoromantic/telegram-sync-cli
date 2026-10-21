@@ -35,7 +35,7 @@ function validateQueryArgs(
   if (!query) {
     error(
       ErrorCodes.INVALID_ARGS,
-      'No query provided. Usage: tg sql -q "<query>" or tg sql print-schema',
+      'No query provided. Usage: tg sql --query "<query>" or tg sql print-schema',
     )
   }
 
@@ -90,10 +90,10 @@ export const sqlQueryCommand = defineCommand({
     command: {
       type: 'positional',
       description: 'Optional subcommand (print-schema)',
+      required: false,
     },
     query: {
       type: 'string',
-      alias: 'q',
       description: 'SQL query to execute (required unless using a subcommand)',
     },
     output: {
