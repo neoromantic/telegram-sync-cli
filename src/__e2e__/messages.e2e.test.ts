@@ -440,6 +440,18 @@ describe('E2E: Messages List', () => {
     expect(json.error.code).toBe('INVALID_ARGS')
   })
 
+  it.each(['--chat=', '--chat=-12.5', '--chat=1e1', '--chat=0x10'])(
+    'rejects the malformed chat %p with INVALID_ARGS',
+    async (flag) => {
+      const result = await runCli(['messages', 'list', flag], options())
+      const json = result.json as ErrorData
+
+      expect(result.exitCode).toBe(3)
+      expect(json.error.code).toBe('INVALID_ARGS')
+      expect(json.error.message).toStartWith('Invalid --chat:')
+    },
+  )
+
   it('requires --chat', async () => {
     const result = await runCli(['messages', 'list'], options())
     expect(result.exitCode).toBe(1)

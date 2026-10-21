@@ -13,6 +13,7 @@ import {
   isRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
+import { InvalidPeerError } from '../send/peer-resolver'
 
 /** The JSON item for a message row, shared by every `tg messages` command */
 export function messageRowToItem(row: MessageSearchRow): MessageSearchItem {
@@ -110,6 +111,13 @@ export class MessageNotFoundError extends Error {
 export function reportHistoryError(err: unknown, action: string): never {
   if (err instanceof MessageNotFoundError) {
     error(ErrorCodes.TELEGRAM_ERROR, err.message, err.details)
+  }
+  if (err instanceof InvalidPeerError) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      `Invalid --chat: ${err.identifier}. Expected @username, a user or chat ID, a phone number (+…) or me.`,
+      { chat: err.identifier },
+    )
   }
   if (err instanceof ConfigError) {
     error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
