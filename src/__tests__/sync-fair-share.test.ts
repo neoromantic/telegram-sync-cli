@@ -21,6 +21,7 @@ import {
   createChatSyncStateService,
 } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
+import { createHistoryRanges } from '../db/history-ranges'
 import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
@@ -169,6 +170,7 @@ describe('job budget with 500 chats', () => {
       createRealSyncWorker({
         client,
         messagesCache: createMessagesCache(db),
+        historyRanges: createHistoryRanges(db),
         chatSyncState,
         jobsService,
         rateLimits: createRateLimitsService(db),

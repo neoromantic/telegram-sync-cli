@@ -274,6 +274,18 @@ export function initSyncSchema(db: Database): void {
 
   ensureMessageSearchIndex(db)
 
+  // History ranges - the message ID ranges of a chat cached without gaps
+  // (src/db/history-ranges.ts); ranges of one chat never touch or overlap
+  db.run(`
+    CREATE TABLE IF NOT EXISTS history_ranges (
+      chat_id     INTEGER NOT NULL,
+      low         INTEGER NOT NULL,
+      high        INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+      PRIMARY KEY (chat_id, low)
+    )
+  `)
+
   // Chat sync state table - tracks sync progress per chat
   db.run(`
     CREATE TABLE IF NOT EXISTS chat_sync_state (

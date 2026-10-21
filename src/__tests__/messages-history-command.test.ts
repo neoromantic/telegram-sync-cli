@@ -38,6 +38,7 @@ import { ConfigError } from '../config'
 import { type AccountsDbInterface, createTestDatabase } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
+import { createHistoryRanges, type HistoryRange } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
@@ -117,6 +118,21 @@ function cacheMessages(db: Database, chatId: number, ids: number[]) {
       raw_json: '{}',
     })),
   )
+}
+
+/** Messages the daemon cached as one run, so the cache can vouch for them */
+function cacheRun(db: Database, chatId: number, low: number, high: number) {
+  cacheMessages(db, chatId, range(low, high))
+  createHistoryRanges(db).add(chatId, { low, high })
+}
+
+/** The recorded ranges of a chat, oldest first */
+function storedRanges(db: Database, chatId = TEAM_CHAT_ID): HistoryRange[] {
+  return db
+    .query(
+      'SELECT low, high FROM history_ranges WHERE chat_id = ? ORDER BY low',
+    )
+    .all(chatId) as HistoryRange[]
 }
 
 /** createFakeHistory, plus the senders a real getHistory response carries */
@@ -211,7 +227,7 @@ describe('resolveHistoryChat', () => {
       SELF_ID,
       ...newDm,
     ]) {
-      cacheMessages(cacheDb, chatId, [1, 2])
+      cacheRun(cacheDb, chatId, 1, 2)
     }
     deps = {
       usersCache: createUsersCache(cacheDb),
@@ -367,6 +383,37 @@ describe('fetchHistoryPage', () => {
     },
   )
 
+  it.each<[HistoryWindow, HistoryRange[]]>([
+    [{ limit: 3 }, [{ low: 8, high: 10 }]],
+    [{ limit: 3, before: 8 }, [{ low: 5, high: 7 }]],
+    [{ limit: 3, before: 3 }, [{ low: 1, high: 2 }]],
+    [{ limit: 3, after: 3 }, [{ low: 4, high: 6 }]],
+    [{ limit: 3, after: 0 }, [{ low: 1, high: 3 }]],
+    [{ limit: 3, after: 8 }, [{ low: 9, high: 10 }]],
+    [{ limit: 3, before: 1 }, []],
+  ])('records the range that window %p covers', async (window, expected) => {
+    const { client } = historyClient(range(1, 10))
+
+    await fetchHistoryPage(client, cacheDb, TEAM_CHAT, window)
+
+    expect(storedRanges(cacheDb)).toEqual(expected)
+  })
+
+  it('joins pages across ID gaps when paging back with nextBefore', async () => {
+    // Private chats share one ID sequence per account, so a chat's IDs skip
+    const { client } = historyClient([1, 2, 3, 7, 8, 9, 10])
+    let before: number | undefined
+    for (let page = 0; page < 4; page++) {
+      const rows = await fetchHistoryPage(client, cacheDb, TEAM_CHAT, {
+        limit: 2,
+        before,
+      })
+      before = Math.min(...rowIds(rows))
+    }
+
+    expect(storedRanges(cacheDb)).toEqual([{ low: 1, high: 10 }])
+  })
+
   it('stores the page under the marked chat ID with raw_json and fetched_at', async () => {
     const { client } = historyClient(range(1, 10))
     const before = Date.now()
@@ -438,9 +485,11 @@ describe('cacheHistoryResponse', () => {
       TEAM_CHAT_ID,
       [message, { _: 'messageEmpty', id: 8 }],
       [alice, bob],
+      {},
     )
 
     expect(ids).toEqual([7])
+    expect(storedRanges(cacheDb)).toEqual([{ low: 7, high: 8 }])
     const usersCache = createUsersCache(cacheDb)
     expect(usersCache.getById(String(ALICE_ID))).toMatchObject({
       first_name: 'Alice',
@@ -499,7 +548,7 @@ describe('listHistory', () => {
   }
 
   it('serves a window the cache holds without a client', async () => {
-    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 5))
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 5)
     const create = throwingFactory()
 
     const result = await list(createLazyClient(create), {
@@ -522,7 +571,7 @@ describe('listHistory', () => {
   })
 
   it('asks Telegram for a window the cache does not hold, then caches it', async () => {
-    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 5))
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 5)
     const { client, requests } = historyClient(range(1, 10))
 
     const fetched = await list(client, { limit: 3, after: 5 })
@@ -533,6 +582,7 @@ describe('listHistory', () => {
     expect(cached.source).toBe('cache')
     expect(cached.items).toEqual(fetched.items)
     expect(requests).toHaveLength(1)
+    expect(storedRanges(cacheDb)).toEqual([{ low: 1, high: 8 }])
   })
 
   it('returns an empty page with null cursors', async () => {
@@ -562,21 +612,25 @@ describe('listHistory', () => {
     expect(fresh.items[0]?.text).toBe('msg 10')
   })
 
-  it('pages a fully synced chat to its start without Telegram', async () => {
-    cacheMessages(cacheDb, TEAM_CHAT_ID, range(3, 5))
-    syncState(true)
+  it('pages back to the first message without Telegram', async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 5)
     const { client, requests } = historyClient(range(1, 5))
 
-    const result = await list(client, { limit: 3, before: 3 })
+    const last = await list(client, { limit: 3, before: 2 })
+    const end = await list(client, { limit: 3, before: 1 })
 
-    expect(result.items).toEqual([])
-    expect(result.source).toBe('cache')
+    expect(messageIds(last.items)).toEqual([1])
+    expect(last.source).toBe('cache')
+    expect(end.items).toEqual([])
+    expect(end.source).toBe('cache')
     expect(requests).toHaveLength(0)
   })
 
-  it('asks Telegram for older messages while history is incomplete', async () => {
-    cacheMessages(cacheDb, TEAM_CHAT_ID, range(3, 5))
-    syncState(false)
+  it('asks Telegram for messages cached outside any recorded range', async () => {
+    // tg send and live updates cache messages without saying what is next
+    // to them, and a fully synced chat from before ranges has none
+    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 5))
+    syncState(true)
     const { client, requests } = historyClient(range(1, 5))
 
     const result = await list(client, { limit: 3, before: 3 })
@@ -586,15 +640,98 @@ describe('listHistory', () => {
     expect(requests).toHaveLength(1)
   })
 
-  it('asks Telegram for newer messages even when history is complete', async () => {
-    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 5))
+  it('asks Telegram below the oldest recorded range', async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 3, 5)
+    const { client, requests } = historyClient(range(1, 5))
+
+    const result = await list(client, { limit: 3, before: 3 })
+
+    expect(messageIds(result.items)).toEqual([2, 1])
+    expect(result.source).toBe('api')
+    expect(requests).toHaveLength(1)
+  })
+
+  it('asks Telegram for a short page past the newest cached message', async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 5)
     syncState(true)
     const { client, requests } = historyClient(range(1, 7))
 
-    const result = await list(client, { limit: 3, after: 5 })
+    const result = await list(client, { limit: 3, after: 4 })
 
+    expect(messageIds(result.items)).toEqual([7, 6, 5])
+    expect(result.source).toBe('api')
+    expect(requests).toHaveLength(1)
+  })
+
+  it('asks Telegram for newer messages between --after and --before in a fully synced chat', async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 5)
+    syncState(true)
+    const { client, requests } = historyClient(range(1, 7))
+
+    const result = await list(client, { limit: 3, after: 5, before: 8 })
+
+    expect(result.source).toBe('api')
     expect(messageIds(result.items)).toEqual([7, 6])
     expect(requests).toHaveLength(1)
+  })
+
+  it('serves a short page between --after and --before that a range covers', async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 8)
+    const create = throwingFactory()
+
+    const result = await list(createLazyClient(create), {
+      limit: 5,
+      after: 5,
+      before: 8,
+    })
+
+    expect(messageIds(result.items)).toEqual([7, 6])
+    expect(result.source).toBe('cache')
+  })
+
+  describe('with gaps in the cache', () => {
+    // Telegram holds 1-1000; the daemon cached the newest page, 951-1000
+    let history: ReturnType<typeof historyClient>
+
+    beforeEach(() => {
+      history = historyClient(range(1, 1000))
+      cacheRun(cacheDb, TEAM_CHAT_ID, 951, 1000)
+    })
+
+    it('starts --after 0 at the first message', async () => {
+      const result = await list(history.client, { limit: 5, after: 0 })
+
+      expect(result.source).toBe('api')
+      expect(messageIds(result.items)).toEqual([5, 4, 3, 2, 1])
+    })
+
+    it('pages forward from a fetched page into the gap', async () => {
+      await list(history.client, { limit: 5, before: 100 })
+
+      const result = await list(history.client, { limit: 5, after: 99 })
+
+      expect(result.source).toBe('api')
+      expect(messageIds(result.items)).toEqual([104, 103, 102, 101, 100])
+    })
+
+    it('pages back with nextBefore without skipping the gap', async () => {
+      await list(history.client, { limit: 5, before: 100 })
+      const seen: number[] = []
+      let before: number | undefined
+      for (let page = 0; page < 6; page++) {
+        const result = await list(history.client, { limit: 10, before })
+        seen.push(...messageIds(result.items))
+        before = result.nextBefore ?? undefined
+      }
+
+      expect(seen).toEqual(range(941, 1000).reverse())
+      // 951-1000 came from the cache, 941-950 from Telegram
+      expect(history.requests).toHaveLength(2)
+      expect(storedRanges(cacheDb)).toEqual([
+        { low: 95, high: 99 },
+        { low: 941, high: 1000 },
+      ])
+    })
   })
 
   it('leaves the sync cursors alone', async () => {
@@ -665,6 +802,22 @@ describe('fetchMessageAround', () => {
     },
   )
 
+  it.each<[number, number, HistoryRange]>([
+    [5, 2, { low: 3, high: 7 }],
+    [10, 2, { low: 8, high: 10 }],
+    [2, 2, { low: 1, high: 4 }],
+    [5, 0, { low: 5, high: 5 }],
+  ])(
+    'records the range around message %p with %p on each side',
+    async (messageId, context, expected) => {
+      const { client } = historyClient(range(1, 10))
+
+      await fetchMessageAround(client, cacheDb, TEAM_CHAT, messageId, context)
+
+      expect(storedRanges(cacheDb)).toEqual([expected])
+    },
+  )
+
   it('keeps the closest messages when Telegram returns more', async () => {
     const { client } = unboundedClient(range(1, 10))
 
@@ -701,7 +854,7 @@ describe('getMessageWithContext', () => {
 
   beforeEach(() => {
     cacheDb = createCacheDb()
-    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 8))
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 8)
     createMessagesCache(cacheDb).markDeleted(TEAM_CHAT_ID, [6, 8])
   })
 
@@ -772,7 +925,7 @@ describe('getMessageWithContext', () => {
         accessHash: toLong('1111'),
       },
     }
-    cacheMessages(cacheDb, ALICE_ID, range(50, 60))
+    cacheRun(cacheDb, ALICE_ID, 50, 60)
     const { client, requests } = historyClient(range(1, 60))
 
     const result = await get(client, 50, { context: 3, chat: aliceChat })
@@ -796,15 +949,7 @@ describe('getMessageWithContext', () => {
     expect(requests).toHaveLength(1)
   })
 
-  it('serves no older context for the first message of a fully synced chat', async () => {
-    const state = createChatSyncStateService(cacheDb)
-    state.upsert({
-      chat_id: TEAM_CHAT_ID,
-      chat_type: 'supergroup',
-      sync_priority: SyncPriority.Medium,
-      sync_enabled: true,
-    })
-    state.markHistoryComplete(TEAM_CHAT_ID)
+  it('serves no older context for the first message of a chat', async () => {
     const create = throwingFactory()
 
     const result = await get(createLazyClient(create), 1, { context: 2 })
@@ -825,6 +970,35 @@ describe('getMessageWithContext', () => {
     expect(result.newer).toEqual([])
     expect(messageIds(result.older)).toEqual([5, 4])
     expect(requests).toHaveLength(1)
+  })
+
+  it('asks Telegram for context across a gap in the cache', async () => {
+    // Telegram holds 1-1000; the daemon cached 951-1000 and a list page 95-99
+    const { client, requests } = historyClient(range(1, 1000))
+    cacheRun(cacheDb, ALICE_ID, 951, 1000)
+    const aliceChat: HistoryChat = {
+      chatId: ALICE_ID,
+      inputPeer: {
+        _: 'inputPeerUser',
+        userId: ALICE_ID,
+        accessHash: toLong('1111'),
+      },
+    }
+    await listHistory({
+      cacheDb,
+      client,
+      chat: aliceChat,
+      window: { limit: 5, before: 100 },
+      includeDeleted: false,
+      fresh: false,
+    })
+
+    const result = await get(client, 99, { context: 2, chat: aliceChat })
+
+    expect(result.source).toBe('api')
+    expect(messageIds(result.newer)).toEqual([101, 100])
+    expect(messageIds(result.older)).toEqual([98, 97])
+    expect(requests).toHaveLength(2)
   })
 
   it('asks Telegram for a message the cache does not hold', async () => {

@@ -145,23 +145,26 @@ number with `+`, or `me`. To page back, pass `nextBefore` as `--before`; to page
   "nextBefore": 1181, "nextAfter": 1200, "source": "cache", "stale": false }
 ```
 
-The cache answers when it holds any message of the window. Otherwise `tg` fetches that window
-from Telegram, caches it and returns `source: "api"`, which needs credentials and a connection.
-One exception: paging back past the oldest message of a chat the daemon synced completely
-returns an empty page from the cache. The cache can be behind or have gaps: without a running
-daemon the newest page can miss recent messages, history backfill doesn't run yet
-([#6](https://github.com/neoromantic/telegram-sync-cli/issues/6)), and pages fetched with
-`--fresh` can sit apart from the rest. `--fresh` always reads the window from Telegram.
+The cache answers when it holds the whole window without a gap: every page the daemon or `tg`
+caches records the message IDs it covers, and the cache serves a window only inside one such
+range, when that range holds `--limit` messages of it or reaches the chat's first message
+(paging back) or `--before` (paging forward). Otherwise `tg` fetches that window from Telegram,
+caches it and returns `source: "api"`, which needs credentials and a connection. So a page
+never skips messages the cache lacks, and a short page past the newest cached message, such as
+the last one when paging forward, asks Telegram. Messages that live updates or `tg send` cached
+are read from Telegram until a page covers them, so while the daemon runs, the newest page of an
+active chat asks Telegram. The newest page comes from the cache when a range holds it, so
+without a running daemon it can miss recent messages. See
+[caching.md](caching.md#chat-history). `--fresh` always reads the window from Telegram.
 
 `tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each
 side: `{ chatId, message, newer, older, source, stale }`. `newer` and `older` are newest first,
 so `[...newer, message, ...older]` reads like a `list` page. The cache answers when it holds the
-message and, with `--context`, at least one message on each side of it. A side with nothing
-cached is filled from Telegram, as an empty `list` window is: one call fetches the message with
-both sides, caches them and returns `source: "api"`. So the context of a chat's newest message
-always asks Telegram. The older side of a chat the daemon synced completely, and the context of a
-cached deleted message, come from the cache as they are. If Telegram no longer returns a cached
-message, the cached copy is returned. `--fresh` fetches all of it from Telegram. A missing
+message and, with `--context`, each side whole, as `list` would serve that side next to the
+message. Otherwise one call fetches the message with both sides, caches them and returns
+`source: "api"`. So the context of a chat's newest message always asks Telegram. The context of
+a cached deleted message comes from the cache as its ranges hold it. If Telegram no longer
+returns a cached message, the cached copy is returned. `--fresh` fetches all of it from Telegram. A missing
 message is a `TELEGRAM_ERROR` with `details: { chatId, messageId }`. A deleted message that is
 cached is returned with `isDeleted: true`.
 

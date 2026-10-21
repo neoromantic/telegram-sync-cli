@@ -13,6 +13,7 @@ import {
 import type { RealSyncWorkerContext } from '../daemon/sync-worker-real-types'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
+import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
@@ -34,6 +35,7 @@ describe('sync-worker real jobs', () => {
         call: mock(async () => ({ messages: [] })),
       } as unknown as TelegramClient,
       messagesCache: createMessagesCache(db),
+      historyRanges: createHistoryRanges(db),
       chatSyncState: createChatSyncStateService(db),
       jobsService: createSyncJobsService(db),
       rateLimits: createRateLimitsService(db),
@@ -48,6 +50,15 @@ describe('sync-worker real jobs', () => {
   afterEach(() => {
     db.close()
   })
+
+  /** The ranges a chat's pages recorded, oldest first */
+  function storedRanges(chatId: number) {
+    return db
+      .query(
+        'SELECT low, high FROM history_ranges WHERE chat_id = ? ORDER BY low',
+      )
+      .all(chatId)
+  }
 
   it('returns rate limited when API calls are blocked (forward catchup)', async () => {
     const job = ctx.jobsService.create({
@@ -122,6 +133,7 @@ describe('sync-worker real jobs', () => {
     expect(updatedJob?.cursor_end).toBe(7)
 
     expect(ctx.messagesCache.countByChatId(chatId)).toBe(2)
+    expect(storedRanges(chatId)).toEqual([{ low: 6, high: 7 }])
   })
 
   it('skips backward history when history is already complete', async () => {
@@ -196,6 +208,8 @@ describe('sync-worker real jobs', () => {
 
     expect(ctx.chatSyncState.get(chatId)?.history_complete).toBe(1)
     expect(ctx.messagesCache.countByChatId(chatId)).toBe(30)
+    // The pages join into one range, which the CLI pages it cached don't break
+    expect(storedRanges(chatId)).toEqual([{ low: 1, high: 30 }])
     // Every gap is filled, and only the 24 messages that weren't cached count
     expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(24)
   })
@@ -225,6 +239,41 @@ describe('sync-worker real jobs', () => {
 
     const state = ctx.chatSyncState.get(chatId)
     expect(state?.history_complete).toBe(1)
+    expect(storedRanges(chatId)).toEqual([])
+  })
+
+  it('covers the rest of the chat when the page below the cursor is empty', async () => {
+    const chatId = 102
+    ctx.chatSyncState.upsert({
+      chat_id: chatId,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+      backward_cursor: 40,
+    })
+    ctx.messagesCache.upsert({
+      chat_id: chatId,
+      message_id: 40,
+      message_type: 'text',
+      date: 1700000040,
+      raw_json: '{}',
+    })
+    ctx.historyRanges.add(chatId, { low: 40, high: 41 })
+    ctx.client = {
+      call: mock(async () => ({ messages: [] })),
+    } as unknown as TelegramClient
+
+    const result = await processBackwardHistoryReal(
+      ctx,
+      ctx.jobsService.create({
+        chat_id: chatId,
+        job_type: SyncJobType.BackwardHistory,
+        priority: SyncPriority.High,
+      }),
+    )
+
+    expect(result.historyComplete).toBe(true)
+    expect(storedRanges(chatId)).toEqual([{ low: 1, high: 41 }])
   })
 
   it('initial load updates cursors and marks history complete when batch is short', async () => {
@@ -258,6 +307,7 @@ describe('sync-worker real jobs', () => {
     expect(state?.forward_cursor).toBe(3)
     expect(state?.backward_cursor).toBe(3)
     expect(state?.history_complete).toBe(1)
+    expect(storedRanges(chatId)).toEqual([{ low: 1, high: 3 }])
   })
 
   it('marks job failed for unknown job type', async () => {
@@ -664,6 +714,7 @@ describe('sync-worker real jobs', () => {
       })
       expect(cachedIds()).toEqual(range(1001, 1150))
       expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(150)
+      expect(storedRanges(chatId)).toEqual([{ low: 1001, high: 1150 }])
     })
 
     it('needs one empty page after a gap of exactly one batch', async () => {
@@ -766,6 +817,7 @@ describe('sync-worker real jobs', () => {
         newCursor: 250,
       })
       expect(cachedIds()).toEqual(range(151, 250))
+      expect(storedRanges(chatId)).toEqual([{ low: 151, high: 250 }])
     })
   })
 

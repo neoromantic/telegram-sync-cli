@@ -1,7 +1,9 @@
 /**
  * Chat history for `tg messages list` and `tg messages get`: cache-first
  * reads, and Telegram pages written back to the cache so they are read back
- * exactly like cached ones.
+ * exactly like cached ones. The cache answers only inside the ranges that
+ * cached pages recorded (src/db/history-ranges.ts), so a read never runs
+ * across a gap in the cache.
  */
 import type { Database } from 'bun:sqlite'
 import type { TelegramClient, tl } from '@mtcute/bun'
@@ -13,8 +15,8 @@ import {
   rawMessageId,
 } from '../../daemon/sync-worker-real-helpers'
 import type { AccountsDbInterface } from '../../db'
-import { createChatSyncStateService } from '../../db/chat-sync-state'
 import type { ChatsCache } from '../../db/chats-cache'
+import { createHistoryRanges, type PageBounds } from '../../db/history-ranges'
 import { createMessagesCache } from '../../db/messages-cache'
 import { createMessagesHistory } from '../../db/messages-history'
 import type { MessageSearchRow } from '../../db/messages-search'
@@ -93,16 +95,17 @@ export function historyRequest({ limit, before, after }: HistoryWindow) {
 }
 
 /**
- * Write a getHistory page to the cache in one transaction and return the
- * IDs of the messages it stored. Full (non-min) senders go in first, because
- * the search index reads sender names when a message row is written.
- * Sync cursors stay where the daemon left them.
+ * Write a getHistory page to the cache in one transaction, with the range
+ * it covers, and return the IDs of the messages it stored. Full (non-min)
+ * senders go in first, because the search index reads sender names when a
+ * message row is written. Sync cursors stay where the daemon left them.
  */
 export function cacheHistoryResponse(
   cacheDb: Database,
   chatId: number,
   messages: unknown[],
   users: tl.TypeUser[],
+  bounds: PageBounds,
 ): number[] {
   const usersCache = createUsersCache(cacheDb)
   const messagesCache = createMessagesCache(cacheDb)
@@ -120,6 +123,11 @@ export function cacheHistoryResponse(
       }
     }
     messagesCache.upsertBatch(inputs)
+    createHistoryRanges(cacheDb).recordPage(
+      chatId,
+      messages.map(rawMessageId),
+      bounds,
+    )
   })()
 
   return inputs.map((input) => input.message_id)
@@ -178,7 +186,16 @@ export async function fetchHistoryPage(
     .sort((a, b) => fromAnchor * (rawMessageId(a) - rawMessageId(b)))
     .slice(0, window.limit)
 
-  const ids = cacheHistoryResponse(cacheDb, chat.chatId, page, users)
+  // Paging back, the page is the newest messages below `before` and a short
+  // one reaches the first message. Paging forward, it is the oldest messages
+  // above `after`, and only a short one leaves nothing up to `before`.
+  const short = messages.length < window.limit
+  const bounds: PageBounds =
+    window.after === undefined
+      ? { before: window.before, reachedStart: short }
+      : { after: window.after, before: short ? window.before : undefined }
+
+  const ids = cacheHistoryResponse(cacheDb, chat.chatId, page, users, bounds)
   return createMessagesHistory(cacheDb).getMany(chat.chatId, ids)
 }
 
@@ -206,8 +223,53 @@ export interface ListHistoryResult {
   stale: false
 }
 
-function isHistoryComplete(cacheDb: Database, chatId: number): boolean {
-  return createChatSyncStateService(cacheDb).get(chatId)?.history_complete === 1
+interface CachedWindow {
+  /** Newest first, cut where the recorded range ends */
+  rows: MessageSearchRow[]
+  /** The cache holds the whole window, so Telegram has nothing to add */
+  whole: boolean
+}
+
+/**
+ * A window as the cache holds it. The page starts at its anchor: just below
+ * `before`, or at the newest cached message, paging back; just above
+ * `after` paging forward. It is whole when the recorded range that holds
+ * the anchor holds `limit` messages of it, or fewer because the range
+ * reaches the chat's first message (paging back) or `before` (paging
+ * forward). A short page past the newest cached message is not whole.
+ */
+function readCachedWindow(
+  cacheDb: Database,
+  chatId: number,
+  { limit, before, after }: HistoryWindow,
+  includeDeleted: boolean,
+): CachedWindow {
+  const history = createMessagesHistory(cacheDb)
+  const ranges = createHistoryRanges(cacheDb)
+
+  if (after === undefined) {
+    // Message IDs start at 1
+    if (before !== undefined && before <= 1) return { rows: [], whole: true }
+
+    const newest = createMessagesCache(cacheDb).getLatestMessageId(chatId)
+    const anchor = Math.min(newest ?? 0, (before ?? Number.MAX_VALUE) - 1)
+    const range = anchor > 0 ? ranges.find(chatId, anchor) : null
+    if (!range) return { rows: [], whole: false }
+
+    const rows = history
+      .list(chatId, { limit, before: anchor + 1, includeDeleted })
+      .filter((row) => row.message_id >= range.low)
+    return { rows, whole: rows.length === limit || range.low === 1 }
+  }
+
+  const range = ranges.find(chatId, after + 1)
+  if (!range) return { rows: [], whole: false }
+
+  const rows = history
+    .list(chatId, { limit, after, before, includeDeleted })
+    .filter((row) => row.message_id <= range.high)
+  const reachesBefore = before !== undefined && range.high >= before - 1
+  return { rows, whole: rows.length === limit || reachesBefore }
 }
 
 async function readHistoryPage({
@@ -222,18 +284,14 @@ async function readHistoryPage({
   source: 'cache' | 'api'
 }> {
   if (!fresh) {
-    const rows = createMessagesHistory(cacheDb).list(chat.chatId, {
-      ...window,
+    const cached = readCachedWindow(
+      cacheDb,
+      chat.chatId,
+      window,
       includeDeleted,
-    })
-    if (rows.length > 0) {
-      return { rows, source: 'cache' }
-    }
-    // The daemon cached a fully synced chat down to its first message, so
-    // there is nothing older to ask Telegram for
-    const olderOnly = window.before !== undefined && window.after === undefined
-    if (olderOnly && isHistoryComplete(cacheDb, chat.chatId)) {
-      return { rows: [], source: 'cache' }
+    )
+    if (cached.whole) {
+      return { rows: cached.rows, source: 'cache' }
     }
   }
 
@@ -242,8 +300,8 @@ async function readHistoryPage({
 }
 
 /**
- * One page of a chat, newest first. The cache answers when it holds any
- * message of the window; otherwise, or with `fresh`, Telegram does.
+ * One page of a chat, newest first. The cache answers when it holds the
+ * whole window without a gap; otherwise, or with `fresh`, Telegram does.
  */
 export async function listHistory(
   options: ListHistoryOptions,
@@ -314,13 +372,18 @@ export async function fetchMessageAround(
     throw new MessageNotFoundError(chat.chatId, messageId)
   }
 
+  const older = closest(ids, messageId, -1, context)
   const keep = new Set([
     messageId,
     ...closest(ids, messageId, 1, context),
-    ...closest(ids, messageId, -1, context),
+    ...older,
   ])
   const page = messages.filter((message) => keep.has(rawMessageId(message)))
-  const stored = cacheHistoryResponse(cacheDb, chat.chatId, page, users)
+  // The page is a run of consecutive messages; with fewer older messages
+  // than asked for, it reaches the first message of the chat
+  const stored = cacheHistoryResponse(cacheDb, chat.chatId, page, users, {
+    reachedStart: older.length < context,
+  })
   const rows = createMessagesHistory(cacheDb).getMany(chat.chatId, stored)
 
   const message = rows.find((row) => row.message_id === messageId)
@@ -364,9 +427,10 @@ interface CachedAround {
 
 /**
  * The message and its context from the cache, or null if the message isn't
- * cached. A context side with no message is incomplete, as an empty `list`
- * window is, except the older side of a fully synced chat. A deleted message
- * is complete as it is: Telegram no longer returns it.
+ * cached. Each side is a `list` window next to the message, so it is
+ * complete only when the cache holds it whole; a side is cut where the
+ * recorded range ends. A deleted message is complete as it is: Telegram no
+ * longer returns it.
  */
 function readAroundFromCache(
   cacheDb: Database,
@@ -384,13 +448,18 @@ function readAroundFromCache(
 
   // A deleted target is still returned; its context follows --includeDeleted
   const side = (bound: 'after' | 'before') =>
-    history.list(chatId, { limit: context, [bound]: messageId, includeDeleted })
-  const around = { message, newer: side('after'), older: side('before') }
-  const complete =
-    message.is_deleted === 1 ||
-    (around.newer.length > 0 &&
-      (around.older.length > 0 || isHistoryComplete(cacheDb, chatId)))
-  return { around, complete }
+    readCachedWindow(
+      cacheDb,
+      chatId,
+      { limit: context, [bound]: messageId },
+      includeDeleted,
+    )
+  const newer = side('after')
+  const older = side('before')
+  return {
+    around: { message, newer: newer.rows, older: older.rows },
+    complete: message.is_deleted === 1 || (newer.whole && older.whole),
+  }
 }
 
 async function readAround(
@@ -430,8 +499,8 @@ async function readAround(
 
 /**
  * One message with up to `context` messages on each side. The cache answers
- * when it holds the message and something on each side of it; otherwise, or
- * with `fresh`, one Telegram call fetches the message with both sides.
+ * when it holds the message and both sides whole; otherwise, or with
+ * `fresh`, one Telegram call fetches the message with both sides.
  */
 export async function getMessageWithContext(
   options: GetMessageOptions,

@@ -23,12 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   daemon start and after reconnects.
 - `tg messages list --chat <peer>` reads a chat's history newest first and
   pages it with `--before` and `--after` (`--limit`, `--includeDeleted`). It
-  is cache-first: Telegram is asked only for a window the cache doesn't hold,
-  or always with `--fresh`, and fetched pages are cached. Items are the same
-  as in `tg messages search`.
+  is cache-first: the cache answers a window only when it holds all of it
+  without a gap, otherwise or with `--fresh` Telegram does, and fetched pages
+  are cached. Items are the same as in `tg messages search`.
 - `tg messages get --chat <peer> --id <id> [--context N]` returns one message
   with up to N messages on each side, cache-first, `--fresh` to fetch. A
-  context side the cache has nothing for comes from Telegram.
+  context side the cache doesn't hold whole comes from Telegram.
+- The cache records the message ID ranges of each chat that it holds without
+  a gap, in the new `history_ranges` table. Every page the daemon or
+  `tg messages list` and `get` cache adds one, so reads can't run across
+  messages the cache lacks.
 
 ### Changed
 

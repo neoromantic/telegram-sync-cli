@@ -2,6 +2,7 @@ import type { TelegramClient } from '@mtcute/bun'
 import { getCacheDb } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
+import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
@@ -18,6 +19,7 @@ function createAccountSyncWorker(client: TelegramClient): RealSyncWorker {
   return createRealSyncWorker({
     client,
     messagesCache: createMessagesCache(cacheDb),
+    historyRanges: createHistoryRanges(cacheDb),
     chatSyncState: createChatSyncStateService(cacheDb),
     jobsService: createSyncJobsService(cacheDb),
     rateLimits: createRateLimitsService(cacheDb),
