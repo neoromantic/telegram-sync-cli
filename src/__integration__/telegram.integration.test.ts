@@ -319,6 +319,19 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
       const fromCache = await get('--id', String(idA))
       expect(fromCache.source).toBe('cache')
       expect(fromCache.message).toEqual(around.message)
+
+      // Cache-first with a wider context: the newer side of the newest
+      // message may still ask Telegram, so only the items are pinned
+      const wide = await get('--id', String(idA), '--context', '2')
+      expect(wide.message).toEqual(around.message)
+      expect(wide.message.text).toContain(markerA)
+      expect(wide.newer.map((item) => item.messageId)).toEqual([idB])
+      expect(wide.older.length).toBeLessThanOrEqual(2)
+      expect(
+        wide.older.every(
+          (item) => item.messageId < idA && item.chatId === userId,
+        ),
+      ).toBe(true)
     },
     API_TIMEOUT_MS * 6,
   )
