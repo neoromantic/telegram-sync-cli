@@ -18,6 +18,7 @@ import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 const SCHEMA_MODULE = join(import.meta.dir, '../db/schema.ts')
 const SYNC_SCHEMA_MODULE = join(import.meta.dir, '../db/sync-schema.ts')
+const DB_MODULE = join(import.meta.dir, '../db/index.ts')
 
 /** Another process: takes the write lock, holds it for `holdMs`, commits */
 const HOLD_LOCK = `
@@ -39,6 +40,27 @@ const INIT_SCHEMA = `
   initCacheSchema(db)
   initSyncSchema(db)
   db.close()
+`
+
+/**
+ * Another process: getCacheDb on a cache whose migration fails once, as
+ * when the disk is full. The failed open must not stick: the next call
+ * opens the file again and migrates it.
+ */
+const RETRY_OPEN = `
+  import { Database } from 'bun:sqlite'
+  const { getCacheDb } = await import(process.env.DB_MODULE)
+  try {
+    getCacheDb()
+    console.log('first open: ok')
+  } catch (err) {
+    console.log('first open: ' + err.message)
+  }
+  const other = new Database(process.env.LOCK_DB_PATH)
+  other.run('DROP TRIGGER fail_rekey')
+  other.close()
+  const db = getCacheDb()
+  console.log('second open: ' + db.query('PRAGMA user_version').get().user_version)
 `
 
 function spawnBun(script: string, env: Record<string, string>) {
@@ -135,10 +157,45 @@ describe('cache database lock', () => {
     expect(await holder.exited).toBe(0)
   }, 20_000)
 
+  it('opens a migrated cache without waiting for the write lock', async () => {
+    const cache = new Database(path)
+    seedLegacyCache(cache)
+    initCacheSchema(cache)
+    initSyncSchema(cache)
+    cache.close()
+
+    const holder = spawnBun(HOLD_LOCK, {
+      LOCK_DB_PATH: path,
+      LOCK_HOLD_MS: '1500',
+    })
+    await waitForLine(holder.stdout, 'locked')
+
+    // Every tg command opens the cache this way; with nothing to migrate it
+    // must not queue behind a daemon write batch
+    const db = new Database(path)
+    const started = performance.now()
+    initCacheSchema(db)
+    initSyncSchema(db)
+    expect(performance.now() - started).toBeLessThan(500)
+    expect(db.query('PRAGMA busy_timeout').get()).toEqual({ timeout: 5000 })
+    db.close()
+
+    expect(await holder.exited).toBe(0)
+  }, 20_000)
+
   it('lets several processes move a 0.2.0 cache to marked IDs at once', async () => {
     const legacy = new Database(path)
     seedLegacyCache(legacy)
     legacy.close()
+
+    // Another writer holds the lock while they start, so they all find
+    // work to do and queue for the lock: one migrates while the others wait
+    // for it, then find nothing left
+    const holder = spawnBun(HOLD_LOCK, {
+      LOCK_DB_PATH: path,
+      LOCK_HOLD_MS: '2000',
+    })
+    await waitForLine(holder.stdout, 'locked')
 
     const env = {
       LOCK_DB_PATH: path,
@@ -168,7 +225,35 @@ describe('cache database lock', () => {
     ).toEqual(['-1001234567890', '-1002222222222', '-4242', '10'])
     assertPeerIdInvariants(migrated)
     migrated.close()
+    expect(await holder.exited).toBe(0)
   }, 30_000)
+
+  it('opens the cache again after a migration that failed', async () => {
+    const legacy = new Database(path)
+    seedLegacyCache(legacy)
+    legacy.run(`
+      CREATE TRIGGER fail_rekey BEFORE UPDATE OF chat_id ON chats_cache
+      BEGIN SELECT RAISE(ABORT, 'disk full'); END
+    `)
+    legacy.close()
+
+    const child = spawnBun(RETRY_OPEN, {
+      DB_MODULE,
+      LOCK_DB_PATH: path,
+      TELEGRAM_SYNC_CLI_DATA_DIR: dir,
+    })
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+
+    expect({ code, stderr }).toEqual({ code: 0, stderr: '' })
+    expect(stdout.trim().split('\n')).toEqual([
+      'first open: disk full',
+      `second open: ${PEER_ID_USER_VERSION}`,
+    ])
+  }, 20_000)
 
   it('lets several processes migrate a 0.1.4 database at once', async () => {
     // Turn the database back into what 0.1.4 left
