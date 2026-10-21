@@ -11,10 +11,15 @@ import { createChatSyncStateService } from '../db/chat-sync-state'
 import { type CachedChatInput, createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
-import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
+import { migratePeerIds, PEER_ID_USER_VERSION } from '../db/peer-id-migration'
 import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import {
+  initSyncSchema,
+  rebuildMessageSearchIndex,
+  SyncJobType,
+  SyncPriority,
+} from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import {
   initLegacySchema,
@@ -44,6 +49,19 @@ function dump(db: Database, table: string): unknown[] {
 
 function totalChanges(db: Database): number {
   return (db.query('SELECT total_changes() AS n').get() as { n: number }).n
+}
+
+function busyTimeout(db: Database): number {
+  return (db.query('PRAGMA busy_timeout').get() as { timeout: number }).timeout
+}
+
+/** from_id and forward_from_id of every cached message, by chat and ID */
+function senderIds(db: Database): unknown[] {
+  return db
+    .query(
+      'SELECT chat_id, message_id, from_id, forward_from_id FROM messages_cache ORDER BY chat_id, message_id',
+    )
+    .all()
 }
 
 function chatRow(
@@ -244,6 +262,17 @@ describe('peer ID migration', () => {
         forward_from_id: 222,
         raw_json: '{"fromId":',
       },
+      // A stored ID that isn't the bare ID of the peer raw_json names stays
+      {
+        ...legacyMessageRow(rawMessage(team, 9, 'other', channel, channel)),
+        from_id: 444,
+        forward_from_id: 444,
+      },
+      {
+        ...legacyMessageRow(rawMessage(team, 10, 'other too', group, group)),
+        from_id: 444,
+        forward_from_id: 444,
+      },
     ]
     createMessagesCache(db).upsertBatch(rows)
 
@@ -270,6 +299,8 @@ describe('peer ID migration', () => {
       [6, -1000000000333, null],
       [7, 333, null],
       [8, 333, 222],
+      [9, 444, 444],
+      [10, 444, 444],
     ])
     expect(userVersion(db)).toBe(PEER_ID_USER_VERSION)
   })
@@ -344,6 +375,77 @@ describe('peer ID migration', () => {
     assertPeerIdInvariants(db)
   })
 
+  it('rolls back the re-key and the index rebuild when the last step, the sender update, fails', () => {
+    seedLegacyCache(db)
+    db.run(`
+      CREATE TRIGGER fail_senders BEFORE UPDATE OF from_id ON messages_cache
+      BEGIN SELECT RAISE(ABORT, 'disk full'); END
+    `)
+    const tables = ['chats_cache', 'message_search', 'messages_cache']
+    const before = tables.map((table) => dump(db, table))
+    const sendersBefore = senderIds(db)
+
+    expect(() => initSyncSchema(db)).toThrow('disk full')
+
+    expect(tables.map((table) => dump(db, table))).toEqual(before)
+    expect(senderIds(db)).toEqual(sendersBefore)
+    expect(userVersion(db)).toBe(0)
+
+    db.run('DROP TRIGGER fail_senders')
+    initSyncSchema(db)
+
+    expect(userVersion(db)).toBe(PEER_ID_USER_VERSION)
+    expect(chatIds(db)['Team Chat']).toBe(String(LEGACY.teamChat.marked))
+    expect(
+      db
+        .query(
+          "SELECT from_id FROM messages_cache WHERE text = 'weekly digest is out'",
+        )
+        .get(),
+    ).toEqual({ from_id: LEGACY.senderChannel.marked })
+    assertPeerIdInvariants(db)
+  })
+
+  it('rolls back the re-key when the search index rebuild fails', () => {
+    seedLegacyCache(db)
+    const chatsBefore = dump(db, 'chats_cache')
+    const sendersBefore = senderIds(db)
+
+    expect(() =>
+      migratePeerIds(db, () => {
+        throw new Error('disk full')
+      }),
+    ).toThrow('disk full')
+
+    expect(dump(db, 'chats_cache')).toEqual(chatsBefore)
+    expect(chatIds(db)['Team Chat']).toBe(String(LEGACY.teamChat.id))
+    expect(senderIds(db)).toEqual(sendersBefore)
+    expect(userVersion(db)).toBe(0)
+  })
+
+  it('waits up to 60 s for the write lock while it migrates, then restores the busy timeout', () => {
+    seedLegacyCache(db)
+    expect(busyTimeout(db)).toBe(5000)
+    const seen: number[] = []
+
+    expect(() =>
+      migratePeerIds(db, (conn) => {
+        seen.push(busyTimeout(conn))
+        throw new Error('disk full')
+      }),
+    ).toThrow('disk full')
+    expect(seen).toEqual([60_000])
+    expect(busyTimeout(db)).toBe(5000)
+
+    migratePeerIds(db, (conn) => {
+      seen.push(busyTimeout(conn))
+      rebuildMessageSearchIndex(conn)
+    })
+    expect(seen).toEqual([60_000, 60_000])
+    expect(busyTimeout(db)).toBe(5000)
+    expect(userVersion(db)).toBe(PEER_ID_USER_VERSION)
+  })
+
   it('indexes group and channel titles for search, without a new index version', () => {
     seedLegacyCache(db)
     const search = createMessagesSearch(db)
@@ -396,7 +498,7 @@ describe('peer ID migration on a shared file', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('lets two connections both open a 0.2.0 cache', () => {
+  it('lets a second connection open a cache the first one moved to marked IDs', () => {
     const path = join(dir, 'cache.db')
     const seed = new Database(path)
     initLegacySchema(seed)
