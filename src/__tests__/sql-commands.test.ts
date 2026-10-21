@@ -236,7 +236,7 @@ describe('SQL Commands', () => {
       })
     })
 
-    it('describes every chat ID column as a marked peer ID', async () => {
+    it('describes every chat and sender ID column as a marked peer ID', async () => {
       initSyncSchema(testCacheDb)
       const { printSchemaCommand } = await import(
         '../commands/sql/print-schema'
@@ -254,13 +254,22 @@ describe('SQL Commands', () => {
       for (const [index, table] of tables.entries()) {
         await run({ args: { table, format: 'json', _: [] } })
         const parsed = JSON.parse(logSpy.mock.calls[index]?.[0] as string)
-        const chatId = (
-          parsed.data.columns as Array<{ name: string; description: string }>
-        ).find((col) => col.name === 'chat_id')
-        descriptions[table] = chatId?.description ?? ''
+        for (const col of parsed.data.columns as Array<{
+          name: string
+          description: string
+        }>) {
+          if (['chat_id', 'from_id', 'forward_from_id'].includes(col.name)) {
+            const key = col.name === 'chat_id' ? table : `${table}.${col.name}`
+            descriptions[key] = col.description
+          }
+        }
       }
 
       expect(descriptions).toEqual({
+        'messages_cache.from_id':
+          'Marked peer ID of the sender: a user ID, or -N / -100… for a group or channel that posts as itself. Null when the message names no sender, such as a channel post fetched from history',
+        'messages_cache.forward_from_id':
+          'Marked peer ID of the original sender of a forwarded message: a user ID, or -N / -100… for a group or channel',
         chats_cache:
           'Marked peer ID, as messages_cache.chat_id holds it: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel',
         messages_cache:

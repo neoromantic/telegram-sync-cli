@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   daemon left running fails group and channel sync jobs until it is
   restarted, and the chats it caches are converted on the next run.
   Downgrading after that is not supported.
+- `fromId`, `sender.id` and `forwardFromId` in `tg messages search`, `list`
+  and `get` hold the marked ID of a group or channel that posts as itself or
+  that a message was forwarded from (`-N`, `-100…`), as `messages_cache`
+  stores them now. History pages, `tg send` and live forwards stored the
+  bare ID before; the first run converts the cached messages.
 
 ### Fixed
 
@@ -35,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User N and basic group N were stored under the same `chats_cache` key and
   overwrote each other, so the daemon could build a user peer for the group's
   sync jobs. They are now separate rows.
+- A message that a channel or group posted as itself got the name of the
+  user whose ID equals the chat's bare ID, in `sender` and in the search
+  index. It now has no user name.
 
 ## [0.2.0] - 2026-10-21
 

@@ -254,7 +254,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: false,
         },
         from_id: {
-          description: 'Sender user ID (null for channel posts)',
+          description:
+            'Marked peer ID of the sender: a user ID, or -N / -100… for a group or channel that posts as itself. Null when the message names no sender, such as a channel post fetched from history',
           nullable: true,
         },
         reply_to_id: {
@@ -262,7 +263,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         forward_from_id: {
-          description: 'Original sender ID if this is a forwarded message',
+          description:
+            'Marked peer ID of the original sender of a forwarded message: a user ID, or -N / -100… for a group or channel',
           nullable: true,
         },
         text: {

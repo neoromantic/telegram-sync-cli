@@ -95,8 +95,8 @@ request's peer).
 - `telegram-peer-ids.test.ts` — marked peer IDs, cross-checked against mtcute's
   `getMarkedPeerId` and `parseMarkedPeerId`
 - `peer-id-migration.test.ts` — the move of a 0.2.0 cache to marked IDs: rows re-keyed from
-  `raw_json` or their type, duplicates merged, a failure rolled back and retried, a second run
-  that changes nothing
+  `raw_json` or their type, duplicates merged, group and channel senders marked, a failure
+  rolled back and retried, a second run that changes nothing
 
 ### Peer ID fixtures
 

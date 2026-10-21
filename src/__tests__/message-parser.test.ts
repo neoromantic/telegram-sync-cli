@@ -19,14 +19,14 @@ describe('extractPeerId', () => {
     expect(extractPeerId(peer)).toBe(12345)
   })
 
-  it('extracts chatId from peerChat', () => {
+  it('gives a basic group (peerChat) its marked ID', () => {
     const peer: RawPeer = { _: 'peerChat', chatId: 67890 }
-    expect(extractPeerId(peer)).toBe(67890)
+    expect(extractPeerId(peer)).toBe(-67890)
   })
 
-  it('extracts channelId from peerChannel', () => {
+  it('gives a channel (peerChannel) its marked ID', () => {
     const peer: RawPeer = { _: 'peerChannel', channelId: 11111 }
-    expect(extractPeerId(peer)).toBe(11111)
+    expect(extractPeerId(peer)).toBe(-1000000011111)
   })
 
   it('returns undefined for undefined peer', () => {
@@ -44,22 +44,22 @@ describe('extractForwardFromId', () => {
     expect(extractForwardFromId(fwdFrom)).toBe(12345)
   })
 
-  it('extracts chatId when forwarded from a basic group (peerChat)', () => {
+  it('gives a basic group (peerChat) source its marked ID', () => {
     const fwdFrom: RawMessageFwdHeader = {
       _: 'messageFwdHeader',
       fromId: { _: 'peerChat', chatId: 67890 },
       date: Date.now(),
     }
-    expect(extractForwardFromId(fwdFrom)).toBe(67890)
+    expect(extractForwardFromId(fwdFrom)).toBe(-67890)
   })
 
-  it('extracts channelId when forwarded from a channel', () => {
+  it('gives a channel source its marked ID', () => {
     const fwdFrom: RawMessageFwdHeader = {
       _: 'messageFwdHeader',
       fromId: { _: 'peerChannel', channelId: 11111 },
       date: Date.now(),
     }
-    expect(extractForwardFromId(fwdFrom)).toBe(11111)
+    expect(extractForwardFromId(fwdFrom)).toBe(-1000000011111)
   })
 
   it('returns undefined when no forward header', () => {
@@ -234,7 +234,7 @@ describe('parseRawMessage', () => {
 
     const result = parseRawMessage(raw, 123)
 
-    expect(result.forwardFromId).toBe(55555)
+    expect(result.forwardFromId).toBe(-55555)
   })
 
   it('parses a message forwarded from a channel', () => {
@@ -256,7 +256,7 @@ describe('parseRawMessage', () => {
 
     const result = parseRawMessage(raw, 999)
 
-    expect(result.forwardFromId).toBe(77777)
+    expect(result.forwardFromId).toBe(-1000000077777)
   })
 
   it('parses a reply message', () => {
@@ -418,8 +418,8 @@ describe('parseRawMessages', () => {
 
     expect(results).toHaveLength(3)
     expect(results[0]!.forwardFromId).toBe(100) // from user
-    expect(results[1]!.forwardFromId).toBe(200) // from basic group (peerChat)
-    expect(results[2]!.forwardFromId).toBe(300) // from channel
+    expect(results[1]!.forwardFromId).toBe(-200) // from basic group (peerChat)
+    expect(results[2]!.forwardFromId).toBe(-1000000000300) // from channel
   })
 })
 
@@ -444,7 +444,7 @@ describe('Issue #25: peerChat forward handling', () => {
     const result = parseRawMessage(raw, 111)
 
     // Previously this would be null because peerChat wasn't handled
-    expect(result.forwardFromId).toBe(12345)
+    expect(result.forwardFromId).toBe(-12345)
     expect(result.forwardFromId).not.toBeNull()
     expect(result.forwardFromId).not.toBeUndefined()
   })

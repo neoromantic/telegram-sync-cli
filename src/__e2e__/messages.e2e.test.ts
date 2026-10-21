@@ -283,6 +283,15 @@ describe('E2E: Messages Search on a cache from 0.2.0', () => {
     ])
   })
 
+  it('prints a channel that posts as itself under its marked ID', async () => {
+    const [hit] = await search('weekly digest')
+
+    expect(hit).toMatchObject({
+      fromId: LEGACY.senderChannel.marked,
+      sender: { id: LEGACY.senderChannel.marked, firstName: null },
+    })
+  })
+
   it('joins every cached message to its chat in SQL', async () => {
     const result = await runCliSuccess(
       [

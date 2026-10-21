@@ -52,8 +52,36 @@ describe('sync-worker-real parseRawMessage', () => {
     )
 
     expect(fromUser?.forward_from_id).toBe(111)
-    expect(fromChat?.forward_from_id).toBe(222)
-    expect(fromChannel?.forward_from_id).toBe(333)
+    expect(fromChat?.forward_from_id).toBe(-222)
+    expect(fromChannel?.forward_from_id).toBe(-1000000000333)
+  })
+
+  it('gives a sender its marked ID', () => {
+    const page = [
+      { _: 'peerUser', userId: 111 },
+      { _: 'peerChat', chatId: 222 },
+      { _: 'peerChannel', channelId: 333 },
+      undefined,
+    ].map((fromId, index) =>
+      parseRawMessage(
+        {
+          _: 'message',
+          id: 30 + index,
+          peerId: { _: 'peerChannel', channelId: 1234567890 },
+          ...(fromId ? { fromId } : {}),
+          date: 1700000000,
+          message: 'hello',
+        },
+        -1001234567890,
+      ),
+    )
+
+    expect(page.map((message) => message?.from_id)).toEqual([
+      111,
+      -222,
+      -1000000000333,
+      null,
+    ])
   })
 
   it('marks service messages as service without media', () => {

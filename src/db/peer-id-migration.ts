@@ -7,6 +7,8 @@
  * `PRAGMA user_version` records the one-time steps that ran:
  * - 1: chats_cache is re-keyed and the search index rebuilt, so its `chat`
  *   column holds group and channel titles
+ * - 2: messages_cache.from_id and forward_from_id of a group or channel
+ *   sender get its marked ID; history pages stored the bare one
  *
  * The re-key itself runs on every open that finds a bare group or channel
  * row, so it also repairs rows that an older binary still running writes
@@ -24,7 +26,7 @@ import {
 import type { ChatType } from './types'
 
 /** user_version once every step has run */
-export const PEER_ID_USER_VERSION = 1
+export const PEER_ID_USER_VERSION = 2
 
 /**
  * How long to wait for another process's write lock. The CLI and the daemon
@@ -148,6 +150,73 @@ function rekeyBareChats(db: Database): void {
   }
 }
 
+type RawPeer = Parameters<typeof toPeerIdFromRawPeer>[0]
+
+/** The `_` of the raw peer at `path` in raw_json; NULL for malformed JSON */
+function rawPeerType(path: string): string {
+  return `CASE WHEN json_valid(raw_json) THEN json_extract(raw_json, '${path}._') END`
+}
+
+/**
+ * The marked ID for a stored sender or forward source, when it is the bare
+ * ID of the group or channel that raw_json names; otherwise the stored value
+ */
+function markedSenderId(stored: number | null, peer: RawPeer): number | null {
+  if (stored === null || stored <= 0) return stored
+  const marked = toPeerIdFromRawPeer(peer)
+  if (marked === null || marked > 0 || toRawPeerId(marked) !== stored) {
+    return stored
+  }
+  return marked
+}
+
+/**
+ * Give group and channel senders and forward sources their marked IDs. The
+ * update trigger re-indexes each changed row, so a channel no longer gets the
+ * name of the user whose ID equals its bare one.
+ */
+function markSenderIds(db: Database): void {
+  const rows = db
+    .query(`
+      SELECT rowid, from_id, forward_from_id, raw_json
+      FROM messages_cache
+      WHERE (from_id > 0
+          AND ${rawPeerType('$.fromId')} IN ('peerChannel', 'peerChat'))
+         OR (forward_from_id > 0
+          AND ${rawPeerType('$.fwdFrom.fromId')} IN ('peerChannel', 'peerChat'))
+    `)
+    .all() as {
+    rowid: number
+    from_id: number | null
+    forward_from_id: number | null
+    raw_json: string
+  }[]
+
+  const update = db.query(`
+    UPDATE messages_cache
+    SET from_id = $from_id, forward_from_id = $forward_from_id
+    WHERE rowid = $rowid
+  `)
+  for (const row of rows) {
+    const raw = JSON.parse(row.raw_json) as {
+      fromId?: RawPeer
+      fwdFrom?: { fromId?: RawPeer }
+    }
+    const fromId = markedSenderId(row.from_id, raw.fromId)
+    const forwardFromId = markedSenderId(
+      row.forward_from_id,
+      raw.fwdFrom?.fromId,
+    )
+    if (fromId !== row.from_id || forwardFromId !== row.forward_from_id) {
+      update.run({
+        $rowid: row.rowid,
+        $from_id: fromId,
+        $forward_from_id: forwardFromId,
+      })
+    }
+  }
+}
+
 /**
  * Bring the cache to marked peer IDs. Called at the end of initSyncSchema,
  * after the search index exists. Without work to do it only reads, so the
@@ -171,6 +240,7 @@ export function migratePeerIds(
 
       rekeyBareChats(db)
       if (version < 1) rebuildSearchIndex(db)
+      if (version < 2) markSenderIds(db)
 
       if (version < PEER_ID_USER_VERSION) {
         db.run(`PRAGMA user_version = ${PEER_ID_USER_VERSION}`)

@@ -9,15 +9,19 @@ import { join } from 'node:path'
 
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { type CachedChatInput, createChatsCache } from '../db/chats-cache'
+import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
 import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { createUsersCache } from '../db/users-cache'
 import {
   initLegacySchema,
   LEGACY,
   legacyChatRow,
+  legacyMessageRow,
+  rawMessage,
   seedLegacyCache,
 } from './helpers/legacy-cache'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
@@ -174,7 +178,7 @@ describe('peer ID migration', () => {
     })
   }
 
-  it('leaves the other tables byte-identical', () => {
+  it('leaves chat IDs in the other tables byte-identical', () => {
     seedLegacyCache(db)
     createChatSyncStateService(db).upsert({
       chat_id: LEGACY.teamChat.marked,
@@ -189,18 +193,108 @@ describe('peer ID migration', () => {
       priority: SyncPriority.High,
     })
     const tables = [
-      'messages_cache',
       'chat_sync_state',
       'sync_jobs',
       'history_ranges',
       'users_cache',
     ]
+    // Only the sender and forward columns of messages_cache change
+    const messages = () =>
+      dump(db, 'messages_cache').map((row) => {
+        const { from_id, forward_from_id, ...rest } = row as Record<
+          string,
+          unknown
+        >
+        return rest
+      })
     const before = tables.map((table) => dump(db, table))
+    const messagesBefore = messages()
 
     initSyncSchema(db)
 
     expect(tables.map((table) => dump(db, table))).toEqual(before)
+    expect(messages()).toEqual(messagesBefore)
     assertPeerIdInvariants(db)
+  })
+
+  it('gives group and channel senders and forward sources their marked IDs', () => {
+    const team = { _: 'peerChannel', channelId: LEGACY.teamChat.id } as const
+    const alice = { _: 'peerUser', userId: 10 } as const
+    const channel = { _: 'peerChannel', channelId: 333 } as const
+    const group = { _: 'peerChat', chatId: 222 } as const
+    const rows = [
+      legacyMessageRow(rawMessage(team, 1, 'as a channel', channel)),
+      legacyMessageRow(rawMessage(team, 2, 'as a group', group)),
+      legacyMessageRow(rawMessage(team, 3, 'forwarded', alice, channel)),
+      legacyMessageRow(rawMessage(team, 4, 'forwarded too', alice, group)),
+      legacyMessageRow(rawMessage(team, 5, 'from a user', alice, alice)),
+      // A live message already had the marked sender
+      {
+        ...legacyMessageRow(rawMessage(team, 6, 'live', channel)),
+        from_id: -1000000000333,
+      },
+      {
+        ...legacyMessageRow(rawMessage(team, 7, 'no raw')),
+        from_id: 333,
+        raw_json: '{}',
+      },
+      {
+        ...legacyMessageRow(rawMessage(team, 8, 'bad raw')),
+        from_id: 333,
+        forward_from_id: 222,
+        raw_json: '{"fromId":',
+      },
+    ]
+    createMessagesCache(db).upsertBatch(rows)
+
+    expect(() => initSyncSchema(db)).not.toThrow()
+
+    const ids = db
+      .query(
+        'SELECT message_id, from_id, forward_from_id FROM messages_cache ORDER BY message_id',
+      )
+      .all()
+      .map((row) => {
+        const { message_id, from_id, forward_from_id } = row as Record<
+          string,
+          number | null
+        >
+        return [message_id, from_id, forward_from_id]
+      })
+    expect(ids).toEqual([
+      [1, -1000000000333, null],
+      [2, -222, null],
+      [3, 10, -1000000000333],
+      [4, 10, -222],
+      [5, 10, 10],
+      [6, -1000000000333, null],
+      [7, 333, null],
+      [8, 333, 222],
+    ])
+    expect(userVersion(db)).toBe(PEER_ID_USER_VERSION)
+  })
+
+  it('stops indexing a channel sender under the user with its bare ID', () => {
+    seedLegacyCache(db)
+    // A user whose ID equals the bare ID of the channel that posts
+    createUsersCache(db).upsert({
+      user_id: String(LEGACY.senderChannel.id),
+      first_name: 'Zed',
+      last_name: 'Zeller',
+      fetched_at: 1_000,
+      raw_json: '{}',
+    })
+    db.run('UPDATE messages_cache SET text = text')
+    const search = createMessagesSearch(db)
+    expect(search.search('Zeller')).toHaveLength(1)
+
+    initSyncSchema(db)
+
+    expect(search.search('Zeller')).toEqual([])
+    expect(search.search('weekly digest')[0]).toMatchObject({
+      from_id: LEGACY.senderChannel.marked,
+      sender_first_name: null,
+    })
   })
 
   it('changes nothing when it runs on a migrated cache', () => {

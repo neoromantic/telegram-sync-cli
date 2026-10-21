@@ -223,6 +223,30 @@ describe('buildSentMessageInputs', () => {
       })
     })
 
+    it('stores a channel that posts as itself under its marked ID', () => {
+      const message = rawMessage({
+        fromId: { _: 'peerChannel', channelId: CHANNEL_ID },
+        fwdFrom: {
+          _: 'messageFwdHeader',
+          fromId: { _: 'peerChat', chatId: GROUP_ID },
+          date: DATE - 60,
+        },
+      })
+      const [input] = buildSentMessageInputs(
+        updatesWith([
+          { _: 'updateNewChannelMessage', message, pts: 1, ptsCount: 1 },
+        ]),
+        selfRequest,
+        null,
+      )
+
+      expect(input).toMatchObject({
+        chat_id: CHANNEL_PEER_ID,
+        from_id: CHANNEL_PEER_ID,
+        forward_from_id: GROUP_PEER_ID,
+      })
+    })
+
     it('maps updateNewMessage in updatesCombined for a basic group', () => {
       const message = rawMessage({
         id: 303,
