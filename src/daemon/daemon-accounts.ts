@@ -112,6 +112,17 @@ function resolveForwardFromId(message: {
   return extractForwardFromId(message.raw.fwdFrom)
 }
 
+/**
+ * On SIGTERM, SIGINT or exit, mtcute's own exit hook saves and closes every
+ * session file before the daemon's shutdown runs. destroy() then fails to save
+ * whatever was queued after the signal. That's expected on a stop, not a fault.
+ */
+function isClosedSessionError(err: unknown): boolean {
+  return /Database has closed|Cannot use a closed database/.test(
+    getErrorMessage(err),
+  )
+}
+
 export async function closeClientSafe(
   ctx: DaemonContext,
   client: TelegramClient,
@@ -121,7 +132,13 @@ export async function closeClientSafe(
     await client.destroy()
     ctx.logger.debug(`Closed client (${reason})`)
   } catch (err) {
-    ctx.logger.warn(`Failed to close client (${reason}): ${formatError(err)}`)
+    if (isClosedSessionError(err)) {
+      ctx.logger.debug(
+        `Session file already closed by mtcute (${reason}): ${getErrorMessage(err)}`,
+      )
+    } else {
+      ctx.logger.warn(`Failed to close client (${reason}): ${formatError(err)}`)
+    }
   }
 }
 

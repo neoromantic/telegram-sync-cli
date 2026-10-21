@@ -46,12 +46,14 @@ function uniqueMarker(): string {
 function collectOutput(stream: ReadableStream<Uint8Array>) {
   let text = ''
   const decoder = new TextDecoder()
-  void (async () => {
+  const done = (async () => {
     for await (const chunk of stream) {
       text += decoder.decode(chunk, { stream: true })
     }
   })()
   return {
+    /** Resolves once the stream has closed */
+    done,
     get text() {
       return text
     },
@@ -341,7 +343,7 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
     async () => {
       const daemon = spawnCli(['daemon', 'start'], cli())
       const logs = collectOutput(daemon.stdout)
-      collectOutput(daemon.stderr)
+      const errors = collectOutput(daemon.stderr)
 
       try {
         await waitFor(
@@ -448,6 +450,10 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
         const stop = await runCliSuccess(['daemon', 'stop'], cli())
         expect(stop.json).toMatchObject({ success: true })
         expect(await daemon.exited).toBe(0)
+        // A normal stop logs no close warning, although mtcute has already
+        // closed the session files when the signal arrived (#34)
+        await errors.done
+        expect(errors.text).not.toContain('Failed to close client')
       } finally {
         daemon.kill()
       }
