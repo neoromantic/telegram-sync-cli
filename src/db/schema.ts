@@ -16,6 +16,11 @@ import { Database } from 'bun:sqlite'
  * Creates all tables and indexes for caching
  */
 export function initCacheSchema(db: Database): void {
+  // The CLI and the daemon write this database at the same time. Wait up to
+  // 5 s for the other one's write lock instead of failing at once (SQLite's
+  // default is not to wait).
+  db.run('PRAGMA busy_timeout = 5000')
+
   // Enable WAL mode for better concurrent access
   db.run('PRAGMA journal_mode = WAL')
 
