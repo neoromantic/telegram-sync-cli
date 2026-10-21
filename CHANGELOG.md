@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `tg send --to`, `tg messages list` and `get --chat`, `tg chats get --id`
   and `tg chats sync` when the cache knows the chat; one that names both a
   cached basic group and a cached channel fails with `INVALID_ARGS` and lists
-  both marked IDs.
+  both marked IDs. A positive ID the cache knows as a user (a private chat,
+  a cached user, a DM with sync state or cached messages) names that user in
+  every command, never a group or channel.
   To upgrade, stop the daemon, upgrade, then start it. The first run of the
   new version converts the cache and rebuilds the search index once. A 0.2.0
   daemon left running fails group and channel sync jobs until it is

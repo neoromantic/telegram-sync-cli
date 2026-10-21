@@ -1,3 +1,4 @@
+import type { Database } from 'bun:sqlite'
 import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
@@ -27,42 +28,29 @@ import {
   rawChatToCacheInput,
   userToPrivateChatCacheInput,
 } from './helpers'
+import { findCachedChatById } from './lookup'
 
 function isResolvedChat(peer: tl.TypeChat | undefined): peer is ResolvedChat {
   return Boolean(peer && peer._ !== 'chatEmpty')
 }
 
 /**
- * The cached chat for @username or a marked ID. A bare group or channel ID
- * as 0.2.0 printed it matches too, unless it names two cached chats.
+ * The cached chat for @username or an ID, as findCachedChatById reads it: a
+ * marked ID, a user's private chat, or a bare group or channel ID as 0.2.0
+ * printed it, unless it names two cached chats.
  */
-function findCachedChat(
-  chatsCache: ReturnType<typeof createChatsCache>,
-  identifier: string,
-  isUsername: boolean,
-) {
-  if (isUsername) return chatsCache.getByUsername(identifier)
-
-  const exact = chatsCache.getById(identifier)
-  if (exact || !/^\d+$/.test(identifier)) return exact
-
-  const legacy = chatsCache.getByLegacyId(Number(identifier))
-  if (legacy.length > 1) {
-    throw new AmbiguousPeerError(
-      identifier,
-      legacy.map((chat) => Number(chat.chat_id)),
-    )
-  }
-  return legacy[0] ?? null
+function findCachedChat(db: Database, identifier: string, isUsername: boolean) {
+  if (isUsername) return createChatsCache(db).getByUsername(identifier)
+  return findCachedChatById(db, identifier)
 }
 
 function getCachedChat(
-  chatsCache: ReturnType<typeof createChatsCache>,
+  db: Database,
   identifier: string,
   isUsername: boolean,
   cacheConfig: Awaited<ReturnType<typeof getResolvedCacheConfig>>,
 ) {
-  const cached = findCachedChat(chatsCache, identifier, isUsername)
+  const cached = findCachedChat(db, identifier, isUsername)
   if (!cached) return null
 
   const stale = isCacheStale(cached.fetched_at, cacheConfig.staleness.dialogs)
@@ -166,7 +154,7 @@ export const getChatCommand = defineCommand({
 
       if (!fresh) {
         const cached = getCachedChat(
-          chatsCache,
+          cacheDb,
           identifier,
           isUsername,
           cacheConfig,

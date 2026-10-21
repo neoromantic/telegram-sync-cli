@@ -17,6 +17,7 @@ import {
 import { isUsernameIdentifier } from '../../utils/identifiers'
 import { error, success } from '../../utils/output'
 import { AmbiguousPeerError } from '../send/peer-resolver'
+import { findCachedChatById } from './lookup'
 
 export interface ResolvedChat {
   /** Marked peer ID, as `tg chats list` shows it and every cache table stores it */
@@ -42,35 +43,23 @@ function fromCachedChat(chat: CachedChat): ResolvedChat {
 }
 
 /**
- * Find the chat in the cache: by @username, by the marked ID `tg chats list`
- * shows (-100… for channels, -N for basic groups), by a bare group or
- * channel ID as 0.2.0 showed it, then by a marked ID the daemon has sync
- * state for (a chat seen only live). A bare ID that names two cached chats
- * throws AmbiguousPeerError.
+ * Find the chat in the cache: by @username, by an ID as findCachedChatById
+ * reads it (the marked ID `tg chats list` shows, a user's private chat, or a
+ * bare group or channel ID as 0.2.0 showed it), then by an ID the daemon has
+ * sync state for (a chat seen only live). A bare ID that names two cached
+ * chats throws AmbiguousPeerError.
  */
 function resolveChat(db: Database, input: string): ResolvedChat | null {
-  const chatsCache = createChatsCache(db)
-
   if (isUsernameIdentifier(input)) {
-    const chat = chatsCache.getByUsername(input)
+    const chat = createChatsCache(db).getByUsername(input)
     return chat ? fromCachedChat(chat) : null
   }
 
-  const id = Number(input)
-  if (!Number.isSafeInteger(id) || id === 0) return null
-
-  const cached = chatsCache.getById(String(id))
+  const cached = findCachedChatById(db, input)
   if (cached) return fromCachedChat(cached)
 
-  const legacy = chatsCache.getByLegacyId(id)
-  if (legacy.length > 1) {
-    throw new AmbiguousPeerError(
-      input,
-      legacy.map((chat) => Number(chat.chat_id)),
-    )
-  }
-  if (legacy[0]) return fromCachedChat(legacy[0])
-
+  if (!/^-?\d+$/.test(input)) return null
+  const id = Number(input)
   const state = createChatSyncStateService(db).get(id)
   if (!state) return null
   return {
