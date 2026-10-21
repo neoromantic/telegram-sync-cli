@@ -174,7 +174,8 @@ tg messages search \
 ### Supported Filters
 
 - `--chat` (chat id or `@username`)
-- `--sender` (user id or `@username`)
+- `--sender` (user ID, `@username`, or the marked ID of a group or channel that posts as itself,
+  such as `-1001234567890`)
 - `--includeDeleted` (alias: `--include-deleted`)
 - `--limit`, `--offset`
 
