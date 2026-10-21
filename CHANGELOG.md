@@ -34,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   others. Inside a lane, small chats go first. History starts right after a
   chat's first page, and works for every enabled chat, not only small ones.
 - The daemon's dialog pass also lists archived chats, so they are cached and
-  sync jobs can reach them, but they don't start syncing on their own.
+  sync jobs can reach them. The pass doesn't start syncing them: an archived
+  chat starts when a message arrives in it live or when `tg chats sync` turns
+  it on.
 - Groups whose member count Telegram doesn't report are off by default, like
   groups over 100 members, instead of getting a full-history sync. The daemon
   keeps the last known count when a dialog leaves it out.

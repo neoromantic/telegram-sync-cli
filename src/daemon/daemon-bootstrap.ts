@@ -26,8 +26,10 @@ export interface DialogPassResult {
  * One pass over an account's dialogs, archived ones included. Every dialog
  * updates `chats_cache`, so the sync jobs can build an InputPeer for it. A
  * dialog also updates the chat's sync state (type, member count, policy and
- * the newest message ID), but an archived chat without a state row gets none:
- * archived chats don't start syncing unless `tg chats sync` turns them on.
+ * the newest message ID), but the pass creates no state for an archived chat
+ * without one. Such a chat starts syncing when a message arrives in it live,
+ * which creates its state like in any other chat, or when `tg chats sync`
+ * turns it on.
  */
 export async function syncAccountDialogs(
   ctx: DaemonContext,

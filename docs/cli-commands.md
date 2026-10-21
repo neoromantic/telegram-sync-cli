@@ -72,8 +72,9 @@ tg chats sync @examplenews        # sync this chat in the background
 
 ### Chat sync
 
-The daemon syncs DMs and groups of up to 100 members by default. Groups of unknown size or
-over 100 members and channels sync only on request:
+The daemon syncs DMs and groups of up to 100 members by default. Archived ones start when a
+message arrives in them live, or with `tg chats sync`. Groups of unknown size or over 100
+members and channels get catch-up and history only on request:
 
 ```bash
 tg chats sync @examplenews        # turn sync on
