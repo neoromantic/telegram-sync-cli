@@ -172,6 +172,7 @@ Commands:
   chats sync        Turn background sync on or off for a chat (cache-only)
 
   messages list     Chat history, newest first (cache-first, --before/--after paging, --fresh)
+  messages get      One message with --context messages on each side (cache-first, --fresh)
   messages search   Search cached messages (FTS5, --chat/--sender/--includeDeleted)
 
   send              Send message to user/chat

@@ -226,11 +226,16 @@ const ALICE_ID = 10
 const TEAM_CHAT_ID = -1001234567890
 const BOOK_CLUB_ID = -4242
 
-describe('E2E: Messages List', () => {
+/**
+ * One seeded cache for a describe block. The commands under test only read
+ * it, so the blocks seed once. Every call runs without credentials: a cache
+ * miss fails fast instead of reaching the network.
+ */
+function useSeededHistory(name: string) {
   let env: TestEnvironment
 
   beforeAll(() => {
-    env = createTestEnvironment('messages-list')
+    env = createTestEnvironment(name)
     env.initDatabase()
     env.seedAccounts([
       {
@@ -252,10 +257,11 @@ describe('E2E: Messages List', () => {
     env.cleanup()
   })
 
-  /** Every list and get call runs without credentials: no network, ever */
-  function options() {
-    return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } }
-  }
+  return () => ({ env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } })
+}
+
+describe('E2E: Messages List', () => {
+  const options = useSeededHistory('messages-list')
 
   async function list(...args: string[]): Promise<ListData> {
     const result = await runCliSuccess(['messages', 'list', ...args], options())
@@ -417,6 +423,115 @@ describe('E2E: Messages List', () => {
 
   it('requires --chat', async () => {
     const result = await runCli(['messages', 'list'], options())
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain('Missing required argument')
+  })
+})
+
+interface GetData {
+  chatId: number
+  message: MessageSearchItem
+  newer: MessageSearchItem[]
+  older: MessageSearchItem[]
+  source: 'cache' | 'api'
+  stale: boolean
+}
+
+describe('E2E: Messages Get', () => {
+  const options = useSeededHistory('messages-get')
+
+  async function get(...args: string[]): Promise<GetData> {
+    const result = await runCliSuccess(['messages', 'get', ...args], options())
+    return (result.json as { data: GetData }).data
+  }
+
+  function ids(items: MessageSearchItem[]) {
+    return items.map((item) => item.messageId)
+  }
+
+  async function getFailure(...args: string[]) {
+    const result = await runCli(['messages', 'get', ...args], options())
+    return { exitCode: result.exitCode, json: result.json as ErrorData }
+  }
+
+  it('returns a message with its context from the cache', async () => {
+    const data = await get('--chat', '@alice', '--id', '4', '--context', '2')
+
+    expect(data.message.messageId).toBe(4)
+    expect(ids(data.newer)).toEqual([6, 5])
+    expect(ids(data.older)).toEqual([3, 2])
+    expect(data).toMatchObject({
+      chatId: ALICE_ID,
+      source: 'cache',
+      stale: false,
+    })
+  })
+
+  it('stops the context at the newest message and skips deleted ones', async () => {
+    const data = await get('--chat', '@alice', '--id', '7', '--context', '2')
+
+    expect(ids(data.newer)).toEqual([])
+    expect(ids(data.older)).toEqual([6, 5])
+  })
+
+  it('returns no context by default', async () => {
+    const data = await get('--chat', '@alice', '--id', '4')
+
+    expect(data.message.messageId).toBe(4)
+    expect(data.newer).toEqual([])
+    expect(data.older).toEqual([])
+  })
+
+  it('returns a deleted message that is cached', async () => {
+    const data = await get('--chat', '@alice', '--id', '8')
+
+    expect(data.message).toMatchObject({ messageId: 8, isDeleted: true })
+    expect(data.source).toBe('cache')
+  })
+
+  it('prints the same item as tg messages list', async () => {
+    const data = await get('--chat', '-1001234567890', '--id', '2')
+    const listed = await runCliSuccess(
+      ['messages', 'list', '--chat', '@teamchat'],
+      options(),
+    )
+    const items = (listed.json as { data: ListData }).data.items
+
+    expect(data.chatId).toBe(TEAM_CHAT_ID)
+    expect(data.message).toEqual(items.find((item) => item.messageId === 2)!)
+  })
+
+  it('asks Telegram for a message the cache does not hold', async () => {
+    const { exitCode, json } = await getFailure(
+      '--chat',
+      '@alice',
+      '--id',
+      '99',
+    )
+
+    expect(exitCode).toBe(3)
+    expect(json.error.code).toBe('INVALID_ARGS')
+    expect(json.error.message).toContain('TELEGRAM_API_ID')
+  })
+
+  it.each(['--id 0', '--id abc', '--id 4 --context -1', '--id 4 --context 50'])(
+    'rejects %p with INVALID_ARGS',
+    async (flags) => {
+      const { exitCode, json } = await getFailure(
+        '--chat',
+        '@alice',
+        ...flags.split(' '),
+      )
+      expect(exitCode).toBe(3)
+      expect(json.error.code).toBe('INVALID_ARGS')
+    },
+  )
+
+  it('requires --id', async () => {
+    const result = await runCli(
+      ['messages', 'get', '--chat', '@alice'],
+      options(),
+    )
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain('Missing required argument')
   })

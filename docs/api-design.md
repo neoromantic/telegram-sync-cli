@@ -77,6 +77,7 @@ tg chats sync @examplenews         # sync a large group or channel too (--off, -
 # Messages: chat history (cache-first) and full-text search (cache-only)
 tg messages list --chat @username --limit 20
 tg messages list --chat @username --before 1200
+tg messages get --chat @username --id 1200 --context 3
 tg messages search --query "hello"
 tg messages search --query "hello" --chat @teamchat --sender @alice
 tg messages search --query "hello" --includeDeleted

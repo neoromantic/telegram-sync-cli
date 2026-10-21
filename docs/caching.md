@@ -108,6 +108,10 @@ tg messages list --chat @username --before 1200
    in `users_cache`) with `raw_json` and `fetched_at`, and return the page read back from the
    cache with `source: "api"`
 
+`tg messages get --chat @username --id 1200 --context 3` follows the same rule for one message:
+if it is cached, it and its context come from the cache; otherwise one `messages.getHistory`
+call fetches it with the messages around it.
+
 `--fresh` always takes step 4. Fetched pages are searchable right away. The CLI doesn't move the
 daemon's sync cursors and never infers deletions. Without a running daemon the cache stops at
 the last sync, so the newest page can be behind Telegram; `--fresh` reads Telegram's view.

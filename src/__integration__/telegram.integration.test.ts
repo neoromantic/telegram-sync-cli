@@ -6,7 +6,9 @@
  * account's own Saved Messages and are deleted afterwards.
  */
 
+import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { join } from 'node:path'
 import {
   type CliOptions,
   runCli,
@@ -235,6 +237,90 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
       })
     },
     API_TIMEOUT_MS * 3,
+  )
+
+  it(
+    'messages list and get read Saved Messages from Telegram, then from the cache',
+    async () => {
+      type Item = { chatId: number; messageId: number; text: string | null }
+      type ListData = { chatId: number; items: Item[]; source: string }
+      type GetData = {
+        message: Item
+        newer: Item[]
+        older: Item[]
+        source: string
+      }
+      const list = async (...args: string[]) =>
+        (
+          (
+            await runCliSuccess(
+              ['messages', 'list', '--chat', 'me', ...args],
+              cli(),
+            )
+          ).json as Envelope<ListData>
+        ).data
+      const get = async (...args: string[]) =>
+        (
+          (
+            await runCliSuccess(
+              ['messages', 'get', '--chat', 'me', ...args],
+              cli(),
+            )
+          ).json as Envelope<GetData>
+        ).data
+
+      const markerA = uniqueMarker()
+      const markerB = uniqueMarker()
+      const idA = await sendToSavedMessages(`tg smoke test ${markerA}`)
+      const idB = await sendToSavedMessages(`tg smoke test ${markerB}`)
+
+      // tg send caches what it sends; drop that so the read has to fetch
+      const cacheDb = new Database(join(env.dataDir, 'cache.db'))
+      cacheDb.run('DELETE FROM messages_cache WHERE message_id IN (?, ?)', [
+        idA,
+        idB,
+      ])
+      cacheDb.close()
+
+      const fresh = await list('--fresh', '--limit', '5')
+      const me = await runCliSuccess(['me'], cli())
+      const userId = (me.json as Envelope<{ user: { id: number } }>).data.user
+        .id
+      expect(fresh.source).toBe('api')
+      expect(fresh.chatId).toBe(userId)
+      expect(fresh.items.slice(0, 2).map((item) => item.messageId)).toEqual([
+        idB,
+        idA,
+      ])
+      expect(fresh.items[1]?.text).toContain(markerA)
+
+      const cached = await list('--limit', '5')
+      expect(cached.source).toBe('cache')
+      expect(cached.items.slice(0, 2)).toEqual(fresh.items.slice(0, 2))
+
+      const search = await runCliSuccess(
+        ['messages', 'search', '--query', markerA],
+        cli(),
+      )
+      expect(
+        (search.json as Envelope<{ results: Item[] }>).data.results.map(
+          (item) => item.messageId,
+        ),
+      ).toEqual([idA])
+
+      const after = await list('--after', String(idA), '--fresh')
+      expect(after.items.map((item) => item.messageId)).toEqual([idB])
+
+      const around = await get('--id', String(idA), '--context', '1', '--fresh')
+      expect(around.source).toBe('api')
+      expect(around.message.messageId).toBe(idA)
+      expect(around.newer[0]?.messageId).toBe(idB)
+
+      const fromCache = await get('--id', String(idA))
+      expect(fromCache.source).toBe('cache')
+      expect(fromCache.message).toEqual(around.message)
+    },
+    API_TIMEOUT_MS * 6,
   )
 
   it.skipIf(!CAN_RUN_DAEMON)(

@@ -61,7 +61,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
   groups and channels on request (`tg chats sync`); the CLI does all mutations (`tg send`)
 - Full Telegram API access through `tg api <method>`
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
-- Chat history with cursor paging (`tg messages list`), cache-first
+- Chat history with cursor paging (`tg messages list`) and a message in context
+  (`tg messages get`), cache-first
 - Full-text search (FTS5) over cached messages
 - Contacts, chats and users (`tg contacts`, `tg chats`, `tg me`, `tg user`)
 - Read-only SQL over the cache (`tg sql`) with an annotated schema
@@ -83,7 +84,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | SQL over your data | ✅ read-only `tg sql` | ❌ |
 | Background sync | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; catch-up and history for large groups and channels on request (`tg chats sync`) | partial: waits for events, stores nothing |
 | Any MTProto method | ✅ `tg api <method>` | ❌ fixed tool set |
-| Read chat history | partial: `tg sql` or `tg api` ([#21](https://github.com/neoromantic/telegram-sync-cli/issues/21)) | ✅ |
+| Read chat history | ✅ `tg messages list` (paging) and `tg messages get` (context), cache-first, `--fresh` | ✅ |
 | Send text | ✅ replies, silent | ✅ replies, Markdown/HTML |
 | Edit, delete, forward, pin | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)) | ✅ |
 | Send and download media | ❌ ([#22](https://github.com/neoromantic/telegram-sync-cli/issues/22)) | ✅ files, albums, voice, transcription |
@@ -106,6 +107,7 @@ tg contacts list --limit 50
 tg chats list --limit 20
 tg chats sync @examplenews          # also sync a large group or channel
 tg messages list --chat @username --limit 20
+tg messages get --chat @username --id 42 --context 3
 tg messages search --query "hello"
 tg send --to @username --message "Hi there"
 tg api account.checkUsername --username myuser
