@@ -292,6 +292,28 @@ describe('rebuildSyncWorker dialog pass', () => {
     expect(pendingCatchups()).toEqual([1002, 1003])
   })
 
+  it('logs a pass that throws and lets the next reconnect run one', async () => {
+    // Nothing awaits the pass in the daemon, so a throw must not escape
+    const ctx = createContext()
+    ctx.runtime.scheduler = createSchedulerStub({
+      refreshQueues: mock(() => {
+        throw new Error('disk I/O error')
+      }),
+    })
+    const fake = fakeDialogClient([
+      { kind: 'user', id: 1002, topMessage: 1007 },
+    ])
+
+    await expect(
+      rebuildSyncWorker(ctx, 1, fake.client),
+    ).resolves.toBeUndefined()
+
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Dialog pass after reconnect failed'),
+    )
+    expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
+  })
+
   it('runs one pass for two quick reconnects of an account', async () => {
     const ctx = createRunningContext()
     const first = fakeDialogClient([
