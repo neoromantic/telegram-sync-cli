@@ -225,6 +225,34 @@ describe('bootstrapDialogs', () => {
     expect(await startScheduler()).toEqual([])
   })
 
+  it('checks an opted-in chat that no dialog lists on every start', async () => {
+    // A public channel the user never joined, turned on with tg chats sync:
+    // no dialog list shows it and no live update reaches it
+    const channelId = -1_000_000_003_003
+    chatSyncState.upsert({
+      chat_id: channelId,
+      chat_type: 'channel',
+      member_count: 5000,
+      sync_priority: SyncPriority.Low,
+      sync_enabled: false,
+      forward_cursor: 900,
+      backward_cursor: 801,
+    })
+    chatSyncState.setSyncMode(channelId, 'on')
+    chatSyncState.raiseTopMessageId(channelId, 900)
+    // Left: no longer in the dialog list
+    seedSynced(1001, 1000, 1200)
+
+    await runPass([{ kind: 'user', id: 1003, topMessage: 50 }])
+
+    expect(chatSyncState.get(channelId)?.top_message_id).toBeNull()
+    expect(chatSyncState.get(1001)?.top_message_id).toBe(1000)
+    const catchups = (await startScheduler()).filter(
+      (job) => job.job_type === SyncJobType.ForwardCatchup,
+    )
+    expect(catchups.map((job) => job.chat_id)).toEqual([channelId])
+  })
+
   it('checks every unvisited chat once after a pass that failed part-way', async () => {
     seedSynced(1001, 1000, 1000)
     seedSynced(1002, 1000, 1000)

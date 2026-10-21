@@ -164,7 +164,8 @@ Scheduler → sync_jobs → worker → messages_cache + chat_sync_state
 - After a reconnect, a dialog pass runs on the new client in the background
   (one per account at a time), then the scheduler catches up the chats that got
   messages while the connection was down. If the pass fails part-way, every
-  synced chat it didn't list gets one checking page
+  synced chat it didn't list gets one checking page; a chat turned on with
+  `tg chats sync` that it didn't list gets one either way
 - Tracks last activity to avoid noisy health checks
 - Validates sync job state transitions
 - Uses rate limit service with flood wait tracking

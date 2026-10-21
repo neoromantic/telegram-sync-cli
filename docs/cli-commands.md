@@ -93,6 +93,9 @@ tg chats sync @examplenews --auto # follow the default policy again
   on gets its first page ahead of other first pages. A changed mode cancels the chat's pending
   jobs; a job that is running finishes.
 - `--account` is checked like in `chats search`; all accounts share one cache.
+- A chat you haven't joined, such as a public channel cached by `tg chats get --id @username`,
+  gets its first page and history, but new messages only on daemon start and after reconnects:
+  Telegram sends no live updates for it.
 
 ```json
 {
