@@ -156,27 +156,15 @@ function ensureSyncState(
   }
 }
 
-function updateForwardCursor(
-  chatSyncState: ChatSyncStateService,
-  chatId: number,
-  messageId: number,
-): void {
-  const state = chatSyncState.get(chatId)
-  if (
-    state &&
-    (state.forward_cursor === null || messageId > state.forward_cursor)
-  ) {
-    chatSyncState.updateCursors(chatId, { forward_cursor: messageId })
-  }
-}
-
 async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
   ensureSyncState(deps.chatSyncState, data.chatId, data.chatType)
 
   const input = toMessageInput(data)
   deps.messagesCache.upsert(input)
 
-  updateForwardCursor(deps.chatSyncState, data.chatId, data.messageId)
+  // The forward cursor means "every message up to here is cached", so live
+  // updates leave it to the sync jobs: messages that arrived while the
+  // daemon was stopped may sit between the cursor and this one.
   deps.chatSyncState.incrementSyncedMessages(data.chatId, 1)
   deps.chatSyncState.updateLastSync(data.chatId, 'forward')
   deps.onMessagesSynced?.(1)

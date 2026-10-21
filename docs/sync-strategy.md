@@ -6,7 +6,8 @@
 
 The daemon synchronizes message history using a **dual cursor** system and a **persistent job queue**:
 
-- **Forward cursor** tracks the newest synced message (catchup + realtime)
+- **Forward cursor** marks how far forward the cache is complete: every message up to it is
+  cached. Only sync jobs move it, never live updates.
 - **Backward cursor** tracks how far history backfill has progressed
 - **sync_jobs** provides resumable, priority-based work
 
@@ -17,11 +18,11 @@ Each chat maintains two independent cursors:
 ```
 Timeline: [oldest] ---- [backward_cursor] ---- [forward_cursor] ---- [newest]
            ^                                           ^
-     History backfill                             Real-time updates
+     History backfill                             Forward catch-up
 ```
 
 Stored in `chat_sync_state`:
-- `forward_cursor` — latest synced message ID
+- `forward_cursor` — every message up to this ID is cached; forward catch-up continues from here
 - `backward_cursor` — oldest synced message ID
 - `history_complete` — reached beginning of history
 
@@ -60,7 +61,7 @@ Core tables (see `docs/database-schema.md` for full schema):
 
 Implemented in `SyncJobType`:
 
-- `forward_catchup` — fetch missed messages since `forward_cursor`
+- `forward_catchup` — fetch the next page of messages above `forward_cursor`
 - `initial_load` — initial recent message window
 - `backward_history` — backfill older history
 - `full_sync` — full history job (used sparingly)
@@ -73,7 +74,29 @@ Job status values:
 ### Real-time
 
 - Handlers listen to mtcute events immediately
-- New messages update `messages_cache` and advance `forward_cursor`
+- New messages are upserted into `messages_cache`. They don't move `forward_cursor`: messages
+  that arrived while the daemon was stopped may sit between the cursor and a live message.
+
+### Forward catch-up
+
+Each `forward_catchup` job makes one `messages.getHistory` call:
+
+- **With a cursor**, it fetches the oldest 100 messages above it (`offset_id = cursor + 1`,
+  `add_offset = -100`, `min_id = cursor`), caches them and moves the cursor to the newest one.
+  A full page means there may be more, so the scheduler queues the next page. One call per job
+  keeps paging under the rate limits and the inter-job delay. If a page fails (for example on
+  a FLOOD_WAIT), the next catch-up resumes from the cursor.
+- **Without a cursor** (a chat the daemon hasn't synced yet), it fetches the newest page and
+  sets the cursor to its newest message. Older history is the backward job's.
+
+So after a restart, catch-up pages from the stored cursor up to the newest message, and every
+message that arrived while the daemon was stopped ends up in the cache, even if live messages
+arrive first. Messages received live are fetched again by the next catch-up; the upsert
+doesn't duplicate them, and only messages that weren't cached yet count towards
+`synced_messages`.
+
+mtcute's `catchUp` option stays off: forward catch-up already covers missed messages, and
+`getDifference` can't replay a long gap anyway (`differenceTooLong`).
 
 ### Catch-up + Backfill
 

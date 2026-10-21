@@ -18,6 +18,7 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { createFakeHistory, range, rawMessage } from './helpers/fake-history'
 
 describe('sync-worker real jobs', () => {
   let db: Database
@@ -575,6 +576,187 @@ describe('sync-worker real jobs', () => {
 
       const state = ctx.chatSyncState.get(chatId)
       expect(state?.history_complete).toBe(1)
+    })
+  })
+
+  describe('forward catch-up paging', () => {
+    const chatId = 4242
+
+    beforeEach(() => {
+      ctx.config.batchSize = 100
+    })
+
+    function seedChat(forwardCursor?: number) {
+      ctx.chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: forwardCursor,
+      })
+    }
+
+    function runCatchup() {
+      const job = ctx.jobsService.create({
+        chat_id: chatId,
+        job_type: SyncJobType.ForwardCatchup,
+        priority: SyncPriority.Realtime,
+      })
+      return processForwardCatchupReal(ctx, job)
+    }
+
+    function cachedIds(): number[] {
+      return range(1, 2000).filter(
+        (id) => ctx.messagesCache.get(chatId, id) !== null,
+      )
+    }
+
+    it('requests the oldest page above the cursor', async () => {
+      seedChat(1000)
+      const history = createFakeHistory(range(1, 1150))
+      ctx.client = history.client
+
+      const result = await runCatchup()
+
+      expect(history.requests[0]).toMatchObject({
+        offsetId: 1001,
+        addOffset: -100,
+        limit: 100,
+        minId: 1000,
+      })
+      expect(result).toMatchObject({
+        success: true,
+        messagesFetched: 100,
+        hasMore: true,
+        newCursor: 1100,
+      })
+      expect(cachedIds()).toEqual(range(1001, 1100))
+      expect(ctx.chatSyncState.get(chatId)?.forward_cursor).toBe(1100)
+    })
+
+    it('pages through a 150-message gap and stops on a short page', async () => {
+      seedChat(1000)
+      const history = createFakeHistory(range(1, 1150))
+      ctx.client = history.client
+
+      const first = await runCatchup()
+      const second = await runCatchup()
+
+      expect(first.hasMore).toBe(true)
+      expect(second).toMatchObject({
+        messagesFetched: 50,
+        hasMore: false,
+        newCursor: 1150,
+      })
+      expect(history.requests).toHaveLength(2)
+      expect(history.requests[1]).toMatchObject({
+        offsetId: 1101,
+        minId: 1100,
+      })
+      expect(cachedIds()).toEqual(range(1001, 1150))
+      expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(150)
+    })
+
+    it('needs one empty page after a gap of exactly one batch', async () => {
+      seedChat(1000)
+      const history = createFakeHistory(range(1, 1100))
+      ctx.client = history.client
+
+      const first = await runCatchup()
+      const second = await runCatchup()
+
+      expect(first).toMatchObject({ hasMore: true, newCursor: 1100 })
+      expect(second).toMatchObject({ messagesFetched: 0, hasMore: false })
+      expect(ctx.chatSyncState.get(chatId)?.forward_cursor).toBe(1100)
+      expect(cachedIds()).toEqual(range(1001, 1100))
+    })
+
+    it('makes no change when nothing is above the cursor', async () => {
+      seedChat(1000)
+      const history = createFakeHistory(range(1, 1000))
+      ctx.client = history.client
+
+      const result = await runCatchup()
+
+      expect(result).toMatchObject({ messagesFetched: 0, hasMore: false })
+      expect(ctx.chatSyncState.get(chatId)?.forward_cursor).toBe(1000)
+      expect(cachedIds()).toEqual([])
+    })
+
+    it('ignores messages at or below the cursor', async () => {
+      seedChat(1000)
+      ctx.config.batchSize = 3
+      ctx.client = {
+        call: mock(async () => ({
+          messages: [rawMessage(1001), rawMessage(1000), rawMessage(999)],
+        })),
+      } as unknown as TelegramClient
+
+      const result = await runCatchup()
+
+      expect(result).toMatchObject({
+        messagesFetched: 1,
+        hasMore: false,
+        newCursor: 1001,
+      })
+      expect(cachedIds()).toEqual([1001])
+    })
+
+    it('moves the cursor past empty messages', async () => {
+      seedChat(1000)
+      ctx.config.batchSize = 2
+      ctx.client = {
+        call: mock(async () => ({
+          messages: [
+            { _: 'messageEmpty', id: 1002 },
+            { _: 'messageEmpty', id: 1001 },
+          ],
+        })),
+      } as unknown as TelegramClient
+
+      const result = await runCatchup()
+
+      expect(result).toMatchObject({ messagesFetched: 0, newCursor: 1002 })
+      expect(ctx.chatSyncState.get(chatId)?.forward_cursor).toBe(1002)
+    })
+
+    it('counts only messages that were not cached yet', async () => {
+      seedChat(1000)
+      ctx.messagesCache.upsert({
+        chat_id: chatId,
+        message_id: 1051,
+        message_type: 'text',
+        date: 1_700_001_051,
+        raw_json: '{}',
+      })
+      const history = createFakeHistory(range(1, 1051))
+      ctx.client = history.client
+
+      const result = await runCatchup()
+
+      expect(result).toMatchObject({ messagesFetched: 50, newCursor: 1051 })
+      expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(50)
+      expect(cachedIds()).toEqual(range(1001, 1051))
+    })
+
+    it('fetches the newest page when the chat has no cursor', async () => {
+      seedChat()
+      const history = createFakeHistory(range(1, 250))
+      ctx.client = history.client
+
+      const result = await runCatchup()
+
+      expect(history.requests[0]).toMatchObject({
+        offsetId: 0,
+        addOffset: 0,
+        minId: 0,
+      })
+      expect(result).toMatchObject({
+        messagesFetched: 100,
+        hasMore: false,
+        newCursor: 250,
+      })
+      expect(cachedIds()).toEqual(range(151, 250))
     })
   })
 })

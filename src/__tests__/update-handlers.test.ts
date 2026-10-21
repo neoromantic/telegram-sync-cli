@@ -156,8 +156,9 @@ describe('UpdateHandlers', () => {
       expect(cached?.forward_from_id).toBe(456)
     })
 
-    it('updates forward cursor when message is newer', async () => {
-      // Set up initial sync state
+    it('leaves the forward cursor to catch-up for newer messages', async () => {
+      // Messages 6-9 may have arrived while the daemon was stopped, so a
+      // live message 10 must not mark them as cached.
       chatSyncState.upsert({
         chat_id: 100,
         chat_type: 'private',
@@ -173,15 +174,33 @@ describe('UpdateHandlers', () => {
 
       await handlers.handleNewMessage(ctx, {
         chatId: 100,
-        messageId: 10, // Newer than cursor
+        messageId: 10,
         fromId: 123,
         text: 'New message',
         date: Date.now(),
         isOutgoing: false,
       })
 
-      const state = chatSyncState.get(100)
-      expect(state?.forward_cursor).toBe(10)
+      expect(messagesCache.get(100, 10)).not.toBeNull()
+      expect(chatSyncState.get(100)?.forward_cursor).toBe(5)
+    })
+
+    it('does not set a forward cursor for a new chat', async () => {
+      const ctx: UpdateContext = {
+        accountId: 1,
+        receivedAt: Date.now(),
+      }
+
+      await handlers.handleNewMessage(ctx, {
+        chatId: 102,
+        messageId: 10,
+        fromId: 123,
+        text: 'First live message',
+        date: Date.now(),
+        isOutgoing: false,
+      })
+
+      expect(chatSyncState.get(102)?.forward_cursor).toBeNull()
     })
 
     it('does not regress forward cursor for older messages', async () => {
