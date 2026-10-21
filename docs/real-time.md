@@ -24,7 +24,11 @@ Handlers live in:
    after fetching the messages below (see [sync-strategy.md](sync-strategy.md)).
 
 A message in a chat without a state row creates one from the message's chat: its type and,
-for groups, its member count decide the sync policy.
+for groups, its member count decide the sync policy. A message in a chat without a
+`chats_cache` row (one new to this run, such as a new DM) also caches the chat from the update,
+so the chat's first page can build an InputPeer with its access hash before the next dialog
+pass. A "min" user or channel is skipped: its access hash works only in the update that carried
+it.
 
 ### Message Type Mapping
 

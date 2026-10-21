@@ -6,6 +6,7 @@ import {
 } from '@mtcute/bun'
 import { getCacheDb } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
+import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import type { SyncChatType } from '../db/sync-schema'
 import { getDefaultConfig, validateConfig } from '../services/telegram'
@@ -155,6 +156,7 @@ export function setupEventHandlers(
     db: cacheDb,
     messagesCache,
     chatSyncState,
+    chatsCache: createChatsCache(cacheDb),
     onMessagesSynced: (count) => {
       ctx.runtime.totalMessagesSynced += count
     },
@@ -191,6 +193,7 @@ export function setupEventHandlers(
         hasMedia,
         forwardFromId,
         rawMessage: msg.raw,
+        rawChat: msg.chat.raw,
       }
 
       updateHandlers.handleNewMessage(ctxLocal, data).catch((err) => {
