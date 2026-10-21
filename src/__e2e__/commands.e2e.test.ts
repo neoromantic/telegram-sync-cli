@@ -485,6 +485,27 @@ describe('E2E: Contacts Commands', () => {
       expect(response.data.items).toHaveLength(1)
       expect(response.data.items[0]?.firstName).toBe('Contact')
     })
+
+    it('should return contacts behind more than 1000 cached users', async () => {
+      env.seedUsers([
+        ...Array.from({ length: 1001 }, (_, i) => ({
+          user_id: String(1000 + i),
+          first_name: `Aaron ${i}`,
+          is_contact: 0,
+        })),
+        { user_id: '9999', first_name: 'Zed', is_contact: 1 },
+      ])
+
+      const result = await runCliSuccess(
+        ['contacts', 'list'],
+        env.getCliOptions(),
+      )
+
+      expect(result.json).toMatchObject({
+        success: true,
+        data: { items: [{ firstName: 'Zed' }], total: 1 },
+      })
+    })
   })
 
   describe('contacts search', () => {
