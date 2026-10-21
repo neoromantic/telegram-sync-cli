@@ -225,6 +225,11 @@ Peers can be specified in multiple formats:
 - Chat ID: `-123456789`
 - Channel ID: `-1001234567890`
 
+A bare number is looked up as a cached user or chat ID first, so a 10-digit ID from
+`tg chats list` works. Only a number the cache doesn't know is tried as a phone number; write
+phone numbers with `+` to skip the ID lookup. Marked IDs (`-…`) resolve from the cache, or from
+the ID alone with no API call.
+
 Note: `tg chats get` currently accepts **@username only**.
 
 ## Type System

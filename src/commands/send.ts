@@ -91,7 +91,7 @@ export const sendCommand = defineCommand({
     to: {
       type: 'string',
       description:
-        'Recipient: user ID, @username, phone number, or me (Saved Messages)',
+        'Recipient: @username, user or chat ID (as tg chats list or tg messages search print it), phone number (+…), or me (Saved Messages)',
       required: true,
     },
     message: {
