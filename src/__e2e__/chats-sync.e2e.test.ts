@@ -53,6 +53,7 @@ interface SyncResult {
     historyComplete: boolean
     syncedMessages: number
     changed: boolean
+    clearedFailedJobs: number
   }
 }
 
@@ -135,6 +136,7 @@ describe('E2E: chats sync', () => {
           historyComplete: false,
           syncedMessages: 0,
           changed: true,
+          clearedFailedJobs: 0,
         },
       })
       expect(stateOf(CHANNEL_PEER_ID)).toMatchObject({
@@ -175,6 +177,47 @@ describe('E2E: chats sync', () => {
     })
     expect(stateOf(-4001)).toMatchObject({ sync_mode: 'off', sync_enabled: 0 })
     expect(jobs.getPendingJobs()).toEqual([])
+  })
+
+  describe('a chat whose sync jobs failed', () => {
+    function failJobs(chatId: number, count: number) {
+      const jobs = createSyncJobsService(cacheDb)
+      for (let i = 0; i < count; i++) {
+        const job = jobs.create({
+          chat_id: chatId,
+          job_type:
+            i === 0 ? SyncJobType.InitialLoad : SyncJobType.BackwardHistory,
+          priority: SyncPriority.High,
+        })
+        jobs.markRunning(job.id)
+        jobs.markFailed(job.id, 'Telegram API error 400: CHANNEL_PRIVATE')
+      }
+    }
+
+    const failedOf = (chatId: number) =>
+      createSyncJobsService(cacheDb)
+        .getFailedJobs(10)
+        .filter((job) => job.chat_id === chatId)
+
+    for (const [label, before, args] of [
+      ['when the mode changes', [], []],
+      ["when the mode didn't change", ['@examplenews'], []],
+      ['with --off', ['@examplenews'], ['--off']],
+    ] as const) {
+      it(`deletes them ${label}, so the daemon retries them`, async () => {
+        if (before.length > 0) await sync(...before)
+        failJobs(CHANNEL_PEER_ID, 2)
+        failJobs(-4001, 1)
+
+        const result = await sync('@examplenews', ...args)
+
+        expect(result.data.clearedFailedJobs).toBe(2)
+        expect(result.data.changed).toBe(before.length === 0 || args.length > 0)
+        expect(failedOf(CHANNEL_PEER_ID)).toEqual([])
+        // Another chat's failed jobs stay
+        expect(failedOf(-4001)).toHaveLength(1)
+      })
+    }
   })
 
   it('goes back to the default policy with --auto', async () => {
