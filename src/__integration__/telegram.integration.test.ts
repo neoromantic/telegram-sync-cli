@@ -409,7 +409,10 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
         const status = await runCliSuccess(['status'], cli())
         expect(status.json).toMatchObject({
           success: true,
-          data: { daemon: { status: 'running' } },
+          data: {
+            daemon: { status: 'running' },
+            sync: { failed_jobs: expect.any(Number) },
+          },
         })
 
         const stop = await runCliSuccess(['daemon', 'stop'], cli())
