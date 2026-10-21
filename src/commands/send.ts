@@ -89,7 +89,8 @@ export const sendCommand = defineCommand({
   args: {
     to: {
       type: 'string',
-      description: 'Recipient: user ID, @username, or phone number',
+      description:
+        'Recipient: user ID, @username, phone number, or me (Saved Messages)',
       required: true,
     },
     message: {
