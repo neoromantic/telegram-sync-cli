@@ -1,6 +1,7 @@
 # telegram-sync-cli
 
 Agent-friendly Telegram CLI with a local cache, a read-only sync daemon and full MTProto API access.
+Website: [tg.sergeybaus.com](https://tg.sergeybaus.com).
 
 [![CI](https://github.com/neoromantic/telegram-sync-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/neoromantic/telegram-sync-cli/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@goodit/telegram-sync-cli)](https://www.npmjs.com/package/@goodit/telegram-sync-cli)

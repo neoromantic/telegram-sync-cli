@@ -23,7 +23,7 @@ base=https://github.com/neoromantic/telegram-sync-cli/releases/download/$tag
 cat <<RUBY
 class Tg < Formula
   desc "Telegram CLI with a local cache, a sync daemon and full MTProto API access"
-  homepage "https://github.com/neoromantic/telegram-sync-cli"
+  homepage "https://tg.sergeybaus.com"
   license "MIT"
 
   livecheck do

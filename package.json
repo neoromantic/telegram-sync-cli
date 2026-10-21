@@ -51,7 +51,7 @@
   "bugs": {
     "url": "https://github.com/neoromantic/telegram-sync-cli/issues"
   },
-  "homepage": "https://github.com/neoromantic/telegram-sync-cli#readme",
+  "homepage": "https://tg.sergeybaus.com",
   "publishConfig": {
     "access": "public"
   },
