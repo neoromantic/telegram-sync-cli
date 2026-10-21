@@ -93,7 +93,8 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
   and until a gap is closed, not as polling; a chat that is caught up costs no calls.
 - A first page (`initial_load`) for chats without a forward cursor
 - Backward history for older messages
-- Priority-based execution
+- Three lanes (catch-up, first pages, history) that take turns, so history makes progress
+  next to catch-up; inside a lane, small chats go first
 - A refresh every ~30 seconds (daemon loop) and after each reconnect's dialog pass queues
   the work that is due again: chats first seen live, pages that failed
 

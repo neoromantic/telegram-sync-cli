@@ -1,12 +1,18 @@
 /**
  * Sync scheduler for managing background synchronization jobs
- * Implements priority-based job queue with forward catchup and backward history sync
+ * Queues the work that is due and hands out jobs in three lanes that take
+ * turns: forward catch-up, first pages and history.
  */
 import type { Database } from 'bun:sqlite'
 import type { ChatSyncStateService } from '../db/chat-sync-state'
 import type { MessagesCache } from '../db/messages-cache'
 import type { SyncJobsService } from '../db/sync-jobs'
-import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
+import {
+  type ChatSyncStateRow,
+  type SyncJobRow,
+  SyncJobType,
+  type SyncPriority,
+} from '../db/sync-schema'
 
 /**
  * Scheduler status
@@ -36,8 +42,14 @@ export interface SyncScheduler {
   initializeForStartup(): Promise<void>
   /** Refresh job queue based on current sync state */
   refreshQueues(): void
-  /** Get next job to process (non-atomic, use claimNextJob for concurrent safety) */
+  /**
+   * Next job to process, taking lane turns into account. Only looks: call
+   * recordJobRun after running it (non-atomic, use claimNextJob for
+   * concurrent safety)
+   */
   getNextJob(): SyncJobRow | null
+  /** Move to the next lane slot after a job ran */
+  recordJobRun(job: SyncJobRow): void
   /** Atomically claim and start the next pending job (prevents race conditions) */
   claimNextJob(): SyncJobRow | null
   /** Mark job as running */
@@ -69,9 +81,42 @@ export interface SyncSchedulerOptions {
 }
 
 /**
+ * Job lanes. Each lane gets its turns, so a long queue in one lane (for
+ * example catch-up after a restart) can't starve the others.
+ */
+export const SYNC_LANES = {
+  catchup: [SyncJobType.ForwardCatchup],
+  firstPage: [SyncJobType.InitialLoad],
+  history: [SyncJobType.BackwardHistory, SyncJobType.FullSync],
+} as const satisfies Record<string, readonly SyncJobType[]>
+
+export type SyncLane = keyof typeof SYNC_LANES
+
+/**
+ * Whose turn each job slot is: half for catch-up, a quarter each for first
+ * pages and history when every lane has work.
+ */
+export const SYNC_SLOT_CYCLE: readonly SyncLane[] = [
+  'catchup',
+  'firstPage',
+  'catchup',
+  'history',
+]
+
+/** Who gets an empty lane's slot */
+const SYNC_LANE_FALLBACK: readonly SyncLane[] = [
+  'catchup',
+  'firstPage',
+  'history',
+]
+
+/**
  * Create sync scheduler
  */
 class SyncSchedulerImpl implements SyncScheduler {
+  /** Position in SYNC_SLOT_CYCLE; in memory, so it restarts with the daemon */
+  private slot = 0
+
   constructor(private readonly options: SyncSchedulerOptions) {}
 
   private get jobsService() {
@@ -82,11 +127,24 @@ class SyncSchedulerImpl implements SyncScheduler {
     return this.options.chatSyncState
   }
 
-  private get messagesCache() {
-    return this.options.messagesCache
+  /** The chat's sync state, if it exists and sync is on */
+  private enabledState(chatId: number): ChatSyncStateRow | null {
+    const state = this.chatSyncState.get(chatId)
+    return state?.sync_enabled ? state : null
+  }
+
+  /**
+   * A job's priority inside its lane is its chat's tier: small chats before
+   * medium groups.
+   */
+  private lanePriority(state: ChatSyncStateRow): SyncPriority {
+    return state.sync_priority
   }
 
   queueForwardCatchup(chatId: number): void {
+    const state = this.enabledState(chatId)
+    if (!state) return
+
     if (
       this.jobsService.hasActiveJobForChat(chatId, SyncJobType.ForwardCatchup)
     ) {
@@ -96,18 +154,16 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.jobsService.create({
       chat_id: chatId,
       job_type: SyncJobType.ForwardCatchup,
-      priority: SyncPriority.Realtime,
+      priority: this.lanePriority(state),
     })
   }
 
   queueBackwardHistory(chatId: number): void {
-    const state = this.chatSyncState.get(chatId)
-    if (state?.history_complete) {
-      return
-    }
+    const state = this.enabledState(chatId)
+    if (!state || state.history_complete) return
 
     // The first page sets both cursors, so it comes before any history.
-    if (state && state.forward_cursor === null) {
+    if (state.forward_cursor === null) {
       this.queueInitialLoad(chatId)
       return
     }
@@ -121,22 +177,22 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.jobsService.create({
       chat_id: chatId,
       job_type: SyncJobType.BackwardHistory,
-      priority: SyncPriority.Background,
+      priority: this.lanePriority(state),
     })
   }
 
   queueInitialLoad(chatId: number): void {
+    const state = this.enabledState(chatId)
+    if (!state) return
+
     if (this.jobsService.hasActiveJobForChat(chatId, SyncJobType.InitialLoad)) {
       return
     }
 
-    const state = this.chatSyncState.get(chatId)
-    const priority = state?.sync_priority ?? SyncPriority.Medium
-
     this.jobsService.create({
       chat_id: chatId,
       job_type: SyncJobType.InitialLoad,
-      priority,
+      priority: this.lanePriority(state),
     })
   }
 
@@ -145,6 +201,8 @@ class SyncSchedulerImpl implements SyncScheduler {
     // Catch-up is queued again below for the chats that are behind; older
     // versions left one pending for every enabled chat.
     this.jobsService.deletePendingOfType(SyncJobType.ForwardCatchup)
+    this.jobsService.deletePendingForInactiveChats()
+    this.jobsService.alignPendingPriorities()
     this.refreshQueues()
   }
 
@@ -166,16 +224,36 @@ class SyncSchedulerImpl implements SyncScheduler {
       this.queueInitialLoad(chat.chat_id)
     }
 
-    const incompleteChats = this.chatSyncState.getIncompleteHistory()
-    for (const chat of incompleteChats) {
-      if (chat.sync_priority <= SyncPriority.Medium) {
-        this.queueBackwardHistory(chat.chat_id)
-      }
+    // History for every enabled chat that had its first page, in any tier.
+    for (const chat of this.chatSyncState.getHistoryDue()) {
+      this.queueBackwardHistory(chat.chat_id)
     }
   }
 
+  private nextInLane(lane: SyncLane): SyncJobRow | null {
+    return this.jobsService.getNextPendingOfTypes(SYNC_LANES[lane])
+  }
+
+  /**
+   * The next job: the oldest, highest-priority job of the lane whose slot
+   * it is, or of the first lane with work if that lane is empty. Only
+   * looks; recordJobRun moves to the next slot.
+   */
   getNextJob(): SyncJobRow | null {
-    return this.jobsService.getNextPending()
+    const lane = SYNC_SLOT_CYCLE[this.slot % SYNC_SLOT_CYCLE.length]!
+    const job = this.nextInLane(lane)
+    if (job) return job
+
+    for (const fallback of SYNC_LANE_FALLBACK) {
+      if (fallback === lane) continue
+      const fallbackJob = this.nextInLane(fallback)
+      if (fallbackJob) return fallbackJob
+    }
+    return null
+  }
+
+  recordJobRun(_job: SyncJobRow): void {
+    this.slot = (this.slot + 1) % SYNC_SLOT_CYCLE.length
   }
 
   claimNextJob(): SyncJobRow | null {

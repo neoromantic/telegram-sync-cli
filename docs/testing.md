@@ -72,7 +72,16 @@ const deps: AuthDependencies = {
 - `output.test.ts` — JSON/pretty/quiet output formatting
 - `telegram.test.ts` — Telegram service layer
 - `sync-jobs.test.ts` — sync job lifecycle
+- `sync-scheduler.test.ts` — what the scheduler queues and the lane turns
 - `update-handlers.test.ts` — daemon update handlers
+- `daemon-restart-gap.test.ts` — messages that arrive while the daemon is stopped are all
+  cached after a restart
+- `sync-fair-share.test.ts` — on 500 chats, history and first pages make progress next to
+  catch-up, chats that are caught up cost no calls, and a FLOOD_WAIT stops every lane
+
+The last two run the real scheduler, sync worker and job loop against a fake
+`messages.getHistory` (`helpers/fake-history.ts`; `createMultiChatHistory` routes on the
+request's peer).
 
 ### Snapshot Tests
 

@@ -213,6 +213,8 @@ CREATE INDEX idx_chat_sync_state_incomplete
 
 - `forward_cursor`: every message up to this ID is cached. Only sync jobs move it, never live
   updates. `0` means the chat was empty at its first page.
+- `sync_priority`: the chat's tier, 1 (DMs and groups under 20 members), 2 (20–100 members) or
+  3 (not synced unless turned on). It is also the priority of the chat's jobs inside each lane.
 - `top_message_id`: the newest message ID Telegram reported, from the dialog pass or a sync
   page. `NULL` means unknown. Catch-up is due while it is `NULL` or above `forward_cursor`.
 
@@ -235,6 +237,8 @@ CREATE TABLE sync_jobs (
 );
 
 CREATE INDEX idx_sync_jobs_priority ON sync_jobs(priority, created_at) WHERE status = 'pending';
+CREATE INDEX idx_sync_jobs_lane
+  ON sync_jobs(job_type, priority, created_at, id) WHERE status = 'pending';
 CREATE INDEX idx_sync_jobs_status ON sync_jobs(status);
 CREATE INDEX idx_sync_jobs_chat ON sync_jobs(chat_id);
 ```
@@ -296,7 +300,8 @@ PRAGMA journal_mode = WAL;
 ## Migrations
 
 There is no `schema_version` table yet. The schema is created with `CREATE TABLE IF NOT EXISTS`
-on startup. Columns added after 0.1.4 (`chat_sync_state.top_message_id`) are added with
+on startup, indexes with `CREATE INDEX IF NOT EXISTS`. Columns added after 0.1.4
+(`chat_sync_state.top_message_id`) are added with
 `ALTER TABLE … ADD COLUMN` when missing; a "duplicate column name" error is ignored, because
 the CLI and the daemon can both run the migration on the first start. Older binaries ignore
 the new columns.

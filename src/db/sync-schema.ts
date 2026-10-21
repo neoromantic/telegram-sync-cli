@@ -336,6 +336,10 @@ export function initSyncSchema(db: Database): void {
     ON sync_jobs(priority, created_at) WHERE status = 'pending'
   `)
   db.run(`
+    CREATE INDEX IF NOT EXISTS idx_sync_jobs_lane
+    ON sync_jobs(job_type, priority, created_at, id) WHERE status = 'pending'
+  `)
+  db.run(`
     CREATE INDEX IF NOT EXISTS idx_sync_jobs_status
     ON sync_jobs(status)
   `)
@@ -422,9 +426,12 @@ export class DaemonStatusRow {
   updated_at!: number
 }
 
-/** Sync priority levels */
+/**
+ * Sync priority levels. A chat's tier (High, Medium, Low) is also the
+ * priority of its jobs inside each lane.
+ */
 export enum SyncPriority {
-  /** P0 - Real-time updates, immediate sync */
+  /** P0 - Ahead of every tier inside a lane */
   Realtime = 0,
   /** P1 - DMs and small groups (<20 members), full sync */
   High = 1,
@@ -432,7 +439,7 @@ export enum SyncPriority {
   Medium = 2,
   /** P3 - Groups of unknown size or over 100 members and channels, on request only */
   Low = 3,
-  /** P4 - Background history backfill */
+  /** P4 - Lowest; older versions gave it to history jobs, new jobs don't use it */
   Background = 4,
 }
 

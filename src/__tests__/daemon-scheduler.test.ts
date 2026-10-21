@@ -49,6 +49,7 @@ const createSchedulerStub = (
     initializeForStartup: mock(async () => {}),
     refreshQueues: mock(() => {}),
     getNextJob: () => null,
+    recordJobRun: mock(() => {}),
     claimNextJob: () => null,
     startJob: () => true,
     completeJob: () => true,
@@ -383,6 +384,113 @@ describe('processJobs', () => {
 
     expect(ctx.runtime.lastJobProcessTime).toBeGreaterThan(0)
     expect(scheduler.queueForwardCatchup).not.toHaveBeenCalled()
+  })
+
+  function jobOf(jobType: SyncJobType): SyncJobRow {
+    return {
+      id: 3,
+      chat_id: 55,
+      job_type: jobType,
+      priority: SyncPriority.High,
+      status: 'pending',
+      cursor_start: null,
+      cursor_end: null,
+      messages_fetched: 0,
+      error_message: null,
+      created_at: Date.now(),
+      started_at: null,
+      completed_at: null,
+    }
+  }
+
+  function connectWorker(ctx: DaemonContext, worker: RealSyncWorker) {
+    ctx.runtime.syncWorkers.set(1, worker)
+    ctx.state.accounts.set(1, {
+      accountId: 1,
+      phone: '+10000000001',
+      name: null,
+      status: 'connected',
+      client: asTelegramClient({}),
+    })
+  }
+
+  it('moves to the next lane slot only after a job ran', async () => {
+    const job = jobOf(SyncJobType.ForwardCatchup)
+
+    // No worker: the job doesn't run and keeps its slot
+    const idle = createContext()
+    const idleScheduler = createSchedulerStub({ getNextJob: () => job })
+    idle.runtime.scheduler = idleScheduler
+    await processJobs(idle)
+    expect(idleScheduler.recordJobRun).not.toHaveBeenCalled()
+
+    // A worker that is rate limited doesn't run it either
+    const blocked = createContext()
+    const blockedScheduler = createSchedulerStub({ getNextJob: () => job })
+    blocked.runtime.scheduler = blockedScheduler
+    connectWorker(blocked, createWorkerStub({ canMakeApiCall: () => false }))
+    await processJobs(blocked)
+    expect(blockedScheduler.recordJobRun).not.toHaveBeenCalled()
+
+    // A job that ran uses the slot, even if it threw
+    const ctx = createContext()
+    const scheduler = createSchedulerStub({ getNextJob: () => job })
+    ctx.runtime.scheduler = scheduler
+    connectWorker(
+      ctx,
+      createWorkerStub({
+        processJobReal: mock(async () => {
+          throw new Error('boom')
+        }),
+      }),
+    )
+    await processJobs(ctx)
+    expect(scheduler.recordJobRun).toHaveBeenCalledTimes(1)
+    expect(scheduler.recordJobRun).toHaveBeenCalledWith(job)
+  })
+
+  it('queues history right after a first page with history left', async () => {
+    const job = jobOf(SyncJobType.InitialLoad)
+    const ctx = createContext()
+    const scheduler = createSchedulerStub({ getNextJob: () => job })
+    ctx.runtime.scheduler = scheduler
+    connectWorker(
+      ctx,
+      createWorkerStub({
+        processJobReal: mock(async () => ({
+          success: true,
+          messagesFetched: 100,
+          newCursor: 300,
+          historyComplete: false,
+        })),
+      }),
+    )
+
+    await processJobs(ctx)
+
+    expect(scheduler.queueBackwardHistory).toHaveBeenCalledWith(55)
+  })
+
+  it('queues no history after a first page that reached the start', async () => {
+    const job = jobOf(SyncJobType.InitialLoad)
+    const ctx = createContext()
+    const scheduler = createSchedulerStub({ getNextJob: () => job })
+    ctx.runtime.scheduler = scheduler
+    connectWorker(
+      ctx,
+      createWorkerStub({
+        processJobReal: mock(async () => ({
+          success: true,
+          messagesFetched: 12,
+          newCursor: 12,
+          historyComplete: true,
+        })),
+      }),
+    )
+
+    await processJobs(ctx)
+
+    expect(scheduler.queueBackwardHistory).not.toHaveBeenCalled()
   })
 
   it('skips processing when inter-job delay not elapsed', async () => {

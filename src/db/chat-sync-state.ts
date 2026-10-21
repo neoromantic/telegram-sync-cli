@@ -111,6 +111,8 @@ export interface ChatSyncStateService {
   getCatchupDue(): ChatSyncStateRow[]
   /** Enabled chats with a forward cursor */
   getEnabledWithCursor(): ChatSyncStateRow[]
+  /** Enabled chats that had their first page and have history left */
+  getHistoryDue(): ChatSyncStateRow[]
   /** Store one catch-up page: the cursor, the counter and maybe the top */
   recordCatchupPage(chatId: number, page: CatchupPageResult): void
   /** Raise top_message_id to the given ID; never lowers it */
@@ -248,6 +250,16 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       SELECT * FROM chat_sync_state
       WHERE sync_enabled = 1 AND forward_cursor IS NOT NULL
       ORDER BY chat_id ASC
+    `)
+      .as(ChatSyncStateRow),
+
+    getHistoryDue: db
+      .query(`
+      SELECT * FROM chat_sync_state
+      WHERE sync_enabled = 1
+        AND forward_cursor IS NOT NULL
+        AND history_complete = 0
+      ORDER BY sync_priority ASC, chat_id ASC
     `)
       .as(ChatSyncStateRow),
 
@@ -416,6 +428,10 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
 
     getEnabledWithCursor(): ChatSyncStateRow[] {
       return stmts.getEnabledWithCursor.all()
+    },
+
+    getHistoryDue(): ChatSyncStateRow[] {
+      return stmts.getHistoryDue.all()
     },
 
     recordCatchupPage(chatId: number, page: CatchupPageResult): void {

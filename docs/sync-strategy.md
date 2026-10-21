@@ -10,7 +10,7 @@ The daemon synchronizes message history using a **dual cursor** system and a **p
   cached. Only sync jobs move it, never live updates.
 - **Newest message ID** (`top_message_id`) tells whether the forward cursor is behind
 - **Backward cursor** tracks how far history backfill has progressed
-- **sync_jobs** provides resumable, priority-based work
+- **sync_jobs** provides resumable work in three lanes that take turns
 
 ## Dual Cursor System
 
@@ -35,11 +35,14 @@ Stored in `chat_sync_state`:
 
 | Priority | Category | Sync Behavior |
 |----------|----------|---------------|
-| **P0** | Real-time | Immediate updates when daemon is running |
 | **P1** | DMs + small groups (<20 members) | Full history sync |
 | **P2** | Medium groups (20–100 members) | Newest 100 messages, then history after the P1 chats |
 | **P3** | Groups of unknown size, large groups (>100) & channels | On request only |
-| **P4** | Background | Low-priority backfill |
+
+Live updates don't go through the queue: they are cached as they arrive. A chat's tier
+(`sync_priority`) is also the priority of its jobs inside each lane (see
+[Job lanes](#job-lanes)). P0 and P4 exist in `SyncPriority` but no tier uses them; older
+versions queued catch-up at P0 and history at P4.
 
 ### Policy (Current)
 
@@ -167,6 +170,32 @@ The dialog pass lists archived dialogs too. They update `chats_cache`, so sync j
 InputPeer for them, and the sync state of chats that already have one. An archived chat without
 a state row doesn't get one: archived chats don't start syncing on their own.
 
+## Job lanes
+
+The daemon runs at most one job every 3 seconds, and all jobs share one `messages.getHistory`
+budget. Jobs are split into three lanes:
+
+| Lane | Job types |
+|------|-----------|
+| catch-up | `forward_catchup` |
+| first page | `initial_load` |
+| history | `backward_history`, `full_sync` |
+
+The lanes take turns in a fixed cycle of four slots: catch-up, first page, catch-up, history.
+When every lane has work, catch-up gets half the jobs and first pages and history a quarter
+each. A slot whose lane is empty goes to the first lane with work, in the order catch-up, first
+page, history, so no slot is wasted. A slot is used only when a job runs: a tick without a job
+or without a worker that may call the API moves nothing. The position in the cycle is kept in
+memory and starts over on restart.
+
+Inside a lane, jobs run by priority (the chat's tier: small chats before medium groups), then
+by age, then by ID. After a first page with history left, the chat's history job is queued
+right away. A catch-up or history page that is full queues the next page of the same chat.
+
+The queue methods create no job for a chat that is disabled or has no state row, so a chat
+whose sync was turned off stops after the job that is running. On start the scheduler also
+drops pending jobs of such chats and moves every other pending job to its chat's tier.
+
 ## Batch Size
 
 Sync jobs use a default batch size of **100 messages** (configurable in worker config).
@@ -176,6 +205,9 @@ Sync jobs use a default batch size of **100 messages** (configurable in worker c
 Rate limits are tracked per API method:
 - `rate_limits` table stores call count + flood wait
 - Workers and CLI calls share the same rate-limit service
+- A FLOOD_WAIT on `messages.getHistory` blocks every lane until it expires; the job that hit it
+  fails and its chat is queued again at the next refresh, from its cursor. Retries with
+  backoff are [#9](https://github.com/neoromantic/telegram-sync-cli/issues/9).
 
 ## Notes
 
