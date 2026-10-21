@@ -667,6 +667,35 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(ctx.state.accounts.get(2)?.status).toBe('disconnected')
   })
 
+  it('disconnectAllAccounts logs a session file mtcute already closed at debug, not warn', async () => {
+    const ctx = createContext(
+      createAccountsDb([{ id: 1, phone: '+15550000001', user_id: null }]),
+    )
+    const { connectAccount, disconnectAllAccounts } = await import(
+      '../daemon/daemon-accounts'
+    )
+
+    nextGetMe = { id: 5550001, firstName: 'Alex', lastName: 'Example' }
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
+
+    // mtcute's exit hook closes the session DB when the signal arrives, so
+    // destroy() can't save what was queued after it
+    createdClients[0]!.destroy.mockImplementation(async () => {
+      throw new Error('Database has closed')
+    })
+
+    await disconnectAllAccounts(ctx)
+
+    expect(createdClients[0]!.destroy).toHaveBeenCalledTimes(1)
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Session file already closed by mtcute (shutdown)',
+      ),
+    )
+    expect(ctx.state.accounts.get(1)?.status).toBe('disconnected')
+  })
+
   it('attemptReconnect resets attempts on success', async () => {
     const accountsDb = createAccountsDb([
       { id: 1, phone: '+111', user_id: 555 },
