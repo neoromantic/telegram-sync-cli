@@ -6,13 +6,18 @@ import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { SyncJobType } from '../db/sync-schema'
+import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
 import { refreshDialogsAfterReconnect } from './daemon-bootstrap'
 import type { DaemonContext } from './daemon-context'
 import { formatError } from './daemon-utils'
 import { DEFAULT_JOB_EXECUTOR_CONFIG } from './job-executor'
 import { createSyncScheduler } from './scheduler'
-import { createRealSyncWorker, type RealSyncWorker } from './sync-worker'
+import { retryDelayMs, SYNC_RETRY_CONFIG } from './sync-retry'
+import {
+  createRealSyncWorker,
+  type RealJobResult,
+  type RealSyncWorker,
+} from './sync-worker'
 
 function createAccountSyncWorker(client: TelegramClient): RealSyncWorker {
   const cacheDb = getCacheDb()
@@ -121,6 +126,53 @@ function getJobContext(ctx: DaemonContext, now: number) {
   return { scheduler, job, worker }
 }
 
+/** Log a job that didn't succeed, by what happened to its row */
+function logJobOutcome(
+  ctx: DaemonContext,
+  job: SyncJobRow,
+  result: RealJobResult,
+): void {
+  const outcome = result.outcome
+  const label = `Job ${job.id} (${job.job_type}, chat ${job.chat_id})`
+  switch (outcome?.state) {
+    case 'deferred':
+      ctx.logger.debug(
+        `Job ${job.id} waits out a FLOOD_WAIT of ${Math.max(1, result.waitSeconds ?? 0)}s`,
+      )
+      return
+    case 'retrying': {
+      const minutes = retryDelayMs(outcome.attempts) / 60_000
+      ctx.logger.warn(
+        `${label} failed, attempt ${outcome.attempts} of ${SYNC_RETRY_CONFIG.maxAttempts}, retry in ${minutes}m: ${result.error}`,
+      )
+      return
+    }
+    case 'failed': {
+      const why = result.permanent
+        ? 'permanent error'
+        : `after ${outcome.attempts} attempts`
+      ctx.logger.warn(
+        `${label} failed for good (${why}): ${result.error}; retried after 24 h or on daemon restart`,
+      )
+      return
+    }
+    case 'cancelled':
+      ctx.logger.debug(
+        `Job ${job.id} dropped: chat ${job.chat_id} was turned off while it ran`,
+      )
+      return
+    case 'not_running':
+      ctx.logger.debug(`Job ${job.id} did not run: ${result.error}`)
+      return
+  }
+
+  if (result.rateLimited) {
+    ctx.logger.debug(`Job ${job.id} rate limited: wait ${result.waitSeconds}s`)
+  } else {
+    ctx.logger.warn(`Job ${job.id} failed: ${result.error}`)
+  }
+}
+
 export async function processJobs(ctx: DaemonContext): Promise<void> {
   const now = Date.now()
   const context = getJobContext(ctx, now)
@@ -158,12 +210,8 @@ export async function processJobs(ctx: DaemonContext): Promise<void> {
       ) {
         scheduler.queueBackwardHistory(job.chat_id)
       }
-    } else if (result.rateLimited) {
-      ctx.logger.debug(
-        `Job ${job.id} rate limited: wait ${result.waitSeconds}s`,
-      )
     } else {
-      ctx.logger.warn(`Job ${job.id} failed: ${result.error}`)
+      logJobOutcome(ctx, job, result)
     }
   } catch (err) {
     ctx.logger.error(`Job ${job.id} error: ${formatError(err)}`)
@@ -178,7 +226,7 @@ export function cleanupScheduler(ctx: DaemonContext): void {
   if (ctx.runtime.scheduler) {
     const cleaned = ctx.runtime.scheduler.cleanup(24 * 60 * 60 * 1000)
     if (cleaned > 0) {
-      ctx.logger.debug(`Cleaned up ${cleaned} old completed jobs`)
+      ctx.logger.debug(`Cleaned up ${cleaned} old jobs`)
     }
   }
 

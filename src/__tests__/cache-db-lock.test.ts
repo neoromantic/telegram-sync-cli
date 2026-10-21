@@ -138,6 +138,8 @@ describe('cache database lock', () => {
     db.run('DROP INDEX idx_sync_jobs_lane')
     db.run('ALTER TABLE chat_sync_state DROP COLUMN top_message_id')
     db.run('ALTER TABLE chat_sync_state DROP COLUMN sync_mode')
+    db.run('ALTER TABLE sync_jobs DROP COLUMN attempts')
+    db.run('ALTER TABLE sync_jobs DROP COLUMN next_run_at')
     db.close()
 
     const env = {
@@ -161,13 +163,16 @@ describe('cache database lock', () => {
     }
 
     const migrated = new Database(path)
-    const columns = (
-      migrated.query('PRAGMA table_info(chat_sync_state)').all() as Array<{
-        name: string
-      }>
-    ).map((col) => col.name)
-    expect(columns).toContain('top_message_id')
-    expect(columns).toContain('sync_mode')
+    const columnsOf = (table: string) =>
+      (
+        migrated.query(`PRAGMA table_info(${table})`).all() as Array<{
+          name: string
+        }>
+      ).map((col) => col.name)
+    expect(columnsOf('chat_sync_state')).toContain('top_message_id')
+    expect(columnsOf('chat_sync_state')).toContain('sync_mode')
+    expect(columnsOf('sync_jobs')).toContain('attempts')
+    expect(columnsOf('sync_jobs')).toContain('next_run_at')
     migrated.close()
   }, 30_000)
 })

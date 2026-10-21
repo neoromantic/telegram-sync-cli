@@ -888,7 +888,9 @@ describe('SyncWorker', () => {
       expect(error.name).toBe('FloodWaitError')
     })
 
-    it('FLOOD_WAIT fails the job with appropriate message', async () => {
+    it('FLOOD_WAIT defers the job without using an attempt', async () => {
+      const baseTime = 1700000000000
+      mockTime(baseTime)
       setupChatState(100)
 
       mockGetMessages.mockImplementation(async () => {
@@ -901,12 +903,19 @@ describe('SyncWorker', () => {
         priority: SyncPriority.Realtime,
       })
 
-      await worker.processJob(job)
+      const result = await worker.processJob(job)
 
-      const updatedJob = jobsService.getById(job.id)
-      expect(updatedJob?.status).toBe(SyncJobStatus.Failed)
-      expect(updatedJob?.error_message).toContain('Rate limited')
-      expect(updatedJob?.error_message).toContain('120')
+      expect(result.outcome).toEqual({
+        state: 'deferred',
+        attempts: 0,
+        nextRunAt: baseTime + 120_000,
+      })
+      expect(jobsService.getById(job.id)).toMatchObject({
+        status: SyncJobStatus.Pending,
+        attempts: 0,
+        next_run_at: baseTime + 120_000,
+        error_message: 'Rate limited: wait 120s',
+      })
     })
 
     it('subsequent requests are blocked after FLOOD_WAIT', async () => {
@@ -1299,7 +1308,9 @@ describe('SyncWorker', () => {
   // ===========================================================================
 
   describe('error handling and job failure', () => {
-    it('marks job as failed on generic error', async () => {
+    it('retries a job after a generic error', async () => {
+      const baseTime = 1700000000000
+      mockTime(baseTime)
       setupChatState(100)
 
       mockGetMessages.mockImplementation(async () => {
@@ -1316,10 +1327,46 @@ describe('SyncWorker', () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toBe('Network error')
+      expect(result.permanent).toBe(false)
+      expect(result.outcome).toEqual({
+        state: 'retrying',
+        attempts: 1,
+        nextRunAt: baseTime + 60_000,
+      })
 
       const updatedJob = jobsService.getById(job.id)
-      expect(updatedJob?.status).toBe(SyncJobStatus.Failed)
+      expect(updatedJob?.status).toBe(SyncJobStatus.Pending)
+      expect(updatedJob?.attempts).toBe(1)
       expect(updatedJob?.error_message).toBe('Network error')
+    })
+
+    it('marks job as failed on the fifth generic error', async () => {
+      setupChatState(100)
+
+      mockGetMessages.mockImplementation(async () => {
+        throw new Error('Network error')
+      })
+
+      const created = jobsService.create({
+        chat_id: 100,
+        job_type: SyncJobType.ForwardCatchup,
+        priority: SyncPriority.Realtime,
+      })
+
+      let time = 1700000000000
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        mockTime(time)
+        const job = jobsService.getById(created.id)!
+        const result = await worker.processJob(job)
+        expect(result.outcome?.attempts).toBe(attempt)
+        time = (result.outcome?.nextRunAt ?? time) + 1
+      }
+
+      expect(jobsService.getById(created.id)).toMatchObject({
+        status: SyncJobStatus.Failed,
+        attempts: 5,
+        error_message: 'Network error',
+      })
     })
 
     it('handles unknown errors gracefully', async () => {
@@ -1397,6 +1444,12 @@ describe('SyncWorker', () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toContain('Unknown job type')
+      expect(result.outcome).toEqual({
+        state: 'failed',
+        attempts: 1,
+        nextRunAt: null,
+      })
+      expect(jobsService.getById(job.id)?.status).toBe(SyncJobStatus.Failed)
     })
 
     it('does not cache partial results on error', async () => {

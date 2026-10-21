@@ -40,15 +40,17 @@ export function resolveFloodWaitResult(
 ): RealJobResult | null {
   const error = err instanceof Error ? err : new Error(String(err))
   const floodWaitSeconds = extractFloodWaitSeconds(error)
-  if (!floodWaitSeconds) {
+  if (floodWaitSeconds === null) {
     return null
   }
 
-  handleFloodWait(ctx, floodWaitSeconds)
+  // FLOOD_WAIT_0 still asks for a pause: wait at least a second.
+  const seconds = Math.max(1, floodWaitSeconds)
+  handleFloodWait(ctx, seconds)
   return {
     success: false,
     messagesFetched: 0,
     rateLimited: true,
-    waitSeconds: floodWaitSeconds,
+    waitSeconds: seconds,
   }
 }

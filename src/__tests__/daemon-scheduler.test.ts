@@ -357,6 +357,8 @@ describe('processJobs', () => {
       created_at: Date.now(),
       started_at: null,
       completed_at: null,
+      attempts: 0,
+      next_run_at: 0,
     }
 
     const scheduler = createSchedulerStub({
@@ -406,6 +408,8 @@ describe('processJobs', () => {
       created_at: Date.now(),
       started_at: null,
       completed_at: null,
+      attempts: 0,
+      next_run_at: 0,
     }
 
     const scheduler = createSchedulerStub({
@@ -453,6 +457,8 @@ describe('processJobs', () => {
       created_at: Date.now(),
       started_at: null,
       completed_at: null,
+      attempts: 0,
+      next_run_at: 0,
     }
   }
 
@@ -546,6 +552,79 @@ describe('processJobs', () => {
     expect(scheduler.queueBackwardHistory).not.toHaveBeenCalled()
   })
 
+  describe('logs a job that did not succeed by its outcome', () => {
+    async function run(
+      result: Awaited<ReturnType<RealSyncWorker['processJobReal']>>,
+    ) {
+      const ctx = createContext()
+      ctx.runtime.scheduler = createSchedulerStub({
+        getNextJob: () => jobOf(SyncJobType.BackwardHistory),
+      })
+      connectWorker(
+        ctx,
+        createWorkerStub({ processJobReal: mock(async () => result) }),
+      )
+      await processJobs(ctx)
+      const lines = (level: 'warn' | 'debug') =>
+        (ctx.logger[level] as ReturnType<typeof mock>).mock.calls.map((call) =>
+          String(call[0]),
+        )
+      return { warn: lines('warn'), debug: lines('debug') }
+    }
+
+    it('warns with the attempt and the error when the job will retry', async () => {
+      const { warn } = await run({
+        success: false,
+        messagesFetched: 0,
+        error: 'connection reset',
+        permanent: false,
+        outcome: { state: 'retrying', attempts: 1, nextRunAt: Date.now() },
+      })
+
+      expect(warn).toEqual([
+        'Job 3 (backward_history, chat 55) failed, attempt 1 of 5, retry in 1m: connection reset',
+      ])
+    })
+
+    it('warns with the error when the job failed for good', async () => {
+      const permanent = await run({
+        success: false,
+        messagesFetched: 0,
+        error: 'Telegram API error 400: CHANNEL_PRIVATE',
+        permanent: true,
+        outcome: { state: 'failed', attempts: 1, nextRunAt: null },
+      })
+      const exhausted = await run({
+        success: false,
+        messagesFetched: 0,
+        error: 'connection reset',
+        permanent: false,
+        outcome: { state: 'failed', attempts: 5, nextRunAt: null },
+      })
+
+      expect(permanent.warn).toHaveLength(1)
+      expect(permanent.warn[0]).toContain('failed for good (permanent error)')
+      expect(permanent.warn[0]).toContain('CHANNEL_PRIVATE')
+      expect(exhausted.warn).toHaveLength(1)
+      expect(exhausted.warn[0]).toContain(
+        '(after 5 attempts): connection reset',
+      )
+    })
+
+    it('only debug-logs a job that waits out a FLOOD_WAIT', async () => {
+      const { warn, debug } = await run({
+        success: false,
+        messagesFetched: 0,
+        rateLimited: true,
+        waitSeconds: 600,
+        outcome: { state: 'deferred', attempts: 0, nextRunAt: Date.now() },
+      })
+
+      expect(warn).toEqual([])
+      expect(debug).toContain('Job 3 waits out a FLOOD_WAIT of 600s')
+    })
+  })
+
   it('skips processing when inter-job delay not elapsed', async () => {
     const ctx = createContext()
     const now = Date.now()
@@ -582,6 +661,7 @@ describe('cleanupScheduler', () => {
     cleanupScheduler(ctx)
 
     expect(scheduler.cleanup).toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith('Cleaned up 2 old jobs')
     expect(ctx.runtime.syncWorkers.size).toBe(0)
     expect(ctx.runtime.scheduler).toBeNull()
   })

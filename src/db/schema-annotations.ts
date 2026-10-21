@@ -605,7 +605,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           defaultValue: 3,
         },
         status: {
-          description: 'Current job status',
+          description:
+            "Current job status. 'pending' includes jobs waiting for a retry; a 'failed' job blocks new jobs of its type for its chat until it is deleted",
           enumValues: ['pending', 'running', 'completed', 'failed'],
           semanticType: 'enum',
           defaultValue: 'pending',
@@ -623,7 +624,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           defaultValue: 0,
         },
         error_message: {
-          description: 'Error details if job failed',
+          description:
+            'The last error, kept while the job waits for its retry and once it failed',
           nullable: true,
         },
         created_at: {
@@ -639,6 +641,17 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           description: 'When job finished (success or failure)',
           semanticType: 'timestamp',
           nullable: true,
+        },
+        attempts: {
+          description:
+            'Failed tries so far; a FLOOD_WAIT does not count. The fifth failure, or a permanent error, marks the job failed',
+          defaultValue: 0,
+        },
+        next_run_at: {
+          description:
+            'When a pending job may run (ms since the epoch); 0 means now. Set after a failure or a FLOOD_WAIT',
+          semanticType: 'timestamp',
+          defaultValue: 0,
         },
       },
       indexes: {

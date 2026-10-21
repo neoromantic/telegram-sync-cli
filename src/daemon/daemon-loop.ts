@@ -67,7 +67,7 @@ async function cleanupOldJobs(ctx: DaemonContext): Promise<void> {
 
   const cleaned = ctx.runtime.scheduler.cleanup(24 * 60 * 60 * 1000)
   if (cleaned > 0) {
-    ctx.logger.debug(`Cleaned up ${cleaned} old completed jobs`)
+    ctx.logger.debug(`Cleaned up ${cleaned} old jobs`)
   }
 }
 

@@ -97,6 +97,29 @@ Implemented in `SyncJobType`:
 Job status values:
 - `pending`, `running`, `completed`, `failed`
 
+A pending job runs once it is due: `next_run_at` is 0 for a new job and later for a job waiting
+for a retry.
+
+### Retries
+
+A job that fails is pending again after a backoff, with the same ID and its place in its lane:
+
+- **Backoff**: the job waits 1, 2, 4 and 8 minutes after its first four failures; `attempts`
+  counts them and `error_message` holds the last error. The fifth failure marks it `failed`.
+  While a lane's jobs are all waiting, its slots go to the other lanes.
+- **FLOOD_WAIT**: a delay, not a failure. The job waits out the FLOOD_WAIT (at least a second,
+  so `FLOOD_WAIT_0` too) and uses no attempt; every lane pauses for the same wait.
+- **Permanent errors** fail the job at once: an RPC error 400, 403 or 404, `CHANNEL_PRIVATE`
+  with any code, a chat without an InputPeer, or an unknown job type. 401 and 406 are account
+  errors that the connection health check handles, so they retry like network errors, timeouts
+  and database errors.
+- **Failed jobs**: a `failed` row blocks its chat's jobs of that type, so no refresh queues the
+  chat for it again. The daemon deletes failed rows after 24 hours, and all of them on start;
+  the next refresh then queues the chat again.
+- **A chat turned off** while its job runs: if the job fails, it is dropped instead of waiting
+  for a retry.
+- **A crash** doesn't count as an attempt: on start, the jobs it left running are pending again.
+
 ## Sync Flow (Current)
 
 ### Real-time
@@ -124,8 +147,8 @@ Each `forward_catchup` job makes one `messages.getHistory` call:
   (`offset_id = cursor + 1`, `add_offset = -100`, `min_id = cursor`), caches them and moves the
   cursor to the newest one. A full page means there may be more, so the scheduler queues the
   next page right away. One call per job keeps paging under the rate limits and the inter-job
-  delay. If a page fails (for example on a FLOOD_WAIT), the next catch-up resumes from the
-  cursor.
+  delay. A page that fails leaves the cursor where it was, and the job runs again from it
+  after its backoff or FLOOD_WAIT (see [Retries](#retries)).
 - **Without a cursor** (a chat the daemon hasn't synced yet), it fetches the newest page and
   sets the cursor to its newest message. Older history is the backward job's.
 
@@ -148,8 +171,8 @@ no calls. What writes `top_message_id`:
   settles after one call.
 - **Live updates never write it**, just as they never move the cursor.
 
-A full page leaves the top alone and queues the next page. A failed or FLOOD_WAITed page also
-leaves it alone, so the next refresh queues the chat again once calls are allowed.
+A full page leaves the top alone and queues the next page. A page that fails or hits a
+FLOOD_WAIT leaves it alone too, and the same job runs again once it is due.
 
 On start, after the dialog passes: if every account connected and every pass listed all its
 dialogs, an enabled chat with a cursor that no pass listed (left, deleted or migrated) is
@@ -204,11 +227,11 @@ arrived live come from Telegram until the next catch-up covers them.
 
 0. **Dialog pass** on start, one per connected account: fills `chats_cache` and updates
    `chat_sync_state` (type, member count, policy, `top_message_id`)
-1. The scheduler recovers jobs a crash left running, drops pending catch-ups (older versions
-   left one for every chat) and queues the work that is due: catch-up for chats that are
-   behind, first pages and history
-2. Every 30 seconds, and after each reconnect's dialog pass, it queues due work again: chats
-   first seen live, pages that failed
+1. The scheduler recovers jobs a crash left running, deletes failed jobs (a restart retries
+   them), drops pending catch-ups (older versions left one for every chat) and queues the work
+   that is due: catch-up for chats that are behind, first pages and history
+2. Every 30 seconds, and after each reconnect's dialog pass, it queues due work again, such as
+   chats first seen live
 3. The worker runs jobs with `messages.getHistory` and updates cursors and counters
 
 The scheduler uses the database as the single source of truth. There is **no in-memory priority queue**.
@@ -257,8 +280,8 @@ Rate limits are tracked per API method:
 - `rate_limits` table stores call count + flood wait
 - Workers and CLI calls share the same rate-limit service
 - A FLOOD_WAIT on `messages.getHistory` blocks every lane until it expires; the job that hit it
-  fails and its chat is queued again at the next refresh, from its cursor. Retries with
-  backoff are [#9](https://github.com/neoromantic/telegram-sync-cli/issues/9).
+  waits it out without using an attempt and runs again from its chat's cursor (see
+  [Retries](#retries)).
 
 ## Notes
 
@@ -273,6 +296,7 @@ Rate limits are tracked per API method:
 - `src/db/sync-jobs.ts`
 - `src/db/chat-sync-state.ts`
 - `src/daemon/scheduler.ts`
+- `src/daemon/sync-retry.ts`
 - `src/daemon/sync-worker-core.ts`
 - `src/daemon/sync-worker-real-jobs.ts`
 - `src/daemon/daemon-bootstrap.ts`

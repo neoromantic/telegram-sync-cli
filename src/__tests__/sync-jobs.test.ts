@@ -2,7 +2,8 @@
  * Tests for sync jobs service
  */
 import { Database } from 'bun:sqlite'
-import { beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { createChatSyncStateService } from '../db/chat-sync-state'
 import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
 import {
@@ -23,7 +24,37 @@ describe('SyncJobsService', () => {
     service = createSyncJobsService(db)
   })
 
+  const realNow = Date.now
+  afterEach(() => {
+    Date.now = realNow
+  })
+
+  /** Make a pending job wait until `runAt` */
+  function waitUntil(id: number, runAt: number) {
+    db.run('UPDATE sync_jobs SET next_run_at = ? WHERE id = ?', [runAt, id])
+  }
+
+  function enableChat(chatId: number, enabled = true) {
+    createChatSyncStateService(db).upsert({
+      chat_id: chatId,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: enabled,
+    })
+  }
+
   describe('create', () => {
+    it('starts with no attempts and is due at once', () => {
+      const job = service.create({
+        chat_id: 100,
+        job_type: SyncJobType.ForwardCatchup,
+        priority: SyncPriority.High,
+      })
+
+      expect(job.attempts).toBe(0)
+      expect(job.next_run_at).toBe(0)
+    })
+
     it('creates a new sync job', () => {
       const job = service.create({
         chat_id: 100,
@@ -131,6 +162,66 @@ describe('SyncJobsService', () => {
 
     it('returns null when no pending jobs', () => {
       expect(service.getNextPending()).toBeNull()
+    })
+  })
+
+  describe('jobs waiting for a retry', () => {
+    const now = 1_700_000_000_000
+
+    function queueWaiting() {
+      const waiting = service.create({
+        chat_id: 100,
+        job_type: SyncJobType.BackwardHistory,
+        priority: SyncPriority.Realtime,
+      })
+      waitUntil(waiting.id, now + 60_000)
+      const due = service.create({
+        chat_id: 200,
+        job_type: SyncJobType.BackwardHistory,
+        priority: SyncPriority.Low,
+      })
+      return { waiting, due }
+    }
+
+    it('are skipped by getNextPending until they are due', () => {
+      Date.now = () => now
+      const { waiting, due } = queueWaiting()
+
+      expect(service.getNextPending()?.id).toBe(due.id)
+
+      Date.now = () => now + 60_000
+      expect(service.getNextPending()?.id).toBe(waiting.id)
+    })
+
+    it('are skipped by getNextPendingOfTypes until they are due', () => {
+      Date.now = () => now
+      const { waiting, due } = queueWaiting()
+      const lane = [SyncJobType.BackwardHistory, SyncJobType.FullSync]
+
+      expect(service.getNextPendingOfTypes(lane)?.id).toBe(due.id)
+      db.run('DELETE FROM sync_jobs WHERE id = ?', [due.id])
+      expect(service.getNextPendingOfTypes(lane)).toBeNull()
+
+      Date.now = () => now + 60_001
+      expect(service.getNextPendingOfTypes(lane)?.id).toBe(waiting.id)
+    })
+
+    it('are skipped by claimNextJob until they are due', () => {
+      Date.now = () => now
+      const { waiting, due } = queueWaiting()
+
+      expect(service.claimNextJob()?.id).toBe(due.id)
+      expect(service.claimNextJob()).toBeNull()
+
+      Date.now = () => now + 60_000
+      expect(service.claimNextJob()?.id).toBe(waiting.id)
+    })
+
+    it('still count as pending', () => {
+      Date.now = () => now
+      queueWaiting()
+
+      expect(service.getPendingJobs()).toHaveLength(2)
     })
   })
 
@@ -291,6 +382,7 @@ describe('SyncJobsService', () => {
       expect(updated?.status).toBe(SyncJobStatus.Failed)
       expect(updated?.error_message).toBe('Network error')
       expect(updated?.completed_at).not.toBeNull()
+      expect(updated?.attempts).toBe(1)
     })
 
     it('returns false when job is not running', () => {
@@ -301,6 +393,95 @@ describe('SyncJobsService', () => {
       })
 
       expect(service.markFailed(job.id, 'Network error')).toBe(false)
+    })
+  })
+
+  describe('retryLater', () => {
+    const now = 1_700_000_000_000
+
+    function runningJob(chatId = 100) {
+      const job = service.create({
+        chat_id: chatId,
+        job_type: SyncJobType.BackwardHistory,
+        priority: SyncPriority.Medium,
+      })
+      service.markRunning(job.id)
+      return job
+    }
+
+    it('makes the job pending again and counts the attempt', () => {
+      Date.now = () => now
+      enableChat(100)
+      const job = runningJob()
+
+      expect(
+        service.retryLater(job.id, {
+          error: 'connection reset',
+          runAt: now + 60_000,
+          countAttempt: true,
+        }),
+      ).toBe('retrying')
+
+      expect(service.getById(job.id)).toEqual({
+        ...job,
+        status: SyncJobStatus.Pending,
+        attempts: 1,
+        next_run_at: now + 60_000,
+        error_message: 'connection reset',
+        started_at: null,
+      })
+    })
+
+    it('keeps the attempts for a FLOOD_WAIT', () => {
+      enableChat(100)
+      const job = runningJob()
+
+      service.retryLater(job.id, {
+        error: 'Rate limited: wait 600s',
+        runAt: now + 600_000,
+        countAttempt: false,
+      })
+
+      expect(service.getById(job.id)).toMatchObject({
+        status: SyncJobStatus.Pending,
+        attempts: 0,
+        next_run_at: now + 600_000,
+      })
+    })
+
+    it('deletes the job of a chat that was turned off while it ran', () => {
+      enableChat(100, false)
+      const off = runningJob(100)
+      const unknown = runningJob(200)
+
+      for (const job of [off, unknown]) {
+        expect(
+          service.retryLater(job.id, {
+            error: 'connection reset',
+            runAt: now,
+            countAttempt: true,
+          }),
+        ).toBe('cancelled')
+        expect(service.getById(job.id)).toBeNull()
+      }
+    })
+
+    it('changes nothing for a job that is not running', () => {
+      enableChat(100)
+      const job = service.create({
+        chat_id: 100,
+        job_type: SyncJobType.BackwardHistory,
+        priority: SyncPriority.Medium,
+      })
+
+      expect(
+        service.retryLater(job.id, {
+          error: 'connection reset',
+          runAt: now,
+          countAttempt: true,
+        }),
+      ).toBe('not_running')
+      expect(service.getById(job.id)).toEqual(job)
     })
   })
 
@@ -422,7 +603,26 @@ describe('SyncJobsService', () => {
       )
     })
 
-    it('returns false if job is not pending or running', () => {
+    it('returns true if job failed, until the row is deleted', () => {
+      const job = service.create({
+        chat_id: 100,
+        job_type: SyncJobType.ForwardCatchup,
+        priority: SyncPriority.High,
+      })
+      service.markRunning(job.id)
+      service.markFailed(job.id, 'Network error')
+
+      expect(service.hasActiveJobForChat(100, SyncJobType.ForwardCatchup)).toBe(
+        true,
+      )
+
+      service.deleteFailed()
+      expect(service.hasActiveJobForChat(100, SyncJobType.ForwardCatchup)).toBe(
+        false,
+      )
+    })
+
+    it('returns false if job is not pending, running or failed', () => {
       const job = service.create({
         chat_id: 100,
         job_type: SyncJobType.ForwardCatchup,
@@ -529,6 +729,110 @@ describe('SyncJobsService', () => {
       expect(deleted).toBe(1)
       expect(service.getById(job1.id)).toBeNull() // Failed job removed
       expect(service.getById(job2.id)).not.toBeNull() // Completed job still exists
+    })
+  })
+
+  describe('deleteFailed', () => {
+    function failedJob(chatId: number) {
+      const job = service.create({
+        chat_id: chatId,
+        job_type: SyncJobType.ForwardCatchup,
+        priority: SyncPriority.High,
+      })
+      service.markRunning(job.id)
+      service.markFailed(job.id, 'Network error')
+      return job
+    }
+
+    it('deletes every failed job, even one that failed just now', () => {
+      Date.now = () => 1_700_000_000_000
+      failedJob(100)
+      failedJob(200)
+      const pending = service.create({
+        chat_id: 300,
+        job_type: SyncJobType.ForwardCatchup,
+        priority: SyncPriority.High,
+      })
+
+      expect(service.deleteFailed()).toBe(2)
+      expect(service.getFailedJobs(10)).toEqual([])
+      expect(service.getById(pending.id)).not.toBeNull()
+    })
+
+    it("deletes only one chat's failed jobs", () => {
+      failedJob(100)
+      failedJob(100)
+      const other = failedJob(200)
+
+      expect(service.deleteFailed(100)).toBe(2)
+      expect(service.getFailedJobs(10).map((job) => job.id)).toEqual([other.id])
+    })
+  })
+
+  describe('getFailedJobs', () => {
+    it('returns the newest failed jobs first', () => {
+      const ids: number[] = []
+      for (const [i, chatId] of [100, 200, 300].entries()) {
+        Date.now = () => 1_700_000_000_000 + i * 1000
+        const job = service.create({
+          chat_id: chatId,
+          job_type: SyncJobType.ForwardCatchup,
+          priority: SyncPriority.High,
+        })
+        service.markRunning(job.id)
+        service.markFailed(job.id, `error ${chatId}`)
+        ids.push(job.id)
+      }
+
+      expect(service.getFailedJobs(2).map((job) => job.id)).toEqual(
+        ids.slice(1).reverse(),
+      )
+    })
+  })
+
+  describe('countJobs', () => {
+    it('counts jobs by status, and pending jobs that failed before', () => {
+      enableChat(100)
+      const create = () =>
+        service.create({
+          chat_id: 100,
+          job_type: SyncJobType.BackwardHistory,
+          priority: SyncPriority.High,
+        })
+
+      expect(service.countJobs()).toEqual({
+        pending: 0,
+        running: 0,
+        failed: 0,
+        retrying: 0,
+      })
+
+      create()
+      service.markRunning(create().id)
+      const failed = create()
+      service.markRunning(failed.id)
+      service.markFailed(failed.id, 'Network error')
+      const retrying = create()
+      service.markRunning(retrying.id)
+      service.retryLater(retrying.id, {
+        error: 'Network error',
+        runAt: Date.now() + 60_000,
+        countAttempt: true,
+      })
+      const deferred = create()
+      service.markRunning(deferred.id)
+      service.retryLater(deferred.id, {
+        error: 'Rate limited: wait 30s',
+        runAt: Date.now() + 30_000,
+        countAttempt: false,
+      })
+
+      expect(service.countJobs()).toEqual({
+        pending: 3,
+        running: 1,
+        failed: 1,
+        retrying: 1,
+      })
     })
   })
 

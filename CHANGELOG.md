@@ -98,6 +98,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of reading its leading digits as a basic group ID.
 - `tg send --to '+1 (555) 000-0000'`, or a `+` number with spaces or dashes,
   looked the number up as a username. A `+` now always means a phone number.
+- Failed sync jobs retry with backoff (1, 2, 4 and 8 minutes) and fail after
+  five attempts. A FLOOD_WAIT delays the job instead of failing it, and a
+  permanent error, such as `CHANNEL_PRIVATE` or a chat without an InputPeer,
+  fails it at once. Before, the next refresh queued a failed chat again every
+  30 seconds forever and left a failed row each time. Failed rows are now
+  cleaned up after 24 hours or on a daemon restart, and the chat is tried
+  again then (#9).
 
 ## [0.1.4] - 2026-10-21
 

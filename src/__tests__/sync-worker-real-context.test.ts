@@ -343,6 +343,29 @@ describe('sync-worker real helpers/context', () => {
       expect(result).toBeNull()
     })
 
+    it('treats FLOOD_WAIT_0 as a wait of one second', () => {
+      const rateLimits = createRateLimitsService(db)
+      const ctx: RealSyncWorkerContext = {
+        client: createMockClient(),
+        messagesCache: createMessagesCache(db),
+        historyRanges: createHistoryRanges(db),
+        chatSyncState: createChatSyncStateService(db),
+        jobsService: createSyncJobsService(db),
+        rateLimits,
+        chatsCache: createChatsCache(db),
+        config: { apiMethod: 'messages.getHistory', batchSize: 1 },
+      }
+
+      const result = resolveFloodWaitResult(ctx, new Error('FLOOD_WAIT_0'))
+      expect(result).toEqual({
+        success: false,
+        messagesFetched: 0,
+        rateLimited: true,
+        waitSeconds: 1,
+      })
+      expect(rateLimits.isBlocked('messages.getHistory')).toBe(true)
+    })
+
     it('delegates getInputPeer to buildInputPeer', () => {
       const chatsCache = createChatsCache(db)
       const ctx: RealSyncWorkerContext = {
