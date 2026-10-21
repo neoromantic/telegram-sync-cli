@@ -111,6 +111,20 @@ describe('DaemonStatusService', () => {
         expect(service.get('daemon_version_pid')).toBe('111')
         expect(service.getDaemonInfo().version).toBe('0.3.1')
       })
+
+      it('writes nothing if one of its keys fails to write', () => {
+        // The last write fails: the version and PID before it must roll back,
+        // so a reader never sees a half-started daemon
+        db.run(
+          "CREATE TRIGGER fail_start BEFORE INSERT ON daemon_status WHEN NEW.key = 'daemon_status' BEGIN SELECT RAISE(ABORT, 'boom'); END",
+        )
+
+        expect(() => service.setDaemonRunning(111, '0.3.1')).toThrow('boom')
+
+        expect(service.get('daemon_version')).toBeNull()
+        expect(service.get('daemon_version_pid')).toBeNull()
+        expect(service.get('daemon_pid')).toBeNull()
+      })
     })
 
     describe('setDaemonStopped', () => {
@@ -131,6 +145,21 @@ describe('DaemonStatusService', () => {
         expect(service.get('daemon_version')).toBeNull()
         expect(service.get('daemon_version_pid')).toBeNull()
         expect(service.getDaemonInfo().version).toBeNull()
+      })
+
+      it('keeps the running state if one of its keys fails to write', () => {
+        service.setDaemonRunning(111, '0.3.1')
+        // The final 'stopped' write fails: the deletes before it must roll back
+        db.run(
+          "CREATE TRIGGER fail_stop BEFORE INSERT ON daemon_status WHEN NEW.value = 'stopped' BEGIN SELECT RAISE(ABORT, 'boom'); END",
+        )
+
+        expect(() => service.setDaemonStopped()).toThrow('boom')
+
+        expect(service.get('daemon_pid')).toBe('111')
+        expect(service.get('daemon_version')).toBe('0.3.1')
+        expect(service.get('daemon_version_pid')).toBe('111')
+        expect(service.getDaemonInfo().version).toBe('0.3.1')
       })
     })
 
