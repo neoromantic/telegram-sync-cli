@@ -261,7 +261,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         from_id: {
           description:
-            'Marked peer ID of the sender: a user ID, or -N / -100… for a group or channel that posts as itself. Null when the message names no sender, such as a channel post fetched from history',
+            'Marked peer ID of the sender: a user ID, or -N / -100… for a group or channel that posts as itself. A message Telegram sends without a sender (an incoming private message, a channel post, Saved Messages) has its chat as the sender, as mtcute gives live messages. Null when raw_json names no peer.',
           nullable: true,
         },
         reply_to_id: {

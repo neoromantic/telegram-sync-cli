@@ -76,12 +76,25 @@ describe('sync-worker-real parseRawMessage', () => {
       ),
     )
 
+    // Telegram leaves fromId out of a channel post: the channel is the sender
     expect(page.map((message) => message?.from_id)).toEqual([
-      111,
-      -222,
-      -1000000000333,
-      null,
+      111, -222, -1000000000333, -1001234567890,
     ])
+  })
+
+  it('gives an incoming private message without fromId its user as the sender', () => {
+    const result = parseRawMessage(
+      {
+        _: 'message',
+        id: 40,
+        peerId: { _: 'peerUser', userId: 5550001 },
+        date: 1700000000,
+        message: 'hi',
+      },
+      5550001,
+    )
+
+    expect(result?.from_id).toBe(5550001)
   })
 
   it('marks service messages as service without media', () => {
@@ -97,6 +110,8 @@ describe('sync-worker-real parseRawMessage', () => {
     expect(result?.message_type).toBe('service')
     expect(result?.has_media).toBe(false)
     expect(result?.text).toBeNull()
+    // No fromId and no peerId: nothing names a sender
+    expect(result?.from_id).toBeNull()
   })
 
   it('maps media types and sets has_media', () => {

@@ -224,19 +224,22 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
         results: Array<{
           chatId: number
           messageId: number
+          fromId: number | null
           text: string
         }>
       }>
       expect(payload.data.results).toHaveLength(1)
       expect(payload.data.results[0]?.text).toContain(marker)
 
-      // Saved Messages is cached under the own user ID, like the daemon does
+      // Saved Messages is cached under the own user ID, like the daemon does,
+      // and the own user is the sender
       const me = await runCliSuccess(['me'], cli())
       const userId = (me.json as Envelope<{ user: { id: number } }>).data.user
         .id
       expect(payload.data.results[0]).toMatchObject({
         chatId: userId,
         messageId,
+        fromId: userId,
       })
     },
     API_TIMEOUT_MS * 3,
@@ -245,7 +248,12 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
   it(
     'messages list and get read Saved Messages from Telegram, then from the cache',
     async () => {
-      type Item = { chatId: number; messageId: number; text: string | null }
+      type Item = {
+        chatId: number
+        messageId: number
+        fromId: number | null
+        text: string | null
+      }
       type ListData = { chatId: number; items: Item[]; source: string }
       type GetData = {
         message: Item
@@ -296,6 +304,11 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
         idA,
       ])
       expect(fresh.items[1]?.text).toContain(markerA)
+      // Telegram sends Saved Messages without fromId: the own user is the sender
+      expect(fresh.items.slice(0, 2).map((item) => item.fromId)).toEqual([
+        userId,
+        userId,
+      ])
 
       const cached = await list('--limit', '5')
       expect(cached.source).toBe('cache')

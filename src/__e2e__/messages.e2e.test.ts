@@ -170,6 +170,9 @@ describe('E2E: Messages Search', () => {
       'Alice',
       'Alice',
     ])
+    expect(results.find((item) => item.chatId === NEWS_ID)?.fromId).toBe(
+      NEWS_ID,
+    )
   })
 
   it('prints each chat under the ID that tg chats list prints', async () => {
@@ -397,9 +400,10 @@ function seedCacheData(db: Database): void {
       is_deleted: true,
     },
     syncedMessage(BOOK_CLUB_PEER, 3, 'hello club', BOB_PEER),
-    // A channel post has no sender
+    // Telegram leaves the sender out of a channel post and an incoming DM;
+    // the chat is the sender
     syncedMessage(NEWS_PEER, 4, 'hello subscribers'),
-    syncedMessage(ALICE_PEER, 5, 'hello from Alice', ALICE_PEER),
+    syncedMessage(ALICE_PEER, 5, 'hello from Alice'),
   ])
 }
 

@@ -5,6 +5,7 @@ import { toLong } from '../utils/long'
 import {
   toInputPeerFromPeerId,
   toPeerIdFromRawPeer,
+  toSenderIdFromRawMessage,
 } from '../utils/telegram-peer-ids'
 import { bigIntReplacer } from './daemon-utils'
 
@@ -87,8 +88,11 @@ export function parseRawMessage(
   }
 
   const { messageType, hasMedia } = resolveMessageType(m)
-  // A channel or group that posts as itself gets its marked ID, like chats
-  const fromId = toPeerIdFromRawPeer(m.fromId as RawPeerField)
+  // A channel or group that posts as itself gets its marked ID, like chats.
+  // Without fromId the chat is the sender, as live updates store it
+  const fromId = toSenderIdFromRawMessage(
+    m as { fromId?: RawPeerField; peerId?: RawPeerField },
+  )
   const replyToId = extractReplyToId(m)
   const forwardFromId = extractForwardFromId(m)
 

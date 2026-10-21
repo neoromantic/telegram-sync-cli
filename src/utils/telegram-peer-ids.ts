@@ -64,6 +64,22 @@ export function toPeerIdFromRawPeer(
 }
 
 /**
+ * Marked ID of a raw message's sender, by mtcute's Message.sender rule that
+ * live updates use: fromId, or the chat (peerId) when Telegram leaves fromId
+ * out, so an incoming private message is from the user, a channel post from
+ * the channel and Saved Messages from the own user. Null when it names neither.
+ */
+export function toSenderIdFromRawMessage(
+  message:
+    | { fromId?: RawPeerLike | null; peerId?: RawPeerLike | null }
+    | null
+    | undefined,
+): number | null {
+  if (!message) return null
+  return toPeerIdFromRawPeer(message.fromId ?? message.peerId)
+}
+
+/**
  * Marked peer ID for a raw user or chat object, as `users`/`chats` lists
  * and updates carry them. A community has a channel ID, like a channel.
  */

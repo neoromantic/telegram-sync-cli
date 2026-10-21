@@ -282,11 +282,11 @@ describe('buildSentMessageInputs', () => {
         selfRequest,
         null,
       )
-      // Same row the sync worker would store for this message
+      // Same row the sync worker and a live update store for this message
       expect(input).toMatchObject({
         chat_id: SELF_ID,
         message_id: 404,
-        from_id: null,
+        from_id: SELF_ID,
         is_outgoing: false,
       })
     })

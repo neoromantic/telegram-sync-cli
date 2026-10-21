@@ -267,7 +267,7 @@ describe('SQL Commands', () => {
 
       expect(descriptions).toEqual({
         'messages_cache.from_id':
-          'Marked peer ID of the sender: a user ID, or -N / -100… for a group or channel that posts as itself. Null when the message names no sender, such as a channel post fetched from history',
+          'Marked peer ID of the sender: a user ID, or -N / -100… for a group or channel that posts as itself. A message Telegram sends without a sender (an incoming private message, a channel post, Saved Messages) has its chat as the sender, as mtcute gives live messages. Null when raw_json names no peer.',
         'messages_cache.forward_from_id':
           'Marked peer ID of the original sender of a forwarded message: a user ID, or -N / -100… for a group or channel',
         chats_cache:

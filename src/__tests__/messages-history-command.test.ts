@@ -592,6 +592,34 @@ describe('cacheHistoryResponse', () => {
     })
     cacheDb.close()
   })
+
+  it('gives an incoming DM without fromId its user as the sender, so search shows the name (#44)', () => {
+    const cacheDb = createCacheDb()
+    const alice: tl.RawUser = {
+      _: 'user',
+      id: ALICE_ID,
+      firstName: 'Alice',
+      accessHash: toLong('1111'),
+    }
+    // Telegram leaves fromId out of an incoming private message
+    const message = {
+      _: 'message',
+      id: 7,
+      date: DATE,
+      message: 'see you at noon',
+      peerId: { _: 'peerUser', userId: ALICE_ID },
+    }
+
+    cacheHistoryResponse(cacheDb, ALICE_ID, [message], [alice], {})
+
+    const [hit] = createMessagesSearch(cacheDb).search('Alice')
+    expect(hit).toMatchObject({
+      chat_id: ALICE_ID,
+      from_id: ALICE_ID,
+      sender_first_name: 'Alice',
+    })
+    cacheDb.close()
+  })
 })
 
 describe('listHistory', () => {

@@ -4,7 +4,10 @@
  */
 
 import type { NewMessageData } from '../daemon/handlers'
-import { toPeerIdFromRawPeer } from './telegram-peer-ids'
+import {
+  toPeerIdFromRawPeer,
+  toSenderIdFromRawMessage,
+} from './telegram-peer-ids'
 
 /**
  * Raw Telegram peer types
@@ -140,7 +143,7 @@ export function parseRawMessage(
   return {
     chatId,
     messageId: raw.id,
-    fromId: extractPeerId(raw.fromId),
+    fromId: toSenderIdFromRawMessage(raw) ?? undefined,
     text: raw.message,
     date: raw.date,
     isOutgoing: raw.out ?? false,
