@@ -500,11 +500,28 @@ describe('E2E: Messages Get', () => {
     })
   })
 
-  it('stops the context at the newest message and skips deleted ones', async () => {
-    const data = await get('--chat', '@alice', '--id', '7', '--context', '2')
+  it('asks Telegram for a context side the cache lacks', async () => {
+    // 8 is deleted, so the cache has nothing newer than 7 to show
+    const { exitCode, json } = await getFailure(
+      '--chat',
+      '@alice',
+      '--id',
+      '7',
+      '--context',
+      '2',
+    )
 
-    expect(ids(data.newer)).toEqual([])
-    expect(ids(data.older)).toEqual([6, 5])
+    expect(exitCode).toBe(3)
+    expect(json.error.code).toBe('INVALID_ARGS')
+    expect(json.error.message).toContain('TELEGRAM_API_ID')
+  })
+
+  it('serves no older context for the first message of a fully synced chat', async () => {
+    const data = await get('--chat', '@alice', '--id', '1', '--context', '2')
+
+    expect(ids(data.newer)).toEqual([3, 2])
+    expect(data.older).toEqual([])
+    expect(data.source).toBe('cache')
   })
 
   it('returns no context by default', async () => {

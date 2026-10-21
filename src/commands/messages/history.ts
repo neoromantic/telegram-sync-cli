@@ -356,39 +356,47 @@ export interface GetMessageResult {
   stale: false
 }
 
+interface CachedAround {
+  around: MessageAround
+  /** False when a side of the context has to come from Telegram */
+  complete: boolean
+}
+
+/**
+ * The message and its context from the cache, or null if the message isn't
+ * cached. A context side with no message is incomplete, as an empty `list`
+ * window is, except the older side of a fully synced chat. A deleted message
+ * is complete as it is: Telegram no longer returns it.
+ */
 function readAroundFromCache(
   cacheDb: Database,
   chatId: number,
   messageId: number,
   context: number,
   includeDeleted: boolean,
-): MessageAround | null {
+): CachedAround | null {
   const history = createMessagesHistory(cacheDb)
   const [message] = history.getMany(chatId, [messageId])
   if (!message) return null
+  if (context === 0) {
+    return { around: { message, newer: [], older: [] }, complete: true }
+  }
 
   // A deleted target is still returned; its context follows --includeDeleted
   const side = (bound: 'after' | 'before') =>
-    context > 0
-      ? history.list(chatId, {
-          limit: context,
-          [bound]: messageId,
-          includeDeleted,
-        })
-      : []
-  return { message, newer: side('after'), older: side('before') }
+    history.list(chatId, { limit: context, [bound]: messageId, includeDeleted })
+  const around = { message, newer: side('after'), older: side('before') }
+  const complete =
+    message.is_deleted === 1 ||
+    (around.newer.length > 0 &&
+      (around.older.length > 0 || isHistoryComplete(cacheDb, chatId)))
+  return { around, complete }
 }
 
-/**
- * One message with up to `context` messages on each side. The cache answers
- * when it holds the message, and its context then comes from the cache too;
- * otherwise, or with `fresh`, Telegram does.
- */
-export async function getMessageWithContext(
+async function readAround(
   options: GetMessageOptions,
-): Promise<GetMessageResult> {
+): Promise<{ around: MessageAround; source: 'cache' | 'api' }> {
   const { cacheDb, client, chat, messageId, context } = options
-
   const cached = options.fresh
     ? null
     : readAroundFromCache(
@@ -398,16 +406,44 @@ export async function getMessageWithContext(
         context,
         options.includeDeleted,
       )
-  const around =
-    cached ??
-    (await fetchMessageAround(client, cacheDb, chat, messageId, context))
+  if (cached?.complete) {
+    return { around: cached.around, source: 'cache' }
+  }
+
+  try {
+    const around = await fetchMessageAround(
+      client,
+      cacheDb,
+      chat,
+      messageId,
+      context,
+    )
+    return { around, source: 'api' }
+  } catch (err) {
+    // Telegram no longer returns a message the cache still holds
+    if (cached && err instanceof MessageNotFoundError) {
+      return { around: cached.around, source: 'cache' }
+    }
+    throw err
+  }
+}
+
+/**
+ * One message with up to `context` messages on each side. The cache answers
+ * when it holds the message and something on each side of it; otherwise, or
+ * with `fresh`, one Telegram call fetches the message with both sides.
+ */
+export async function getMessageWithContext(
+  options: GetMessageOptions,
+): Promise<GetMessageResult> {
+  const { around, source } = await readAround(options)
 
   return {
-    chatId: chat.chatId,
+    chatId: options.chat.chatId,
     message: messageRowToItem(around.message),
     newer: around.newer.map(messageRowToItem),
     older: around.older.map(messageRowToItem),
-    source: cached ? 'cache' : 'api',
+    source,
     stale: false,
   }
 }

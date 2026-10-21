@@ -156,10 +156,14 @@ daemon the newest page can miss recent messages, history backfill doesn't run ye
 `tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each
 side: `{ chatId, message, newer, older, source, stale }`. `newer` and `older` are newest first,
 so `[...newer, message, ...older]` reads like a `list` page. The cache answers when it holds the
-message, and the context then comes from the cache too; otherwise, or with `--fresh`, all of it
-comes from Telegram and is cached. A missing message is a `TELEGRAM_ERROR` with
-`details: { chatId, messageId }`. A deleted message that is cached is returned with
-`isDeleted: true`.
+message and, with `--context`, at least one message on each side of it. A side with nothing
+cached is filled from Telegram, as an empty `list` window is: one call fetches the message with
+both sides, caches them and returns `source: "api"`. So the context of a chat's newest message
+always asks Telegram. The older side of a chat the daemon synced completely, and the context of a
+cached deleted message, come from the cache as they are. If Telegram no longer returns a cached
+message, the cached copy is returned. `--fresh` fetches all of it from Telegram. A missing
+message is a `TELEGRAM_ERROR` with `details: { chatId, messageId }`. A deleted message that is
+cached is returned with `isDeleted: true`.
 
 Items are exactly the objects `tg messages search` prints. Deleted messages are left out unless
 `--includeDeleted` is set.

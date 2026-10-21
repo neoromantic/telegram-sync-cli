@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or always with `--fresh`, and fetched pages are cached. Items are the same
   as in `tg messages search`.
 - `tg messages get --chat <peer> --id <id> [--context N]` returns one message
-  with up to N messages on each side, cache-first, `--fresh` to fetch.
+  with up to N messages on each side, cache-first, `--fresh` to fetch. A
+  context side the cache has nothing for comes from Telegram.
 
 ### Changed
 
