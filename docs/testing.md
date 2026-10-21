@@ -166,8 +166,9 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `status.e2e.test.ts` — `tg status` counts and lists running, pending, retrying and failed
   sync jobs from a seeded cache, in JSON and pretty output, without credentials; the retry
   commands it prints delete the failed jobs and keep each chat's mode; it shows the daemon's
-  version, and a restart hint for a running daemon of another, newer or unrecorded version;
-  none for the same version, a stopped daemon or one still starting
+  version, a restart hint for a running daemon of another or unrecorded version and a "use the
+  newer tg" hint for a newer one; no hint for the same version, a stopped daemon (one that died,
+  stopped cleanly or never ran) or one still starting
 
 ### E2E Helpers
 

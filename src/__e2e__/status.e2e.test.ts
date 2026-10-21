@@ -527,9 +527,8 @@ describe('E2E: status, daemon version', () => {
     expect(output).not.toContain('tg daemon stop')
   })
 
-  it('reports no version for a stopped daemon', async () => {
-    daemonStatus().setDaemonRunning(4242, OTHER)
-
+  /** A stopped daemon reports no version and no hint */
+  async function expectNoVersionWhileStopped() {
     const { data } = await status()
     expect(data.daemon).toMatchObject({
       status: 'stopped',
@@ -540,6 +539,24 @@ describe('E2E: status, daemon version', () => {
     const output = await prettyStatus()
     expect(output).not.toMatch(/^\s+Version\s/m)
     expect(output).not.toContain('⚠ The daemon')
+  }
+
+  it('reports no version for a daemon that died without cleanup', async () => {
+    daemonStatus().setDaemonRunning(4242, OTHER)
+
+    await expectNoVersionWhileStopped()
+  })
+
+  it('reports no version for a daemon that stopped cleanly', async () => {
+    // No PID file and no daemon_pid row: both PIDs are null
+    daemonStatus().setDaemonRunning(4242, OTHER)
+    daemonStatus().setDaemonStopped()
+
+    await expectNoVersionWhileStopped()
+  })
+
+  it('reports no version when no daemon has run', async () => {
+    await expectNoVersionWhileStopped()
   })
 
   it('compares nothing while the daemon is still starting', async () => {
