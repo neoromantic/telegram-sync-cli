@@ -236,13 +236,13 @@ export async function refreshDialogsAfterReconnect(
       accountId,
       client,
     )
-    // Unlisted chats get a checking page. A complete pass doesn't mark them
-    // caught up yet, as when every account shared one cache.
+    // The pass covers this account's own cache, so a complete one marks the
+    // chats it didn't list caught up, as on start
     markUnvisitedChats(
       createChatSyncStateService(rt.db),
       visited,
       complete,
-      false,
+      true,
     )
     rt.scheduler?.refreshQueues()
   } catch (err) {

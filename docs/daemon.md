@@ -204,8 +204,9 @@ account's scheduler → its sync_jobs → its worker and client → its messages
 - After a reconnect, a dialog pass runs on the new client in the background
   (one per account at a time), then the scheduler catches up the chats that got
   messages while the connection was down. If the pass fails part-way, every
-  synced chat it didn't list gets one checking page; a chat turned on with
-  `tg chats sync` that it didn't list gets one either way
+  synced chat it didn't list gets one checking page; after a complete pass the
+  account's chats it didn't list are marked caught up. A chat turned on with
+  `tg chats sync` that it didn't list gets a checking page either way
 - A sync job that fails retries after 1, 2, 4 and 8 minutes and is marked failed after the
   fifth attempt; a permanent error (such as `CHANNEL_PRIVATE`) fails it at once, and a
   FLOOD_WAIT only delays it. A failed job's chat isn't queued again for that job type until
