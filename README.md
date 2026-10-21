@@ -79,7 +79,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Local cache, offline queries | ✅ SQLite, cache-first, `--fresh` | ❌ live calls only |
 | Message search | ✅ full-text (FTS5) over cached messages | ✅ Telegram server search |
 | SQL over your data | ✅ read-only `tg sql` | ❌ |
-| Background sync | ✅ read-only daemon ([backfill: #6](https://github.com/neoromantic/telegram-sync-cli/issues/6)) | partial: waits for events, stores nothing |
+| Background sync | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; large groups and channels on request (`tg chats sync`) | partial: waits for events, stores nothing |
 | Any MTProto method | ✅ `tg api <method>` | ❌ fixed tool set |
 | Read chat history | partial: `tg sql` or `tg api` ([#21](https://github.com/neoromantic/telegram-sync-cli/issues/21)) | ✅ |
 | Send text | ✅ replies, silent | ✅ replies, Markdown/HTML |
