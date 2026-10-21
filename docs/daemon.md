@@ -7,7 +7,8 @@
 The `tg daemon` subcommand runs a long-lived process that:
 - Maintains MTProto connections for configured accounts
 - Processes real-time updates (new/edit/delete messages)
-- Bootstraps dialogs on startup (seed `chats_cache` + `chat_sync_state`)
+- Bootstraps dialogs on startup and after each reconnect (seed `chats_cache` +
+  `chat_sync_state`, archived chats included)
 - Schedules message sync jobs (forward catchup + backfill)
 - Writes only to local cache/sync tables (read-only to Telegram)
 
@@ -87,11 +88,16 @@ Handlers live in:
 ### Sync Scheduling
 
 The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
-- Forward catchup for missed messages
+- Forward catchup for chats that are behind: their newest message (`top_message_id`, from the
+  dialog pass) is above the forward cursor or unknown. It runs on start, after each reconnect
+  and until a gap is closed, not as polling; a chat that is caught up costs no calls.
+- A first page (`initial_load`) for chats without a forward cursor
 - Backward history for older messages
-- Priority-based execution (P0–P4)
-- Periodic refresh to pick up newly discovered chats
-  - Refresh interval: ~30 seconds (daemon loop)
+- Priority-based execution
+- A refresh every ~30 seconds (daemon loop) and after each reconnect's dialog pass queues
+  the work that is due again: chats first seen live, pages that failed
+
+See [sync-strategy.md](sync-strategy.md) for the rules.
 
 Key files:
 - `src/daemon/scheduler.ts`
@@ -152,6 +158,10 @@ Scheduler → sync_jobs → worker → messages_cache + chat_sync_state
   session file, registers the update handlers on the new client, starts its
   updates loop and rebuilds the account's sync worker; a failed attempt closes
   the new client and schedules the next retry
+- After a reconnect, a dialog pass runs on the new client in the background
+  (one per account at a time), then the scheduler catches up the chats that got
+  messages while the connection was down. If the pass fails part-way, every
+  synced chat it didn't list gets one checking page
 - Tracks last activity to avoid noisy health checks
 - Validates sync job state transitions
 - Uses rate limit service with flood wait tracking

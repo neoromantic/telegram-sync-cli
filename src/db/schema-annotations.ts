@@ -474,7 +474,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         forward_cursor: {
           description:
-            'Newest message ID seen (for catching up on new messages)',
+            'Every message up to this ID is cached; forward catch-up pages up from here. Only sync jobs move it, never live updates. 0: the chat was empty at its first page',
           nullable: true,
         },
         backward_cursor: {
@@ -523,6 +523,11 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         updated_at: {
           description: 'When sync state was last modified',
           semanticType: 'timestamp',
+        },
+        top_message_id: {
+          description:
+            'Newest message ID Telegram reported (dialog list or a sync page). NULL: unknown. Catch-up is due while it is NULL or above forward_cursor',
+          nullable: true,
         },
       },
       indexes: {

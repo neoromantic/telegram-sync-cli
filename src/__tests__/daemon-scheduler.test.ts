@@ -1,7 +1,7 @@
 /**
  * Tests for daemon scheduler logic (no module mocks)
  */
-import { describe, expect, it, mock } from 'bun:test'
+import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import type { TelegramClient } from '@mtcute/bun'
 import type { DaemonContext } from '../daemon/daemon-context'
 import { createDaemonRuntime } from '../daemon/daemon-context'
@@ -11,17 +11,21 @@ import {
   processJobs,
   rebuildSyncWorker,
 } from '../daemon/daemon-scheduler'
-import type { SyncScheduler } from '../daemon/scheduler'
+import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import type { RealSyncWorker } from '../daemon/sync-worker'
 import { getCacheDb } from '../db'
+import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createTestDatabase } from '../db/index.ts'
+import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
+import { createSyncJobsService } from '../db/sync-jobs'
 import {
   initSyncSchema,
   type SyncJobRow,
   SyncJobType,
   SyncPriority,
 } from '../db/sync-schema'
+import { fakeDialogClient } from './helpers/fake-dialogs'
 
 function createLogger() {
   return {
@@ -171,10 +175,114 @@ describe('rebuildSyncWorker', () => {
 
   it('does nothing without a scheduler', () => {
     const ctx = createContext()
+    const fake = fakeDialogClient([])
 
-    rebuildSyncWorker(ctx, 1, asTelegramClient({}))
+    expect(rebuildSyncWorker(ctx, 1, fake.client)).toBeUndefined()
 
     expect(ctx.runtime.syncWorkers.size).toBe(0)
+    expect(fake.calls).toHaveLength(0)
+  })
+})
+
+describe('rebuildSyncWorker dialog pass', () => {
+  const cacheDb = getCacheDb()
+  const chatSyncState = createChatSyncStateService(cacheDb)
+  const jobsService = createSyncJobsService(cacheDb)
+
+  beforeEach(() => {
+    initCacheSchema(cacheDb)
+    initSyncSchema(cacheDb)
+    // The cache database file is shared by the tests in this process
+    cacheDb.run('DELETE FROM chat_sync_state')
+    cacheDb.run('DELETE FROM sync_jobs')
+    cacheDb.run('DELETE FROM chats_cache')
+
+    for (const userId of [1001, 1002, 1003]) {
+      chatSyncState.upsert({
+        chat_id: userId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 1000,
+        backward_cursor: 1,
+      })
+      chatSyncState.markHistoryComplete(userId)
+      chatSyncState.raiseTopMessageId(userId, 1000)
+    }
+  })
+
+  function createRunningContext() {
+    const ctx = createContext()
+    ctx.runtime.scheduler = createSyncScheduler({
+      db: cacheDb,
+      jobsService,
+      chatSyncState,
+      messagesCache: createMessagesCache(cacheDb),
+    })
+    return ctx
+  }
+
+  const pendingCatchups = () =>
+    jobsService
+      .getPendingJobs()
+      .filter((job) => job.job_type === SyncJobType.ForwardCatchup)
+      .map((job) => job.chat_id)
+      .sort()
+
+  it('catches up the chats that got messages while the connection was down', async () => {
+    const ctx = createRunningContext()
+    const fake = fakeDialogClient([
+      { kind: 'user', id: 1001, topMessage: 1000 },
+      { kind: 'user', id: 1002, topMessage: 1007 },
+    ])
+
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    expect(fake.calls).toEqual([{ archived: 'keep' }])
+    expect(ctx.runtime.syncWorkers.get(1)?.client).toBe(fake.client)
+    expect(chatSyncState.get(1002)?.top_message_id).toBe(1007)
+    // A complete pass of one account says nothing about chats it didn't list
+    expect(chatSyncState.get(1003)?.top_message_id).toBe(1000)
+    expect(pendingCatchups()).toEqual([1002])
+    expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
+  })
+
+  it('checks every unlisted chat after a pass that failed', async () => {
+    const ctx = createRunningContext()
+    const fake = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 1000 },
+        { kind: 'user', id: 1002, topMessage: 1000 },
+      ],
+      { failAfter: 1 },
+    )
+
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    expect(chatSyncState.get(1001)?.top_message_id).toBe(1000)
+    expect(chatSyncState.get(1002)?.top_message_id).toBeNull()
+    expect(chatSyncState.get(1003)?.top_message_id).toBeNull()
+    expect(pendingCatchups()).toEqual([1002, 1003])
+  })
+
+  it('runs one pass for two quick reconnects of an account', async () => {
+    const ctx = createRunningContext()
+    const first = fakeDialogClient([
+      { kind: 'user', id: 1002, topMessage: 1007 },
+    ])
+    const second = fakeDialogClient([
+      { kind: 'user', id: 1002, topMessage: 1007 },
+    ])
+
+    const firstPass = rebuildSyncWorker(ctx, 1, first.client)
+    const secondPass = rebuildSyncWorker(ctx, 1, second.client)
+    await Promise.all([firstPass, secondPass])
+
+    expect(first.calls).toHaveLength(1)
+    expect(second.calls).toHaveLength(0)
+    // The worker still moves to the newest client
+    expect(ctx.runtime.syncWorkers.get(1)?.client).toBe(second.client)
+    expect(pendingCatchups()).toEqual([1002])
   })
 })
 

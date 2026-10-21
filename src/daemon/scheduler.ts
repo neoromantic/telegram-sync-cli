@@ -142,12 +142,21 @@ class SyncSchedulerImpl implements SyncScheduler {
 
   async initializeForStartup(): Promise<void> {
     this.recoverCrashedJobs()
+    // Catch-up is queued again below for the chats that are behind; older
+    // versions left one pending for every enabled chat.
+    this.jobsService.deletePendingOfType(SyncJobType.ForwardCatchup)
     this.refreshQueues()
   }
 
+  /**
+   * Queue the work that is due. Called on start, after a reconnect's dialog
+   * pass and every 30 loop ticks; a chat with nothing to do costs no call.
+   */
   refreshQueues(): void {
-    const enabledChats = this.chatSyncState.getEnabledChats()
-    for (const chat of enabledChats) {
+    // Catch-up only for chats whose newest message is above the cursor or
+    // unknown. Live updates don't move the cursor or the top, so a chat
+    // that is caught up stays that way until a dialog pass sees more.
+    for (const chat of this.chatSyncState.getCatchupDue()) {
       this.queueForwardCatchup(chat.chat_id)
     }
 

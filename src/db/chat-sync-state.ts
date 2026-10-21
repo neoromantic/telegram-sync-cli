@@ -47,6 +47,23 @@ export interface FirstPageResult {
 }
 
 /**
+ * The result of one forward catch-up page
+ */
+export interface CatchupPageResult {
+  /** The newest message ID on the page, or the old cursor if it was empty */
+  forward_cursor: number
+  /** Messages on the page that weren't cached yet */
+  new_messages: number
+  /**
+   * The page reached the newest message (it wasn't full): settle
+   * top_message_id at the new cursor, unless it changed during the fetch
+   */
+  caught_up: boolean
+  /** top_message_id as read before the fetch */
+  top_before: number | null
+}
+
+/**
  * Options for resetting sync state
  */
 export interface ResetSyncStateOptions {
@@ -87,6 +104,21 @@ export interface ChatSyncStateService {
    * counter. Does nothing if the chat already has a forward cursor.
    */
   recordFirstPage(chatId: number, page: FirstPageResult): void
+  /**
+   * Enabled chats whose forward cursor is behind: top_message_id is unknown
+   * or above the cursor
+   */
+  getCatchupDue(): ChatSyncStateRow[]
+  /** Enabled chats with a forward cursor */
+  getEnabledWithCursor(): ChatSyncStateRow[]
+  /** Store one catch-up page: the cursor, the counter and maybe the top */
+  recordCatchupPage(chatId: number, page: CatchupPageResult): void
+  /** Raise top_message_id to the given ID; never lowers it */
+  raiseTopMessageId(chatId: number, topMessageId: number): void
+  /** Mark chats as caught up: top_message_id = forward_cursor */
+  markCaughtUp(chatIds: Iterable<number>): void
+  /** Mark chats' newest message as unknown, so each gets one catch-up */
+  markTopUnknown(chatIds: Iterable<number>): void
   /** Delete sync state for a chat */
   delete(chatId: number): void
   /** Update last sync timestamp */
@@ -194,10 +226,65 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       SET forward_cursor = $forward,
           backward_cursor = $backward,
           history_complete = $complete,
+          top_message_id = MAX(COALESCE(top_message_id, 0), $forward),
           synced_messages = synced_messages + $count,
           last_forward_sync = $now,
           updated_at = $now
       WHERE chat_id = $chat_id AND forward_cursor IS NULL
+    `),
+
+    getCatchupDue: db
+      .query(`
+      SELECT * FROM chat_sync_state
+      WHERE sync_enabled = 1
+        AND forward_cursor IS NOT NULL
+        AND (top_message_id IS NULL OR top_message_id > forward_cursor)
+      ORDER BY sync_priority ASC, chat_id ASC
+    `)
+      .as(ChatSyncStateRow),
+
+    getEnabledWithCursor: db
+      .query(`
+      SELECT * FROM chat_sync_state
+      WHERE sync_enabled = 1 AND forward_cursor IS NOT NULL
+      ORDER BY chat_id ASC
+    `)
+      .as(ChatSyncStateRow),
+
+    // A top raised during the fetch (by a dialog pass) is newer than the
+    // page, so it stays and the chat stays due.
+    recordCatchupPage: db.prepare(`
+      UPDATE chat_sync_state
+      SET forward_cursor = $cursor,
+          top_message_id = CASE
+            WHEN $caught_up = 1
+              AND COALESCE(top_message_id, -1) <= COALESCE($top_before, -1)
+            THEN $cursor
+            ELSE top_message_id
+          END,
+          synced_messages = synced_messages + $count,
+          last_forward_sync = $now,
+          updated_at = $now
+      WHERE chat_id = $chat_id
+    `),
+
+    raiseTopMessageId: db.prepare(`
+      UPDATE chat_sync_state
+      SET top_message_id = MAX(COALESCE(top_message_id, 0), $top),
+          updated_at = $now
+      WHERE chat_id = $chat_id
+    `),
+
+    markCaughtUp: db.prepare(`
+      UPDATE chat_sync_state
+      SET top_message_id = forward_cursor, updated_at = $now
+      WHERE chat_id = $chat_id
+    `),
+
+    markTopUnknown: db.prepare(`
+      UPDATE chat_sync_state
+      SET top_message_id = NULL, updated_at = $now
+      WHERE chat_id = $chat_id
     `),
 
     delete: db.prepare(`
@@ -321,6 +408,51 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $count: page.new_messages,
         $now: Date.now(),
       })
+    },
+
+    getCatchupDue(): ChatSyncStateRow[] {
+      return stmts.getCatchupDue.all()
+    },
+
+    getEnabledWithCursor(): ChatSyncStateRow[] {
+      return stmts.getEnabledWithCursor.all()
+    },
+
+    recordCatchupPage(chatId: number, page: CatchupPageResult): void {
+      stmts.recordCatchupPage.run({
+        $chat_id: chatId,
+        $cursor: page.forward_cursor,
+        $caught_up: page.caught_up ? 1 : 0,
+        $top_before: page.top_before,
+        $count: page.new_messages,
+        $now: Date.now(),
+      })
+    },
+
+    raiseTopMessageId(chatId: number, topMessageId: number): void {
+      stmts.raiseTopMessageId.run({
+        $chat_id: chatId,
+        $top: topMessageId,
+        $now: Date.now(),
+      })
+    },
+
+    markCaughtUp(chatIds: Iterable<number>): void {
+      const now = Date.now()
+      db.transaction(() => {
+        for (const chatId of chatIds) {
+          stmts.markCaughtUp.run({ $chat_id: chatId, $now: now })
+        }
+      })()
+    },
+
+    markTopUnknown(chatIds: Iterable<number>): void {
+      const now = Date.now()
+      db.transaction(() => {
+        for (const chatId of chatIds) {
+          stmts.markTopUnknown.run({ $chat_id: chatId, $now: now })
+        }
+      })()
     },
 
     delete(chatId: number): void {

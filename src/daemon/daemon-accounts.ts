@@ -521,7 +521,7 @@ export async function attemptReconnect(
     accountState.reconnectAttempts = 0
     accountState.lastError = undefined
 
-    rebuildSyncWorker(ctx, accountState.accountId, client)
+    void rebuildSyncWorker(ctx, accountState.accountId, client)
     ctx.logger.info(
       `[Account ${accountState.accountId}] Real-time updates active`,
     )

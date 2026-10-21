@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Forward catch-up runs only for chats that are behind: on start and after
+  reconnects, for chats whose newest message in the dialog list is above the
+  cursor, and until a gap is closed. It no longer polls every enabled chat
+  every 30 seconds. The first catch-up after a restart or reconnect fetches the
+  messages received live since the last one again.
+- The daemon's dialog pass also lists archived chats, so they are cached and
+  sync jobs can reach them, but they don't start syncing on their own.
 - Groups whose member count Telegram doesn't report are off by default, like
   groups over 100 members, instead of getting a full-history sync. The daemon
   keeps the last known count when a dialog leaves it out.

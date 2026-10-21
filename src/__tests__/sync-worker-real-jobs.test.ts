@@ -760,6 +760,134 @@ describe('sync-worker real jobs', () => {
     })
   })
 
+  describe('forward catch-up and the newest message', () => {
+    const chatId = 4444
+
+    beforeEach(() => {
+      ctx.config.batchSize = 100
+      ctx.chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 1000,
+      })
+    })
+
+    function runCatchup() {
+      const job = ctx.jobsService.create({
+        chat_id: chatId,
+        job_type: SyncJobType.ForwardCatchup,
+        priority: SyncPriority.High,
+      })
+      return processForwardCatchupReal(ctx, job)
+    }
+
+    const state = () => ctx.chatSyncState.get(chatId)
+    const isDue = () =>
+      ctx.chatSyncState.getCatchupDue().some((chat) => chat.chat_id === chatId)
+
+    it('keeps the chat due after a full page', async () => {
+      ctx.chatSyncState.raiseTopMessageId(chatId, 1150)
+      ctx.client = createFakeHistory(range(1, 1150)).client
+
+      const result = await runCatchup()
+
+      expect(result).toMatchObject({ hasMore: true, newCursor: 1100 })
+      expect(state()?.top_message_id).toBe(1150)
+      expect(isDue()).toBe(true)
+    })
+
+    it('settles the top at the cursor after a short page', async () => {
+      ctx.chatSyncState.raiseTopMessageId(chatId, 1150)
+      ctx.client = createFakeHistory(range(1, 1150)).client
+
+      await runCatchup()
+      const second = await runCatchup()
+
+      expect(second).toMatchObject({ hasMore: false, newCursor: 1150 })
+      expect(state()?.forward_cursor).toBe(1150)
+      expect(state()?.top_message_id).toBe(1150)
+      expect(isDue()).toBe(false)
+    })
+
+    it('settles an unknown top', async () => {
+      ctx.client = createFakeHistory(range(1, 1020)).client
+
+      await runCatchup()
+
+      expect(state()?.top_message_id).toBe(1020)
+      expect(isDue()).toBe(false)
+    })
+
+    it('settles in one call when nothing is above the cursor', async () => {
+      // The dialog's newest message was deleted before catch-up ran
+      ctx.chatSyncState.raiseTopMessageId(chatId, 1001)
+      const history = createFakeHistory(range(1, 1000))
+      ctx.client = history.client
+
+      const result = await runCatchup()
+
+      expect(result).toMatchObject({ messagesFetched: 0, hasMore: false })
+      expect(history.requests).toHaveLength(1)
+      expect(state()?.forward_cursor).toBe(1000)
+      expect(state()?.top_message_id).toBe(1000)
+      expect(isDue()).toBe(false)
+    })
+
+    it('keeps the chat due if the top rose during the fetch', async () => {
+      ctx.chatSyncState.raiseTopMessageId(chatId, 1020)
+      const history = createFakeHistory(range(1, 1020))
+      ctx.client = {
+        call: async (request: Parameters<TelegramClient['call']>[0]) => {
+          // A dialog pass sees message 1021 while the page is in flight
+          history.add(1021)
+          ctx.chatSyncState.raiseTopMessageId(chatId, 1021)
+          return history.client.call(request)
+        },
+      } as unknown as TelegramClient
+
+      await runCatchup()
+
+      expect(state()?.forward_cursor).toBe(1021)
+      expect(state()?.top_message_id).toBe(1021)
+      expect(isDue()).toBe(false)
+
+      ctx.client = {
+        call: async (request: Parameters<TelegramClient['call']>[0]) => {
+          // This time the new message arrives after the page was fetched
+          const page = await history.client.call(request)
+          history.add(1022)
+          ctx.chatSyncState.raiseTopMessageId(chatId, 1022)
+          return page
+        },
+      } as unknown as TelegramClient
+
+      ctx.chatSyncState.markTopUnknown([chatId])
+      await runCatchup()
+
+      expect(state()?.forward_cursor).toBe(1021)
+      expect(state()?.top_message_id).toBe(1022)
+      expect(isDue()).toBe(true)
+    })
+
+    it('leaves the top alone when the page fails', async () => {
+      ctx.chatSyncState.raiseTopMessageId(chatId, 1150)
+      ctx.client = {
+        call: mock(async () => {
+          throw new Error('FLOOD_WAIT_30')
+        }),
+      } as unknown as TelegramClient
+
+      const result = await runCatchup()
+
+      expect(result.rateLimited).toBe(true)
+      expect(state()?.forward_cursor).toBe(1000)
+      expect(state()?.top_message_id).toBe(1150)
+      expect(isDue()).toBe(true)
+    })
+  })
+
   describe('initial load', () => {
     const chatId = 4343
 
@@ -809,6 +937,7 @@ describe('sync-worker real jobs', () => {
       expect(state?.forward_cursor).toBe(250)
       expect(state?.backward_cursor).toBe(151)
       expect(state?.history_complete).toBe(0)
+      expect(state?.top_message_id).toBe(250)
       const [job] = ctx.jobsService.getJobsForChat(chatId)
       expect(job?.messages_fetched).toBe(98)
     })
@@ -869,6 +998,28 @@ describe('sync-worker real jobs', () => {
       const state = ctx.chatSyncState.get(chatId)
       expect(state?.backward_cursor).toBe(51)
       expect(state?.history_complete).toBe(0)
+    })
+
+    it('raises the top to at least the newest message on the page', async () => {
+      ctx.chatSyncState.raiseTopMessageId(chatId, 240)
+      ctx.client = createFakeHistory(range(1, 250)).client
+
+      await runJob(SyncJobType.InitialLoad)
+
+      expect(ctx.chatSyncState.get(chatId)?.top_message_id).toBe(250)
+    })
+
+    it('keeps a higher top, so the chat is caught up next', async () => {
+      // The dialog pass saw message 260; the page only got up to 250
+      ctx.chatSyncState.raiseTopMessageId(chatId, 260)
+      ctx.client = createFakeHistory(range(1, 250)).client
+
+      await runJob(SyncJobType.InitialLoad)
+
+      expect(ctx.chatSyncState.get(chatId)?.top_message_id).toBe(260)
+      expect(
+        ctx.chatSyncState.getCatchupDue().map((chat) => chat.chat_id),
+      ).toEqual([chatId])
     })
 
     it('makes no call for a chat that already has a forward cursor', async () => {

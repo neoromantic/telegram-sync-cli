@@ -20,8 +20,11 @@ Handlers live in:
 2. **Normalize** message metadata (chat type, media type, forward attribution)
 3. **Persist** into `messages_cache`
 4. **Update counters** in `chat_sync_state` (`synced_messages`, `last_forward_sync`). The
-   forward cursor stays where it is: forward catch-up moves it after fetching the messages
-   below (see [sync-strategy.md](sync-strategy.md)).
+   forward cursor and `top_message_id` stay where they are: forward catch-up moves the cursor
+   after fetching the messages below (see [sync-strategy.md](sync-strategy.md)).
+
+A message in a chat without a state row creates one from the message's chat: its type and,
+for groups, its member count decide the sync policy.
 
 ### Message Type Mapping
 
@@ -38,7 +41,10 @@ Delete updates mark rows as deleted instead of removing them:
 
 ## Gaps / Too Long Updates
 
-Large gaps are handled by scheduling sync jobs (forward catchup / backfill). The daemon does not perform ad-hoc full diffs on realtime gaps.
+Gaps are closed by forward catch-up, not by `getDifference`. On start and after each reconnect
+the daemon lists the dialogs; a chat whose newest message is above its forward cursor gets
+catch-up pages until the cursor reaches it. The daemon does not perform ad-hoc full diffs on
+realtime gaps.
 
 ## Implementation References
 

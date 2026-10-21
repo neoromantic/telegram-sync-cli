@@ -17,6 +17,8 @@ export interface DaemonRuntime {
   totalMessagesSynced: number
   signalHandlersSetup: boolean
   statusService: DaemonStatusService | null
+  /** Accounts whose dialog pass after a reconnect is still running */
+  dialogPassesInFlight: Set<number>
 }
 
 export interface DaemonContext {
@@ -40,5 +42,6 @@ export function createDaemonRuntime(): DaemonRuntime {
     totalMessagesSynced: 0,
     signalHandlersSetup: false,
     statusService: null,
+    dialogPassesInFlight: new Set(),
   }
 }

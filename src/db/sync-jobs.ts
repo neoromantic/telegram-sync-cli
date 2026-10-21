@@ -64,6 +64,8 @@ export interface SyncJobsService {
   cleanupFailed(olderThanMs: number): number
   /** Cancel pending jobs for a chat */
   cancelPendingForChat(chatId: number): number
+  /** Delete every pending job of a type */
+  deletePendingOfType(jobType: SyncJobType): number
   /** Recover jobs that were running when daemon crashed (reset to pending) */
   recoverCrashedJobs(): number
 }
@@ -175,6 +177,11 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     cancelPendingForChat: db.prepare(`
       DELETE FROM sync_jobs
       WHERE chat_id = $chat_id AND status = $status
+    `),
+
+    deletePendingOfType: db.prepare(`
+      DELETE FROM sync_jobs
+      WHERE job_type = $job_type AND status = $status
     `),
 
     recoverCrashedJobs: db.prepare(`
@@ -306,6 +313,14 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     cancelPendingForChat(chatId: number): number {
       const result = stmts.cancelPendingForChat.run({
         $chat_id: chatId,
+        $status: SyncJobStatus.Pending,
+      })
+      return result.changes
+    },
+
+    deletePendingOfType(jobType: SyncJobType): number {
+      const result = stmts.deletePendingOfType.run({
+        $job_type: jobType,
         $status: SyncJobStatus.Pending,
       })
       return result.changes

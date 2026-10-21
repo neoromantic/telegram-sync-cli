@@ -6,6 +6,7 @@ import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { SyncJobType } from '../db/sync-schema'
+import { refreshDialogsAfterReconnect } from './daemon-bootstrap'
 import type { DaemonContext } from './daemon-context'
 import { formatError } from './daemon-utils'
 import { DEFAULT_JOB_EXECUTOR_CONFIG } from './job-executor'
@@ -54,18 +55,24 @@ export async function initializeScheduler(ctx: DaemonContext): Promise<void> {
 }
 
 /**
- * Give the account a sync worker bound to its new client after a reconnect.
- * Does nothing before the scheduler starts or after it shuts down.
+ * Give the account a sync worker bound to its new client after a reconnect,
+ * and start a dialog pass on it in the background, so the chats that got
+ * messages while the connection was down are caught up. Does nothing before
+ * the scheduler starts or after it shuts down.
+ *
+ * Returns the background pass, for tests; callers don't wait for it.
  */
 export function rebuildSyncWorker(
   ctx: DaemonContext,
   accountId: number,
   client: TelegramClient,
-): void {
+): Promise<void> | undefined {
   if (!ctx.runtime.scheduler) return
 
   ctx.runtime.syncWorkers.set(accountId, createAccountSyncWorker(client))
   ctx.logger.debug(`Rebuilt sync worker for account ${accountId}`)
+
+  return refreshDialogsAfterReconnect(ctx, accountId, client)
 }
 
 function selectAvailableWorker(ctx: DaemonContext): {
