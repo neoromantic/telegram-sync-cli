@@ -357,6 +357,16 @@ describe('E2E: Messages List', () => {
     }
   })
 
+  it.each(['+15550001111', '15550001111'])(
+    'needs credentials to look up the phone number %p',
+    async (chat) => {
+      const { exitCode, json } = await listFailure('--chat', chat)
+      expect(exitCode).toBe(3)
+      expect(json.error.code).toBe('INVALID_ARGS')
+      expect(json.error.message).toContain('TELEGRAM_API_ID')
+    },
+  )
+
   it('skips deleted messages unless --includeDeleted', async () => {
     expect(await ids('--chat', '@alice')).not.toContain(8)
 

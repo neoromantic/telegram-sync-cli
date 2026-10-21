@@ -72,6 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tg sql` print (`-100…` for channels and supergroups, `-N` for basic
   groups), and a cached 10-digit user or chat ID is no longer looked up as a
   phone number.
+- `tg send --to +<phone>` reported a rate limit on the phone lookup as a
+  number it couldn't resolve. It now fails with `RATE_LIMITED`.
 
 ## [0.1.4] - 2026-10-21
 
