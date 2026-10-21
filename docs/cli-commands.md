@@ -163,10 +163,13 @@ so `[...newer, message, ...older]` reads like a `list` page. The cache answers w
 message and, with `--context`, each side whole, as `list` would serve that side next to the
 message. Otherwise one call fetches the message with both sides, caches them and returns
 `source: "api"`. So the context of a chat's newest message always asks Telegram. The context of
-a cached deleted message comes from the cache as its ranges hold it. If Telegram no longer
-returns a cached message, the cached copy is returned. `--fresh` fetches all of it from Telegram. A missing
-message is a `TELEGRAM_ERROR` with `details: { chatId, messageId }`. A deleted message that is
-cached is returned with `isDeleted: true`.
+a cached deleted message comes from the cache as its ranges hold it. If the message is cached
+and that call fails (no credentials or connection, a flood wait, a chat Telegram refuses) or
+Telegram no longer returns the message, the cached message comes back with the context the
+cache holds and `source: "cache"`, so a cached search hit always opens (`--verbose` logs the
+error). `--fresh` fetches all of it from Telegram and reports a failed call. A missing message
+is a `TELEGRAM_ERROR` with `details: { chatId, messageId }`. A deleted message that is cached is
+returned with `isDeleted: true`.
 
 Items are exactly the objects `tg messages search` prints. Deleted messages are left out unless
 `--includeDeleted` is set.

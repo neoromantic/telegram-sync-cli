@@ -546,20 +546,15 @@ describe('E2E: Messages Get', () => {
     })
   })
 
-  it('asks Telegram for a context side the cache lacks', async () => {
-    // 8 is deleted, so the cache has nothing newer than 7 to show
-    const { exitCode, json } = await getFailure(
-      '--chat',
-      '@alice',
-      '--id',
-      '7',
-      '--context',
-      '2',
-    )
+  it('serves the context the cache holds when Telegram cannot be asked', async () => {
+    // 8 is deleted, so the cache has nothing newer than 7 to show. Telegram
+    // would be asked for the newer side, but there are no credentials.
+    const data = await get('--chat', '@alice', '--id', '7', '--context', '2')
 
-    expect(exitCode).toBe(3)
-    expect(json.error.code).toBe('INVALID_ARGS')
-    expect(json.error.message).toContain('TELEGRAM_API_ID')
+    expect(data.message.messageId).toBe(7)
+    expect(data.newer).toEqual([])
+    expect(ids(data.older)).toEqual([6, 5])
+    expect(data.source).toBe('cache')
   })
 
   it('serves no older context for the first message of a chat', async () => {
@@ -658,10 +653,14 @@ describe('E2E: Messages Get', () => {
       String(hit!.chatId),
       '--id',
       String(hit!.messageId),
+      '--context',
+      '5',
     )
 
     expect(data.chatId).toBe(NEW_DM_ID)
     expect(data.message).toEqual(hit!)
+    expect(data.newer).toEqual([])
+    expect(data.older).toEqual([])
     expect(data.source).toBe('cache')
   })
 
