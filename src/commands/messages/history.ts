@@ -22,7 +22,7 @@ import { createUsersCache, type UsersCache } from '../../db/users-cache'
 import type { MessageSearchItem } from '../../types'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import { toPeerIdFromInputPeer } from '../../utils/telegram-peer-ids'
-import { resolvePeer } from '../send/peer-resolver'
+import { type HistoryLookup, resolvePeer } from '../send/peer-resolver'
 import { resolveSelfId } from '../send/sent-message-cache'
 import {
   type HistoryClient,
@@ -41,6 +41,7 @@ export interface HistoryChat {
 export interface ResolveHistoryChatDeps {
   usersCache: UsersCache
   chatsCache: ChatsCache
+  messagesCache: HistoryLookup
   accounts: Pick<AccountsDbInterface, 'getById' | 'getActive' | 'update'>
   accountId: number | undefined
 }
@@ -59,6 +60,7 @@ export async function resolveHistoryChat(
     identifier,
     deps.usersCache,
     deps.chatsCache,
+    deps.messagesCache,
   )
   const selfId =
     inputPeer._ === 'inputPeerSelf'

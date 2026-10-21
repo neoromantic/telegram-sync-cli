@@ -58,6 +58,8 @@ const BOB_ID = 11
 const TEAM_CHAT_RAW_ID = 1234567890
 const TEAM_CHAT_ID = -1001234567890
 const BOOK_CLUB_ID = -4242
+const NEW_USER_ID = 12
+const LONG_NEW_USER_ID = 7_000_000_001
 const DATE = 1_760_000_000
 
 const TEAM_CHAT: HistoryChat = {
@@ -199,12 +201,21 @@ describe('resolveHistoryChat', () => {
       '2222',
     )
     cacheChat(cacheDb, '4242', 'group', 'Book Club', null, null)
-    for (const chatId of [ALICE_ID, TEAM_CHAT_ID, BOOK_CLUB_ID, SELF_ID]) {
+    // A private chat the daemon cached with no users_cache or chats_cache row
+    const newDm = [NEW_USER_ID, LONG_NEW_USER_ID]
+    for (const chatId of [
+      ALICE_ID,
+      TEAM_CHAT_ID,
+      BOOK_CLUB_ID,
+      SELF_ID,
+      ...newDm,
+    ]) {
       cacheMessages(cacheDb, chatId, [1, 2])
     }
     deps = {
       usersCache: createUsersCache(cacheDb),
       chatsCache: createChatsCache(cacheDb),
+      messagesCache: createMessagesCache(cacheDb),
       accounts,
       accountId: undefined,
     }
@@ -222,6 +233,8 @@ describe('resolveHistoryChat', () => {
     ['-1001234567890', TEAM_CHAT_ID],
     ['-4242', BOOK_CLUB_ID],
     ['me', SELF_ID],
+    [String(NEW_USER_ID), NEW_USER_ID],
+    [String(LONG_NEW_USER_ID), LONG_NEW_USER_ID],
   ])(
     'resolves and lists %p from the cache as chat %p',
     async (identifier, chatId) => {

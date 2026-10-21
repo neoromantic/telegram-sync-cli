@@ -5,7 +5,9 @@ import { type TelegramClient, tl } from '@mtcute/bun'
 import { resolvePeer } from '../commands/send/peer-resolver'
 import { ConfigError } from '../config'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
+import { createMessagesCache, type MessagesCache } from '../db/messages-cache'
 import { createTestCacheDatabase } from '../db/schema'
+import { initSyncSchema } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
@@ -52,12 +54,36 @@ describe('resolvePeer with numeric IDs', () => {
   let db: Database
   let usersCache: UsersCache
   let chatsCache: ChatsCache
+  let messagesCache: MessagesCache
 
   beforeEach(() => {
     db = createTestCacheDatabase().db
+    initSyncSchema(db)
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
+    messagesCache = createMessagesCache(db)
   })
+
+  function cacheMessage(chatId: number) {
+    messagesCache.upsert({
+      chat_id: chatId,
+      message_id: 1,
+      from_id: chatId,
+      text: 'hi',
+      message_type: 'text',
+      date: 1_760_000_000,
+      raw_json: '{}',
+    })
+  }
+
+  function resolvedPeer(users: tl.TypeUser[]): tl.contacts.RawResolvedPeer {
+    return {
+      _: 'contacts.resolvedPeer',
+      peer: { _: 'peerUser', userId: 0 },
+      users,
+      chats: [],
+    }
+  }
 
   function cacheChat(
     chatId: string,
@@ -82,7 +108,13 @@ describe('resolvePeer with numeric IDs', () => {
   }
 
   function resolve(identifier: string, client: Pick<TelegramClient, 'call'>) {
-    return resolvePeer(client, identifier, usersCache, chatsCache)
+    return resolvePeer(
+      client,
+      identifier,
+      usersCache,
+      chatsCache,
+      messagesCache,
+    )
   }
 
   describe('marked IDs, as tg messages search and tg sql print them', () => {
@@ -189,6 +221,51 @@ describe('resolvePeer with numeric IDs', () => {
       expect(call).not.toHaveBeenCalled()
     })
 
+    it.each([12, 7_000_000_001])(
+      'resolves %p as a user when only its private chat is cached',
+      async (userId) => {
+        cacheMessage(userId)
+        const { call, client } = throwingClient()
+
+        const peer = await resolve(String(userId), client)
+
+        expect(peer).toEqual({
+          inputPeer: { _: 'inputPeerUser', userId, accessHash: toLong(0) },
+          name: `User ${userId}`,
+        })
+        expect(call).not.toHaveBeenCalled()
+      },
+    )
+
+    it('resolves a cached user without an access hash as a user, not a group', async () => {
+      usersCache.upsert({
+        user_id: '11',
+        first_name: 'Bob',
+        last_name: 'Baker',
+        fetched_at: Date.now(),
+        raw_json: '{}',
+      })
+      const { call, client } = throwingClient()
+
+      const peer = await resolve('11', client)
+
+      expect(peer).toEqual({
+        inputPeer: { _: 'inputPeerUser', userId: 11, accessHash: toLong(0) },
+        name: 'Bob Baker',
+      })
+      expect(call).not.toHaveBeenCalled()
+    })
+
+    it('still takes an unknown short number as a basic group', async () => {
+      cacheMessage(-12)
+      const { call, client } = throwingClient()
+
+      const peer = await resolve('12', client)
+
+      expect(peer.inputPeer).toEqual({ _: 'inputPeerChat', chatId: 12 })
+      expect(call).not.toHaveBeenCalled()
+    })
+
     it('still looks up an uncached 10-digit number as a phone', async () => {
       const { call, client } = throwingClient(phoneNotOccupied)
 
@@ -213,6 +290,56 @@ describe('resolvePeer with numeric IDs', () => {
         _: 'contacts.resolvePhone',
         phone: '15550000000',
       })
+    })
+
+    it.each([
+      ['@alice', 'contacts.resolveUsername'],
+      ['+15550000000', 'contacts.resolvePhone'],
+    ])(
+      'caches the user Telegram resolves for %p, so its ID hits the cache next',
+      async (identifier, method) => {
+        const alice: tl.RawUser = {
+          _: 'user',
+          id: 10,
+          firstName: 'Alice',
+          lastName: 'Able',
+          username: 'alice',
+          phone: '15550000000',
+          accessHash: toLong('1111'),
+        }
+        const call = mock(async (request: { _: string }) => {
+          expect(request._).toBe(method)
+          return resolvedPeer([alice])
+        })
+        const client = { call } as unknown as Pick<TelegramClient, 'call'>
+
+        await resolve(identifier, client)
+        const byId = await resolve('10', throwingClient().client)
+
+        expect(byId).toEqual({
+          inputPeer: {
+            _: 'inputPeerUser',
+            userId: 10,
+            accessHash: toLong('1111'),
+          },
+          name: 'Alice Able',
+        })
+      },
+    )
+
+    it('does not cache a min user', async () => {
+      const call = mock(async () =>
+        resolvedPeer([
+          { _: 'user', id: 10, min: true, firstName: 'Alice' } as tl.RawUser,
+        ]),
+      )
+
+      await resolve('@alice', { call } as unknown as Pick<
+        TelegramClient,
+        'call'
+      >)
+
+      expect(usersCache.getById('10')).toBeNull()
     })
 
     it.each([

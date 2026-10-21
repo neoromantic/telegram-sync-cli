@@ -4,6 +4,7 @@ import { defineCommand } from 'citty'
 import { ConfigError } from '../config'
 import { accountsDb, getCacheDb } from '../db'
 import { createChatsCache } from '../db/chats-cache'
+import { createMessagesCache } from '../db/messages-cache'
 import { createUsersCache } from '../db/users-cache'
 import { getClientForAccount } from '../services/telegram'
 import { ErrorCodes } from '../types'
@@ -143,6 +144,7 @@ export const sendCommand = defineCommand({
         recipient,
         usersCache,
         chatsCache,
+        createMessagesCache(cacheDb),
       )
 
       verbose(`Sending message to ${name}...`)

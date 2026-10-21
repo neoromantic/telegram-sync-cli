@@ -228,10 +228,14 @@ Peers can be specified in multiple formats:
 - Chat ID: `-123456789`
 - Channel ID: `-1001234567890`
 
-A bare number is looked up as a cached user or chat ID first, so a 10-digit ID from
-`tg chats list` works. Only a number the cache doesn't know is tried as a phone number; write
-phone numbers with `+` to skip the ID lookup. Marked IDs (`-…`) resolve from the cache, or from
-the ID alone with no API call.
+A bare number is looked up in the cache first: a user with an access hash, then a chat ID as
+`tg chats list` prints it, then a user known without an access hash or a private chat with
+cached messages (`tg messages search` prints a private chat under the user ID). If the cache
+doesn't know the number, one with 10 or more digits is tried as a phone number and a shorter one
+is taken as a basic group ID. Write phone numbers with `+` to skip the ID lookup. Marked IDs
+(`-…`) resolve from the cache, or from the ID alone with no API call. Telegram may refuse a user
+found without an access hash; cache reads don't need one. Users that an `@username` or phone
+lookup returns are cached, so the next lookup by ID needs no API call.
 
 Note: `tg chats get` currently accepts **@username only**.
 

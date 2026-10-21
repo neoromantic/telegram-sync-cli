@@ -3,6 +3,7 @@ import type { TelegramClient } from '@mtcute/bun'
 import { ConfigError } from '../../config'
 import { accountsDb, getCacheDb } from '../../db'
 import { createChatsCache } from '../../db/chats-cache'
+import { createMessagesCache } from '../../db/messages-cache'
 import type { MessageSearchRow } from '../../db/messages-search'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
@@ -155,6 +156,7 @@ export function openHistory(accountId: number | undefined, context: string) {
     ),
     usersCache: createUsersCache(cacheDb),
     chatsCache: createChatsCache(cacheDb),
+    messagesCache: createMessagesCache(cacheDb),
     accounts: accountsDb,
     accountId,
   }

@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   phone number.
 - `tg send --to +<phone>` reported a rate limit on the phone lookup as a
   number it couldn't resolve. It now fails with `RATE_LIMITED`.
+- `tg send --to <user ID>` resolves a user the cache knows without an access
+  hash, or whose private chat has cached messages, as that user. Before, a
+  short ID became the basic group with the same number and a 10-digit one a
+  phone number. Users found by `@username` or phone are cached, so the next
+  lookup by ID needs no API call.
 
 ## [0.1.4] - 2026-10-21
 
