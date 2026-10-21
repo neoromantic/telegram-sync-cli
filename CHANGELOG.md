@@ -7,9 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg send --to me` (or `self`) sends to Saved Messages.
+- A live smoke suite (`bun run test:integration`) covers auth, the profile,
+  chats, contacts, sending and the daemon against the real API.
+
 ### Changed
 
-- Upgraded mtcute to 0.32.5 and switched type checking to TypeScript 7.
+- Upgraded mtcute to 0.32.6 and switched type checking to TypeScript 7.
+
+### Fixed
+
+- `tg sql --query "…"` failed with "Missing required positional argument".
+  The `-q` short alias is gone: it always meant the global `--quiet`.
+- The daemon's dialog bootstrap gave up on the first long FLOOD_WAIT, so
+  large accounts got a partial chat list. The daemon now waits out
+  FLOOD_WAITs of up to 5 minutes.
+- `tg contacts list` from the cache missed contacts once more than 1000 users
+  were cached.
+- Messages received in real time were stored without `raw_json`.
+- `tg daemon stop` printed a progress line to stdout before the JSON.
 - CI runs on the shared devkit reusable workflows; git hooks run gitleaks and
   a privacy scan.
 - `AGENTS.md` is the canonical agent guide; the roadmap became a known-gaps
