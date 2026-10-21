@@ -200,8 +200,10 @@ The scheduler uses the database as the single source of truth. There is **no in-
 ### Archived chats
 
 The dialog pass lists archived dialogs too. They update `chats_cache`, so sync jobs can build an
-InputPeer for them, and the sync state of chats that already have one. An archived chat without
-a state row doesn't get one: archived chats don't start syncing on their own.
+InputPeer for them, and the sync state of chats that already have one. The pass creates no
+state row for an archived chat. An archived chat starts syncing when a message arrives in it
+live, which creates its state like in any other chat (the update doesn't say whether the chat
+is archived), or when `tg chats sync` turns it on.
 
 ## Job lanes
 
