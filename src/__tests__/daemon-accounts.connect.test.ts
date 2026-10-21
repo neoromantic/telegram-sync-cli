@@ -21,7 +21,7 @@ type AccountUpdateInput = Parameters<AccountsDbInterface['update']>[1]
 type AccountSeed = Pick<Account, 'id' | 'phone'> & { user_id?: number | null }
 type MessageLike = {
   id: number
-  chat: { id: number; type: string; chatType?: string }
+  chat: { id: number; type: string; chatType?: string; membersCount?: number }
   sender?: { id: number } | null
   text: string
   date: Date
@@ -301,6 +301,34 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(state?.sync_enabled).toBe(0)
     expect(accountState.lastActivity).toBeDefined()
     expect(client.onNewMessage.add).toHaveBeenCalled()
+  })
+
+  it('passes a live group message member count to the sync policy', async () => {
+    const ctx = createContext(createAccountsDb([{ id: 1, phone: '+111' }]))
+    const { setupEventHandlers } = await import('../daemon/daemon-accounts')
+    const accountState: AccountConnectionState = {
+      accountId: 1,
+      phone: '+111',
+      name: null,
+      status: 'connected',
+      client: createClient(),
+    }
+    setupEventHandlers(ctx, accountState)
+
+    accountState.eventHandlers?.onNewMessage(
+      asMessage({
+        id: 1,
+        chat: { id: -4001, type: 'chat', chatType: 'group', membersCount: 10 },
+        sender: { id: 777 },
+        text: 'Hi all',
+        date: new Date('2024-01-01T00:00:00Z'),
+        isOutgoing: false,
+      }),
+    )
+
+    const state = createChatSyncStateService(testCacheDb).get(-4001)
+    expect(state?.member_count).toBe(10)
+    expect(state?.sync_enabled).toBe(1)
   })
 
   it('handles delete updates without chat context', async () => {

@@ -15,7 +15,8 @@ import {
 export interface ChatSyncStateInput {
   chat_id: number
   chat_type: SyncChatType
-  member_count?: number
+  /** Omitted or null keeps the stored count */
+  member_count?: number | null
   sync_priority: SyncPriority
   sync_enabled: boolean
   forward_cursor?: number | null
@@ -96,7 +97,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       )
       ON CONFLICT(chat_id) DO UPDATE SET
         chat_type = excluded.chat_type,
-        member_count = excluded.member_count,
+        member_count = COALESCE(excluded.member_count, chat_sync_state.member_count),
         sync_priority = excluded.sync_priority,
         sync_enabled = excluded.sync_enabled,
         forward_cursor = COALESCE(excluded.forward_cursor, chat_sync_state.forward_cursor),

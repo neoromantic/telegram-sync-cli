@@ -34,8 +34,8 @@ Stored in `chat_sync_state`:
 |----------|----------|---------------|
 | **P0** | Real-time | Immediate updates when daemon is running |
 | **P1** | DMs + small groups (<20 members) | Full history sync |
-| **P2** | Medium groups (20–100 members) | Initial load + gradual history |
-| **P3** | Large groups (>100) & channels | On-demand only |
+| **P2** | Medium groups (20–100 members) | Newest 100 messages, then history after the P1 chats |
+| **P3** | Groups of unknown size, large groups (>100) & channels | On request only |
 | **P4** | Background | Low-priority backfill |
 
 ### Policy (Current)
@@ -44,10 +44,17 @@ Implemented in `determineSyncPolicy`:
 
 - `private` → enabled, **High**
 - `group/supergroup`:
+  - unknown member count → disabled, **Low**
   - `< 20` → enabled, **High**
   - `20–100` → enabled, **Medium**
   - `> 100` → disabled, **Low**
 - `channel` → disabled, **Low**
+
+Telegram often leaves the member count out of a supergroup's dialog, and such a group may have
+thousands of members, so a group without a count is treated as large. The dialog pass keeps the
+last known count when a dialog omits it, so a chat doesn't flip on or off between starts. A
+live message in a chat the daemon hasn't seen yet creates its state from the message's chat:
+basic groups always carry their member count, supergroups often don't.
 
 ## Data Model
 
@@ -121,7 +128,6 @@ Rate limits are tracked per API method:
 ## Notes
 
 - Catchup and realtime run concurrently; realtime handlers do not wait for catchup to complete.
-- Medium-group initial load size is governed by worker batch size (currently 100), not a fixed “10 messages” rule.
 - Daemon bootstraps dialogs on startup to seed `chats_cache` + `chat_sync_state`.
 - Scheduler refreshes job queues periodically to pick up newly discovered chats.
 - Contact sync remains **CLI-driven**; the daemon does not refresh contacts.

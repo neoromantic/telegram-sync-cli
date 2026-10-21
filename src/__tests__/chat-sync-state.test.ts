@@ -61,6 +61,35 @@ describe('ChatSyncStateService', () => {
     })
   })
 
+  describe('upsert member_count', () => {
+    it('keeps the stored count when the update has none', () => {
+      service.upsert({
+        chat_id: -4001,
+        chat_type: 'group',
+        member_count: 42,
+        sync_priority: SyncPriority.Medium,
+        sync_enabled: true,
+      })
+
+      service.upsert({
+        chat_id: -4001,
+        chat_type: 'group',
+        sync_priority: SyncPriority.Medium,
+        sync_enabled: true,
+      })
+      expect(service.get(-4001)?.member_count).toBe(42)
+
+      service.upsert({
+        chat_id: -4001,
+        chat_type: 'group',
+        member_count: 12,
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+      })
+      expect(service.get(-4001)?.member_count).toBe(12)
+    })
+  })
+
   describe('updateCursors', () => {
     beforeEach(() => {
       service.upsert({

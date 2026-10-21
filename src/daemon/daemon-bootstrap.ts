@@ -58,15 +58,18 @@ export async function bootstrapDialogs(ctx: DaemonContext): Promise<void> {
         const peerId = toPeerIdFromRawPeer(rawPeer ?? null)
         const chatId = peerId ?? Number(chatInput.chat_id)
         const syncType = chatInput.type as SyncChatType
-        const policy = determineSyncPolicy(
-          syncType,
-          chatInput.member_count ?? undefined,
-        )
+        // Dialogs often leave the member count out; the stored one keeps a
+        // chat from flipping on or off between starts.
+        const memberCount =
+          chatInput.member_count ??
+          chatSyncState.get(chatId)?.member_count ??
+          null
+        const policy = determineSyncPolicy(syncType, memberCount)
 
         chatSyncState.upsert({
           chat_id: chatId,
           chat_type: syncType,
-          member_count: chatInput.member_count ?? undefined,
+          member_count: memberCount,
           sync_priority: policy.priority,
           sync_enabled: policy.enabled,
         })

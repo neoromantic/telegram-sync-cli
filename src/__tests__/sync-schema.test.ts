@@ -8,9 +8,11 @@ import { initCacheSchema } from '../db/schema'
 import {
   ChatSyncStateRow,
   DaemonStatusRow,
+  determineSyncPolicy,
   initSyncSchema,
   MessageCacheRow,
   SyncJobRow,
+  SyncPriority,
 } from '../db/sync-schema'
 
 describe('sync schema', () => {
@@ -412,5 +414,40 @@ describe('sync schema', () => {
       // Should have exactly the expected tables (not duplicates)
       expect(tables.length).toBeGreaterThanOrEqual(3)
     })
+  })
+})
+
+describe('determineSyncPolicy', () => {
+  const high = { priority: SyncPriority.High, enabled: true }
+  const medium = { priority: SyncPriority.Medium, enabled: true }
+  const off = { priority: SyncPriority.Low, enabled: false }
+
+  it('syncs private chats in full', () => {
+    expect(determineSyncPolicy('private')).toEqual(high)
+  })
+
+  it('treats a group of unknown size as large', () => {
+    for (const type of ['group', 'supergroup'] as const) {
+      expect(determineSyncPolicy(type)).toEqual(off)
+      expect(determineSyncPolicy(type, undefined)).toEqual(off)
+      expect(determineSyncPolicy(type, null)).toEqual(off)
+      expect(determineSyncPolicy(type, 0)).toEqual(off)
+    }
+  })
+
+  it('syncs groups under 20 members in full', () => {
+    expect(determineSyncPolicy('group', 1)).toEqual(high)
+    expect(determineSyncPolicy('supergroup', 19)).toEqual(high)
+  })
+
+  it('gives groups of 20 to 100 members the medium tier', () => {
+    expect(determineSyncPolicy('group', 20)).toEqual(medium)
+    expect(determineSyncPolicy('supergroup', 100)).toEqual(medium)
+  })
+
+  it('leaves groups over 100 members and channels off', () => {
+    expect(determineSyncPolicy('supergroup', 101)).toEqual(off)
+    expect(determineSyncPolicy('channel')).toEqual(off)
+    expect(determineSyncPolicy('channel', 10)).toEqual(off)
   })
 })
