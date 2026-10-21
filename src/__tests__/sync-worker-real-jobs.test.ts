@@ -318,6 +318,12 @@ describe('sync-worker real jobs', () => {
   })
 
   it('marks job failed for unknown job type', async () => {
+    ctx.chatSyncState.upsert({
+      chat_id: 1,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+    })
     const job = ctx.jobsService.create({
       chat_id: 1,
       job_type: 'BogusType' as SyncJobType,
@@ -526,21 +532,39 @@ describe('sync-worker real jobs', () => {
       })
     })
 
-    it('drops a job whose chat was turned off while it ran', async () => {
-      ctx.client = {
-        call: mock(async () => {
-          ctx.chatSyncState.setSyncMode(CHAT, 'off')
-          ctx.jobsService.cancelPendingForChat(CHAT)
-          throw new Error('connection reset')
-        }),
-      } as unknown as TelegramClient
-      const job = queue()
+    for (const [label, err, attempts] of [
+      ['a transient error', new Error('connection reset'), 0],
+      ['a FLOOD_WAIT', new Error('FLOOD_WAIT_30'), 0],
+      ['a permanent error', new tl.RpcError(400, 'CHANNEL_PRIVATE'), 0],
+      ['its last attempt', new Error('connection reset'), 4],
+    ] as const) {
+      it(`drops a job whose chat was turned off while it ran, on ${label}`, async () => {
+        ctx.client = {
+          call: mock(async () => {
+            // tg chats sync --off runs while the call is in flight
+            ctx.chatSyncState.setSyncMode(CHAT, 'off')
+            ctx.jobsService.cancelPendingForChat(CHAT)
+            throw err
+          }),
+        } as unknown as TelegramClient
+        const queued = queue()
+        db.run('UPDATE sync_jobs SET attempts = ? WHERE id = ?', [
+          attempts,
+          queued.id,
+        ])
+        const job = ctx.jobsService.getById(queued.id)!
 
-      const result = await processJobReal(ctx, job)
+        const result = await processJobReal(ctx, job)
 
-      expect(result.outcome?.state).toBe('cancelled')
-      expect(ctx.jobsService.getById(job.id)).toBeNull()
-    })
+        expect(result.outcome).toEqual({
+          state: 'cancelled',
+          attempts,
+          nextRunAt: null,
+        })
+        expect(ctx.jobsService.getById(job.id)).toBeNull()
+        expect(failedRows()).toEqual([])
+      })
+    }
 
     it('never leaves a job running when a handler returns no error', async () => {
       const job = queue()

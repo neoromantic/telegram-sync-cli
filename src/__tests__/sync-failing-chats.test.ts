@@ -300,22 +300,29 @@ describe('chats whose sync pages keep failing', () => {
     expectNoDuplicateRows()
   })
 
-  it('drops the job of a chat turned off while its page was in flight', async () => {
-    failures.set(FAILING_CHAT, () => {
-      // tg chats sync --off runs while the call is in flight
-      chatSyncState.setSyncMode(FAILING_CHAT, 'off')
-      jobsService.cancelPendingForChat(FAILING_CHAT)
-      return new Error('connection reset')
+  for (const [label, error] of [
+    ['a transient error', () => new Error('connection reset')],
+    ['a permanent error', () => new tl.RpcError(400, 'CHANNEL_PRIVATE')],
+  ] as const) {
+    it(`drops the job of a chat turned off while its page was in flight, on ${label}`, async () => {
+      failures.set(FAILING_CHAT, () => {
+        // tg chats sync --off runs while the call is in flight
+        chatSyncState.setSyncMode(FAILING_CHAT, 'off')
+        jobsService.cancelPendingForChat(FAILING_CHAT)
+        return error()
+      })
+      await scheduler.initializeForStartup()
+
+      await runFor(MINUTE)
+      expect(callsFor(FAILING_CHAT)).toHaveLength(1)
+      expect(rowsFor(FAILING_CHAT)).toEqual([])
+      // tg status has no failed job to show for it
+      expect(jobsService.countJobs().failed).toBe(0)
+
+      await refreshCycles()
+      expect(callsFor(FAILING_CHAT)).toHaveLength(1)
+      expect(rowsFor(FAILING_CHAT)).toEqual([])
+      expectNoDuplicateRows()
     })
-    await scheduler.initializeForStartup()
-
-    await runFor(MINUTE)
-    expect(callsFor(FAILING_CHAT)).toHaveLength(1)
-    expect(rowsFor(FAILING_CHAT)).toEqual([])
-
-    await refreshCycles()
-    expect(callsFor(FAILING_CHAT)).toHaveLength(1)
-    expect(rowsFor(FAILING_CHAT)).toEqual([])
-    expectNoDuplicateRows()
-  })
+  }
 })

@@ -49,6 +49,12 @@ export interface SyncJobRetry {
 export type SyncJobRetryResult = 'retrying' | 'cancelled' | 'not_running'
 
 /**
+ * What `failOrDrop` did: the job is failed, it was deleted because its chat
+ * was turned off while it ran, or it wasn't running
+ */
+export type SyncJobFailResult = 'failed' | 'cancelled' | 'not_running'
+
+/**
  * Job counts by status. `pending` includes the jobs waiting for a retry;
  * `retrying` counts those that failed at least once.
  */
@@ -81,6 +87,11 @@ export interface SyncJobsService {
   markCompleted(id: number): boolean
   /** Mark job as failed, counting the attempt */
   markFailed(id: number, errorMessage: string): boolean
+  /**
+   * Mark a running job failed, counting the attempt. If its chat was turned
+   * off while it ran, delete it instead.
+   */
+  failOrDrop(id: number, errorMessage: string): SyncJobFailResult
   /**
    * Make a running job pending again, due at `runAt`. If its chat was turned
    * off while it ran, delete it instead.
@@ -184,6 +195,17 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       SET status = $status, error_message = $error, completed_at = $now,
           attempts = attempts + 1
       WHERE id = $id AND status = $expected_status
+    `),
+
+    failIfEnabled: db.prepare(`
+      UPDATE sync_jobs
+      SET status = $status, error_message = $error, completed_at = $now,
+          attempts = attempts + 1
+      WHERE id = $id AND status = $expected_status
+        AND EXISTS (
+          SELECT 1 FROM chat_sync_state s
+          WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
+        )
     `),
 
     retryLater: db.prepare(`
@@ -309,6 +331,19 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     getLastInsertId: db.query(`SELECT last_insert_rowid() as id`),
   }
 
+  /**
+   * Delete a running job whose chat was turned off. Each statement is atomic,
+   * and tg chats sync turns a chat off in an IMMEDIATE transaction, so the
+   * guarded update before this and the mode change can't interleave.
+   */
+  function dropRunning(id: number): 'cancelled' | 'not_running' {
+    const deleted = stmts.deleteRunning.run({
+      $id: id,
+      $running_status: SyncJobStatus.Running,
+    })
+    return deleted.changes === 1 ? 'cancelled' : 'not_running'
+  }
+
   return {
     create(input: SyncJobInput): SyncJobRow {
       const now = Date.now()
@@ -409,9 +444,18 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return result.changes === 1
     },
 
+    failOrDrop(id: number, errorMessage: string): SyncJobFailResult {
+      const updated = stmts.failIfEnabled.run({
+        $id: id,
+        $status: SyncJobStatus.Failed,
+        $expected_status: SyncJobStatus.Running,
+        $error: errorMessage,
+        $now: Date.now(),
+      })
+      return updated.changes === 1 ? 'failed' : dropRunning(id)
+    },
+
     retryLater(id: number, retry: SyncJobRetry): SyncJobRetryResult {
-      // Each statement is atomic, and tg chats sync turns a chat off in an
-      // IMMEDIATE transaction, so the two can't interleave.
       const updated = stmts.retryLater.run({
         $id: id,
         $pending_status: SyncJobStatus.Pending,
@@ -420,13 +464,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         $run_at: retry.runAt,
         $error: retry.error,
       })
-      if (updated.changes === 1) return 'retrying'
-
-      const deleted = stmts.deleteRunning.run({
-        $id: id,
-        $running_status: SyncJobStatus.Running,
-      })
-      return deleted.changes === 1 ? 'cancelled' : 'not_running'
+      return updated.changes === 1 ? 'retrying' : dropRunning(id)
     },
 
     updateProgress(id: number, progress: SyncJobProgress): void {

@@ -1,4 +1,4 @@
-import type { SyncJobRetryResult, SyncJobsService } from '../db/sync-jobs'
+import type { SyncJobsService } from '../db/sync-jobs'
 import type { SyncJobRow, SyncJobType } from '../db/sync-schema'
 import {
   isPermanentSyncError,
@@ -14,6 +14,7 @@ import {
  * - retrying: it failed and is pending until its backoff ends
  * - failed: it failed for good (a permanent error or the last attempt)
  * - cancelled: its chat was turned off while it ran, so it was deleted
+ *   instead of being retried, deferred or failed
  * - not_running: it wasn't pending when it should start or running when it
  *   ended, so nothing changed
  */
@@ -68,18 +69,15 @@ export async function runOnceBase<
   return options.processJob(job)
 }
 
-function retryOutcome(
-  retried: SyncJobRetryResult,
-  state: 'deferred' | 'retrying',
-  attempts: number,
-  runAt: number,
+/** The outcome of a job that was deleted, or that wasn't running when it ended */
+function droppedOutcome(
+  state: 'cancelled' | 'not_running',
   job: SyncJobRow,
 ): JobOutcome {
-  if (retried === 'retrying') return { state, attempts, nextRunAt: runAt }
-  if (retried === 'not_running') {
+  if (state === 'not_running') {
     console.warn(`[sync-worker] Job ${job.id} was not running when it ended`)
   }
-  return { state: retried, attempts: job.attempts, nextRunAt: null }
+  return { state, attempts: job.attempts, nextRunAt: null }
 }
 
 /**
@@ -112,18 +110,20 @@ export function finalizeJobResult(
       runAt,
       countAttempt: false,
     })
-    return retryOutcome(retried, 'deferred', job.attempts, runAt, job)
+    return retried === 'retrying'
+      ? { state: 'deferred', attempts: job.attempts, nextRunAt: runAt }
+      : droppedOutcome(retried, job)
   }
 
   const error = result.error ?? 'Job ended without a result'
   const failures = job.attempts + 1
 
+  // Every path drops the job of a chat that was turned off while it ran.
   if (result.permanent || failures >= SYNC_RETRY_CONFIG.maxAttempts) {
-    if (!jobsService.markFailed(job.id, error)) {
-      console.warn(`[sync-worker] Failed to mark job ${job.id} failed`)
-      return { state: 'not_running', attempts: job.attempts, nextRunAt: null }
-    }
-    return { state: 'failed', attempts: failures, nextRunAt: null }
+    const failed = jobsService.failOrDrop(job.id, error)
+    return failed === 'failed'
+      ? { state: 'failed', attempts: failures, nextRunAt: null }
+      : droppedOutcome(failed, job)
   }
 
   const runAt = now + retryDelayMs(failures)
@@ -132,7 +132,9 @@ export function finalizeJobResult(
     runAt,
     countAttempt: true,
   })
-  return retryOutcome(retried, 'retrying', failures, runAt, job)
+  return retried === 'retrying'
+    ? { state: 'retrying', attempts: failures, nextRunAt: runAt }
+    : droppedOutcome(retried, job)
 }
 
 /** End a job whose handler threw */

@@ -105,7 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fails it at once. Before, the next refresh queued a failed chat again every
   30 seconds forever and left a failed row each time. Failed rows are now
   cleaned up after 24 hours or on a daemon restart, and the chat is tried
-  again then (#9).
+  again then. A job whose chat is turned off while it runs is dropped if it
+  fails (#9).
 - `tg status` counts failed sync jobs (`failed_jobs` was always 0) and lists
   the newest ones with their attempts and error. It also counts the jobs
   waiting for a retry (`retrying_jobs`) and shows when they run again.

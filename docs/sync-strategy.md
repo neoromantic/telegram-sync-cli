@@ -120,8 +120,8 @@ A job that fails is pending again after a backoff, with the same ID and its plac
   chat for it again. The daemon deletes failed rows after 24 hours, and all of them on start;
   `tg chats sync <chat>` deletes the chat's failed rows at once, in any mode. The next refresh
   then queues the chat again.
-- **A chat turned off** while its job runs: if the job fails, it is dropped instead of waiting
-  for a retry.
+- **A chat turned off** while its job runs: if the job fails or hits a FLOOD_WAIT, it is
+  dropped, not retried or kept as `failed`, whatever the error and attempt.
 - **A crash** doesn't count as an attempt: on start, the jobs it left running are pending again.
 
 ## Sync Flow (Current)
