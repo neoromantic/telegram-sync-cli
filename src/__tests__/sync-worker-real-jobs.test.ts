@@ -189,16 +189,19 @@ describe('sync-worker real jobs', () => {
         priority: SyncPriority.High,
       })
 
-    const first = await processBackwardHistoryReal(ctx, job())
+    const firstJob = job()
+    const first = await processBackwardHistoryReal(ctx, firstJob)
 
     expect(history.requests[0]).toMatchObject({ offsetId: 0, limit: 5 })
+    // 29 and 30 were cached already, so only 26-28 count
     expect(first).toMatchObject({
       success: true,
+      messagesFetched: 3,
       newCursor: 26,
       hasMore: true,
       historyComplete: false,
     })
-    // 29 and 30 were cached already
+    expect(ctx.jobsService.getById(firstJob.id)?.messages_fetched).toBe(3)
     expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(3)
 
     for (let i = 0; i < 10; i++) {
