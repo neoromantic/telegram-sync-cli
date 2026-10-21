@@ -205,6 +205,38 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
     API_TIMEOUT_MS * 3,
   )
 
+  it(
+    'send to Saved Messages caches the message for search without a daemon',
+    async () => {
+      const marker = uniqueMarker()
+      const messageId = await sendToSavedMessages(`tg smoke test ${marker}`)
+
+      const result = await runCliSuccess(
+        ['messages', 'search', '--query', marker],
+        cli(),
+      )
+      const payload = result.json as Envelope<{
+        results: Array<{
+          chatId: number
+          messageId: number
+          text: string
+        }>
+      }>
+      expect(payload.data.results).toHaveLength(1)
+      expect(payload.data.results[0]?.text).toContain(marker)
+
+      // Saved Messages is cached under the own user ID, like the daemon does
+      const me = await runCliSuccess(['me'], cli())
+      const userId = (me.json as Envelope<{ user: { id: number } }>).data.user
+        .id
+      expect(payload.data.results[0]).toMatchObject({
+        chatId: userId,
+        messageId,
+      })
+    },
+    API_TIMEOUT_MS * 3,
+  )
+
   it.skipIf(!CAN_RUN_DAEMON)(
     'daemon connects, bootstraps dialogs, syncs history and stops cleanly',
     async () => {
