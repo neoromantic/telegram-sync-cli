@@ -40,6 +40,8 @@ export interface SyncJobsService {
   getById(id: number): SyncJobRow | null
   /** Get the next pending job (highest priority, oldest first) */
   getNextPending(): SyncJobRow | null
+  /** Get the next pending job of the given types (highest priority, oldest first) */
+  getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null
   /** Atomically claim the next pending job (prevents race conditions) */
   claimNextJob(): SyncJobRow | null
   /** Get all pending jobs */
@@ -66,6 +68,10 @@ export interface SyncJobsService {
   cancelPendingForChat(chatId: number): number
   /** Delete every pending job of a type */
   deletePendingOfType(jobType: SyncJobType): number
+  /** Delete pending jobs of chats that are disabled or have no sync state */
+  deletePendingForInactiveChats(): number
+  /** Set each pending job's priority to its chat's lane priority */
+  alignPendingPriorities(): number
   /** Recover jobs that were running when daemon crashed (reset to pending) */
   recoverCrashedJobs(): number
 }
@@ -90,7 +96,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       .query(`
       SELECT * FROM sync_jobs
       WHERE status = $status
-      ORDER BY priority ASC, created_at ASC
+      ORDER BY priority ASC, created_at ASC, id ASC
       LIMIT 1
     `)
       .as(SyncJobRow),
@@ -102,7 +108,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       WHERE id = (
         SELECT id FROM sync_jobs
         WHERE status = $pendingStatus
-        ORDER BY priority ASC, created_at ASC
+        ORDER BY priority ASC, created_at ASC, id ASC
         LIMIT 1
       )
       AND status = $pendingStatus
@@ -114,7 +120,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       .query(`
       SELECT * FROM sync_jobs
       WHERE status = $status
-      ORDER BY priority ASC, created_at ASC
+      ORDER BY priority ASC, created_at ASC, id ASC
     `)
       .as(SyncJobRow),
 
@@ -184,6 +190,27 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       WHERE job_type = $job_type AND status = $status
     `),
 
+    deletePendingForInactiveChats: db.prepare(`
+      DELETE FROM sync_jobs
+      WHERE status = $status
+        AND NOT EXISTS (
+          SELECT 1 FROM chat_sync_state s
+          WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
+        )
+    `),
+
+    alignPendingPriorities: db.prepare(`
+      UPDATE sync_jobs
+      SET priority = (
+        SELECT s.sync_priority FROM chat_sync_state s
+        WHERE s.chat_id = sync_jobs.chat_id
+      )
+      WHERE status = $status
+        AND EXISTS (
+          SELECT 1 FROM chat_sync_state s WHERE s.chat_id = sync_jobs.chat_id
+        )
+    `),
+
     recoverCrashedJobs: db.prepare(`
       UPDATE sync_jobs
       SET status = $newStatus, error_message = $error
@@ -217,6 +244,27 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     getNextPending(): SyncJobRow | null {
       return (
         stmts.getNextPending.get({ $status: SyncJobStatus.Pending }) ?? null
+      )
+    },
+
+    getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null {
+      if (jobTypes.length === 0) return null
+      const placeholders = jobTypes.map((_, i) => `$type${i}`).join(', ')
+      const params: Record<string, string> = { $status: SyncJobStatus.Pending }
+      jobTypes.forEach((jobType, i) => {
+        params[`$type${i}`] = jobType
+      })
+      // query() caches the statement per SQL text, so each lane prepares once.
+      return (
+        db
+          .query(`
+            SELECT * FROM sync_jobs
+            WHERE status = $status AND job_type IN (${placeholders})
+            ORDER BY priority ASC, created_at ASC, id ASC
+            LIMIT 1
+          `)
+          .as(SyncJobRow)
+          .get(params) ?? null
       )
     },
 
@@ -324,6 +372,18 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         $status: SyncJobStatus.Pending,
       })
       return result.changes
+    },
+
+    deletePendingForInactiveChats(): number {
+      return stmts.deletePendingForInactiveChats.run({
+        $status: SyncJobStatus.Pending,
+      }).changes
+    },
+
+    alignPendingPriorities(): number {
+      return stmts.alignPendingPriorities.run({
+        $status: SyncJobStatus.Pending,
+      }).changes
     },
 
     recoverCrashedJobs(): number {

@@ -147,6 +147,15 @@ export async function processJobs(ctx: DaemonContext): Promise<void> {
           scheduler.queueForwardCatchup(job.chat_id)
         }
       }
+
+      // History starts right after the first page instead of waiting for
+      // the next refresh.
+      if (
+        job.job_type === SyncJobType.InitialLoad &&
+        result.historyComplete === false
+      ) {
+        scheduler.queueBackwardHistory(job.chat_id)
+      }
     } else if (result.rateLimited) {
       ctx.logger.debug(
         `Job ${job.id} rate limited: wait ${result.waitSeconds}s`,
@@ -157,6 +166,8 @@ export async function processJobs(ctx: DaemonContext): Promise<void> {
   } catch (err) {
     ctx.logger.error(`Job ${job.id} error: ${formatError(err)}`)
   } finally {
+    // The job used its lane's slot, whatever the outcome.
+    scheduler.recordJobRun(job)
     ctx.runtime.lastJobProcessTime = Date.now()
   }
 }

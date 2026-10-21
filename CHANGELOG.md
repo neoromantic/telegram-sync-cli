@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cursor, and until a gap is closed. It no longer polls every enabled chat
   every 30 seconds. The first catch-up after a restart or reconnect fetches the
   messages received live since the last one again.
+- Sync jobs run in three lanes that take turns: catch-up gets half the jobs,
+  first pages and history a quarter each, and an idle lane's turn goes to the
+  others. Inside a lane, small chats go first. History starts right after a
+  chat's first page, and works for every enabled chat, not only small ones.
 - The daemon's dialog pass also lists archived chats, so they are cached and
   sync jobs can reach them, but they don't start syncing on their own.
 - Groups whose member count Telegram doesn't report are off by default, like
@@ -22,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- History backfill and first pages never ran on accounts with more than a few
+  dozen chats, because catch-up for every chat always went first (#6).
 - A chat whose first message arrived live never got its first page, so it had
   no cursors and no history. Every enabled chat without a forward cursor now
   gets one.

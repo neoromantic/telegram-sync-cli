@@ -32,7 +32,7 @@ const SHOULD_RUN = Boolean(
 const CAN_RUN_DAEMON = SHOULD_RUN && process.env.TELEGRAM_API_REPLAY !== '1'
 
 const API_TIMEOUT_MS = 30_000
-const DAEMON_TEST_TIMEOUT_MS = 300_000
+const DAEMON_TEST_TIMEOUT_MS = 420_000
 
 type Envelope<T> = { success: boolean; data: T }
 
@@ -284,6 +284,27 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
           },
           60_000,
           'sync jobs to cache messages',
+        )
+
+        // First pages run next to catch-up instead of waiting behind it (#6)
+        await waitFor(
+          async () => {
+            const result = await runCli(
+              [
+                'sql',
+                '--query',
+                "SELECT COUNT(*) AS n FROM sync_jobs WHERE job_type = 'initial_load' AND status = 'completed'",
+              ],
+              cli(),
+            )
+            const payload = result.json as Envelope<{
+              rows: Array<{ n: number }>
+            }>
+            const count = payload?.data?.rows?.[0]?.n ?? 0
+            return count > 0 ? count : null
+          },
+          90_000,
+          'a completed initial_load job',
         )
 
         const status = await runCliSuccess(['status'], cli())

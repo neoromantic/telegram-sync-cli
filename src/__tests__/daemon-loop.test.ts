@@ -51,6 +51,7 @@ function createMockScheduler(
     initializeForStartup: async () => {},
     refreshQueues: () => {},
     getNextJob: () => null,
+    recordJobRun: () => {},
     claimNextJob: () => null,
     startJob: () => false,
     completeJob: () => false,

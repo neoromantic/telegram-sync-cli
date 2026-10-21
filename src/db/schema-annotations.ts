@@ -483,8 +483,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         sync_priority: {
           description:
-            'Sync priority level (0=realtime, 1=high, 2=medium, 3=low, 4=background)',
-          enumValues: ['0', '1', '2', '3', '4'],
+            "Sync tier: 1=high (DMs, groups under 20 members), 2=medium (20-100 members), 3=low (not synced unless turned on). Also the priority of the chat's jobs inside each lane",
+          enumValues: ['1', '2', '3'],
           defaultValue: 3,
         },
         sync_enabled: {
@@ -543,7 +543,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     // -------------------------------------------------------------------------
     sync_jobs: {
       description:
-        'Job queue for background message synchronization. Daemon processes jobs by priority.',
+        'Job queue for background message synchronization. Jobs run in three lanes that take turns (catch-up, first pages, history), by priority inside a lane.',
       primaryKey: 'id',
       columns: {
         id: {
@@ -566,7 +566,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: false,
         },
         priority: {
-          description: 'Job priority (lower = higher priority)',
+          description:
+            "Priority inside the job's lane (lower runs first): the chat's sync tier",
           defaultValue: 3,
         },
         status: {
@@ -608,6 +609,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
       indexes: {
         idx_sync_jobs_priority: 'Get highest priority pending jobs',
+        idx_sync_jobs_lane:
+          'Next pending job of a lane (job types), by priority, age and id',
         idx_sync_jobs_status: 'Filter jobs by status',
         idx_sync_jobs_chat: 'Find jobs for a specific chat',
       },

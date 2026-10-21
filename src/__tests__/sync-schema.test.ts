@@ -518,6 +518,14 @@ describe('migration from 0.1.4', () => {
       top_message_id: null,
     })
 
+    expect(
+      db
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_sync_jobs_lane'",
+        )
+        .get(),
+    ).toEqual({ name: 'idx_sync_jobs_lane' })
+
     const schema = schemaOf(db)
     const row = rowOf(db)
     initSyncSchema(db)
