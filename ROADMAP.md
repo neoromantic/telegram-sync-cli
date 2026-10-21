@@ -6,7 +6,6 @@ The list is in priority order.
 
 ## Reliability
 
-- [Daemon loses messages that arrive while it is stopped](https://github.com/neoromantic/telegram-sync-cli/issues/15)
 - [Backfill sync doesn't run](https://github.com/neoromantic/telegram-sync-cli/issues/6)
 - [Retry failed sync jobs with backoff](https://github.com/neoromantic/telegram-sync-cli/issues/9)
 - [Messages and chats are cached with different peer ID formats](https://github.com/neoromantic/telegram-sync-cli/issues/18)
