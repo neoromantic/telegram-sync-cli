@@ -9,14 +9,17 @@
  *   column holds group and channel titles
  * - 2: messages_cache.from_id and forward_from_id of a group or channel
  *   sender get its marked ID; history pages stored the bare one
+ * - 3: a message Telegram sent without fromId (an incoming private message,
+ *   a channel post, Saved Messages) gets its chat as the sender, as live
+ *   updates store it; history pages stored NULL (#44)
  *
  * The re-key itself runs on every open that finds a bare group or channel
  * row, so it also repairs rows that an older binary still running writes
- * after the upgrade. Step 2 runs once, because finding bare sender IDs means
- * reading every message's raw_json: the ones an older binary caches later
- * stay bare until the message is fetched again. Everything runs in one
- * write transaction: a failure rolls all of it back, user_version included,
- * and the next open retries.
+ * after the upgrade. Steps 2 and 3 run once, because finding those senders
+ * means reading every message's raw_json: the ones an older binary caches
+ * later keep the old sender until the message is fetched again. Everything
+ * runs in one write transaction: a failure rolls all of it back,
+ * user_version included, and the next open retries.
  */
 import type { Database } from 'bun:sqlite'
 
@@ -25,11 +28,12 @@ import {
   toPeerIdFromRawChat,
   toPeerIdFromRawPeer,
   toRawPeerId,
+  toSenderIdFromRawMessage,
 } from '../utils/telegram-peer-ids'
 import type { ChatType } from './types'
 
 /** user_version once every step has run */
-export const PEER_ID_USER_VERSION = 2
+export const PEER_ID_USER_VERSION = 3
 
 /**
  * How long to wait for another process's write lock. The CLI and the daemon
@@ -221,6 +225,42 @@ function markSenderIds(db: Database): void {
 }
 
 /**
+ * Give a message that raw_json shows without fromId its chat as the sender,
+ * by the rule live updates follow. The update trigger re-indexes each changed
+ * row, so search finds it under the sender's name. A row whose raw_json is
+ * '{}' or malformed names no chat and keeps NULL.
+ *
+ * It can match most of a cache (private chats get full history), so it reads
+ * only the two peers, not the whole raw_json, to keep memory small. json_quote
+ * makes from_peer JSON text even for a missing ('null') or scalar fromId, so
+ * JSON.parse can't throw and roll the migration back.
+ */
+function fillMissingSenders(db: Database): void {
+  const rows = db
+    .query(`
+      SELECT rowid,
+             json_quote(json_extract(raw_json, '$.fromId')) AS from_peer,
+             json_extract(raw_json, '$.peerId') AS peer
+      FROM messages_cache
+      WHERE from_id IS NULL
+        AND ${rawPeerType('$.fromId')} IS NULL
+        AND ${rawPeerType('$.peerId')} IN ('peerUser', 'peerChat', 'peerChannel')
+    `)
+    .all() as { rowid: number; from_peer: string; peer: string }[]
+
+  const update = db.query(
+    'UPDATE messages_cache SET from_id = $from_id WHERE rowid = $rowid',
+  )
+  for (const row of rows) {
+    const fromId = toSenderIdFromRawMessage({
+      fromId: JSON.parse(row.from_peer) as RawPeer,
+      peerId: JSON.parse(row.peer) as RawPeer,
+    })
+    if (fromId !== null) update.run({ $rowid: row.rowid, $from_id: fromId })
+  }
+}
+
+/**
  * Bring the cache to marked peer IDs. Called at the end of initSyncSchema,
  * after the search index exists. Without work to do it only reads, so the
  * CLI and the daemon can call it on every open.
@@ -244,6 +284,7 @@ export function migratePeerIds(
       rekeyBareChats(db)
       if (version < 1) rebuildSearchIndex(db)
       if (version < 2) markSenderIds(db)
+      if (version < 3) fillMissingSenders(db)
 
       if (version < PEER_ID_USER_VERSION) {
         db.run(`PRAGMA user_version = ${PEER_ID_USER_VERSION}`)

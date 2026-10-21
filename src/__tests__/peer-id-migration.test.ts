@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { type CachedChatInput, createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
@@ -21,6 +22,7 @@ import {
   SyncPriority,
 } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import {
   initLegacySchema,
   LEGACY,
@@ -484,6 +486,113 @@ describe('peer ID migration', () => {
 
     expect(chatIds(db)['Late News']).toBe('-1003333333333')
     assertPeerIdInvariants(db)
+  })
+
+  it('gives a cached message without fromId its chat as the sender, once (#44)', () => {
+    // A cache that 0.3.0 wrote: marked IDs, but history pages left from_id
+    // NULL for a message Telegram sends without fromId
+    db.run('PRAGMA user_version = 2')
+    const alice = { _: 'peerUser', userId: LEGACY.alice.id } as const
+    const bob = { _: 'peerUser', userId: 11 } as const
+    const self = { _: 'peerUser', userId: 5550099 } as const
+    const news = { _: 'peerChannel', channelId: LEGACY.news.id } as const
+    const team = { _: 'peerChannel', channelId: LEGACY.teamChat.id } as const
+    const historyRow = (
+      peerId: Parameters<typeof toPeerIdFromRawPeer>[0] & object,
+      id: number,
+      text: string,
+      extra: Record<string, unknown> = {},
+    ) => ({
+      ...parseRawMessage(
+        {
+          _: 'message',
+          id,
+          peerId,
+          date: 1_700_000_000,
+          message: text,
+          ...extra,
+        },
+        toPeerIdFromRawPeer(peerId)!,
+      )!,
+      from_id: null,
+    })
+    createUsersCache(db).upsert({
+      user_id: String(LEGACY.alice.id),
+      first_name: 'Alice',
+      last_name: 'Able',
+      fetched_at: 1_000,
+      raw_json: '{}',
+    })
+    createChatsCache(db).upsertMany([
+      chatRow({
+        chat_id: String(LEGACY.news.marked),
+        type: 'channel',
+        title: LEGACY.news.title,
+      }),
+    ])
+    createMessagesCache(db).upsertBatch([
+      historyRow(alice, 1, 'lunch at noon?'),
+      historyRow(news, 2, 'weekly digest', { post: true }),
+      historyRow(self, 3, 'note to self'),
+      // A sender in fromId stays as it is
+      {
+        ...historyRow(team, 4, 'from Bob', { fromId: bob }),
+        from_id: 11,
+      },
+      { ...historyRow(team, 5, 'no raw'), raw_json: '{}' },
+      { ...historyRow(team, 6, 'bad raw'), raw_json: '{"peerId":' },
+      historyRow(team, 7, 'new peer type', {
+        fromId: { _: 'peerSomethingNew', id: 12 },
+      }),
+      // Not a peer at all: no sender, and the migration doesn't fail
+      { ...historyRow(team, 8, 'odd raw'), raw_json: '{"fromId":"x"}' },
+      {
+        ...historyRow(team, 9, 'odd raw'),
+        raw_json: JSON.stringify({ fromId: 'x', peerId: team }),
+      },
+    ])
+    const search = createMessagesSearch(db)
+    expect(search.search('Alice')).toEqual([])
+    const chatsBefore = dump(db, 'chats_cache')
+
+    initSyncSchema(db)
+
+    const fromIds = db
+      .query(
+        'SELECT message_id, from_id FROM messages_cache ORDER BY message_id',
+      )
+      .all()
+      .map((row) => (row as { from_id: number | null }).from_id)
+    expect(fromIds).toEqual([
+      LEGACY.alice.id,
+      LEGACY.news.marked,
+      5550099,
+      11,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ])
+    expect(userVersion(db)).toBe(PEER_ID_USER_VERSION)
+    expect(dump(db, 'chats_cache')).toEqual(chatsBefore)
+    expect(search.search('Alice')).toEqual([
+      expect.objectContaining({
+        chat_id: LEGACY.alice.id,
+        message_id: 1,
+        sender_first_name: 'Alice',
+      }),
+    ])
+
+    // It runs once: a row an older binary caches later keeps NULL
+    createMessagesCache(db).upsertBatch([historyRow(alice, 10, 'running late')])
+    initSyncSchema(db)
+
+    expect(
+      db
+        .query('SELECT from_id FROM messages_cache WHERE message_id = 10')
+        .get(),
+    ).toEqual({ from_id: null })
   })
 })
 

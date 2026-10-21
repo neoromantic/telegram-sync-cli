@@ -376,16 +376,26 @@ the new columns.
   when its `raw_json` names that group or channel (`fromId`, `fwdFrom.fromId`) with the stored
   bare ID; rows whose `raw_json` is `{}` or malformed stay as they are. The update trigger
   re-indexes each row.
+- `3`: history pages, `tg messages list`/`get` and `tg send` stored NULL in
+  `messages_cache.from_id` for a message Telegram sends without `fromId`. A row whose `raw_json`
+  names its chat (`peerId`) and no `fromId` gets the chat as the sender, by the rule in
+  [Peer IDs](#peer-ids); rows whose `raw_json` is `{}` or malformed stay NULL. The update trigger
+  re-indexes each row.
 
 The first open after an upgrade runs the steps in one `BEGIN IMMEDIATE` transaction, waiting up
 to 60 seconds for another process's write lock. A failure rolls everything back, `user_version`
 included, and the next open tries again. The move of bare `chats_cache` rows also runs on every
-later open that finds one, which repairs rows that an older daemon still running writes. Step `2`
-runs once, because finding bare sender IDs means reading the `raw_json` of every message: a group
-or channel sender or forward source that an older daemon still running, or a second 0.2.0
-install, caches after the upgrade keeps its bare ID until the message is fetched again. Opens
-with nothing to do only read. Going back to an older version after the migration is not
-supported: it would not find groups and channels in `chats_cache`.
+later open that finds one, which repairs rows that an older daemon still running writes. Steps
+`2` and `3` run once, because finding those senders means reading the `raw_json` of every
+message. A group or channel sender or forward source that an older daemon still running, or a
+second 0.2.0 install, caches after the upgrade keeps its bare ID until the message is fetched
+again. A daemon of the previous version left running keeps storing NULL senders until it
+restarts, and those rows heal only when the message is fetched again. Step `3` rewrites and
+re-indexes every row it fills, several seconds per 100,000 messages, while it holds the write
+lock, and that daemon waits only 5 seconds for it before a write fails. Stop the daemon before
+upgrading and start it again after, so the old daemon neither loses writes to the one-time fill
+nor stores new messages without a sender. Opens with nothing to do only read. Going back to an older version after the migration is not supported: it would not
+find groups and channels in `chats_cache`.
 
 ## Usage Notes
 
