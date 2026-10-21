@@ -36,7 +36,7 @@ type MockClient = Pick<TelegramClient, 'call'>
 function assertInputPeerUser(
   peer: tl.TypeInputPeer | null,
 ): asserts peer is tl.RawInputPeerUser {
-  if (!peer || peer._ !== 'inputPeerUser') {
+  if (peer?._ !== 'inputPeerUser') {
     throw new Error(`Expected inputPeerUser, got ${peer?._ ?? 'null'}`)
   }
 }
@@ -44,7 +44,7 @@ function assertInputPeerUser(
 function assertInputPeerChat(
   peer: tl.TypeInputPeer | null,
 ): asserts peer is tl.RawInputPeerChat {
-  if (!peer || peer._ !== 'inputPeerChat') {
+  if (peer?._ !== 'inputPeerChat') {
     throw new Error(`Expected inputPeerChat, got ${peer?._ ?? 'null'}`)
   }
 }
@@ -52,7 +52,7 @@ function assertInputPeerChat(
 function assertInputPeerChannel(
   peer: tl.TypeInputPeer | null,
 ): asserts peer is tl.RawInputPeerChannel {
-  if (!peer || peer._ !== 'inputPeerChannel') {
+  if (peer?._ !== 'inputPeerChannel') {
     throw new Error(`Expected inputPeerChannel, got ${peer?._ ?? 'null'}`)
   }
 }

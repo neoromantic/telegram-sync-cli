@@ -439,8 +439,6 @@ export function getDataDir(): string {
   return DATA_DIR
 }
 
-export { db }
-
 // Re-export sync schema types and functions
 export {
   ChatSyncStateRow,
@@ -454,3 +452,4 @@ export {
   SyncJobType,
   SyncPriority,
 } from './sync-schema'
+export { db }

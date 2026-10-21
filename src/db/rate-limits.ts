@@ -312,7 +312,7 @@ export class RateLimitsService {
       $now: now,
     }) as RateLimitRow | null
 
-    if (!row || !row.flood_wait_until) {
+    if (!row?.flood_wait_until) {
       return null
     }
 
