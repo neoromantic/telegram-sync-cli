@@ -330,4 +330,31 @@ describe('job budget with 500 chats', () => {
     expect(state?.backward_cursor).toBe(1)
     expect(state?.history_complete).toBe(1)
   }, 60_000)
+
+  it("stops a chat's pages after tg chats sync --off", async () => {
+    const chatId = GAP_CHATS[0]!
+    useClient({
+      call: async (request: GetHistoryRequest) => {
+        // The CLI turns the chat off while its first page is in flight
+        chatSyncState.setSyncMode(chatId, 'off')
+        jobsService.cancelPendingForChat(chatId)
+        return history.client.call(request as never)
+      },
+    } as unknown as TelegramClient)
+    scheduler.queueForwardCatchup(chatId)
+
+    ctx.runtime.lastJobProcessTime = 0
+    await processJobs(ctx)
+
+    // The running page finished, but its full page queued nothing
+    const state = chatSyncState.get(chatId)
+    expect(state?.forward_cursor).toBe(1100)
+    expect(state?.sync_enabled).toBe(0)
+    expect(jobsService.getJobsForChat(chatId)).toMatchObject([
+      { job_type: SyncJobType.ForwardCatchup, status: 'completed' },
+    ])
+
+    scheduler.refreshQueues()
+    expect(jobsService.getJobsForChat(chatId)).toHaveLength(1)
+  })
 })

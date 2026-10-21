@@ -101,6 +101,7 @@ describe('cache database lock', () => {
     const db = new Database(path)
     db.run('DROP INDEX idx_sync_jobs_lane')
     db.run('ALTER TABLE chat_sync_state DROP COLUMN top_message_id')
+    db.run('ALTER TABLE chat_sync_state DROP COLUMN sync_mode')
     db.close()
 
     const env = {
@@ -130,6 +131,7 @@ describe('cache database lock', () => {
       }>
     ).map((col) => col.name)
     expect(columns).toContain('top_message_id')
+    expect(columns).toContain('sync_mode')
     migrated.close()
   }, 30_000)
 })

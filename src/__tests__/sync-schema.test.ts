@@ -516,6 +516,7 @@ describe('migration from 0.1.4', () => {
       sync_enabled: 1,
       synced_messages: 1000,
       top_message_id: null,
+      sync_mode: 'auto',
     })
 
     expect(

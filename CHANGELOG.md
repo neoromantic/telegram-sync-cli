@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg chats sync <chat>` turns background sync on for a chat the default
+  policy leaves out, such as a large group or a channel; `--off` turns it off
+  and `--auto` goes back to the policy. The choice survives daemon restarts.
+  The chat is found in the cache by @username, by the ID `tg chats list`
+  shows or by a marked ID, without Telegram credentials.
+
 ### Changed
 
 - Forward catch-up runs only for chats that are behind: on start and after

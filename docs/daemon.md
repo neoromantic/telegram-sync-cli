@@ -92,6 +92,8 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
   dialog pass) is above the forward cursor or unknown. It runs on start, after each reconnect
   and until a gap is closed, not as polling; a chat that is caught up costs no calls.
 - A first page (`initial_load`) for chats without a forward cursor
+- Large groups and channels only when turned on with `tg chats sync`; the daemon picks up
+  the change at its next refresh
 - Backward history for older messages
 - Three lanes (catch-up, first pages, history) that take turns, so history makes progress
   next to catch-up; inside a lane, small chats go first

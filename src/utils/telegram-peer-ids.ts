@@ -55,6 +55,25 @@ export function toPeerIdFromInputPeer(
   }
 }
 
+/**
+ * Marked peer ID for a raw ID as `chats_cache` stores it: users keep theirs,
+ * basic groups are negative, supergroups and channels get the -100 prefix.
+ */
+export function toMarkedPeerId(
+  rawId: number,
+  type: 'private' | 'group' | 'supergroup' | 'channel',
+): number {
+  switch (type) {
+    case 'private':
+      return rawId
+    case 'group':
+      return -rawId
+    case 'supergroup':
+    case 'channel':
+      return -CHANNEL_PEER_ID_OFFSET - rawId
+  }
+}
+
 export function toChannelIdFromPeerId(peerId: number): number {
   const abs = Math.abs(peerId)
   return abs > CHANNEL_PEER_ID_OFFSET ? abs - CHANNEL_PEER_ID_OFFSET : abs

@@ -90,6 +90,96 @@ describe('ChatSyncStateService', () => {
     })
   })
 
+  describe('setSyncMode', () => {
+    const CHANNEL = -1001234567890
+
+    beforeEach(() => {
+      service.upsert({
+        chat_id: CHANNEL,
+        chat_type: 'channel',
+        member_count: 5000,
+        sync_priority: SyncPriority.Low,
+        sync_enabled: false,
+      })
+    })
+
+    // What the dialog pass writes for the channel from the policy
+    const passUpsert = (enabled: boolean, memberCount?: number) =>
+      service.upsert({
+        chat_id: CHANNEL,
+        chat_type: 'supergroup',
+        member_count: memberCount,
+        sync_priority: enabled ? SyncPriority.High : SyncPriority.Low,
+        sync_enabled: enabled,
+      })
+
+    it('starts at auto', () => {
+      expect(service.get(CHANNEL)?.sync_mode).toBe('auto')
+    })
+
+    it('writes the sync_enabled and sync_priority each mode means', () => {
+      service.setSyncMode(CHANNEL, 'on')
+      expect(service.get(CHANNEL)).toMatchObject({
+        sync_mode: 'on',
+        sync_enabled: 1,
+        sync_priority: SyncPriority.High,
+      })
+
+      service.setSyncMode(CHANNEL, 'off')
+      expect(service.get(CHANNEL)).toMatchObject({
+        sync_mode: 'off',
+        sync_enabled: 0,
+      })
+
+      service.setSyncMode(CHANNEL, 'auto')
+      expect(service.get(CHANNEL)).toMatchObject({
+        sync_mode: 'auto',
+        sync_enabled: 0,
+        sync_priority: SyncPriority.Low,
+      })
+    })
+
+    it('keeps a chat turned on through a dialog pass', () => {
+      service.setSyncMode(CHANNEL, 'on')
+
+      passUpsert(false, 6000)
+
+      expect(service.get(CHANNEL)).toMatchObject({
+        sync_mode: 'on',
+        sync_enabled: 1,
+        sync_priority: SyncPriority.High,
+        chat_type: 'supergroup',
+        member_count: 6000,
+      })
+    })
+
+    it('keeps a chat turned off through a dialog pass', () => {
+      service.setSyncMode(CHANNEL, 'off')
+
+      passUpsert(true, 10)
+
+      expect(service.get(CHANNEL)).toMatchObject({
+        sync_mode: 'off',
+        sync_enabled: 0,
+        member_count: 10,
+      })
+    })
+
+    it('lets the policy decide under auto', () => {
+      passUpsert(true, 10)
+      expect(service.get(CHANNEL)).toMatchObject({
+        sync_enabled: 1,
+        sync_priority: SyncPriority.High,
+      })
+
+      passUpsert(false)
+      expect(service.get(CHANNEL)).toMatchObject({
+        sync_enabled: 0,
+        sync_priority: SyncPriority.Low,
+      })
+    })
+  })
+
   describe('top_message_id', () => {
     beforeEach(() => {
       service.upsert({

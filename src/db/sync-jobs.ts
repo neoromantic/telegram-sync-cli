@@ -202,7 +202,11 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     alignPendingPriorities: db.prepare(`
       UPDATE sync_jobs
       SET priority = (
-        SELECT s.sync_priority FROM chat_sync_state s
+        SELECT CASE
+          WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
+          ELSE s.sync_priority
+        END
+        FROM chat_sync_state s
         WHERE s.chat_id = sync_jobs.chat_id
       )
       WHERE status = $status

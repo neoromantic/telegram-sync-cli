@@ -32,6 +32,8 @@ export interface ErrorResult {
     code: string
     message: string
     details?: Record<string, unknown>
+    /** What to do next, for errors that have a fix */
+    suggestion?: string
   }
 }
 

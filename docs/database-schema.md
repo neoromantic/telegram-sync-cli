@@ -201,7 +201,8 @@ CREATE TABLE chat_sync_state (
   last_backward_sync INTEGER,
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
   updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
-  top_message_id INTEGER
+  top_message_id INTEGER,
+  sync_mode TEXT NOT NULL DEFAULT 'auto'
 );
 
 CREATE INDEX idx_chat_sync_state_enabled
@@ -213,6 +214,8 @@ CREATE INDEX idx_chat_sync_state_incomplete
 
 - `forward_cursor`: every message up to this ID is cached. Only sync jobs move it, never live
   updates. `0` means the chat was empty at its first page.
+- `sync_mode`: `auto` follows the sync policy; `on` and `off` are set with `tg chats sync` and
+  win over the policy in every dialog pass. `sync_enabled` and `sync_priority` hold the result.
 - `sync_priority`: the chat's tier, 1 (DMs and groups under 20 members), 2 (20–100 members) or
   3 (not synced unless turned on). It is also the priority of the chat's jobs inside each lane.
 - `top_message_id`: the newest message ID Telegram reported, from the dialog pass or a sync
@@ -303,7 +306,7 @@ the other process's write lock instead of failing with "database is locked".
 
 There is no `schema_version` table yet. The schema is created with `CREATE TABLE IF NOT EXISTS`
 on startup, indexes with `CREATE INDEX IF NOT EXISTS`. Columns added after 0.1.4
-(`chat_sync_state.top_message_id`) are added with
+(`chat_sync_state.top_message_id`, `chat_sync_state.sync_mode`) are added with
 `ALTER TABLE … ADD COLUMN` when missing; a "duplicate column name" error is ignored, because
 the CLI and the daemon can both run the migration on the first start. Older binaries ignore
 the new columns.

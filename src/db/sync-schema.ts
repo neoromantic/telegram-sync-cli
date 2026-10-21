@@ -291,12 +291,19 @@ export function initSyncSchema(db: Database): void {
       last_backward_sync INTEGER,
       created_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
       updated_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
-      top_message_id    INTEGER
+      top_message_id    INTEGER,
+      sync_mode         TEXT NOT NULL DEFAULT 'auto'
     )
   `)
 
   // Columns added after 0.1.4
   ensureColumn(db, 'chat_sync_state', 'top_message_id', 'INTEGER')
+  ensureColumn(
+    db,
+    'chat_sync_state',
+    'sync_mode',
+    "TEXT NOT NULL DEFAULT 'auto'",
+  )
 
   // Chat sync state indexes
   db.run(`
@@ -401,6 +408,8 @@ export class ChatSyncStateRow {
   updated_at!: number
   /** Newest message ID Telegram reported; NULL means unknown */
   top_message_id!: number | null
+  /** Set by `tg chats sync`: 'auto' follows the policy, 'on' and 'off' override it */
+  sync_mode!: SyncMode
 }
 
 /** Sync job row class */
@@ -431,7 +440,7 @@ export class DaemonStatusRow {
  * priority of its jobs inside each lane.
  */
 export enum SyncPriority {
-  /** P0 - Ahead of every tier inside a lane */
+  /** P0 - The first page of a chat turned on with `tg chats sync` */
   Realtime = 0,
   /** P1 - DMs and small groups (<20 members), full sync */
   High = 1,
@@ -467,12 +476,20 @@ export enum SyncJobStatus {
 export type SyncChatType = 'private' | 'group' | 'supergroup' | 'channel'
 
 /**
+ * Whether a chat syncs: 'auto' follows determineSyncPolicy, 'on' and 'off'
+ * are the user's choice from `tg chats sync`, kept across dialog passes
+ */
+export type SyncMode = 'auto' | 'on' | 'off'
+
+export const SYNC_MODES: readonly SyncMode[] = ['auto', 'on', 'off']
+
+/**
  * Determine sync policy based on chat type and member count:
  * - private chats and groups under 20 members: High, full history
  * - groups of 20-100 members: Medium, the newest 100 messages, then history
  *   after the small chats
  * - groups of unknown size or over 100 members, and channels: off, synced
- *   only on request
+ *   only on request (`tg chats sync`)
  *
  * Telegram often leaves the member count out of a supergroup's dialog, and
  * such a group may have thousands of members, so an unknown count is treated
