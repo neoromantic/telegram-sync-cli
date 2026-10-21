@@ -70,6 +70,10 @@ tg chats get --id @username       # or the ID of a cached chat (cache-only, no c
 tg chats sync @examplenews        # sync this chat in the background
 ```
 
+`tg chats get --id` reads an ID like `tg chats sync` does. A bare 0.2.0 ID that names both a
+cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
+`details: { identifier, candidates }`.
+
 ### Chat sync
 
 The daemon syncs DMs and groups of up to 100 members by default. Archived ones start when a
@@ -91,8 +95,8 @@ tg chats sync @examplenews --auto # follow the default policy again
 - `id` and `peerId` are the same marked ID; `peerId` stays for scripts written against 0.2.0,
   where `id` was the bare one. A positive ID is a user's DM first, as in `tg send --to`: the
   bare group or channel ID counts only when the cache doesn't know user N. A bare ID that names
-  both a cached basic group and a cached channel is `INVALID_ARGS`, with both marked IDs in
-  `details.candidates`.
+  both a cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
+  `details: { chat, candidates }`, `candidates` being both marked IDs.
 - Cache-only: the chat must be in `chats_cache` or have sync state from the daemon. No Telegram
   credentials needed. A daemon start caches every chat, archived ones too;
   `tg chats get --id @username` caches one chat; `tg chats list --fresh` caches only the 200
@@ -147,10 +151,12 @@ tg messages search --query "hello" --includeDeleted
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
 `@username`, a user or chat ID as `tg chats list` or `tg messages search` prints it, a phone
-number with `+`, or `me`. To page back, pass `nextBefore` as `--before`; to page forward, pass
-`nextAfter` as `--after`; stop when `items` is empty. Both bounds are exclusive message IDs,
-`--after 0` starts at the first message, and with both set the page is the one right after
-`--after`. `--limit` is 1-100 (default 20).
+number with `+`, or `me`. A bare 0.2.0 ID that names both a cached basic group and a cached
+channel is `INVALID_ARGS` (exit 3) with `details: { chat, candidates }` in `list` and `get`.
+To page back, pass `nextBefore` as `--before`; to page forward, pass `nextAfter` as `--after`;
+stop when `items` is empty. Both bounds are exclusive message IDs, `--after 0` starts at the
+first message, and with both set the page is the one right after `--after`. `--limit` is 1-100
+(default 20).
 
 ```json
 { "chatId": -1001234567890, "items": [ … ], "limit": 20, "before": null, "after": null,
@@ -200,8 +206,8 @@ tg send --to -1001234567890 -m "Hi" # a chat ID as tg messages search prints it
 supergroups, `-N` for basic groups, the user ID for a private chat), a phone number with `+`
 (spaces, dashes and brackets are fine), or `me`. The bare group or channel ID that 0.2.0
 printed still works when the cache knows the chat; if it names both a cached basic group and a
-cached channel, the command fails with `INVALID_ARGS` and lists both marked IDs in
-`details.candidates`.
+cached channel, the command fails with `INVALID_ARGS` (exit 3) and
+`details: { to, candidates }`, `candidates` being both marked IDs.
 
 A sent message goes into the message cache right away, so `tg messages search`
 finds it without the daemon.
