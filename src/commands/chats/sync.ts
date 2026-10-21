@@ -22,7 +22,7 @@ import {
   toMarkedPeerId,
 } from '../../utils/telegram-peer-ids'
 
-interface ResolvedChat {
+export interface ResolvedChat {
   /** Raw ID, as `tg chats list` shows it */
   id: number
   /** Marked peer ID, as the sync tables store it */
@@ -82,12 +82,21 @@ function resolveChat(db: Database, input: string): ResolvedChat | null {
  * Store the mode and the sync_enabled it means, in one transaction. A mode
  * that changed cancels the chat's pending jobs, so the daemon queues them
  * again at the right priority; a running job finishes.
+ *
+ * The transaction takes the write lock before its first read (BEGIN
+ * IMMEDIATE). A deferred one would read first, and in WAL mode a write
+ * after the daemon committed fails at once with SQLITE_BUSY_SNAPSHOT,
+ * busy_timeout or not.
  */
-function applySyncMode(db: Database, chat: ResolvedChat, mode: SyncMode) {
+export function applySyncMode(
+  db: Database,
+  chat: ResolvedChat,
+  mode: SyncMode,
+) {
   const chatSyncState = createChatSyncStateService(db)
   const jobsService = createSyncJobsService(db)
 
-  return db.transaction(() => {
+  const apply = db.transaction(() => {
     if (!chatSyncState.get(chat.peerId)) {
       const policy = determineSyncPolicy(chat.type, chat.memberCount)
       chatSyncState.upsert({
@@ -106,7 +115,8 @@ function applySyncMode(db: Database, chat: ResolvedChat, mode: SyncMode) {
     }
 
     return { state: chatSyncState.get(chat.peerId)!, changed }
-  })()
+  })
+  return apply.immediate()
 }
 
 export const syncChatCommand = defineCommand({

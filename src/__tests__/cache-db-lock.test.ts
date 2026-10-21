@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { applySyncMode } from '../commands/chats/sync'
+import { createChatSyncStateService } from '../db/chat-sync-state'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 
@@ -91,6 +93,40 @@ describe('cache database lock', () => {
     const started = Date.now()
     expect(() => db.run(write)).not.toThrow()
     expect(Date.now() - started).toBeGreaterThan(100)
+    db.close()
+
+    expect(await holder.exited).toBe(0)
+  }, 20_000)
+
+  it('lets tg chats sync wait for a write lock another process holds', async () => {
+    const holder = spawnBun(HOLD_LOCK, {
+      LOCK_DB_PATH: path,
+      LOCK_HOLD_MS: '1000',
+    })
+    await waitForLine(holder.stdout, 'locked')
+
+    // The holder commits while the command waits. A transaction that read
+    // before it asked for the write lock would now fail with
+    // SQLITE_BUSY_SNAPSHOT, which busy_timeout doesn't cover.
+    const db = new Database(path)
+    initCacheSchema(db)
+    const chat = {
+      id: 1234567890,
+      peerId: -1001234567890,
+      type: 'channel' as const,
+      title: 'Example News',
+      username: 'examplenews',
+      memberCount: 5000,
+    }
+    const started = Date.now()
+    const { state, changed } = applySyncMode(db, chat, 'on')
+    expect(Date.now() - started).toBeGreaterThan(100)
+
+    expect(changed).toBe(true)
+    expect(state).toMatchObject({ sync_mode: 'on', sync_enabled: 1 })
+    expect(createChatSyncStateService(db).get(chat.peerId)?.sync_mode).toBe(
+      'on',
+    )
     db.close()
 
     expect(await holder.exited).toBe(0)
