@@ -221,6 +221,48 @@ describe('E2E: status', () => {
     })
   })
 
+  it('lists only the 5 newest failed jobs, but counts them all', async () => {
+    const now = Date.now()
+    const failed = [1, 2, 3, 4, 5, 6].map((age) =>
+      seedJob({
+        chat_id: 2000 + age,
+        job_type: SyncJobType.InitialLoad,
+        status: 'failed',
+        attempts: 1,
+        error_message: 'Telegram API error 400: CHANNEL_PRIVATE',
+        completed_at: now - age * HOUR,
+      }),
+    )
+
+    const { data } = await status()
+
+    expect(data.sync.failed_jobs).toBe(6)
+    expect(data.sync.jobs.map((job) => job.id)).toEqual(failed.slice(0, 5))
+  })
+
+  it('reports no next_run_at for a retry whose backoff has ended', async () => {
+    const due = seedJob({
+      chat_id: 1005,
+      job_type: SyncJobType.BackwardHistory,
+      status: 'pending',
+      attempts: 1,
+      next_run_at: Date.now() - 5000,
+      error_message: 'connection reset',
+    })
+
+    const { data } = await status()
+
+    expect(data.sync.retrying_jobs).toBe(1)
+    expect(data.sync.jobs).toEqual([
+      expect.objectContaining({
+        id: due,
+        status: 'pending',
+        attempts: 1,
+        next_run_at: null,
+      }),
+    ])
+  })
+
   it('reports zero jobs for an empty queue', async () => {
     const { data } = await status()
 
@@ -263,6 +305,36 @@ describe('E2E: status', () => {
       ['chats', 'sync', '1001', '--auto'],
     ])
     expect(output).not.toContain('Empty')
+  })
+
+  it('shows retrying and deferred jobs and when they run in pretty output', async () => {
+    const now = Date.now()
+    seedJob({
+      chat_id: 1004,
+      job_type: SyncJobType.BackwardHistory,
+      status: 'pending',
+      attempts: 2,
+      next_run_at: now + 30 * 60_000,
+      error_message: 'connection reset',
+    })
+    seedJob({
+      chat_id: 1006,
+      job_type: SyncJobType.InitialLoad,
+      status: 'pending',
+      next_run_at: now + 10 * 60_000,
+      error_message: 'Rate limited: wait 600s',
+    })
+
+    const output = await prettyStatus()
+
+    expect(output).toMatch(/Pending\s+2 jobs/)
+    expect(output).toMatch(/Retrying\s+1 jobs/)
+    expect(output).toMatch(
+      /chat:1004 attempt 2 of 5, next in \d+m \d+s: connection reset/,
+    )
+    // A FLOOD_WAIT deferral used no attempt, so it shows only when it runs
+    expect(output).toMatch(/chat:1006 next in \d+m \d+s$/m)
+    expect(output).not.toMatch(/Failed\s+\d+ jobs/)
   })
 
   it("prints retry commands that keep each chat's mode", async () => {
