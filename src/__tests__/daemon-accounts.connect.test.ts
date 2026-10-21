@@ -370,6 +370,121 @@ describe('daemon-accounts: connection + event wiring', () => {
     assertPeerIdInvariants(testCacheDb)
   })
 
+  it('stores the sender a history page stores for a message without fromId (#44)', async () => {
+    const ctx = createContext(createAccountsDb([{ id: 1, phone: '+111' }]))
+    const { setupEventHandlers } = await import('../daemon/daemon-accounts')
+    const { cacheHistoryResponse } = await import(
+      '../commands/messages/history'
+    )
+    const accountState: AccountConnectionState = {
+      accountId: 1,
+      phone: '+111',
+      name: null,
+      status: 'connected',
+      client: createClient(),
+    }
+    setupEventHandlers(ctx, accountState)
+
+    const date = 1_704_067_200
+    const alice: tl.RawUser = {
+      _: 'user',
+      id: 5550001,
+      firstName: 'Alice',
+      accessHash: toLong('1111'),
+    }
+    const self: tl.RawUser = {
+      _: 'user',
+      id: 5550099,
+      self: true,
+      firstName: 'Me',
+      accessHash: toLong('9999'),
+    }
+    const news: tl.RawChannel = {
+      _: 'channel',
+      id: 1234567890,
+      title: 'Example News',
+      broadcast: true,
+      accessHash: toLong('2222'),
+      photo: { _: 'chatPhotoEmpty' },
+      date,
+    }
+    const bookClub: tl.RawChat = {
+      _: 'chat',
+      id: 4242,
+      title: 'Book Club',
+      photo: { _: 'chatPhotoEmpty' },
+      participantsCount: 5,
+      date,
+      version: 1,
+    }
+    // Telegram leaves fromId out of all but the outgoing message
+    const messages: Array<tl.RawMessage | tl.RawMessageService> = [
+      {
+        _: 'message',
+        id: 1,
+        peerId: { _: 'peerUser', userId: alice.id },
+        date,
+        message: 'incoming',
+      },
+      {
+        _: 'message',
+        id: 2,
+        post: true,
+        peerId: { _: 'peerChannel', channelId: news.id },
+        date,
+        message: 'channel post',
+      },
+      {
+        _: 'message',
+        id: 3,
+        peerId: { _: 'peerUser', userId: self.id },
+        date,
+        message: 'saved',
+      },
+      {
+        _: 'message',
+        id: 4,
+        out: true,
+        fromId: { _: 'peerUser', userId: self.id },
+        peerId: { _: 'peerUser', userId: alice.id },
+        date,
+        message: 'outgoing',
+      },
+      {
+        _: 'messageService',
+        id: 5,
+        peerId: { _: 'peerChat', chatId: bookClub.id },
+        date,
+        action: { _: 'messageActionChatEditTitle', title: 'Book Club' },
+      },
+    ]
+    const peers = mtcute.PeersIndex.from({
+      users: [alice, self],
+      chats: [news, bookClub],
+    })
+    const historyDb = new Database(':memory:')
+    initCacheSchema(historyDb)
+    initSyncSchema(historyDb)
+
+    const senders = messages.map((raw) => {
+      const msg = new mtcute.Message(raw, peers)
+      accountState.eventHandlers?.onNewMessage(msg)
+      cacheHistoryResponse(historyDb, msg.chat.id, [raw], [alice, self], {})
+      const live = createMessagesCache(testCacheDb).get(msg.chat.id, msg.id)
+      const history = createMessagesCache(historyDb).get(msg.chat.id, msg.id)
+      return [live?.from_id, history?.from_id, msg.sender.id]
+    })
+    historyDb.close()
+
+    expect(senders).toEqual([
+      [5550001, 5550001, 5550001],
+      [-1001234567890, -1001234567890, -1001234567890],
+      [5550099, 5550099, 5550099],
+      [5550099, 5550099, 5550099],
+      [-4242, -4242, -4242],
+    ])
+  })
+
   it('passes a live group message member count to the sync policy', async () => {
     const ctx = createContext(createAccountsDb([{ id: 1, phone: '+111' }]))
     const { setupEventHandlers } = await import('../daemon/daemon-accounts')

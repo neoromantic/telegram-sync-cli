@@ -71,6 +71,9 @@ Every column that holds a chat holds its **marked peer ID**, the format mtcute u
 That covers `chats_cache.chat_id`, `messages_cache.chat_id`, `chat_sync_state.chat_id`,
 `sync_jobs.chat_id` and `history_ranges.chat_id`, and the senders in `messages_cache.from_id`
 and `forward_from_id`: a group or channel that posts as itself has its marked ID there too.
+When Telegram leaves the sender out, `from_id` is the chat, as mtcute gives it to live messages:
+the user for an incoming private message, your own user in Saved Messages, the channel for a
+channel post.
 `users_cache.user_id` is the same number as the `chat_id` of the private chat with that user.
 `chats_cache.chat_id` is TEXT and the others are INTEGER, so a join compares
 `chats_cache.chat_id = CAST(m.chat_id AS TEXT)`, which uses the primary key. All conversions live

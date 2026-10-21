@@ -311,7 +311,8 @@ describe('parseRawMessage', () => {
 
     const result = parseRawMessage(raw, 999)
 
-    expect(result.fromId).toBeUndefined()
+    // The channel is the sender, as mtcute gives it to live messages
+    expect(result.fromId).toBe(-1000000000999)
   })
 })
 
