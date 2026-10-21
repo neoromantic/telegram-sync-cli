@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-21
+
 ### Added
 
 - `tg chats sync <chat>` turns background sync on for a chat the default
@@ -188,7 +190,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/neoromantic/telegram-sync-cli/releases/tag/v0.1.2
