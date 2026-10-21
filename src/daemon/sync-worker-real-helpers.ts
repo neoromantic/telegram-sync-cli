@@ -3,6 +3,7 @@ import type { ChatsCache } from '../db/chats-cache'
 import type { MessageInput } from '../db/messages-cache'
 import { toLong } from '../utils/long'
 import { getCandidateChatIds } from '../utils/telegram-peer-ids'
+import { bigIntReplacer } from './daemon-utils'
 
 const MEDIA_TYPE_MAP: Record<string, string> = {
   messageMediaPhoto: 'photo',
@@ -63,13 +64,6 @@ export function buildInputPeer(
     userId: chatId,
     accessHash: toLong(0),
   }
-}
-
-function bigIntReplacer(_key: string, value: unknown): unknown {
-  if (typeof value === 'bigint') {
-    return value.toString()
-  }
-  return value
 }
 
 function resolveMessageType(message: Record<string, unknown>): {

@@ -184,6 +184,7 @@ export function setupEventHandlers(
         messageType,
         hasMedia,
         forwardFromId,
+        rawMessage: msg.raw,
       }
 
       updateHandlers.handleNewMessage(ctxLocal, data).catch((err) => {

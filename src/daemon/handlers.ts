@@ -6,7 +6,7 @@ import type { Database } from 'bun:sqlite'
 import type { ChatSyncStateService } from '../db/chat-sync-state'
 import type { MessageInput, MessagesCache } from '../db/messages-cache'
 import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
-import { formatError } from './daemon-utils'
+import { bigIntReplacer, formatError } from './daemon-utils'
 import type { DaemonLogger } from './types'
 
 /**
@@ -132,7 +132,9 @@ function toMessageInput(data: NewMessageData): MessageInput {
     forward_from_id: data.forwardFromId,
     has_media: data.hasMedia,
     is_pinned: data.isPinned,
-    raw_json: data.rawMessage ? JSON.stringify(data.rawMessage) : '{}',
+    raw_json: data.rawMessage
+      ? JSON.stringify(data.rawMessage, bigIntReplacer)
+      : '{}',
   }
 }
 
