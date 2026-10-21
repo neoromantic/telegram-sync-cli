@@ -41,6 +41,10 @@ bun test src/__tests__/auth.test.ts
 
 Unit tests run without network access using mocked dependencies.
 
+`test-setup.ts`, preloaded for every `bun test` run, points `TELEGRAM_SYNC_CLI_DATA_DIR` at
+`.tmp/test-data-<pid>` even if the shell or `.env` sets it, so tests that use the file-backed
+cache database never touch a real data dir.
+
 The test scripts pass `--isolate`, so each file gets a fresh module registry. `mock.module()`
 replaces a module for the whole process and `mock.restore()` doesn't undo it, so without
 isolation a module mock would leak into every file that runs after it, and the file order
