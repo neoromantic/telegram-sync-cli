@@ -8,6 +8,7 @@
 import type { Database } from 'bun:sqlite'
 import type { TelegramClient, tl } from '@mtcute/bun'
 
+import { getErrorMessage } from '../../daemon/daemon-utils'
 import {
   createMessageInputs,
   fetchMessagesRaw,
@@ -22,6 +23,7 @@ import { createMessagesHistory } from '../../db/messages-history'
 import type { MessageSearchRow } from '../../db/messages-search'
 import { createUsersCache, type UsersCache } from '../../db/users-cache'
 import type { MessageSearchItem } from '../../types'
+import { verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import { toPeerIdFromInputPeer } from '../../utils/telegram-peer-ids'
 import { type HistoryLookup, resolvePeer } from '../send/peer-resolver'
@@ -489,8 +491,13 @@ async function readAround(
     )
     return { around, source: 'api' }
   } catch (err) {
-    // Telegram no longer returns a message the cache still holds
-    if (cached && err instanceof MessageNotFoundError) {
+    // The cache holds the message: Telegram no longer returns it, or it
+    // can't be asked (no credentials or connection, a flood wait, a peer
+    // without an access hash). Serve the context the cache holds.
+    if (cached) {
+      verbose(
+        `Serving message ${messageId} from the cache: ${getErrorMessage(err)}`,
+      )
       return { around: cached.around, source: 'cache' }
     }
     throw err
@@ -500,7 +507,9 @@ async function readAround(
 /**
  * One message with up to `context` messages on each side. The cache answers
  * when it holds the message and both sides whole; otherwise, or with
- * `fresh`, one Telegram call fetches the message with both sides.
+ * `fresh`, one Telegram call fetches the message with both sides. If that
+ * call fails and the message is cached, the cache answers with what it
+ * holds of the sides; `fresh` reports the failure.
  */
 export async function getMessageWithContext(
   options: GetMessageOptions,

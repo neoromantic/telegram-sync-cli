@@ -972,6 +972,74 @@ describe('getMessageWithContext', () => {
     expect(requests).toHaveLength(1)
   })
 
+  it.each<[string, Error]>([
+    [
+      'without credentials',
+      new ConfigError('TELEGRAM_API_ID environment variable is required', []),
+    ],
+    ['for a peer without an access hash', new Error('PEER_ID_INVALID')],
+    ['while rate limited', new RateLimitError('messages.getHistory', 30)],
+  ])(
+    'serves the context the cache holds when Telegram cannot be asked %s',
+    async (_name, failure) => {
+      const call = mock(async () => {
+        throw failure
+      })
+
+      // Nothing newer than 7 is cached (8 is deleted), so the cache lacks
+      // the newer side
+      const result = await get({ call } as unknown as CallClient, 7, {
+        context: 2,
+      })
+
+      expect(call).toHaveBeenCalledTimes(1)
+      expect(result.source).toBe('cache')
+      expect(result.message.messageId).toBe(7)
+      expect(result.newer).toEqual([])
+      expect(messageIds(result.older)).toEqual([5, 4])
+    },
+  )
+
+  it('serves a cached message alone when no recorded range is next to it', async () => {
+    // A message that tg send or a live update cached
+    cacheMessages(cacheDb, ALICE_ID, [42])
+    const aliceChat: HistoryChat = {
+      chatId: ALICE_ID,
+      inputPeer: {
+        _: 'inputPeerUser',
+        userId: ALICE_ID,
+        accessHash: toLong(0),
+      },
+    }
+    const call = mock(async () => {
+      throw new Error('PEER_ID_INVALID')
+    })
+
+    const result = await get({ call } as unknown as CallClient, 42, {
+      context: 5,
+      chat: aliceChat,
+    })
+
+    expect(result.source).toBe('cache')
+    expect(result.message.messageId).toBe(42)
+    expect(result.newer).toEqual([])
+    expect(result.older).toEqual([])
+  })
+
+  it('reports a failed call with fresh, or for a message the cache lacks', async () => {
+    const call = mock(async () => {
+      throw new Error('PEER_ID_INVALID')
+    })
+    const client = { call } as unknown as CallClient
+
+    await expect(get(client, 4, { context: 2, fresh: true })).rejects.toThrow(
+      'PEER_ID_INVALID',
+    )
+    await expect(get(client, 11, { context: 2 })).rejects.toThrow(
+      'PEER_ID_INVALID',
+    )
+  })
+
   it('asks Telegram for context across a gap in the cache', async () => {
     // Telegram holds 1-1000; the daemon cached 951-1000 and a list page 95-99
     const { client, requests } = historyClient(range(1, 1000))

@@ -28,7 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are cached. Items are the same as in `tg messages search`.
 - `tg messages get --chat <peer> --id <id> [--context N]` returns one message
   with up to N messages on each side, cache-first, `--fresh` to fetch. A
-  context side the cache doesn't hold whole comes from Telegram.
+  context side the cache doesn't hold whole comes from Telegram, and if
+  Telegram can't be asked, a cached message comes back with the context the
+  cache holds.
 - The cache records the message ID ranges of each chat that it holds without
   a gap, in the new `history_ranges` table. Every page the daemon or
   `tg messages list` and `get` cache adds one, so reads can't run across

@@ -122,7 +122,9 @@ runs, the newest page of an active chat comes from Telegram, and is cached as a 
 `tg messages get --chat @username --id 1200 --context 3` treats each side of the context as a
 window next to the message: if the message is cached and both sides pass step 2, all of it comes
 from the cache; otherwise one `messages.getHistory` call fetches the message with the messages
-around it. A cached deleted message comes from the cache with the context its ranges hold.
+around it. If that call fails, or Telegram no longer returns the message, a cached message comes
+from the cache with the context its ranges hold, as a cached deleted message always does. Only
+`--fresh` reports the failure.
 
 `--fresh` always takes step 3. Fetched pages are searchable right away. The CLI doesn't move the
 daemon's sync cursors and never infers deletions, and backfill doesn't read progress from cached
