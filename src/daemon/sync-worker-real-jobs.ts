@@ -10,30 +10,14 @@ import {
 import {
   createMessageInputs,
   fetchMessagesRaw,
+  forwardPageRequest,
+  rawMessageId,
 } from './sync-worker-real-helpers'
 import type {
   RealJobResult,
   RealSyncWorkerContext,
 } from './sync-worker-real-types'
 import { processJobWithHandlers } from './sync-worker-utils'
-
-/**
- * The page a forward catch-up fetches. With a cursor it is the oldest
- * `limit` messages above the cursor: a negative `addOffset` makes
- * `offsetId` inclusive, so the page starts one above the cursor, and `minId`
- * keeps older messages out. Without a cursor it is the newest page.
- */
-function forwardPageRequest(cursor: number | null, limit: number) {
-  if (cursor === null) {
-    return { limit }
-  }
-  return { offsetId: cursor + 1, addOffset: -limit, limit, minId: cursor }
-}
-
-function rawMessageId(message: unknown): number {
-  const id = (message as { id?: unknown } | null)?.id
-  return typeof id === 'number' ? id : 0
-}
 
 function countUncached(
   ctx: RealSyncWorkerContext,
