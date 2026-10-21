@@ -244,6 +244,7 @@ tg daemon stop --timeout 10
 tg daemon status
 
 tg status
+tg status --account work        # only this account's figures
 
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg sql --query "SELECT COUNT(*) AS n FROM messages_cache" --account 2
@@ -269,6 +270,16 @@ part counts the daemon's sync jobs and lists some of them:
   job line carries `acct:<id>` and the command adds `--account <id>`.
 - `progress.sample_chats` (the overall top 5) and `rate_limits.active_flood_waits` items carry
   `account_id` too.
+- `accounts.accounts[]` gives each account its own figures: `cache` (`status`: `ok`,
+  `missing` for an account with no cache yet, which `tg status` never creates, or `error` with
+  `error`), `connection` (`{ status, last_error }` from a live daemon, else `null`), `sync`
+  (`pending_jobs`, `running_jobs`, `failed_jobs`, `retrying_jobs`), `progress`
+  (`chats_enabled`, `chats_history_complete`, `chats_history_pending`, `messages_cached`) and
+  `rate_limits` (`api_calls_last_minute`, `active_flood_waits`, a count). With several
+  accounts, pretty output prints a line with these under each account.
+- `--account <selector>` scopes the totals, the lists and `accounts.accounts` to one account;
+  `account_id` says which (`null` without the flag). The `daemon` section always covers the
+  whole daemon.
 - `storage` reports the shared cache of 0.3 and older: `legacy_caches` lists the files set
   aside as `shared-cache*.db` (`path`, `size_bytes`), and `migration` is `null` or
   `{ reason, path, suggestion }` while the move waits (see

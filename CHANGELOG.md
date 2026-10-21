@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `progress.sample_chats` and `rate_limits.active_flood_waits` has
   `account_id`. With several accounts, pretty output tags jobs with
   `acct:<id>` and the retry commands add `--account <id>`.
+- `tg status` gives each entry in `accounts.accounts` its own `cache`,
+  `connection`, `sync`, `progress` and `rate_limits`, and pretty output
+  prints them on a line under each account. `tg status --account <selector>`
+  reports only that account and sets the new top-level `account_id` (`null`
+  for all). `tg daemon status` adds `accounts[]` with each account's
+  connection, last error, messages synced and cached, and chat counts.
 
 ### Changed
 

@@ -28,6 +28,10 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import type { SyncMode } from '../db/sync-schema'
 import { cacheUnavailableSuggestion } from '../utils/account-cache'
+import {
+  ACCOUNT_SELECTOR_DESCRIPTION,
+  resolveAccountSelector,
+} from '../utils/account-selector'
 import { getOutputFormat, success } from '../utils/output'
 import { VERSION } from '../version'
 import { printPrettyStatus } from './status/pretty'
@@ -82,14 +86,19 @@ export const statusCommand = defineCommand({
       alias: 'j',
       default: false,
     },
+    account: {
+      type: 'string',
+      description: `${ACCOUNT_SELECTOR_DESCRIPTION}; report only this account (default: all)`,
+    },
   },
   async run({ args }) {
     const dataDir = getDataDir()
     const pidPath = join(dataDir, 'daemon.pid')
     const pidFile = createPidFile(pidPath)
+    const accountId = resolveAccountSelector(args.account)
 
     // Collect all status data
-    const statusData = await collectStatus(pidFile)
+    const statusData = await collectStatus(pidFile, { accountId })
 
     // Determine output format
     const format = getOutputFormat()
@@ -381,6 +390,53 @@ export function collectStorageStatus(dataDir: string) {
   return { legacy_caches: legacyCaches, migration }
 }
 
+/** The live daemon's view of an account, or null without one */
+export function liveConnection(
+  snapshot: AccountStatusSnapshot,
+  livePid: number | null,
+): { status: string; last_error: string | null } | null {
+  const daemon = snapshot.daemon
+  if (
+    livePid === null ||
+    !daemon ||
+    daemon.status !== 'running' ||
+    daemon.pid !== livePid
+  ) {
+    return null
+  }
+  return {
+    status: daemon.connectionStatus ?? 'unknown',
+    last_error: daemon.lastError,
+  }
+}
+
+/** One account's own figures, for its entry under accounts */
+function accountBreakdown(
+  snapshot: AccountStatusSnapshot,
+  livePid: number | null,
+) {
+  return {
+    cache: snapshot.cache,
+    connection: liveConnection(snapshot, livePid),
+    sync: {
+      pending_jobs: snapshot.sync.pending_jobs,
+      running_jobs: snapshot.sync.running_jobs,
+      failed_jobs: snapshot.sync.failed_jobs,
+      retrying_jobs: snapshot.sync.retrying_jobs,
+    },
+    progress: {
+      chats_enabled: snapshot.progress.chats_enabled,
+      chats_history_complete: snapshot.progress.chats_history_complete,
+      chats_history_pending: snapshot.progress.chats_history_pending,
+      messages_cached: snapshot.progress.messages_cached,
+    },
+    rate_limits: {
+      api_calls_last_minute: snapshot.rate_limits.api_calls_last_minute,
+      active_flood_waits: snapshot.rate_limits.active_flood_waits.length,
+    },
+  }
+}
+
 function sumRecords(records: Array<Record<string, number>>) {
   const total: Record<string, number> = {}
   for (const record of records) {
@@ -393,27 +449,42 @@ function sumRecords(records: Array<Record<string, number>>) {
 
 /**
  * Collect all status information: every account's cache read on its own,
- * then the totals over them
+ * then the totals over them. With `accountId`, the totals and lists cover
+ * only that account; the daemon section still covers the whole daemon.
  */
 export async function collectStatus(
   pidFile: ReturnType<typeof createPidFile>,
-  options: { dataDir?: string } = {},
+  options: { dataDir?: string; accountId?: number } = {},
 ) {
   const dataDir = options.dataDir ?? getDataDir()
   const pid = pidFile.read()
   const isRunning = pid !== null && pidFile.isRunning()
+  const livePid = isRunning ? pid : null
 
   // Moves a shared cache first, so the accounts' files below are current
   const storage = collectStorageStatus(dataDir)
 
-  const accounts = accountsDb.getAll()
+  const allAccounts = accountsDb.getAll()
   const activeAccount = accountsDb.getActive()
-  const snapshots = accounts.map((account) => readAccountStatus(account.id))
+  const allSnapshots = allAccounts.map((account) =>
+    readAccountStatus(account.id),
+  )
+  const inScope = (accountId: number) =>
+    options.accountId === undefined || accountId === options.accountId
+  const accounts = allAccounts.filter((account) => inScope(account.id))
+  const snapshots = allSnapshots.filter((snapshot) =>
+    inScope(snapshot.accountId),
+  )
+  const snapshotOf = new Map(
+    allSnapshots.map((snapshot) => [snapshot.accountId, snapshot]),
+  )
 
   // Daemon: only the rows the live daemon wrote count
   const summary = summarizeDaemonStatus(
-    snapshots.flatMap((snapshot) => (snapshot.daemon ? [snapshot.daemon] : [])),
-    isRunning ? pid : null,
+    allSnapshots.flatMap((snapshot) =>
+      snapshot.daemon ? [snapshot.daemon] : [],
+    ),
+    livePid,
   )
   // A daemon that holds the PID file but hasn't written its rows yet (its
   // first open after an upgrade can wait for the shared-cache move, and an
@@ -506,7 +577,7 @@ export async function collectStatus(
   }
 
   const accountsStatus = {
-    total: accounts.length,
+    total: allAccounts.length,
     active_id: activeAccount?.id ?? null,
     active_phone: activeAccount?.phone ?? null,
     active_name: activeAccount?.name ?? null,
@@ -519,10 +590,13 @@ export async function collectStatus(
       username: a.username,
       label: a.label,
       is_active: a.is_active === 1,
+      ...accountBreakdown(snapshotOf.get(a.id)!, livePid),
     })),
   }
 
   return {
+    /** The account the figures cover; null for every account */
+    account_id: options.accountId ?? null,
     daemon: daemonStatus,
     sync: syncStatus,
     progress: progressStatus,

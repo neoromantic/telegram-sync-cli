@@ -5,17 +5,19 @@
  */
 import type { Database } from 'bun:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
+import { createDaemonStatusService } from '../db/daemon-status'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { SyncJobType, SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { VERSION } from '../version'
 import {
   type CliResult,
   NO_CREDENTIALS,
@@ -434,5 +436,142 @@ describe('E2E: which account a command uses', () => {
     } finally {
       env.cleanup()
     }
+  })
+})
+
+describe('E2E: status per account', () => {
+  let env: TestEnvironment
+
+  beforeAll(() => {
+    env = createTwoAccounts('multi-account-status')
+    // A live daemon wrote both accounts' rows; this test process stands in
+    // for it, so daemon.pid names a live PID
+    writeFileSync(join(env.dataDir, 'daemon.pid'), String(process.pid))
+    const tick = (accountId: number, connection: string, synced: number) => {
+      const status = createDaemonStatusService(env.openCacheDb(accountId))
+      status.setDaemonRunning(process.pid, VERSION)
+      status.writeTick({
+        connectionStatus: connection,
+        lastError: connection === 'connected' ? null : 'connection reset',
+        messagesSynced: synced,
+        pendingJobs: 0,
+        runningJobs: 0,
+      })
+    }
+    tick(1, 'connected', 3)
+    tick(2, 'reconnecting', 4)
+  })
+
+  afterAll(() => {
+    expectNoRootCache(env)
+    env.cleanup()
+  })
+
+  type StatusAccount = {
+    id: number
+    cache: { status: string }
+    connection: { status: string; last_error: string | null } | null
+    sync: Record<string, number>
+    progress: Record<string, number>
+    rate_limits: Record<string, number>
+  }
+
+  it('gives each account its own cache, connection, sync, progress and rate limits', async () => {
+    const data = await run(env, ['status'])
+    const accounts = (data.accounts as { accounts: StatusAccount[] }).accounts
+
+    expect(data.account_id).toBeNull()
+    expect(data.daemon).toMatchObject({
+      status: 'running',
+      connected_accounts: 1,
+      total_accounts: 2,
+      messages_synced: 7,
+    })
+    expect(accounts).toEqual([
+      expect.objectContaining({
+        id: 1,
+        cache: { status: 'ok' },
+        connection: { status: 'connected', last_error: null },
+        sync: {
+          pending_jobs: 0,
+          running_jobs: 0,
+          failed_jobs: 1,
+          retrying_jobs: 0,
+        },
+        progress: {
+          chats_enabled: 0,
+          chats_history_complete: 0,
+          chats_history_pending: 0,
+          messages_cached: 1,
+        },
+        rate_limits: { api_calls_last_minute: 0, active_flood_waits: 0 },
+      }),
+      expect.objectContaining({
+        id: 2,
+        connection: { status: 'reconnecting', last_error: 'connection reset' },
+        sync: expect.objectContaining({ failed_jobs: 0 }),
+        progress: expect.objectContaining({ messages_cached: 1 }),
+      }),
+    ])
+  })
+
+  it('reports only the account --account selects', async () => {
+    const data = await run(env, ['status', '--account', 'work'])
+    const sync = data.sync as { failed_jobs: number; jobs: unknown[] }
+
+    expect(data.account_id).toBe(2)
+    expect(sync).toMatchObject({ failed_jobs: 0, jobs: [] })
+    expect(data.progress).toMatchObject({ messages_cached: 1, chats_cached: 1 })
+    expect(
+      (data.accounts as { accounts: StatusAccount[] }).accounts.map(
+        (account) => account.id,
+      ),
+    ).toEqual([2])
+  })
+
+  it('lists each account in tg daemon status, with totals that are their sums', async () => {
+    const data = await run(env, ['daemon', 'status'])
+
+    expect(data).toMatchObject({
+      status: 'running',
+      connectedAccounts: 1,
+      totalAccounts: 2,
+      messagesSynced: 7,
+      messagesCached: 2,
+    })
+    expect(data.accounts).toEqual([
+      {
+        id: 1,
+        connection: 'connected',
+        lastError: null,
+        messagesSynced: 3,
+        messagesCached: 1,
+        chatsEnabled: 0,
+        chatsHistoryComplete: 0,
+      },
+      {
+        id: 2,
+        connection: 'reconnecting',
+        lastError: 'connection reset',
+        messagesSynced: 4,
+        messagesCached: 1,
+        chatsEnabled: 0,
+        chatsHistoryComplete: 0,
+      },
+    ])
+  })
+
+  it('prints a line per account in pretty output', async () => {
+    const result = await runCliSuccess(
+      ['status', '--format', 'pretty'],
+      cliOptions(env),
+    )
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
+    const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, '')
+
+    expect(output).toMatch(
+      /connected · 0 queued · 1 failed · history 0\/0 · 1 msgs/,
+    )
+    expect(output).toMatch(/reconnecting · 0 queued · history 0\/0 · 1 msgs/)
   })
 })
