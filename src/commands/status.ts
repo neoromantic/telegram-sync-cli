@@ -15,6 +15,7 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import type { SyncMode } from '../db/sync-schema'
 import { getOutputFormat, success } from '../utils/output'
+import { VERSION } from '../version'
 import { printPrettyStatus } from './status/pretty'
 
 /**
@@ -101,6 +102,10 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
   const daemonStatus: {
     status: 'running' | 'stopped'
     pid: number | null
+    /** The version the running daemon recorded at start */
+    version: string | null
+    /** A running daemon of another version, or one that recorded none */
+    version_mismatch: boolean
     uptime_seconds: number | null
     memory_bytes: number | null
     started_at: string | null
@@ -111,6 +116,8 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
   } = {
     status: isRunning ? 'running' : 'stopped',
     pid: isRunning ? pid : null,
+    version: null,
+    version_mismatch: false,
     uptime_seconds: null,
     memory_bytes: null,
     started_at: null,
@@ -201,6 +208,13 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
     // Daemon info
     const daemonService = createDaemonStatusService(cacheDb)
     const daemonInfo = daemonService.getDaemonInfo()
+
+    // A daemon that holds the PID file but hasn't written its rows yet (its
+    // first open after an upgrade can wait for the migration) compares nothing
+    if (isRunning && daemonInfo.pid === pid) {
+      daemonStatus.version = daemonInfo.version
+      daemonStatus.version_mismatch = daemonInfo.version !== VERSION
+    }
 
     if (isRunning && daemonInfo.startedAt) {
       daemonStatus.uptime_seconds = Math.floor(
@@ -366,6 +380,7 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
     progress: progressStatus,
     rate_limits: rateLimitsStatus,
     accounts: accountsStatus,
+    cli_version: VERSION,
     timestamp: new Date().toISOString(),
   }
 }

@@ -137,6 +137,13 @@ Key files:
 - `chatsHistoryComplete`
 - `lastUpdate`
 
+### Upgrading
+
+A running daemon keeps the code it started with. To upgrade, stop the daemon, upgrade tg and
+start the daemon again. The daemon records its version when it starts, and `tg status` says when
+the running daemon is another version: `daemon.version_mismatch` in JSON, and a Version row with
+the advice in `--format pretty`. `tg daemon status` doesn't report it.
+
 ---
 
 ## Data Flow

@@ -11,6 +11,8 @@ import { DaemonStatusRow } from './sync-schema'
 export interface DaemonInfo {
   status: 'running' | 'stopped'
   pid: number | null
+  /** The version the running daemon recorded at start; null if none */
+  version: string | null
   startedAt: number | null
   lastUpdate: number | null
   connectedAccounts: number
@@ -34,8 +36,8 @@ export interface DaemonStatusService {
   clear(): void
 
   // Convenience methods
-  /** Mark daemon as running with given PID */
-  setDaemonRunning(pid: number): void
+  /** Mark daemon as running with given PID and version */
+  setDaemonRunning(pid: number, version: string): void
   /** Mark daemon as stopped */
   setDaemonStopped(): void
   /** Check if daemon is running */
@@ -114,8 +116,13 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       stmts.clear.run()
     },
 
-    setDaemonRunning(pid: number): void {
+    setDaemonRunning(pid: number, version: string): void {
       const now = Date.now()
+      // The version goes first, so a reader never sees the new daemon_pid
+      // without its version. daemon_version_pid ties the version to this
+      // daemon: an older one that starts later rewrites only daemon_pid.
+      service.set('daemon_version', version)
+      service.set('daemon_version_pid', pid.toString())
       service.set('daemon_pid', pid.toString())
       service.set('daemon_started_at', now.toString())
       service.set('daemon_status', 'running')
@@ -124,6 +131,8 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
     setDaemonStopped(): void {
       service.delete('daemon_pid')
       service.delete('daemon_started_at')
+      service.delete('daemon_version')
+      service.delete('daemon_version_pid')
       service.set('daemon_status', 'stopped')
     },
 
@@ -151,11 +160,16 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       const connectedStr = service.get('connected_accounts')
       const totalStr = service.get('total_accounts')
       const syncedStr = service.get('messages_synced')
+      const versionPidStr = service.get('daemon_version_pid')
 
       return {
         status:
           service.get('daemon_status') === 'running' ? 'running' : 'stopped',
         pid: pidStr ? parseInt(pidStr, 10) : null,
+        version:
+          pidStr !== null && versionPidStr === pidStr
+            ? service.get('daemon_version')
+            : null,
         startedAt: startedAtStr ? parseInt(startedAtStr, 10) : null,
         lastUpdate: lastUpdateStr ? parseInt(lastUpdateStr, 10) : null,
         connectedAccounts: connectedStr ? parseInt(connectedStr, 10) : 0,

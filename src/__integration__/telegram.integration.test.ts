@@ -15,6 +15,7 @@ import {
   runCliSuccess,
   spawnCli,
 } from '../__e2e__/helpers/cli'
+import { VERSION } from '../version'
 import {
   createIntegrationEnvironment,
   type IntegrationEnvironment,
@@ -440,8 +441,13 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
         expect(status.json).toMatchObject({
           success: true,
           data: {
-            daemon: { status: 'running' },
+            daemon: {
+              status: 'running',
+              version: VERSION,
+              version_mismatch: false,
+            },
             sync: { failed_jobs: expect.any(Number) },
+            cli_version: VERSION,
           },
         })
 

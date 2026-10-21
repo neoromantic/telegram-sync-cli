@@ -97,28 +97,46 @@ describe('DaemonStatusService', () => {
     describe('setDaemonRunning', () => {
       it('sets daemon as running with PID and start time', () => {
         const pid = 12345
-        service.setDaemonRunning(pid)
+        service.setDaemonRunning(pid, '0.3.1')
 
         expect(service.get('daemon_pid')).toBe(pid.toString())
         expect(service.get('daemon_started_at')).not.toBeNull()
         expect(service.get('daemon_status')).toBe('running')
       })
+
+      it('records the version, tied to the PID', () => {
+        service.setDaemonRunning(111, '0.3.1')
+
+        expect(service.get('daemon_version')).toBe('0.3.1')
+        expect(service.get('daemon_version_pid')).toBe('111')
+        expect(service.getDaemonInfo().version).toBe('0.3.1')
+      })
     })
 
     describe('setDaemonStopped', () => {
       it('clears daemon running state', () => {
-        service.setDaemonRunning(12345)
+        service.setDaemonRunning(12345, '0.3.1')
 
         service.setDaemonStopped()
 
         expect(service.get('daemon_pid')).toBeNull()
         expect(service.get('daemon_status')).toBe('stopped')
       })
+
+      it('clears the version', () => {
+        service.setDaemonRunning(111, '0.3.1')
+
+        service.setDaemonStopped()
+
+        expect(service.get('daemon_version')).toBeNull()
+        expect(service.get('daemon_version_pid')).toBeNull()
+        expect(service.getDaemonInfo().version).toBeNull()
+      })
     })
 
     describe('isDaemonRunning', () => {
       it('returns true when daemon is running', () => {
-        service.setDaemonRunning(12345)
+        service.setDaemonRunning(12345, '0.3.1')
         expect(service.isDaemonRunning()).toBe(true)
       })
 
@@ -157,7 +175,7 @@ describe('DaemonStatusService', () => {
 
     describe('getDaemonInfo', () => {
       it('returns all daemon info', () => {
-        service.setDaemonRunning(12345)
+        service.setDaemonRunning(12345, '0.3.1')
         service.setConnectedAccounts(3, 5)
         service.setMessagesSynced(1000)
 
@@ -174,6 +192,20 @@ describe('DaemonStatusService', () => {
         const info = service.getDaemonInfo()
         expect(info.status).toBe('stopped')
         expect(info.pid).toBeNull()
+        expect(info.version).toBeNull()
+      })
+
+      it("ignores a version left by another PID's daemon", () => {
+        // A daemon that recorded its version died without cleanup, then an
+        // older daemon started: it writes only these three keys
+        service.setDaemonRunning(111, '0.3.1')
+        service.set('daemon_pid', '222')
+        service.set('daemon_started_at', Date.now().toString())
+        service.set('daemon_status', 'running')
+
+        const info = service.getDaemonInfo()
+        expect(info.pid).toBe(222)
+        expect(info.version).toBeNull()
       })
     })
   })

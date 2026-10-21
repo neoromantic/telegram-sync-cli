@@ -23,6 +23,18 @@ function printDaemonSection(status: StatusSnapshot): void {
     printRow('PID', c.number(status.daemon.pid))
   }
 
+  const { version, version_mismatch } = status.daemon
+  if (version !== null || version_mismatch) {
+    printRow(
+      'Version',
+      version === null
+        ? c.warning('not recorded')
+        : version_mismatch
+          ? c.warning(version)
+          : c.value(version),
+    )
+  }
+
   if (status.daemon.uptime_seconds !== null) {
     printRow(
       'Uptime',
@@ -55,6 +67,48 @@ function printDaemonSection(status: StatusSnapshot): void {
     const lastUpdate = new Date(status.daemon.last_update).getTime()
     printRow('Last Update', c.dim(formatRelativeTime(lastUpdate)))
   }
+
+  if (version_mismatch) printDaemonVersionHint(version, status.cli_version)
+}
+
+/** Whether a version is newer than another; an invalid one counts as older */
+function isNewerVersion(version: string, than: string): boolean {
+  try {
+    return Bun.semver.order(version, than) > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Say what to do about a running daemon of another version. Restarting a
+ * newer daemon with this tg would downgrade it, so then use the newer tg.
+ */
+function printDaemonVersionHint(
+  version: string | null,
+  cliVersion: string,
+): void {
+  console.log()
+  if (version !== null && isNewerVersion(version, cliVersion)) {
+    console.log(
+      c.warning(
+        `  ${icons.warning} The daemon runs ${version}, newer than this tg (${cliVersion}). Use the newer tg; restarting the daemon with this one would downgrade it.`,
+      ),
+    )
+    return
+  }
+
+  const runs =
+    version === null
+      ? 'The daemon was started by an older tg.'
+      : `The daemon runs ${version}, this tg is ${cliVersion}.`
+  console.log(
+    c.warning(
+      `  ${icons.warning} ${runs} Restart the daemon to run ${cliVersion}:`,
+    ),
+  )
+  console.log(`    ${c.value('tg daemon stop')}`)
+  console.log(`    ${c.value('tg daemon start')}`)
 }
 
 /** What a failed job or one waiting to run again is waiting for */

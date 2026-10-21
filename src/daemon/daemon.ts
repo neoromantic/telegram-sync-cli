@@ -13,6 +13,7 @@ import {
 import { createDaemonStatusService } from '../db/daemon-status'
 import { initSyncSchema } from '../db/sync-schema'
 import { requireDefaultConfig } from '../services/telegram'
+import { VERSION } from '../version'
 import {
   connectAccount,
   disconnectAllAccounts,
@@ -95,7 +96,7 @@ async function initializeDatabase(ctx: DaemonContext): Promise<boolean> {
 
     const statusService = createDaemonStatusService(cacheDb)
     ctx.runtime.statusService = statusService
-    statusService.setDaemonRunning(process.pid)
+    statusService.setDaemonRunning(process.pid, VERSION)
 
     return true
   } catch (err) {
@@ -164,7 +165,7 @@ async function performCleanup(ctx: DaemonContext): Promise<void> {
 }
 
 async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
-  ctx.logger.info('Starting Telegram Sync CLI daemon...')
+  ctx.logger.info(`Starting Telegram Sync CLI daemon ${VERSION}...`)
 
   let exitCode = DaemonExitCode.Success
 

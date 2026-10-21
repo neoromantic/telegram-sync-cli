@@ -305,6 +305,14 @@ CREATE TABLE daemon_status (
 );
 ```
 
+Keys: `daemon_status`, `daemon_pid`, `daemon_started_at`, `daemon_version`,
+`daemon_version_pid`, `connected_accounts`, `total_accounts`, `messages_synced`, `last_update`,
+`pending_jobs`, `running_jobs`.
+
+- Daemons from 0.3.0 and older write neither version key.
+- Stopping clears the PID, start time and version keys.
+- `tg status` uses `daemon_version` only while `daemon_version_pid` equals `daemon_pid`.
+
 ### Table: rate_limits
 
 ```sql
