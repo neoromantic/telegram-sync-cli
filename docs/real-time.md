@@ -19,7 +19,9 @@ Handlers live in:
 1. **Event received** from mtcute
 2. **Normalize** message metadata (chat type, media type, forward attribution)
 3. **Persist** into `messages_cache`
-4. **Update cursors** in `chat_sync_state`
+4. **Update counters** in `chat_sync_state` (`synced_messages`, `last_forward_sync`). The
+   forward cursor stays where it is: forward catch-up moves it after fetching the messages
+   below (see [sync-strategy.md](sync-strategy.md)).
 
 ### Message Type Mapping
 

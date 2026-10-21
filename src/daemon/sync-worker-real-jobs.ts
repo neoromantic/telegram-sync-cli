@@ -1,3 +1,4 @@
+import type { MessageInput } from '../db/messages-cache'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
 import {
   canMakeApiCall,
@@ -16,6 +17,44 @@ import type {
 } from './sync-worker-real-types'
 import { processJobWithHandlers } from './sync-worker-utils'
 
+/**
+ * The page a forward catch-up fetches. With a cursor it is the oldest
+ * `limit` messages above the cursor: a negative `addOffset` makes
+ * `offsetId` inclusive, so the page starts one above the cursor, and `minId`
+ * keeps older messages out. Without a cursor it is the newest page.
+ */
+function forwardPageRequest(cursor: number | null, limit: number) {
+  if (cursor === null) {
+    return { limit }
+  }
+  return { offsetId: cursor + 1, addOffset: -limit, limit, minId: cursor }
+}
+
+function rawMessageId(message: unknown): number {
+  const id = (message as { id?: unknown } | null)?.id
+  return typeof id === 'number' ? id : 0
+}
+
+function countUncached(
+  ctx: RealSyncWorkerContext,
+  chatId: number,
+  inputs: MessageInput[],
+): number {
+  return inputs.filter(
+    (input) => ctx.messagesCache.get(chatId, input.message_id) === null,
+  ).length
+}
+
+/**
+ * Forward catch-up keeps one rule: every message up to `forward_cursor` is
+ * cached. Live updates don't move the cursor, because messages that arrived
+ * while the daemon was stopped may sit below them. Each job caches the page
+ * just above the cursor and moves the cursor to its newest message; a full
+ * page means there may be more, so the scheduler queues the next page.
+ *
+ * A chat without a cursor gets its newest page; older history is the
+ * backward job's.
+ */
 export async function processForwardCatchupReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
@@ -43,48 +82,53 @@ export async function processForwardCatchupReal(
     return result
   }
 
-  const state = ctx.chatSyncState.get(chatId)
-  const forwardCursor = state?.forward_cursor ?? 0
+  const storedCursor = ctx.chatSyncState.get(chatId)?.forward_cursor
+  const cursor = storedCursor && storedCursor > 0 ? storedCursor : null
+  const floor = cursor ?? 0
 
   try {
     recordApiCall(ctx)
 
-    const { messages } = await fetchMessagesRaw(ctx.client, inputPeer, {
-      minId: forwardCursor,
-      limit: ctx.config.batchSize,
-    })
+    const { messages } = await fetchMessagesRaw(
+      ctx.client,
+      inputPeer,
+      forwardPageRequest(cursor, ctx.config.batchSize),
+    )
 
-    if (messages.length === 0) {
+    // Guard against a server that returns messages at or below the cursor.
+    const above = messages.filter((message) => rawMessageId(message) > floor)
+
+    if (above.length === 0) {
       ctx.chatSyncState.updateLastSync(chatId, 'forward')
       result = { success: true, messagesFetched: 0, hasMore: false }
       return result
     }
 
-    const { inputs, maxId } = createMessageInputs(
-      messages,
-      chatId,
-      forwardCursor,
-      forwardCursor,
-    )
+    // Empty messages hold no data, but the cursor still moves past them.
+    const top = Math.max(...above.map(rawMessageId))
+    const { inputs } = createMessageInputs(above, chatId, floor, floor)
+
+    // Live updates already counted the messages they cached.
+    const newCount = countUncached(ctx, chatId, inputs)
 
     if (inputs.length > 0) {
       ctx.messagesCache.upsertBatch(inputs)
     }
 
-    ctx.chatSyncState.updateCursors(chatId, { forward_cursor: maxId })
-    ctx.chatSyncState.incrementSyncedMessages(chatId, inputs.length)
+    ctx.chatSyncState.updateCursors(chatId, { forward_cursor: top })
+    ctx.chatSyncState.incrementSyncedMessages(chatId, newCount)
     ctx.chatSyncState.updateLastSync(chatId, 'forward')
 
     ctx.jobsService.updateProgress(job.id, {
-      messages_fetched: inputs.length,
-      cursor_end: maxId,
+      messages_fetched: newCount,
+      cursor_end: top,
     })
 
     result = {
       success: true,
-      messagesFetched: inputs.length,
-      hasMore: messages.length >= ctx.config.batchSize,
-      newCursor: maxId,
+      messagesFetched: newCount,
+      hasMore: cursor !== null && above.length >= ctx.config.batchSize,
+      newCursor: top,
     }
   } catch (err) {
     const floodResult = resolveFloodWaitResult(ctx, err)

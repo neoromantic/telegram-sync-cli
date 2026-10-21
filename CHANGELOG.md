@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closes the old client and restores updates and sync on the new one.
 - `tg send` didn't add the sent message to the cache, so `tg messages search`
   missed it until a later sync, even with the daemon running.
+- The daemon lost messages that arrived while it was stopped: the first live
+  message after a restart moved the chat's forward cursor past them, and
+  catch-up fetched only the newest 100. Live updates no longer move the
+  cursor, and catch-up pages up from it until it reaches the newest message.
 
 ## [0.1.3] - 2026-10-21
 
