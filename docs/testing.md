@@ -108,9 +108,10 @@ migrates.
 
 - `helpers/legacy-cache.ts` builds a cache as 0.2.0 left it (`initLegacySchema`,
   `seedLegacyCache`), for migration tests.
-- `helpers/peer-id-invariants.ts` has `assertPeerIdInvariants(db)`: every `chats_cache` ID
-  fits its type, and every chat ID in the other tables parses with mtcute. The bootstrap,
-  update handler, send cache and e2e tests run it at the end.
+- `helpers/peer-id-invariants.ts` has `assertPeerIdInvariants(db)`: every `chats_cache` and
+  `chat_sync_state` ID fits its type, every chat ID in the other tables parses with mtcute, and
+  none of them is a positive ID that `chats_cache` or `chat_sync_state` knows as a group or
+  channel. The bootstrap, update handler, send cache and e2e tests run it at the end.
 
 ### Snapshot Tests
 
