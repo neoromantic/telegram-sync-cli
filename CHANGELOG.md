@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A message that a channel or group posted as itself got the name of the
   user whose ID equals the chat's bare ID, in `sender` and in the search
   index. It now has no user name.
+- `tg chats sync -1001234567890 --format pretty` (or `-f pretty`) took
+  `pretty` for the chat and failed with "Chat not found in the cache:
+  pretty", so the ID copied from `tg chats list` failed for every group and
+  channel with that flag. The marked ID now wins.
 
 ## [0.2.0] - 2026-10-21
 

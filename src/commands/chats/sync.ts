@@ -172,8 +172,11 @@ export const syncChatCommand = defineCommand({
     // One cache serves every account (#17); the selector is only checked.
     resolveAccountSelector(args.account)
 
+    // The parser reads a marked ID such as -100… as flags and takes the
+    // value of a flag it doesn't know (the global --format pretty) as the
+    // positional, so a marked ID in rawArgs wins
     const input = (
-      args.chat ?? rawArgs.find((arg) => /^-\d+$/.test(arg))
+      rawArgs.find((arg) => /^-\d+$/.test(arg)) ?? args.chat
     )?.trim()
     if (!input) {
       error(
