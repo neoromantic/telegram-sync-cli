@@ -13,7 +13,7 @@ import { createDaemon, createPidFile, DaemonExitCode } from '../daemon'
 import { getCacheDb, getDataDir } from '../db'
 import { createDaemonStatusService } from '../db/daemon-status'
 import { ErrorCodes } from '../types'
-import { error, success } from '../utils/output'
+import { error, info, success } from '../utils/output'
 import { formatDuration } from '../utils/time'
 
 /**
@@ -81,7 +81,7 @@ const stopCommand = defineCommand({
     const timeoutMs = parseInt(args.timeout, 10) * 1000
 
     // Send SIGTERM
-    console.log(`Stopping daemon (PID ${pid})...`)
+    info(`Stopping daemon (PID ${pid})...`)
     if (!pidFile.sendSignal('SIGTERM')) {
       error(
         ErrorCodes.DAEMON_SIGNAL_FAILED,
@@ -107,7 +107,7 @@ const stopCommand = defineCommand({
       )
     }
 
-    console.log('Graceful shutdown timed out, forcing kill...')
+    info('Graceful shutdown timed out, forcing kill...')
     if (pidFile.sendSignal('SIGKILL')) {
       await new Promise((resolve) => setTimeout(resolve, 500))
       if (!pidFile.isRunning()) {
