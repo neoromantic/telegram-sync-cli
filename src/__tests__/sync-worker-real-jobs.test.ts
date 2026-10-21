@@ -3,14 +3,18 @@
  */
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { TelegramClient } from '@mtcute/bun'
+import { type TelegramClient, tl } from '@mtcute/bun'
 import {
   processBackwardHistoryReal,
   processForwardCatchupReal,
   processInitialLoadReal,
   processJobReal,
 } from '../daemon/sync-worker-real-jobs'
-import type { RealSyncWorkerContext } from '../daemon/sync-worker-real-types'
+import type {
+  RealJobResult,
+  RealSyncWorkerContext,
+} from '../daemon/sync-worker-real-types'
+import { processJobWithHandlers } from '../daemon/sync-worker-utils'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
@@ -328,6 +332,259 @@ describe('sync-worker real jobs', () => {
     const stored = ctx.jobsService.getById(job.id)
     expect(stored?.status).toBe('failed')
     expect(stored?.error_message).toContain('Unknown job type')
+    expect(stored?.attempts).toBe(1)
+  })
+
+  describe('job outcomes', () => {
+    const NOW = 1_700_000_000_000
+    const CHAT = 300
+    const realNow = Date.now
+
+    beforeEach(() => {
+      Date.now = () => NOW
+      ctx.chatSyncState.upsert({
+        chat_id: CHAT,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 5,
+        backward_cursor: 100,
+      })
+    })
+
+    afterEach(() => {
+      Date.now = realNow
+    })
+
+    function queue(jobType = SyncJobType.BackwardHistory, chatId = CHAT) {
+      return ctx.jobsService.create({
+        chat_id: chatId,
+        job_type: jobType,
+        priority: SyncPriority.High,
+      })
+    }
+
+    function throwing(err: unknown) {
+      const call = mock(async () => {
+        throw err
+      })
+      ctx.client = { call } as unknown as TelegramClient
+      return call
+    }
+
+    const failedRows = () =>
+      db.query("SELECT id FROM sync_jobs WHERE status = 'failed'").all()
+
+    it('retries a job after a transient error', async () => {
+      throwing(new Error('connection reset'))
+      const job = queue()
+
+      const result = await processJobReal(ctx, job)
+
+      expect(result.outcome).toEqual({
+        state: 'retrying',
+        attempts: 1,
+        nextRunAt: NOW + 60_000,
+      })
+      expect(ctx.jobsService.getById(job.id)).toEqual({
+        ...job,
+        status: 'pending',
+        attempts: 1,
+        next_run_at: NOW + 60_000,
+        error_message: 'connection reset',
+        started_at: null,
+      })
+    })
+
+    for (const [label, err] of [
+      ['400 CHANNEL_PRIVATE', new tl.RpcError(400, 'CHANNEL_PRIVATE')],
+      ['403', new tl.RpcError(403, 'CHAT_ADMIN_REQUIRED')],
+      ['404', new tl.RpcError(404, 'NOT_FOUND')],
+      ['406 CHANNEL_PRIVATE', new tl.RpcError(406, 'CHANNEL_PRIVATE')],
+    ] as const) {
+      it(`fails a job at once on RPC error ${label}`, async () => {
+        throwing(err)
+        const job = queue()
+
+        const result = await processJobReal(ctx, job)
+
+        expect(result.permanent).toBe(true)
+        expect(result.outcome).toEqual({
+          state: 'failed',
+          attempts: 1,
+          nextRunAt: null,
+        })
+        expect(ctx.jobsService.getById(job.id)).toMatchObject({
+          status: 'failed',
+          attempts: 1,
+          error_message: err.message,
+        })
+      })
+    }
+
+    for (const jobType of [
+      SyncJobType.ForwardCatchup,
+      SyncJobType.BackwardHistory,
+      SyncJobType.InitialLoad,
+    ]) {
+      it(`fails a ${jobType} job at once when the InputPeer is missing`, async () => {
+        const chatId = -1009876543210
+        ctx.chatSyncState.upsert({
+          chat_id: chatId,
+          chat_type: 'channel',
+          sync_priority: SyncPriority.High,
+          sync_enabled: true,
+          forward_cursor: jobType === SyncJobType.InitialLoad ? undefined : 5,
+          backward_cursor: 100,
+        })
+        const job = queue(jobType, chatId)
+
+        const result = await processJobReal(ctx, job)
+
+        expect(result.error).toContain('InputPeer')
+        expect(ctx.jobsService.getById(job.id)).toMatchObject({
+          status: 'failed',
+          attempts: 1,
+        })
+      })
+    }
+
+    for (const [label, err] of [
+      ['FLOOD_WAIT_600', new Error('FLOOD_WAIT_600')],
+      [
+        'an RpcError 420 with seconds',
+        tl.RpcError.fromTl({
+          _: 'rpcError',
+          errorCode: 420,
+          errorMessage: 'FLOOD_WAIT_600',
+        }),
+      ],
+    ] as const) {
+      it(`defers a job on ${label} without using an attempt`, async () => {
+        throwing(err)
+        const job = queue()
+
+        const result = await processJobReal(ctx, job)
+
+        expect(result.outcome).toEqual({
+          state: 'deferred',
+          attempts: 0,
+          nextRunAt: NOW + 600_000,
+        })
+        expect(ctx.jobsService.getById(job.id)).toMatchObject({
+          status: 'pending',
+          attempts: 0,
+          next_run_at: NOW + 600_000,
+          error_message: 'Rate limited: wait 600s',
+        })
+        expect(ctx.rateLimits.isBlocked(ctx.config.apiMethod)).toBe(true)
+        expect(failedRows()).toEqual([])
+        expect(ctx.jobsService.getNextPending()).toBeNull()
+
+        // After the wait the same job runs and completes
+        Date.now = () => NOW + 600_000
+        ctx.client = {
+          call: mock(async () => ({ messages: [rawMessage(99)] })),
+        } as unknown as TelegramClient
+        const next = ctx.jobsService.getNextPending()
+        expect(next?.id).toBe(job.id)
+        const retried = await processJobReal(ctx, next!)
+
+        expect(retried.success).toBe(true)
+        expect(ctx.jobsService.getById(job.id)?.status).toBe('completed')
+      })
+    }
+
+    it('defers a job on FLOOD_WAIT_0 by a second', async () => {
+      throwing(new Error('FLOOD_WAIT_0'))
+      const job = queue()
+
+      const result = await processJobReal(ctx, job)
+
+      expect(result).toMatchObject({ rateLimited: true, waitSeconds: 1 })
+      expect(ctx.jobsService.getById(job.id)).toMatchObject({
+        status: 'pending',
+        attempts: 0,
+        next_run_at: NOW + 1000,
+        error_message: 'Rate limited: wait 1s',
+      })
+    })
+
+    it('defers a job whose call is blocked by an earlier FLOOD_WAIT', async () => {
+      const call = throwing(new Error('unreachable'))
+      ctx.rateLimits.setFloodWait(ctx.config.apiMethod, 30)
+      const job = queue()
+
+      const result = await processJobReal(ctx, job)
+
+      expect(call).not.toHaveBeenCalled()
+      expect(result.outcome?.state).toBe('deferred')
+      expect(ctx.jobsService.getById(job.id)).toMatchObject({
+        status: 'pending',
+        attempts: 0,
+        next_run_at: NOW + 30_000,
+      })
+    })
+
+    it('drops a job whose chat was turned off while it ran', async () => {
+      ctx.client = {
+        call: mock(async () => {
+          ctx.chatSyncState.setSyncMode(CHAT, 'off')
+          ctx.jobsService.cancelPendingForChat(CHAT)
+          throw new Error('connection reset')
+        }),
+      } as unknown as TelegramClient
+      const job = queue()
+
+      const result = await processJobReal(ctx, job)
+
+      expect(result.outcome?.state).toBe('cancelled')
+      expect(ctx.jobsService.getById(job.id)).toBeNull()
+    })
+
+    it('never leaves a job running when a handler returns no error', async () => {
+      const job = queue()
+
+      const result = await processJobWithHandlers(
+        ctx,
+        job,
+        {
+          [SyncJobType.BackwardHistory]: async (): Promise<RealJobResult> => ({
+            success: false,
+            messagesFetched: 0,
+          }),
+        },
+        () => ({ success: false, messagesFetched: 0 }),
+      )
+
+      expect(result.outcome?.state).toBe('retrying')
+      expect(ctx.jobsService.getById(job.id)).toMatchObject({
+        status: 'pending',
+        attempts: 1,
+        error_message: 'Job ended without a result',
+      })
+    })
+
+    it('retries a job whose handler throws a transient error', async () => {
+      const job = queue()
+
+      const result = await processJobWithHandlers(
+        ctx,
+        job,
+        {
+          [SyncJobType.BackwardHistory]: async (): Promise<RealJobResult> => {
+            throw new Error('database is locked')
+          },
+        },
+        () => ({ success: false, messagesFetched: 0 }),
+      )
+
+      expect(result).toMatchObject({
+        error: 'database is locked',
+        permanent: false,
+        outcome: { state: 'retrying', attempts: 1 },
+      })
+    })
   })
 
   describe('exception handling', () => {

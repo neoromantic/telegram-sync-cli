@@ -345,9 +345,15 @@ export function initSyncSchema(db: Database): void {
       error_message     TEXT,
       created_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
       started_at        INTEGER,
-      completed_at      INTEGER
+      completed_at      INTEGER,
+      attempts          INTEGER NOT NULL DEFAULT 0,
+      next_run_at       INTEGER NOT NULL DEFAULT 0
     )
   `)
+
+  // Columns added after 0.1.4
+  ensureColumn(db, 'sync_jobs', 'attempts', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'sync_jobs', 'next_run_at', 'INTEGER NOT NULL DEFAULT 0')
 
   // Sync jobs indexes
   db.run(`
@@ -438,6 +444,10 @@ export class SyncJobRow {
   created_at!: number
   started_at!: number | null
   completed_at!: number | null
+  /** Failed tries so far; a FLOOD_WAIT doesn't count */
+  attempts!: number
+  /** When a pending job may run next, in ms since the epoch; 0 means now */
+  next_run_at!: number
 }
 
 /** Daemon status row class */

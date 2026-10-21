@@ -1,5 +1,6 @@
 import type { MessageInput } from '../db/messages-cache'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
+import { isPermanentSyncError } from './sync-retry'
 import {
   canMakeApiCall,
   getInputPeer,
@@ -67,6 +68,7 @@ export async function processForwardCatchupReal(
       success: false,
       messagesFetched: 0,
       error: `Could not build InputPeer for chat ${chatId}`,
+      permanent: true,
     }
     return result
   }
@@ -152,6 +154,7 @@ export async function processForwardCatchupReal(
       success: false,
       messagesFetched: 0,
       error: error.message,
+      permanent: isPermanentSyncError(err),
     }
   }
 
@@ -179,6 +182,7 @@ export async function processBackwardHistoryReal(
       success: false,
       messagesFetched: 0,
       error: `Could not build InputPeer for chat ${chatId}`,
+      permanent: true,
     }
   }
 
@@ -277,6 +281,7 @@ export async function processBackwardHistoryReal(
       success: false,
       messagesFetched: 0,
       error: error.message,
+      permanent: isPermanentSyncError(err),
     }
   }
 
@@ -319,6 +324,7 @@ export async function processInitialLoadReal(
       success: false,
       messagesFetched: 0,
       error: `Could not build InputPeer for chat ${chatId}`,
+      permanent: true,
     }
     return result
   }
@@ -394,6 +400,7 @@ export async function processInitialLoadReal(
       success: false,
       messagesFetched: 0,
       error: error.message,
+      permanent: isPermanentSyncError(err),
     }
   }
 
@@ -431,5 +438,6 @@ export async function processJobReal(
     success: false,
     messagesFetched: 0,
     error: `Unknown job type: ${jobType}`,
+    permanent: true,
   }))
 }

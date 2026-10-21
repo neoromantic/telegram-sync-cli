@@ -476,6 +476,24 @@ describe('migration from 0.1.4', () => {
     )
   `
 
+  // sync_jobs as 0.1.4 created it
+  const SYNC_JOBS_0_1_4 = `
+    CREATE TABLE sync_jobs (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id           INTEGER NOT NULL,
+      job_type          TEXT NOT NULL,
+      priority          INTEGER NOT NULL DEFAULT 3,
+      status            TEXT NOT NULL DEFAULT 'pending',
+      cursor_start      INTEGER,
+      cursor_end        INTEGER,
+      messages_fetched  INTEGER DEFAULT 0,
+      error_message     TEXT,
+      created_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+      started_at        INTEGER,
+      completed_at      INTEGER
+    )
+  `
+
   let dir: string
 
   beforeEach(() => {
@@ -495,8 +513,28 @@ describe('migration from 0.1.4', () => {
         (chat_id, chat_type, forward_cursor, backward_cursor, sync_priority, sync_enabled, synced_messages)
       VALUES (42, 'private', 1000, 1, 1, 1, 1000)
     `)
+    db.run(SYNC_JOBS_0_1_4)
+    db.run(`
+      INSERT INTO sync_jobs (chat_id, job_type, priority, status, error_message, completed_at)
+      VALUES
+        (42, 'backward_history', 1, 'pending', NULL, NULL),
+        (42, 'forward_catchup', 0, 'failed', 'Rate limited: wait 30s', 1700000000000)
+    `)
     return db
   }
+
+  const jobsOf = (db: Database) =>
+    db
+      .prepare(
+        'SELECT id, status, attempts, next_run_at FROM sync_jobs ORDER BY id',
+      )
+      .all()
+  const columnsOf = (db: Database, table: string) =>
+    (
+      db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+        name: string
+      }>
+    ).map((col) => col.name)
 
   const schemaOf = (db: Database) =>
     db.query('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()
@@ -532,6 +570,34 @@ describe('migration from 0.1.4', () => {
     initSyncSchema(db)
     expect(schemaOf(db)).toEqual(schema)
     expect(rowOf(db)).toEqual(row)
+    db.close()
+  })
+
+  it('gives existing sync jobs no attempts and makes them due', () => {
+    const db = createOldDatabase(join(dir, 'cache.db'))
+
+    initSyncSchema(db)
+
+    const jobs = [
+      { id: 1, status: 'pending', attempts: 0, next_run_at: 0 },
+      { id: 2, status: 'failed', attempts: 0, next_run_at: 0 },
+    ]
+    expect(jobsOf(db)).toEqual(jobs)
+
+    const schema = schemaOf(db)
+    initSyncSchema(db)
+    expect(schemaOf(db)).toEqual(schema)
+    expect(jobsOf(db)).toEqual(jobs)
+
+    const fresh = new Database(':memory:')
+    initCacheSchema(fresh)
+    initSyncSchema(fresh)
+    expect(columnsOf(db, 'sync_jobs')).toEqual(columnsOf(fresh, 'sync_jobs'))
+    expect(columnsOf(db, 'sync_jobs').slice(-2)).toEqual([
+      'attempts',
+      'next_run_at',
+    ])
+    fresh.close()
     db.close()
   })
 

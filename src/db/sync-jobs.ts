@@ -31,6 +31,35 @@ export interface SyncJobProgress {
 }
 
 /**
+ * A job to run again later, from `retryLater`
+ */
+export interface SyncJobRetry {
+  /** The error, kept as the job's last error */
+  error: string
+  /** When the job may run again, in ms since the epoch */
+  runAt: number
+  /** Whether the try counts towards the attempts; a FLOOD_WAIT doesn't */
+  countAttempt: boolean
+}
+
+/**
+ * What `retryLater` did: the job is pending again, it was deleted because
+ * its chat was turned off while it ran, or it wasn't running
+ */
+export type SyncJobRetryResult = 'retrying' | 'cancelled' | 'not_running'
+
+/**
+ * Job counts by status. `pending` includes the jobs waiting for a retry;
+ * `retrying` counts those that failed at least once.
+ */
+export interface SyncJobCounts {
+  pending: number
+  running: number
+  failed: number
+  retrying: number
+}
+
+/**
  * Sync jobs service interface
  */
 export interface SyncJobsService {
@@ -38,32 +67,46 @@ export interface SyncJobsService {
   create(input: SyncJobInput): SyncJobRow
   /** Get job by ID */
   getById(id: number): SyncJobRow | null
-  /** Get the next pending job (highest priority, oldest first) */
+  /** Get the next pending job that is due (highest priority, oldest first) */
   getNextPending(): SyncJobRow | null
-  /** Get the next pending job of the given types (highest priority, oldest first) */
+  /** Get the next due pending job of the given types (highest priority, oldest first) */
   getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null
-  /** Atomically claim the next pending job (prevents race conditions) */
+  /** Atomically claim the next due pending job (prevents race conditions) */
   claimNextJob(): SyncJobRow | null
-  /** Get all pending jobs */
+  /** Get all pending jobs, including those waiting for a retry */
   getPendingJobs(): SyncJobRow[]
   /** Mark job as running */
   markRunning(id: number): boolean
   /** Mark job as completed */
   markCompleted(id: number): boolean
-  /** Mark job as failed */
+  /** Mark job as failed, counting the attempt */
   markFailed(id: number, errorMessage: string): boolean
+  /**
+   * Make a running job pending again, due at `runAt`. If its chat was turned
+   * off while it ran, delete it instead.
+   */
+  retryLater(id: number, retry: SyncJobRetry): SyncJobRetryResult
   /** Update job progress */
   updateProgress(id: number, progress: SyncJobProgress): void
   /** Get all running jobs */
   getRunningJobs(): SyncJobRow[]
   /** Get jobs for a specific chat */
   getJobsForChat(chatId: number): SyncJobRow[]
-  /** Check if chat has pending or running job of given type */
+  /**
+   * Check if chat has a pending, running or failed job of given type. A
+   * failed job holds its chat's slot for that job type until it is deleted.
+   */
   hasActiveJobForChat(chatId: number, jobType: SyncJobType): boolean
   /** Clean up old completed jobs */
   cleanupCompleted(olderThanMs: number): number
   /** Clean up old failed jobs */
   cleanupFailed(olderThanMs: number): number
+  /** Delete failed jobs of one chat, or of every chat, whatever their age */
+  deleteFailed(chatId?: number): number
+  /** The newest failed jobs */
+  getFailedJobs(limit: number): SyncJobRow[]
+  /** Count jobs by status */
+  countJobs(): SyncJobCounts
   /** Cancel pending jobs for a chat */
   cancelPendingForChat(chatId: number): number
   /** Delete every pending job of a type */
@@ -95,7 +138,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     getNextPending: db
       .query(`
       SELECT * FROM sync_jobs
-      WHERE status = $status
+      WHERE status = $status AND next_run_at <= $now
       ORDER BY priority ASC, created_at ASC, id ASC
       LIMIT 1
     `)
@@ -107,7 +150,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       SET status = $newStatus, started_at = $now
       WHERE id = (
         SELECT id FROM sync_jobs
-        WHERE status = $pendingStatus
+        WHERE status = $pendingStatus AND next_run_at <= $now
         ORDER BY priority ASC, created_at ASC, id ASC
         LIMIT 1
       )
@@ -138,8 +181,24 @@ export function createSyncJobsService(db: Database): SyncJobsService {
 
     markFailed: db.prepare(`
       UPDATE sync_jobs
-      SET status = $status, error_message = $error, completed_at = $now
+      SET status = $status, error_message = $error, completed_at = $now,
+          attempts = attempts + 1
       WHERE id = $id AND status = $expected_status
+    `),
+
+    retryLater: db.prepare(`
+      UPDATE sync_jobs
+      SET status = $pending_status, attempts = attempts + $inc,
+          next_run_at = $run_at, error_message = $error, started_at = NULL
+      WHERE id = $id AND status = $running_status
+        AND EXISTS (
+          SELECT 1 FROM chat_sync_state s
+          WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
+        )
+    `),
+
+    deleteRunning: db.prepare(`
+      DELETE FROM sync_jobs WHERE id = $id AND status = $running_status
     `),
 
     updateProgress: db.prepare(`
@@ -166,7 +225,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       SELECT 1 FROM sync_jobs
       WHERE chat_id = $chat_id
         AND job_type = $job_type
-        AND status IN ($pending_status, $running_status)
+        AND status IN ($pending_status, $running_status, $failed_status)
       LIMIT 1
     `),
 
@@ -178,6 +237,32 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     cleanupFailed: db.prepare(`
       DELETE FROM sync_jobs
       WHERE status = $status AND completed_at < $before
+    `),
+
+    deleteFailed: db.prepare(`
+      DELETE FROM sync_jobs WHERE status = $status
+    `),
+
+    deleteFailedForChat: db.prepare(`
+      DELETE FROM sync_jobs WHERE status = $status AND chat_id = $chat_id
+    `),
+
+    getFailedJobs: db
+      .query(`
+      SELECT * FROM sync_jobs
+      WHERE status = $status
+      ORDER BY completed_at DESC, id DESC
+      LIMIT $limit
+    `)
+      .as(SyncJobRow),
+
+    countJobs: db.query(`
+      SELECT
+        COALESCE(SUM(status = $pending_status), 0) AS pending,
+        COALESCE(SUM(status = $running_status), 0) AS running,
+        COALESCE(SUM(status = $failed_status), 0) AS failed,
+        COALESCE(SUM(status = $pending_status AND attempts > 0), 0) AS retrying
+      FROM sync_jobs
     `),
 
     cancelPendingForChat: db.prepare(`
@@ -247,14 +332,20 @@ export function createSyncJobsService(db: Database): SyncJobsService {
 
     getNextPending(): SyncJobRow | null {
       return (
-        stmts.getNextPending.get({ $status: SyncJobStatus.Pending }) ?? null
+        stmts.getNextPending.get({
+          $status: SyncJobStatus.Pending,
+          $now: Date.now(),
+        }) ?? null
       )
     },
 
     getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null {
       if (jobTypes.length === 0) return null
       const placeholders = jobTypes.map((_, i) => `$type${i}`).join(', ')
-      const params: Record<string, string> = { $status: SyncJobStatus.Pending }
+      const params: Record<string, string | number> = {
+        $status: SyncJobStatus.Pending,
+        $now: Date.now(),
+      }
       jobTypes.forEach((jobType, i) => {
         params[`$type${i}`] = jobType
       })
@@ -263,7 +354,8 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         db
           .query(`
             SELECT * FROM sync_jobs
-            WHERE status = $status AND job_type IN (${placeholders})
+            WHERE status = $status AND next_run_at <= $now
+              AND job_type IN (${placeholders})
             ORDER BY priority ASC, created_at ASC, id ASC
             LIMIT 1
           `)
@@ -317,6 +409,26 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return result.changes === 1
     },
 
+    retryLater(id: number, retry: SyncJobRetry): SyncJobRetryResult {
+      // Each statement is atomic, and tg chats sync turns a chat off in an
+      // IMMEDIATE transaction, so the two can't interleave.
+      const updated = stmts.retryLater.run({
+        $id: id,
+        $pending_status: SyncJobStatus.Pending,
+        $running_status: SyncJobStatus.Running,
+        $inc: retry.countAttempt ? 1 : 0,
+        $run_at: retry.runAt,
+        $error: retry.error,
+      })
+      if (updated.changes === 1) return 'retrying'
+
+      const deleted = stmts.deleteRunning.run({
+        $id: id,
+        $running_status: SyncJobStatus.Running,
+      })
+      return deleted.changes === 1 ? 'cancelled' : 'not_running'
+    },
+
     updateProgress(id: number, progress: SyncJobProgress): void {
       stmts.updateProgress.run({
         $id: id,
@@ -340,6 +452,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         $job_type: jobType,
         $pending_status: SyncJobStatus.Pending,
         $running_status: SyncJobStatus.Running,
+        $failed_status: SyncJobStatus.Failed,
       })
       return result !== null
     },
@@ -360,6 +473,31 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         $before: before,
       })
       return result.changes
+    },
+
+    deleteFailed(chatId?: number): number {
+      if (chatId === undefined) {
+        return stmts.deleteFailed.run({ $status: SyncJobStatus.Failed }).changes
+      }
+      return stmts.deleteFailedForChat.run({
+        $status: SyncJobStatus.Failed,
+        $chat_id: chatId,
+      }).changes
+    },
+
+    getFailedJobs(limit: number): SyncJobRow[] {
+      return stmts.getFailedJobs.all({
+        $status: SyncJobStatus.Failed,
+        $limit: limit,
+      })
+    },
+
+    countJobs(): SyncJobCounts {
+      return stmts.countJobs.get({
+        $pending_status: SyncJobStatus.Pending,
+        $running_status: SyncJobStatus.Running,
+        $failed_status: SyncJobStatus.Failed,
+      }) as SyncJobCounts
     },
 
     cancelPendingForChat(chatId: number): number {

@@ -14,6 +14,7 @@ import {
 } from 'bun:test'
 
 import { createTestCacheDatabase } from '../db/schema'
+import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import type { ErrorCode } from '../types'
 import { ErrorCodes } from '../types'
@@ -201,6 +202,38 @@ describe('SQL Commands', () => {
       expect(parsed.success).toBe(true)
       expect(parsed.data.table).toBe('users_cache')
       expect(parsed.data.columns.length).toBeGreaterThan(0)
+    })
+
+    it('describes the retry columns of sync_jobs', async () => {
+      initSyncSchema(testCacheDb)
+      const { printSchemaCommand } = await import(
+        '../commands/sql/print-schema'
+      )
+      const run = printSchemaCommand.run as CommandRun
+
+      await run({
+        args: { table: 'sync_jobs', format: 'json', _: [] },
+      })
+
+      const parsed = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+      const columns = Object.fromEntries(
+        (parsed.data.columns as Array<{ name: string }>).map((col) => [
+          col.name,
+          col,
+        ]),
+      )
+      expect(columns.attempts).toMatchObject({
+        type: 'INTEGER',
+        nullable: false,
+        defaultValue: '0',
+        description: expect.stringContaining('FLOOD_WAIT does not count'),
+      })
+      expect(columns.next_run_at).toMatchObject({
+        type: 'INTEGER',
+        defaultValue: '0',
+        semanticType: 'timestamp',
+        description: expect.stringContaining('0 means now'),
+      })
     })
 
     it('prints text schema for a table', async () => {

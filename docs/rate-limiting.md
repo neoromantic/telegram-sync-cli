@@ -72,10 +72,10 @@ later calls while the method is blocked.
 The daemon's sync jobs make one `messages.getHistory` call each, at most one job every 3
 seconds, shared by its three lanes (catch-up, first pages, history; see
 [sync-strategy.md](sync-strategy.md#job-lanes)). While a FLOOD_WAIT on `messages.getHistory`
-lasts, no lane runs a job. The job that hit it fails; its chat's cursor stays where the last
-page left it, and the next refresh after the wait queues the chat again. Retries with backoff
-for jobs that keep failing are tracked in
-[#9](https://github.com/neoromantic/telegram-sync-cli/issues/9).
+lasts, no lane runs a job. The job that hit it doesn't fail: it waits out the FLOOD_WAIT as a
+pending job and uses no attempt, then runs again from its chat's cursor, where the last page
+left it. Other errors retry with backoff (see
+[sync-strategy.md](sync-strategy.md#retries)).
 
 ## Notes
 

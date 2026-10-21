@@ -62,7 +62,7 @@ export interface SyncScheduler {
   updateProgress(jobId: number, messagesFetched: number, cursor?: number): void
   /** Get scheduler status */
   getStatus(): SchedulerStatus
-  /** Clean up old completed jobs */
+  /** Delete completed and failed jobs older than maxAgeMs (default 24 h) */
   cleanup(maxAgeMs?: number): number
   /** Cancel all pending jobs for a chat */
   cancelJobsForChat(chatId: number): number
@@ -204,7 +204,11 @@ class SyncSchedulerImpl implements SyncScheduler {
   }
 
   async initializeForStartup(): Promise<void> {
+    // A crash doesn't count as an attempt.
     this.recoverCrashedJobs()
+    // A restart retries every failed job, and removes the failed rows older
+    // versions left: refreshQueues below queues their chats again.
+    this.jobsService.deleteFailed()
     // Catch-up is queued again below for the chats that are behind; older
     // versions left one pending for every enabled chat.
     this.jobsService.deletePendingOfType(SyncJobType.ForwardCatchup)
@@ -216,6 +220,8 @@ class SyncSchedulerImpl implements SyncScheduler {
   /**
    * Queue the work that is due. Called on start, after a reconnect's dialog
    * pass and every 30 loop ticks; a chat with nothing to do costs no call.
+   * A chat whose job of a type failed for good gets no new job of that type
+   * until the failed row is deleted.
    */
   refreshQueues(): void {
     // Catch-up only for chats whose newest message is above the cursor or
@@ -237,14 +243,15 @@ class SyncSchedulerImpl implements SyncScheduler {
     }
   }
 
+  /** The lane's next job that is due; jobs waiting for a retry are skipped */
   private nextInLane(lane: SyncLane): SyncJobRow | null {
     return this.jobsService.getNextPendingOfTypes(SYNC_LANES[lane])
   }
 
   /**
-   * The next job: the oldest, highest-priority job of the lane whose slot
-   * it is, or of the first lane with work if that lane is empty. Only
-   * looks; recordJobRun moves to the next slot.
+   * The next job: the oldest, highest-priority due job of the lane whose
+   * slot it is, or of the first lane with work if that lane has none due.
+   * Only looks; recordJobRun moves to the next slot.
    */
   getNextJob(): SyncJobRow | null {
     const lane = SYNC_SLOT_CYCLE[this.slot % SYNC_SLOT_CYCLE.length]!
@@ -311,7 +318,10 @@ class SyncSchedulerImpl implements SyncScheduler {
   }
 
   cleanup(maxAgeMs = 24 * 60 * 60 * 1000): number {
-    return this.jobsService.cleanupCompleted(maxAgeMs)
+    return (
+      this.jobsService.cleanupCompleted(maxAgeMs) +
+      this.jobsService.cleanupFailed(maxAgeMs)
+    )
   }
 
   cancelJobsForChat(chatId: number): number {

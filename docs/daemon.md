@@ -16,7 +16,8 @@ The `tg daemon` subcommand runs a long-lived process that:
 - **READ-ONLY**: The daemon never performs mutations (no sending/editing messages)
 - **Foreground execution**: Users manage backgrounding (tmux, systemd, etc.)
 - **Multi-account**: Connects all configured accounts (soft limit planned)
-- **Resilient**: Reconnects with backoff; handles rate limits and errors
+- **Resilient**: Reconnects with backoff; retries failed sync jobs with backoff; handles rate
+  limits
 
 ---
 
@@ -98,7 +99,7 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
 - Three lanes (catch-up, first pages, history) that take turns, so history makes progress
   next to catch-up; inside a lane, small chats go first
 - A refresh every ~30 seconds (daemon loop) and after each reconnect's dialog pass queues
-  the work that is due again: chats first seen live, pages that failed
+  the work that is due again, such as chats first seen live
 
 See [sync-strategy.md](sync-strategy.md) for the rules.
 
@@ -118,6 +119,7 @@ Key files:
 - `src/daemon/sync-worker-core.ts`
 - `src/daemon/sync-worker-real-jobs.ts`
 - `src/daemon/sync-worker-real-context.ts`
+- `src/daemon/sync-retry.ts` (backoff and permanent errors)
 
 ---
 
@@ -166,6 +168,11 @@ Scheduler → sync_jobs → worker → messages_cache + chat_sync_state
   messages while the connection was down. If the pass fails part-way, every
   synced chat it didn't list gets one checking page; a chat turned on with
   `tg chats sync` that it didn't list gets one either way
+- A sync job that fails retries after 1, 2, 4 and 8 minutes and is marked failed after the
+  fifth attempt; a permanent error (such as `CHANNEL_PRIVATE`) fails it at once, and a
+  FLOOD_WAIT only delays it. A failed job's chat isn't queued again for that job type until
+  the daemon deletes the failed row: after 24 hours or on the next start. Each failure is
+  logged as a warning (see [sync-strategy.md](sync-strategy.md#retries))
 - Tracks last activity to avoid noisy health checks
 - Validates sync job state transitions
 - Uses rate limit service with flood wait tracking

@@ -234,6 +234,6 @@ describe('mainLoop', () => {
 
     await runWithImmediateTimeouts(() => mainLoop(ctx))
 
-    expect(ctx.logger.debug).toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith('Cleaned up 2 old jobs')
   })
 })

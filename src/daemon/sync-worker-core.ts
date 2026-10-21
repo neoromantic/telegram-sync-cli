@@ -14,7 +14,11 @@ import type { MessageInput, MessagesCache } from '../db/messages-cache'
 import type { RateLimitsService } from '../db/rate-limits'
 import type { SyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
-import { processJobWithHandlers, runOnceBase } from './sync-worker-utils'
+import {
+  type JobOutcome,
+  processJobWithHandlers,
+  runOnceBase,
+} from './sync-worker-utils'
 
 /**
  * Telegram API message representation (simplified)
@@ -113,6 +117,10 @@ export interface JobResult {
   error?: string
   rateLimited?: boolean
   waitSeconds?: number
+  /** The error won't go away on a retry, so the job fails at once */
+  permanent?: boolean
+  /** How the job row ended: completed, deferred, retrying, failed… */
+  outcome?: JobOutcome
 }
 
 interface SyncWorkerContext {
@@ -390,6 +398,7 @@ async function processJob(
     success: false,
     messagesFetched: 0,
     error: `Unknown job type: ${jobType}`,
+    permanent: true,
   }))
 }
 

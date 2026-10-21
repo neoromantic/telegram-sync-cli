@@ -2,7 +2,7 @@
  * Tests for sync scheduler
  */
 import { Database } from 'bun:sqlite'
-import { beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createMessagesCache } from '../db/messages-cache'
@@ -15,12 +15,25 @@ import {
   SyncPriority,
 } from '../db/sync-schema'
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
 describe('SyncScheduler', () => {
   let db: Database
   let scheduler: SyncScheduler
   let jobsService: ReturnType<typeof createSyncJobsService>
   let chatSyncState: ReturnType<typeof createChatSyncStateService>
   let messagesCache: ReturnType<typeof createMessagesCache>
+
+  const realNow = Date.now
+  afterEach(() => {
+    Date.now = realNow
+  })
+
+  /** Run a job and fail it for good */
+  function failJob(id: number, error = 'CHANNEL_PRIVATE') {
+    jobsService.markRunning(id)
+    jobsService.markFailed(id, error)
+  }
 
   beforeEach(() => {
     db = new Database(':memory:')
@@ -544,6 +557,51 @@ describe('SyncScheduler', () => {
       expect(jobsService.getJobsForChat(1)).toHaveLength(0)
     })
 
+    it('queues no job of a type whose job failed, until the failed row is gone', () => {
+      const t0 = 1_700_000_000_000
+      Date.now = () => t0
+      seed(1, { cursor: 1000, top: 1150 })
+      seed(2, { historyComplete: false })
+      seed(3, { cursor: 1000, top: 1000, historyComplete: false })
+      const cases = [
+        [1, SyncJobType.ForwardCatchup],
+        [2, SyncJobType.InitialLoad],
+        [3, SyncJobType.BackwardHistory],
+      ] as const
+
+      scheduler.refreshQueues()
+      for (const [chatId, jobType] of cases) {
+        const jobs = jobsOf(chatId, jobType)
+        expect(jobs).toHaveLength(1)
+        failJob(jobs[0]!.id)
+      }
+
+      for (let i = 0; i < 3; i++) scheduler.refreshQueues()
+      for (const [chatId, jobType] of cases) {
+        expect(jobsOf(chatId, jobType).map((job) => job.status)).toEqual([
+          'failed',
+        ])
+      }
+
+      // tg chats sync deletes the chat's failed rows
+      jobsService.deleteFailed(1)
+      scheduler.refreshQueues()
+      expect(
+        jobsOf(1, SyncJobType.ForwardCatchup).map((job) => job.status),
+      ).toEqual(['pending'])
+      expect(jobsOf(2, SyncJobType.InitialLoad)).toHaveLength(1)
+
+      // The cleanup deletes them a day later
+      Date.now = () => t0 + DAY_MS + 1
+      scheduler.cleanup()
+      scheduler.refreshQueues()
+      for (const [chatId, jobType] of cases) {
+        expect(jobsOf(chatId, jobType).map((job) => job.status)).toEqual([
+          'pending',
+        ])
+      }
+    })
+
     it('queues the first page for an enabled chat without a cursor', () => {
       seed(1, { historyComplete: false })
       chatSyncState.incrementSyncedMessages(1, 3)
@@ -620,6 +678,28 @@ describe('SyncScheduler', () => {
 
       jobsService.deletePendingOfType(SyncJobType.ForwardCatchup)
       expect(run(3)).toEqual(['history', 'history', 'history'])
+    })
+
+    it('give the slot of a lane whose jobs all wait for a retry to the next lane', () => {
+      const now = 1_700_000_000_000
+      Date.now = () => now
+      const history = jobsService.create({
+        chat_id: 2000,
+        job_type: SyncJobType.BackwardHistory,
+        priority: 1,
+      })
+      db.run('UPDATE sync_jobs SET next_run_at = ? WHERE id = ?', [
+        now + 60_000,
+        history.id,
+      ])
+      queue(SyncJobType.InitialLoad, 1)
+
+      // Catch-up, first page and catch-up slots used: it is history's turn
+      for (let i = 0; i < 3; i++) scheduler.recordJobRun(history)
+      expect(scheduler.getNextJob()?.job_type).toBe(SyncJobType.InitialLoad)
+
+      Date.now = () => now + 60_000
+      expect(scheduler.getNextJob()?.id).toBe(history.id)
     })
 
     it('only move to the next slot when a job ran', () => {
@@ -808,6 +888,46 @@ describe('SyncScheduler', () => {
     })
   })
 
+  describe('cleanup', () => {
+    it('deletes completed and failed jobs older than 24 hours', () => {
+      const t0 = 1_700_000_000_000
+      const finish = (chatId: number, failed: boolean) => {
+        const job = jobsService.create({
+          chat_id: chatId,
+          job_type: SyncJobType.ForwardCatchup,
+          priority: SyncPriority.High,
+        })
+        jobsService.markRunning(job.id)
+        if (failed) jobsService.markFailed(job.id, 'Network error')
+        else jobsService.markCompleted(job.id)
+        return job.id
+      }
+
+      Date.now = () => t0
+      finish(1, false)
+      finish(2, true)
+      Date.now = () => t0 + 60 * 60 * 1000
+      const kept = [finish(3, false), finish(4, true)]
+      kept.push(
+        jobsService.create({
+          chat_id: 5,
+          job_type: SyncJobType.ForwardCatchup,
+          priority: SyncPriority.High,
+        }).id,
+      )
+
+      Date.now = () => t0 + DAY_MS + 1
+      expect(scheduler.cleanup(DAY_MS)).toBe(2)
+      expect(
+        (
+          db.query('SELECT id FROM sync_jobs ORDER BY id').all() as Array<{
+            id: number
+          }>
+        ).map((row) => row.id),
+      ).toEqual(kept)
+    })
+  })
+
   describe('recoverCrashedJobs', () => {
     it('recovers running jobs from crashed daemon', () => {
       const job1 = jobsService.create({
@@ -933,6 +1053,80 @@ describe('SyncScheduler', () => {
           [firstPage.id, -4001, SyncPriority.Medium],
         ].sort(),
       )
+    })
+  })
+
+  describe('initializeForStartup with failed jobs', () => {
+    it('deletes every failed job and queues its chat again', async () => {
+      const t0 = 1_700_000_000_000
+      Date.now = () => t0
+      // No cursor yet: the first page failed in this very millisecond
+      chatSyncState.upsert({
+        chat_id: 1,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+      })
+      const firstPage = jobsService.create({
+        chat_id: 1,
+        job_type: SyncJobType.InitialLoad,
+        priority: SyncPriority.High,
+      })
+      failJob(firstPage.id)
+      // Behind, with a failed catch-up an older version left
+      chatSyncState.upsert({
+        chat_id: 2,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 1000,
+        backward_cursor: 1,
+      })
+      chatSyncState.markHistoryComplete(2)
+      chatSyncState.raiseTopMessageId(2, 1150)
+      db.run(
+        `INSERT INTO sync_jobs (chat_id, job_type, priority, status, error_message, completed_at)
+         VALUES (2, 'forward_catchup', 0, 'failed', 'Rate limited: wait 30s', ?)`,
+        [t0 - 60_000],
+      )
+      // History waiting for its third try
+      chatSyncState.upsert({
+        chat_id: 3,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 1000,
+        backward_cursor: 500,
+      })
+      chatSyncState.raiseTopMessageId(3, 1000)
+      const history = jobsService.create({
+        chat_id: 3,
+        job_type: SyncJobType.BackwardHistory,
+        priority: SyncPriority.High,
+      })
+      db.run(
+        'UPDATE sync_jobs SET attempts = 2, next_run_at = ? WHERE id = ?',
+        [t0 + 240_000, history.id],
+      )
+
+      await scheduler.initializeForStartup()
+
+      expect(jobsService.getFailedJobs(10)).toEqual([])
+      expect(jobsService.getJobsForChat(1)).toMatchObject([
+        { job_type: SyncJobType.InitialLoad, status: 'pending', attempts: 0 },
+      ])
+      expect(jobsService.getJobsForChat(1)[0]?.id).not.toBe(firstPage.id)
+      expect(jobsService.getJobsForChat(2)).toMatchObject([
+        { job_type: SyncJobType.ForwardCatchup, status: 'pending' },
+      ])
+      expect(jobsService.getJobsForChat(3)).toMatchObject([
+        {
+          id: history.id,
+          status: 'pending',
+          attempts: 2,
+          next_run_at: t0 + 240_000,
+        },
+      ])
     })
   })
 

@@ -27,7 +27,12 @@ import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import {
+  initSyncSchema,
+  type SyncJobRow,
+  SyncJobType,
+  SyncPriority,
+} from '../db/sync-schema'
 import {
   createMultiChatHistory,
   type GetHistoryRequest,
@@ -288,16 +293,26 @@ describe('job budget with 500 chats', () => {
     await scheduler.initializeForStartup()
 
     // Catch-up, first page, catch-up, then the history page that floods
-    const ran: string[] = []
+    const ran: SyncJobRow[] = []
     for (let i = 0; i < 4; i++) {
-      const job = scheduler.getNextJob()!
-      ran.push(job.job_type)
+      ran.push(scheduler.getNextJob()!)
       ctx.runtime.lastJobProcessTime = 0
       await processJobs(ctx)
     }
-    expect(ran[3]).toBe(SyncJobType.BackwardHistory)
+    const floodedJob = ran[3]!
+    expect(floodedJob.job_type).toBe(SyncJobType.BackwardHistory)
     expect(flooded).toBe(true)
     expect(chatSyncState.get(historyChat)?.backward_cursor).toBe(301)
+
+    // The wait is a delay: the job keeps its attempts and nothing failed
+    const failedRows = () =>
+      countOf("SELECT COUNT(*) AS n FROM sync_jobs WHERE status = 'failed'")
+    expect(failedRows()).toBe(0)
+    expect(jobsService.getById(floodedJob.id)).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      error_message: 'Rate limited: wait 30s',
+    })
 
     // While the block lasts, no lane runs a job
     const requests = history.requestCount
@@ -309,6 +324,11 @@ describe('job budget with 500 chats', () => {
     expect(history.requestCount).toBe(requests)
     expect(jobsService.getPendingJobs()).toHaveLength(pending)
     expect(scheduler.getNextJob()).not.toBeNull()
+    scheduler.refreshQueues()
+    expect(jobsService.getById(floodedJob.id)).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+    })
 
     const realNow = Date.now
     const later = realNow() + 31_000
@@ -331,6 +351,12 @@ describe('job budget with 500 chats', () => {
     const state = chatSyncState.get(historyChat)
     expect(state?.backward_cursor).toBe(1)
     expect(state?.history_complete).toBe(1)
+    // The page that flooded ran again as the same job
+    expect(jobsService.getById(floodedJob.id)).toMatchObject({
+      status: 'completed',
+      attempts: 0,
+    })
+    expect(failedRows()).toBe(0)
   }, 60_000)
 
   it("stops a chat's pages after tg chats sync --off", async () => {

@@ -253,7 +253,9 @@ CREATE TABLE sync_jobs (
   error_message TEXT,
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
   started_at INTEGER,
-  completed_at INTEGER
+  completed_at INTEGER,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_run_at INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX idx_sync_jobs_priority ON sync_jobs(priority, created_at) WHERE status = 'pending';
@@ -262,6 +264,16 @@ CREATE INDEX idx_sync_jobs_lane
 CREATE INDEX idx_sync_jobs_status ON sync_jobs(status);
 CREATE INDEX idx_sync_jobs_chat ON sync_jobs(chat_id);
 ```
+
+- `status`: `pending` includes jobs waiting for a retry. A `failed` job keeps its chat from
+  getting a new job of the same type until the daemon deletes it: after 24 hours or on start.
+- `attempts`: failed tries so far. A FLOOD_WAIT doesn't count; the fifth failure, or a
+  permanent error, marks the job `failed`.
+- `next_run_at`: when a pending job may run, in milliseconds since the epoch. `0` means now;
+  a job that failed or hit a FLOOD_WAIT waits until then (see
+  [sync-strategy.md](sync-strategy.md#retries)).
+- `error_message`: the last error, kept while the job waits for its retry.
+- Databases from 0.1.4 get `attempts` and `next_run_at` added with their defaults.
 
 ### Table: daemon_status
 
