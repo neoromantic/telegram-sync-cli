@@ -138,7 +138,7 @@ Reference: [CLI commands](docs/cli-commands.md), [authentication](docs/auth.md),
 ## For AI agents
 
 - Output is JSON by default. Errors look like
-  `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"wait": 30}, "suggestion": "…"}}`.
+  `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}}}`.
 - Exit codes: `0` ok, `1` general error, `2` auth required, `3` invalid arguments,
   `4` network error, `5` Telegram error or rate limit, `6` account not found.
 - `tg sql --query "…"` runs read-only SQL over the cache; `tg sql print-schema` prints the

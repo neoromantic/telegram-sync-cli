@@ -63,7 +63,9 @@ instead of failing it:
 - The daemon waits up to 5 minutes (for example during the dialog bootstrap on accounts
   with thousands of chats) and logs each wait.
 
-Longer waits fail the request and are recorded as described above.
+Longer waits fail the request and are recorded as described above. CLI commands report them
+as `RATE_LIMITED` with `details: { method, wait_seconds }`, both on the failed request and on
+later calls while the method is blocked.
 
 ## Daemon Sync Jobs
 
