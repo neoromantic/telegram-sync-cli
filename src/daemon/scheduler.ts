@@ -11,7 +11,7 @@ import {
   type ChatSyncStateRow,
   type SyncJobRow,
   SyncJobType,
-  type SyncPriority,
+  SyncPriority,
 } from '../db/sync-schema'
 
 /**
@@ -135,9 +135,16 @@ class SyncSchedulerImpl implements SyncScheduler {
 
   /**
    * A job's priority inside its lane is its chat's tier: small chats before
-   * medium groups.
+   * medium groups. A chat turned on by hand gets its first page ahead of
+   * everything, so the user sees it soon.
    */
-  private lanePriority(state: ChatSyncStateRow): SyncPriority {
+  private lanePriority(
+    state: ChatSyncStateRow,
+    jobType: SyncJobType,
+  ): SyncPriority {
+    if (jobType === SyncJobType.InitialLoad && state.sync_mode === 'on') {
+      return SyncPriority.Realtime
+    }
     return state.sync_priority
   }
 
@@ -154,7 +161,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.jobsService.create({
       chat_id: chatId,
       job_type: SyncJobType.ForwardCatchup,
-      priority: this.lanePriority(state),
+      priority: this.lanePriority(state, SyncJobType.ForwardCatchup),
     })
   }
 
@@ -177,7 +184,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.jobsService.create({
       chat_id: chatId,
       job_type: SyncJobType.BackwardHistory,
-      priority: this.lanePriority(state),
+      priority: this.lanePriority(state, SyncJobType.BackwardHistory),
     })
   }
 
@@ -192,7 +199,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.jobsService.create({
       chat_id: chatId,
       job_type: SyncJobType.InitialLoad,
-      priority: this.lanePriority(state),
+      priority: this.lanePriority(state, SyncJobType.InitialLoad),
     })
   }
 

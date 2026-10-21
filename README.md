@@ -56,7 +56,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 
 - Multi-account management (`tg accounts`, `--account`)
 - Phone and QR login (`tg auth`)
-- Read-only daemon for real-time sync and history backfill; the CLI does all mutations (`tg send`)
+- Read-only daemon for real-time sync and history backfill; large groups and channels on
+  request (`tg chats sync`); the CLI does all mutations (`tg send`)
 - Full Telegram API access through `tg api <method>`
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
 - Full-text search (FTS5) over cached messages
@@ -101,6 +102,7 @@ tg <command> [options]
 tg accounts list
 tg contacts list --limit 50
 tg chats list --limit 20
+tg chats sync @examplenews          # also sync a large group or channel
 tg messages search --query "hello"
 tg send --to @username --message "Hi there"
 tg api account.checkUsername --username myuser

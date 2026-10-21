@@ -529,6 +529,13 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
             'Newest message ID Telegram reported (dialog list or a sync page). NULL: unknown. Catch-up is due while it is NULL or above forward_cursor',
           nullable: true,
         },
+        sync_mode: {
+          description:
+            "Set with tg chats sync: 'auto' follows the sync policy, 'on' and 'off' win over it in every dialog pass",
+          enumValues: ['auto', 'on', 'off'],
+          semanticType: 'enum',
+          defaultValue: 'auto',
+        },
       },
       indexes: {
         idx_chat_sync_state_enabled:
@@ -567,7 +574,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         priority: {
           description:
-            "Priority inside the job's lane (lower runs first): the chat's sync tier",
+            "Priority inside the job's lane (lower runs first): the chat's sync tier, or 0 for the first page of a chat turned on with tg chats sync",
           defaultValue: 3,
         },
         status: {

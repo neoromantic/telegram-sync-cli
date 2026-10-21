@@ -55,10 +55,11 @@ export function error(
   code: ErrorCode,
   message: string,
   details?: Record<string, unknown>,
+  suggestion?: string,
 ): never {
   const result: Output<never> = {
     success: false,
-    error: { code, message, details },
+    error: { code, message, details, suggestion },
   }
 
   if (currentFormat !== 'quiet') {

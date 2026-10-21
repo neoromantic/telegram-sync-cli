@@ -169,6 +169,7 @@ Commands:
   chats list        List dialogs (cached, --fresh for API)
   chats search      Search chats by title/username (cache-only)
   chats get         Get chat by @username
+  chats sync        Turn background sync on or off for a chat (cache-only)
 
   messages search   Search cached messages (FTS5, --chat/--sender/--includeDeleted)
 

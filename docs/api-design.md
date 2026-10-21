@@ -72,6 +72,7 @@ tg contacts get --id 123456789
 tg chats list --limit 50 --type private
 tg chats search --query "query"   # cache-only
 tg chats get --id @username        # username only
+tg chats sync @examplenews         # sync a large group or channel too (--off, --auto)
 
 # Messages (cache-only full-text search)
 tg messages search --query "hello"

@@ -129,7 +129,7 @@ whose newest message (`top_message_id`, from the dialog pass on start and after 
 above the forward cursor, never as polling. Priorities: real-time first; DMs
 and groups under 20 members get full history; groups of 20–100 get the newest 100 messages,
 then history after the small chats; groups of unknown size or over 100 members and channels
-sync only on request. Details: [docs/sync-strategy.md](docs/sync-strategy.md).
+sync only on request (`tg chats sync`). Details: [docs/sync-strategy.md](docs/sync-strategy.md).
 
 ### Bun-native APIs
 

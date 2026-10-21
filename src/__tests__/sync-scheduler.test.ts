@@ -123,6 +123,57 @@ describe('SyncScheduler', () => {
     })
   })
 
+  describe('a chat turned on with tg chats sync', () => {
+    beforeEach(() => {
+      chatSyncState.upsert({
+        chat_id: -1001234567890,
+        chat_type: 'channel',
+        member_count: 5000,
+        sync_priority: SyncPriority.Low,
+        sync_enabled: false,
+      })
+      chatSyncState.setSyncMode(-1001234567890, 'on')
+    })
+
+    it('gets its first page at P0 and its history at its tier', () => {
+      scheduler.refreshQueues()
+      chatSyncState.recordFirstPage(-1001234567890, {
+        forward_cursor: 900,
+        backward_cursor: 801,
+        history_complete: false,
+        new_messages: 100,
+      })
+      scheduler.queueBackwardHistory(-1001234567890)
+
+      const jobs = jobsService
+        .getJobsForChat(-1001234567890)
+        .map((job) => [job.job_type, job.priority])
+        .sort()
+      expect(jobs).toEqual([
+        [SyncJobType.BackwardHistory, SyncPriority.High],
+        [SyncJobType.InitialLoad, SyncPriority.Realtime],
+      ])
+    })
+
+    it('keeps its first page at P0 across a restart', async () => {
+      jobsService.create({
+        chat_id: -1001234567890,
+        job_type: SyncJobType.InitialLoad,
+        priority: SyncPriority.Low,
+      })
+
+      await scheduler.initializeForStartup()
+
+      expect(jobsService.getPendingJobs()).toMatchObject([
+        {
+          chat_id: -1001234567890,
+          job_type: SyncJobType.InitialLoad,
+          priority: SyncPriority.Realtime,
+        },
+      ])
+    })
+  })
+
   describe('queueBackwardHistory', () => {
     it('queues backward history job for a chat with existing backward_cursor', () => {
       chatSyncState.upsert({

@@ -5,8 +5,10 @@
 import type { Database } from 'bun:sqlite'
 import {
   ChatSyncStateRow,
+  determineSyncPolicy,
   type SyncChatType,
-  type SyncPriority,
+  type SyncMode,
+  SyncPriority,
 } from './sync-schema'
 
 /**
@@ -127,6 +129,11 @@ export interface ChatSyncStateService {
   updateLastSync(chatId: number, type: 'forward' | 'backward'): void
   /** Enable or disable sync for a chat */
   setSyncEnabled(chatId: number, enabled: boolean): void
+  /**
+   * Set the user's choice and the sync_enabled and sync_priority it means:
+   * 'on' syncs at High, 'off' doesn't sync, 'auto' follows the policy
+   */
+  setSyncMode(chatId: number, mode: SyncMode): void
   /** Reset sync state to allow re-syncing (sets cursors to NULL) */
   resetSyncState(chatId: number, options?: ResetSyncStateOptions): void
 }
@@ -153,8 +160,11 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       ON CONFLICT(chat_id) DO UPDATE SET
         chat_type = excluded.chat_type,
         member_count = COALESCE(excluded.member_count, chat_sync_state.member_count),
-        sync_priority = excluded.sync_priority,
-        sync_enabled = excluded.sync_enabled,
+        -- A mode set with tg chats sync outlives the policy.
+        sync_priority = CASE WHEN chat_sync_state.sync_mode = 'on'
+          THEN 1 ELSE excluded.sync_priority END,
+        sync_enabled = CASE chat_sync_state.sync_mode
+          WHEN 'on' THEN 1 WHEN 'off' THEN 0 ELSE excluded.sync_enabled END,
         forward_cursor = COALESCE(excluded.forward_cursor, chat_sync_state.forward_cursor),
         backward_cursor = COALESCE(excluded.backward_cursor, chat_sync_state.backward_cursor),
         total_messages = COALESCE(excluded.total_messages, chat_sync_state.total_messages),
@@ -318,6 +328,15 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
     setSyncEnabled: db.prepare(`
       UPDATE chat_sync_state
       SET sync_enabled = $enabled, updated_at = $now
+      WHERE chat_id = $chat_id
+    `),
+
+    setSyncMode: db.prepare(`
+      UPDATE chat_sync_state
+      SET sync_mode = $mode,
+          sync_enabled = $enabled,
+          sync_priority = $priority,
+          updated_at = $now
       WHERE chat_id = $chat_id
     `),
 
@@ -488,6 +507,25 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       stmts.setSyncEnabled.run({
         $chat_id: chatId,
         $enabled: enabled ? 1 : 0,
+        $now: Date.now(),
+      })
+    },
+
+    setSyncMode(chatId: number, mode: SyncMode): void {
+      const state = stmts.get.get({ $chat_id: chatId })
+      if (!state) return
+
+      const policy = determineSyncPolicy(
+        state.chat_type as SyncChatType,
+        state.member_count,
+      )
+      const enabled =
+        mode === 'on' ? true : mode === 'off' ? false : policy.enabled
+      stmts.setSyncMode.run({
+        $chat_id: chatId,
+        $mode: mode,
+        $enabled: enabled ? 1 : 0,
+        $priority: mode === 'on' ? SyncPriority.High : policy.priority,
         $now: Date.now(),
       })
     },

@@ -37,12 +37,12 @@ Stored in `chat_sync_state`:
 |----------|----------|---------------|
 | **P1** | DMs + small groups (<20 members) | Full history sync |
 | **P2** | Medium groups (20–100 members) | Newest 100 messages, then history after the P1 chats |
-| **P3** | Groups of unknown size, large groups (>100) & channels | On request only |
+| **P3** | Groups of unknown size, large groups (>100) & channels | On request only (`tg chats sync`) |
 
 Live updates don't go through the queue: they are cached as they arrive. A chat's tier
 (`sync_priority`) is also the priority of its jobs inside each lane (see
-[Job lanes](#job-lanes)). P0 and P4 exist in `SyncPriority` but no tier uses them; older
-versions queued catch-up at P0 and history at P4.
+[Job lanes](#job-lanes)). P0 is only for the first page of a chat turned on with
+`tg chats sync`. P4 is no longer used; older versions queued catch-up at P0 and history at P4.
 
 ### Policy (Current)
 
@@ -55,6 +55,14 @@ Implemented in `determineSyncPolicy`:
   - `20–100` → enabled, **Medium**
   - `> 100` → disabled, **Low**
 - `channel` → disabled, **Low**
+
+### Turning a chat on or off
+
+`tg chats sync <chat>` turns sync on for any chat, `--off` turns it off and `--auto` goes back
+to the policy. The choice is stored in `chat_sync_state.sync_mode` (`auto`, `on`, `off`), and
+the dialog pass and live updates never overwrite it: an upsert keeps `sync_enabled` at 1 for
+`on` and 0 for `off`, and `sync_priority` at High for `on`, while the chat type and member
+count still update. A chat turned on gets the High tier and its first page at P0.
 
 Telegram often leaves the member count out of a supergroup's dialog, and such a group may have
 thousands of members, so a group without a count is treated as large. The dialog pass keeps the

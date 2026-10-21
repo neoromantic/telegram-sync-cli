@@ -126,6 +126,34 @@ describe('bootstrapDialogs', () => {
     return createSyncJobsService(testCacheDb).getPendingJobs()
   }
 
+  it('keeps the mode set with tg chats sync', async () => {
+    chatSyncState.upsert({
+      chat_id: -1_000_000_002_002,
+      chat_type: 'channel',
+      sync_priority: SyncPriority.Low,
+      sync_enabled: false,
+    })
+    chatSyncState.setSyncMode(-1_000_000_002_002, 'on')
+    seedSynced(1001, 10, 10)
+    chatSyncState.setSyncMode(1001, 'off')
+
+    await runPass([
+      { kind: 'channel', id: 2002, membersCount: 5000, topMessage: 9 },
+      { kind: 'user', id: 1001, topMessage: 10 },
+    ])
+
+    expect(chatSyncState.get(-1_000_000_002_002)).toMatchObject({
+      sync_mode: 'on',
+      sync_enabled: 1,
+      sync_priority: SyncPriority.High,
+      member_count: 5000,
+    })
+    expect(chatSyncState.get(1001)).toMatchObject({
+      sync_mode: 'off',
+      sync_enabled: 0,
+    })
+  })
+
   it('lists archived dialogs too', async () => {
     const fake = await runPass([{ kind: 'user', id: 1001, topMessage: 5 }])
 
