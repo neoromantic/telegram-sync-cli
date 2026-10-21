@@ -15,7 +15,6 @@ The list is in priority order.
 
 ## Features
 
-- [Read chat history: tg messages list and get](https://github.com/neoromantic/telegram-sync-cli/issues/21)
 - [Wait for new messages](https://github.com/neoromantic/telegram-sync-cli/issues/24)
 - [Unread messages and mark as read](https://github.com/neoromantic/telegram-sync-cli/issues/25)
 - [Send and download media](https://github.com/neoromantic/telegram-sync-cli/issues/22)
