@@ -402,30 +402,46 @@ describe('sync-worker real jobs', () => {
       })
     })
 
-    for (const [label, err] of [
-      ['400 CHANNEL_PRIVATE', new tl.RpcError(400, 'CHANNEL_PRIVATE')],
-      ['403', new tl.RpcError(403, 'CHAT_ADMIN_REQUIRED')],
-      ['404', new tl.RpcError(404, 'NOT_FOUND')],
-      ['406 CHANNEL_PRIVATE', new tl.RpcError(406, 'CHANNEL_PRIVATE')],
-    ] as const) {
-      it(`fails a job at once on RPC error ${label}`, async () => {
-        throwing(err)
-        const job = queue()
+    for (const jobType of [
+      SyncJobType.ForwardCatchup,
+      SyncJobType.BackwardHistory,
+      SyncJobType.InitialLoad,
+    ]) {
+      for (const [label, err] of [
+        ['400 CHANNEL_PRIVATE', new tl.RpcError(400, 'CHANNEL_PRIVATE')],
+        ['403', new tl.RpcError(403, 'CHAT_ADMIN_REQUIRED')],
+        ['404', new tl.RpcError(404, 'NOT_FOUND')],
+        ['406 CHANNEL_PRIVATE', new tl.RpcError(406, 'CHANNEL_PRIVATE')],
+      ] as const) {
+        it(`fails a ${jobType} job at once on RPC error ${label}`, async () => {
+          const chatId = 301
+          ctx.chatSyncState.upsert({
+            chat_id: chatId,
+            chat_type: 'private',
+            sync_priority: SyncPriority.High,
+            sync_enabled: true,
+            // An initial load skips a chat that already has a forward cursor
+            forward_cursor: jobType === SyncJobType.InitialLoad ? undefined : 5,
+          })
+          const call = throwing(err)
+          const job = queue(jobType, chatId)
 
-        const result = await processJobReal(ctx, job)
+          const result = await processJobReal(ctx, job)
 
-        expect(result.permanent).toBe(true)
-        expect(result.outcome).toEqual({
-          state: 'failed',
-          attempts: 1,
-          nextRunAt: null,
+          expect(call).toHaveBeenCalledTimes(1)
+          expect(result.permanent).toBe(true)
+          expect(result.outcome).toEqual({
+            state: 'failed',
+            attempts: 1,
+            nextRunAt: null,
+          })
+          expect(ctx.jobsService.getById(job.id)).toMatchObject({
+            status: 'failed',
+            attempts: 1,
+            error_message: err.message,
+          })
         })
-        expect(ctx.jobsService.getById(job.id)).toMatchObject({
-          status: 'failed',
-          attempts: 1,
-          error_message: err.message,
-        })
-      })
+      }
     }
 
     for (const jobType of [
@@ -662,6 +678,7 @@ describe('sync-worker real jobs', () => {
       expect(result.success).toBe(false)
       expect(result.messagesFetched).toBe(0)
       expect(result.error).toBe('Network connection lost')
+      expect(result.permanent).toBe(false)
       expect(result.rateLimited).toBeUndefined()
     })
 
