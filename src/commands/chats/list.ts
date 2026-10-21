@@ -1,16 +1,13 @@
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
-import { getCacheDb } from '../../db'
 import { createChatsCache } from '../../db/chats-cache'
 import type { ChatType } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
 import { ErrorCodes, type PaginatedResult } from '../../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../../utils/account-selector'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { buildCachePaginatedResponse } from '../../utils/cache-pagination'
 import { error, success, verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
@@ -77,7 +74,6 @@ export const listChatsCommand = defineCommand({
   async run({ args }) {
     const limit = Number.parseInt(args.limit ?? '50', 10)
     const offset = Number.parseInt(args.offset ?? '0', 10)
-    const accountId = resolveAccountSelector(args.account)
     const fresh = args.fresh ?? false
     const rawType = args.type
     const typeFilter = rawType as ChatType | undefined
@@ -89,8 +85,9 @@ export const listChatsCommand = defineCommand({
       )
     }
 
+    const { account, db: cacheDb } = openAccountCache(args.account)
+
     try {
-      const cacheDb = getCacheDb()
       const chatsCache = createChatsCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
@@ -120,8 +117,8 @@ export const listChatsCommand = defineCommand({
 
       verbose('Fetching dialogs from Telegram API...')
       const client = wrapClientCallWithRateLimits(
-        getClientForAccount(accountId),
-        { context: 'cli:chats.list' },
+        getClientForAccount(account.id),
+        { context: 'cli:chats.list', accountId: account.id },
       )
 
       const { dialogs, users } = await collectDialogs(client)

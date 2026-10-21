@@ -98,6 +98,25 @@ request's peer).
   `raw_json` or their type, duplicates merged, group and channel senders marked, senders filled
   in for messages without `fromId`, a failure rolled back and retried, a second run that changes
   nothing
+- `cache-layout.test.ts` — the move of the shared cache of 0.3 and older on temp data dirs:
+  adopt, set aside or delete for 0, 1 or 2 accounts with or without a per-account cache, rows
+  still in the WAL, an earlier `shared-cache.db` never overwritten, a held file that blocks
+  adopting but only defers setting aside
+- `cache-meta.test.ts` — the owner stamp of an account's cache
+- `cache-db-lock.test.ts` — several processes opening, migrating and moving caches at once
+- `account-selector.test.ts` — `resolveAccount`: `--account`, the active account, the only one,
+  and the errors
+- `daemon-scheduler.test.ts`, `daemon-bootstrap.test.ts`, `daemon-accounts.connect.test.ts`,
+  `daemon-start-caches.test.ts` — the daemon with two accounts: each job runs on its own
+  account's client, accounts take turns, dialogs, live messages and deletes land in the
+  receiving account's cache, and an account whose cache doesn't open is left out
+
+Daemon tests give each account its own in-memory cache with `addAccountRuntime(ctx, id)`
+(`helpers/daemon-runtime.ts`). Tests that `mock.module('../db', …)` use `mockDbModule`
+(`helpers/db-mock.ts`), which maps each account ID to its cache. A test that writes a SQLite
+file another process must find closed (the shared cache that tg moves) seeds it with
+`seedInChild(path, seeder)` (`helpers/seed-in-child.ts`, seeders in `helpers/seeders.ts`):
+bun:sqlite keeps a file open after `close()` while prepared statements remain.
 
 ### Peer ID fixtures
 
@@ -170,6 +189,13 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
   version, a restart hint for a running daemon of another or unrecorded version and a "use the
   newer tg" hint for a newer one; no hint for the same version, a stopped daemon (one that died,
   stopped cleanly or never ran) or one still starting
+- `multi-account.e2e.test.ts` — two accounts, each with its own cache and a message with the
+  same ID: every cache command returns only the selected account's rows, `tg accounts switch`
+  changes which, `tg chats sync` writes only its account's file, the errors for zero, one or
+  several accounts, and no root `cache.db` is ever created
+- `cache-layout.e2e.test.ts` — the first run after an upgrade from 0.3 or older: a shared cache
+  adopted (a 0.2.0 one migrated too), set aside with one notice, deleted when empty,
+  `CACHE_UNAVAILABLE` while an older tg holds it, and the owner check
 
 ### E2E Helpers
 
@@ -186,12 +212,17 @@ const result = await runCli(['accounts', 'list'])
 ```typescript
 const env = createTestEnvironment('my-test')
 env.initDatabase()
-env.seedAccounts([{ phone: '+1234567890', is_active: true }])
+env.seedAccounts([{ phone: '+15550000000', is_active: true }])
+// accounts/1/cache.db with the current schema; open until cleanup()
+const cacheDb = env.openCacheDb(1) // env.cachePath(1) is its path
 
-await runCli(['accounts', 'list'], env.getCliOptions())
+await runCli(['chats', 'list'], env.getCliOptions())
 
 env.cleanup()
 ```
+
+Seed an account before running a cache command: with no account it fails with
+`AUTH_REQUIRED`.
 
 ## Integration Tests (Real API)
 
@@ -205,7 +236,7 @@ real Telegram API. It is skipped unless the variables below are set, and it neve
 | send to Saved Messages | `send --to me` delivers a message; `tg api messages.getMessages` reads it back |
 | send caches for search | with no daemon running, `messages search` finds a message right after `send --to me`, under the own user ID |
 | messages list and get | after two sends whose cache rows are dropped, `messages list --chat me --fresh` returns them newest first from the API under the own user ID; the next read comes from the cache with equal items, `messages search` finds them, `--after` pages forward, and `messages get --context 1` reads one in context from the API, then from the cache; a cache-first `get --context 2` returns it with the newer message and up to two older ones |
-| daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` |
+| daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs) into `accounts/<id>/cache.db` (no root `cache.db`), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` |
 
 Each test copies the session into its own temp data dir. Messages go only to the account's
 Saved Messages and are deleted after each test. A run takes about a minute.

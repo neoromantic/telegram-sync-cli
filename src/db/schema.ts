@@ -8,6 +8,7 @@
  * - sync_state: Tracks synchronization progress
  * - rate_limits: API rate limiting data
  * - api_activity: API call audit log
+ * - cache_meta: which account the file belongs to
  */
 import { Database } from 'bun:sqlite'
 
@@ -137,6 +138,15 @@ export function initCacheSchema(db: Database): void {
   db.run(
     'CREATE INDEX IF NOT EXISTS idx_api_activity_method ON api_activity(method)',
   )
+
+  // Owner stamp: each account has its own cache file (see cache-meta.ts)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS cache_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+    )
+  `)
 }
 
 /**

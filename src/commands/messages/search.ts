@@ -1,12 +1,9 @@
 import { defineCommand } from 'citty'
 
-import { getCacheDb } from '../../db'
 import { createMessagesSearch } from '../../db/messages-search'
 import { ErrorCodes } from '../../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../../utils/account-selector'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import {
   isUsernameIdentifier,
   normalizeUsername,
@@ -84,10 +81,9 @@ export const searchMessagesCommand = defineCommand({
 
     const chatFilter = parseIdentifier(args.chat)
     const senderFilter = parseIdentifier(args.sender)
-    resolveAccountSelector(args.account)
+    const { db: cacheDb } = openAccountCache(args.account)
 
     try {
-      const cacheDb = getCacheDb()
       const search = createMessagesSearch(cacheDb)
 
       const results = search.search(query, {

@@ -1,9 +1,7 @@
 import { defineCommand } from 'citty'
 
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../../utils/account-selector'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { success } from '../../utils/output'
 import {
   CHAT_ARG_DESCRIPTION,
@@ -65,10 +63,10 @@ export const getMessageCommand = defineCommand({
       max: MAX_CONTEXT,
       default: 0,
     })
-    const accountId = resolveAccountSelector(args.account)
+    const { account } = openAccountCache(args.account)
 
     try {
-      const deps = openHistory(accountId, 'cli:messages.get')
+      const deps = openHistory(account.id, 'cli:messages.get')
       const chat = await resolveHistoryChat(deps.client, args.chat, deps)
       const result = await getMessageWithContext({
         cacheDb: deps.cacheDb,

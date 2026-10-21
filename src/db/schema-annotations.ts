@@ -60,7 +60,7 @@ export interface SchemaRegistry {
 // =============================================================================
 
 export const SCHEMA_REGISTRY: SchemaRegistry = {
-  version: 2,
+  version: 3,
   tables: {
     // -------------------------------------------------------------------------
     // Users Cache Table
@@ -774,12 +774,12 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     // -------------------------------------------------------------------------
     daemon_status: {
       description:
-        'Key-value store for daemon state (running, last activity, etc).',
+        "Key-value store for the daemon's state for this account (running, connection, progress).",
       primaryKey: 'key',
       columns: {
         key: {
           description:
-            'Status key: daemon_status, daemon_pid, daemon_started_at, daemon_version, daemon_version_pid, connected_accounts, total_accounts, messages_synced, last_update, pending_jobs, running_jobs',
+            'Status key: daemon_pid, daemon_started_at, daemon_status, daemon_version, daemon_version_pid, last_update, connection_status, last_error, messages_synced, pending_jobs, running_jobs',
           nullable: false,
         },
         value: {
@@ -789,6 +789,31 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         updated_at: {
           description: 'When this status was last updated',
+          semanticType: 'timestamp',
+        },
+      },
+    },
+
+    // -------------------------------------------------------------------------
+    // Cache Metadata Table
+    // -------------------------------------------------------------------------
+    cache_meta: {
+      description:
+        'Which account this cache file belongs to. Each account has its own file, accounts/<id>/cache.db; a file stamped for another account is not opened.',
+      primaryKey: 'key',
+      columns: {
+        key: {
+          description:
+            'account_id (the ID in tg accounts list) or user_id (the Telegram user ID)',
+          nullable: false,
+          enumValues: ['account_id', 'user_id'],
+        },
+        value: {
+          description: 'The ID, as text',
+          nullable: false,
+        },
+        updated_at: {
+          description: 'When the key was written',
           semanticType: 'timestamp',
         },
       },

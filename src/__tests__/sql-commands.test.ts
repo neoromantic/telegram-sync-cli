@@ -19,14 +19,13 @@ import { createUsersCache } from '../db/users-cache'
 import type { ErrorCode } from '../types'
 import { ErrorCodes } from '../types'
 import { setOutputFormat } from '../utils/output'
+import { mockDbModule } from './helpers/db-mock'
 
 let testCacheDb: Database
 
 type CommandRun = (input: { args: Record<string, unknown> }) => Promise<void>
 
-mock.module('../db', () => ({
-  getCacheDb: () => testCacheDb,
-}))
+mock.module('../db', () => mockDbModule({ cacheFor: () => testCacheDb }))
 
 async function expectCommandError(
   run: Promise<unknown>,

@@ -6,12 +6,14 @@
 import { join } from 'node:path'
 import {
   type AccountsDbInterface,
+  closeAccountCacheDbs,
   accountsDb as defaultAccountsDb,
-  getCacheDb,
+  ensureCacheLayout,
+  getAccountCacheDb,
   getDataDir,
+  isCacheUnavailableError,
 } from '../db'
 import { createDaemonStatusService } from '../db/daemon-status'
-import { initSyncSchema } from '../db/sync-schema'
 import { requireDefaultConfig } from '../services/telegram'
 import { VERSION } from '../version'
 import {
@@ -20,7 +22,11 @@ import {
   setupSignalHandlers,
 } from './daemon-accounts'
 import { bootstrapDialogs } from './daemon-bootstrap'
-import { createDaemonRuntime, type DaemonContext } from './daemon-context'
+import {
+  createDaemonRuntime,
+  type DaemonContext,
+  totalMessagesSynced,
+} from './daemon-context'
 import { createLogger } from './daemon-logger'
 import { mainLoop } from './daemon-loop'
 import { cleanupScheduler, initializeScheduler } from './daemon-scheduler'
@@ -89,24 +95,63 @@ function createContext(
   }
 }
 
+/**
+ * Move a shared cache from 0.3, then open every account's own cache. An
+ * account whose cache can't be opened (another account's file, a corrupt
+ * one) is logged and left out; the others run.
+ */
 async function initializeDatabase(ctx: DaemonContext): Promise<boolean> {
   try {
-    const cacheDb = getCacheDb()
-    initSyncSchema(cacheDb)
-
-    const statusService = createDaemonStatusService(cacheDb)
-    ctx.runtime.statusService = statusService
-    statusService.setDaemonRunning(process.pid, VERSION)
-
-    return true
+    ensureCacheLayout({
+      mode: 'strict',
+      notice: (message) => ctx.logger.info(message),
+    })
   } catch (err) {
-    ctx.logger.error(`Failed to initialize database: ${formatError(err)}`)
+    ctx.logger.error(
+      `Failed to move the shared cache: ${formatError(err)}. Stop older tg processes, then start the daemon again.`,
+    )
     return false
   }
+
+  for (const account of ctx.accountsDb.getAll()) {
+    try {
+      const db = getAccountCacheDb(account.id)
+      const statusService = createDaemonStatusService(db)
+      statusService.setDaemonRunning(process.pid, VERSION)
+      ctx.runtime.accounts.set(account.id, {
+        accountId: account.id,
+        db,
+        statusService,
+        scheduler: null,
+        worker: null,
+        lastJobProcessTime: 0,
+        messagesSynced: 0,
+      })
+    } catch (err) {
+      const why = isCacheUnavailableError(err)
+        ? `${err.message} (${err.reason})`
+        : formatError(err)
+      ctx.logger.error(
+        `[Account ${account.id}] Failed to open its cache, not syncing it: ${why}`,
+      )
+      ctx.state.accounts.set(account.id, {
+        accountId: account.id,
+        phone: account.phone,
+        name: account.name ?? null,
+        status: 'error',
+        lastError: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  return true
 }
 
 async function connectAccounts(ctx: DaemonContext): Promise<number> {
-  const accounts = ctx.accountsDb.getAll()
+  // Only accounts whose cache opened
+  const accounts = ctx.accountsDb
+    .getAll()
+    .filter((account) => ctx.runtime.accounts.has(account.id))
   ctx.logger.info(`Connecting ${accounts.length} account(s)...`)
 
   const connectionResults = await Promise.all(
@@ -147,15 +192,16 @@ async function performCleanup(ctx: DaemonContext): Promise<void> {
     cleanupScheduler(ctx)
     await disconnectAllAccounts(ctx)
 
-    try {
-      const statusService =
-        ctx.runtime.statusService ?? createDaemonStatusService(getCacheDb())
-      statusService.setDaemonStopped()
-    } catch (err) {
-      ctx.logger.warn(
-        `Failed to update daemon status on shutdown: ${formatError(err)}`,
-      )
+    for (const rt of ctx.runtime.accounts.values()) {
+      try {
+        rt.statusService.setDaemonStopped()
+      } catch (err) {
+        ctx.logger.warn(
+          `[Account ${rt.accountId}] Failed to update daemon status on shutdown: ${formatError(err)}`,
+        )
+      }
     }
+    closeAccountCacheDbs()
 
     ctx.pidFile.release()
     ctx.state.running = false
@@ -212,6 +258,12 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
 
   ctx.state.running = true
   ctx.state.startedAt = Date.now()
+
+  if (ctx.runtime.accounts.size === 0) {
+    ctx.logger.error('No account has a cache the daemon can open')
+    await performCleanup(ctx)
+    return DaemonExitCode.AllAccountsFailed
+  }
 
   const connectedCount = await connectAccounts(ctx)
   ctx.logger.info(`${connectedCount}/${accounts.length} account(s) connected`)
@@ -282,7 +334,7 @@ export function createDaemon(
           status: a.status,
           lastError: a.lastError,
         })),
-        messagesSynced: ctx.runtime.totalMessagesSynced,
+        messagesSynced: totalMessagesSynced(ctx.runtime),
         lastUpdate: ctx.state.running ? Date.now() : null,
       }
     },

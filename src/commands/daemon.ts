@@ -10,11 +10,12 @@
 import { join } from 'node:path'
 import { defineCommand } from 'citty'
 import { createDaemon, createPidFile, DaemonExitCode } from '../daemon'
-import { getCacheDb, getDataDir } from '../db'
-import { createDaemonStatusService } from '../db/daemon-status'
+import { accountsDb, getDataDir } from '../db'
+import { summarizeDaemonStatus } from '../db/daemon-status'
 import { ErrorCodes } from '../types'
 import { error, info, success } from '../utils/output'
 import { formatDuration } from '../utils/time'
+import { collectStorageStatus, readAccountStatus } from './status'
 
 /**
  * Start subcommand - starts daemon in foreground
@@ -124,7 +125,8 @@ const stopCommand = defineCommand({
 })
 
 /**
- * Status subcommand - shows daemon status
+ * Status subcommand - shows daemon status, as totals over the accounts'
+ * caches
  */
 const statusCommand = defineCommand({
   meta: {
@@ -147,72 +149,36 @@ const statusCommand = defineCommand({
       return
     }
 
-    // Read status from database
-    try {
-      const cacheDb = getCacheDb()
-      const statusService = createDaemonStatusService(cacheDb)
-      const info = statusService.getDaemonInfo()
+    collectStorageStatus(dataDir)
+    const snapshots = accountsDb
+      .getAll()
+      .map((account) => readAccountStatus(account.id))
+    const summary = summarizeDaemonStatus(
+      snapshots.flatMap((snapshot) =>
+        snapshot.daemon ? [snapshot.daemon] : [],
+      ),
+      pidFile.isRunning() ? pid : null,
+    )
+    const sum = (pick: (snapshot: (typeof snapshots)[number]) => number) =>
+      snapshots.reduce((total, snapshot) => total + pick(snapshot), 0)
 
-      const uptime = info.startedAt
-        ? formatDuration(Date.now() - info.startedAt)
-        : null
-
-      let messagesTrackedTotal: number | null = null
-      let messagesCached: number | null = null
-      let chatsEnabled: number | null = null
-      let chatsHistoryComplete: number | null = null
-
-      try {
-        const trackedRow = cacheDb
-          .query(
-            'SELECT COALESCE(SUM(synced_messages), 0) as count FROM chat_sync_state',
-          )
-          .get() as { count: number } | null
-        const cachedRow = cacheDb
-          .query('SELECT COUNT(*) as count FROM messages_cache')
-          .get() as { count: number } | null
-        const enabledRow = cacheDb
-          .query(
-            'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1',
-          )
-          .get() as { count: number } | null
-        const completeRow = cacheDb
-          .query(
-            'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 1',
-          )
-          .get() as { count: number } | null
-
-        messagesTrackedTotal = trackedRow?.count ?? 0
-        messagesCached = cachedRow?.count ?? 0
-        chatsEnabled = enabledRow?.count ?? 0
-        chatsHistoryComplete = completeRow?.count ?? 0
-      } catch {
-        // Ignore progress query failures
-      }
-
-      success({
-        status: 'running',
-        pid,
-        uptime,
-        connectedAccounts: info.connectedAccounts,
-        totalAccounts: info.totalAccounts,
-        messagesSynced: info.messagesSynced,
-        messagesSyncedTotal: messagesTrackedTotal,
-        messagesCached,
-        chatsEnabled,
-        chatsHistoryComplete,
-        lastUpdate: info.lastUpdate
-          ? new Date(info.lastUpdate).toISOString()
-          : null,
-      })
-    } catch (_err) {
-      // Database might not be initialized yet
-      success({
-        status: 'running',
-        pid,
-        message: 'Daemon is running (status details unavailable)',
-      })
-    }
+    success({
+      status: 'running',
+      pid,
+      uptime: summary.startedAt
+        ? formatDuration(Date.now() - summary.startedAt)
+        : null,
+      connectedAccounts: summary.connectedAccounts,
+      totalAccounts: summary.totalAccounts,
+      messagesSynced: summary.messagesSynced,
+      messagesSyncedTotal: sum((s) => s.progress.messages_tracked),
+      messagesCached: sum((s) => s.progress.messages_cached),
+      chatsEnabled: sum((s) => s.progress.chats_enabled),
+      chatsHistoryComplete: sum((s) => s.progress.chats_history_complete),
+      lastUpdate: summary.lastUpdate
+        ? new Date(summary.lastUpdate).toISOString()
+        : null,
+    })
   },
 })
 

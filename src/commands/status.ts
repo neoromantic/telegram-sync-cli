@@ -5,15 +5,29 @@
  * with colorful, easy-to-read output.
  */
 
+import type { Database } from 'bun:sqlite'
 import { join } from 'node:path'
 import { defineCommand } from 'citty'
 import { createPidFile } from '../daemon'
-import { accountsDb, getCacheDb, getDataDir } from '../db'
+import {
+  accountsDb,
+  ensureCacheLayout,
+  getDataDir,
+  getLegacyCachePath,
+  isCacheUnavailableError,
+  listSharedCaches,
+  openExistingAccountCacheDb,
+} from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
-import { createDaemonStatusService } from '../db/daemon-status'
+import {
+  createDaemonStatusService,
+  type DaemonInfo,
+  summarizeDaemonStatus,
+} from '../db/daemon-status'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import type { SyncMode } from '../db/sync-schema'
+import { cacheUnavailableSuggestion } from '../utils/account-cache'
 import { getOutputFormat, success } from '../utils/output'
 import { VERSION } from '../version'
 import { printPrettyStatus } from './status/pretty'
@@ -91,14 +105,320 @@ export const statusCommand = defineCommand({
   },
 })
 
+/** A listed sync job, with the account whose cache holds it */
+export interface StatusJob {
+  account_id: number
+  id: number
+  chat_id: number
+  type: string
+  status: string
+  messages_fetched: number
+  /** Failed tries so far */
+  attempts: number
+  /** The last error */
+  error: string | null
+  /** When a waiting job runs again (ISO); null if it is due */
+  next_run_at: string | null
+  /** The chat's sync mode; null if the chat has no sync state */
+  sync_mode: SyncMode | null
+}
+
+export interface StatusSampleChat {
+  account_id: number
+  chat_id: number
+  chat_type: string
+  synced_messages: number
+  history_complete: boolean
+  forward_cursor: number | null
+  backward_cursor: number | null
+  sync_priority: number
+}
+
+export interface StatusFloodWait {
+  account_id: number
+  method: string
+  blocked_until: string
+  wait_seconds: number
+  remaining_seconds: number
+}
+
+/** What one account's cache says */
+export interface AccountStatusSnapshot {
+  accountId: number
+  cache: { status: 'ok' | 'missing' | 'error'; error?: string }
+  daemon: DaemonInfo | null
+  sync: {
+    pending_jobs: number
+    running_jobs: number
+    failed_jobs: number
+    retrying_jobs: number
+    running: StatusJob[]
+    pending: StatusJob[]
+    failed: StatusJob[]
+  }
+  progress: {
+    chats_total: number
+    chats_enabled: number
+    chats_history_complete: number
+    chats_history_pending: number
+    chats_cached: number
+    messages_tracked: number
+    messages_cached: number
+    sample_chats: StatusSampleChat[]
+  }
+  rate_limits: {
+    api_calls_last_minute: number
+    calls_by_method: Record<string, number>
+    active_flood_waits: StatusFloodWait[]
+  }
+}
+
+function emptyAccountSnapshot(accountId: number): AccountStatusSnapshot {
+  return {
+    accountId,
+    cache: { status: 'missing' },
+    daemon: null,
+    sync: {
+      pending_jobs: 0,
+      running_jobs: 0,
+      failed_jobs: 0,
+      retrying_jobs: 0,
+      running: [],
+      pending: [],
+      failed: [],
+    },
+    progress: {
+      chats_total: 0,
+      chats_enabled: 0,
+      chats_history_complete: 0,
+      chats_history_pending: 0,
+      chats_cached: 0,
+      messages_tracked: 0,
+      messages_cached: 0,
+      sample_chats: [],
+    },
+    rate_limits: {
+      api_calls_last_minute: 0,
+      calls_by_method: {},
+      active_flood_waits: [],
+    },
+  }
+}
+
+function count(db: Database, sql: string): number {
+  return (db.query(sql).get() as { count: number } | null)?.count ?? 0
+}
+
 /**
- * Collect all status information
+ * Read one account's cache. An account without a cache file reads as
+ * empty, and none is created.
  */
-export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
+export function readAccountStatus(accountId: number): AccountStatusSnapshot {
+  const snapshot = emptyAccountSnapshot(accountId)
+
+  let cacheDb: Database | null
+  try {
+    cacheDb = openExistingAccountCacheDb(accountId)
+  } catch (err) {
+    snapshot.cache = {
+      status: 'error',
+      error: err instanceof Error ? err.message : String(err),
+    }
+    return snapshot
+  }
+  if (!cacheDb) return snapshot
+  snapshot.cache = { status: 'ok' }
+
+  snapshot.daemon = createDaemonStatusService(cacheDb).getDaemonInfo()
+
+  // Sync jobs
+  const syncService = createSyncJobsService(cacheDb)
+  const counts = syncService.countJobs()
+  snapshot.sync.pending_jobs = counts.pending
+  snapshot.sync.running_jobs = counts.running
+  snapshot.sync.failed_jobs = counts.failed
+  snapshot.sync.retrying_jobs = counts.retrying
+
+  const chatSyncState = createChatSyncStateService(cacheDb)
+  const nowMs = Date.now()
+  const toStatusJob = (
+    job: ReturnType<typeof syncService.getPendingJobs>[number],
+  ): StatusJob => ({
+    account_id: accountId,
+    id: job.id,
+    chat_id: job.chat_id,
+    type: job.job_type,
+    status: job.status,
+    messages_fetched: job.messages_fetched,
+    attempts: job.attempts,
+    error: job.error_message,
+    next_run_at:
+      job.next_run_at > nowMs ? new Date(job.next_run_at).toISOString() : null,
+    sync_mode: chatSyncState.get(job.chat_id)?.sync_mode ?? null,
+  })
+  // Running jobs, the next pending ones and the newest failed ones
+  snapshot.sync.running = syncService.getRunningJobs().map(toStatusJob)
+  snapshot.sync.pending = syncService
+    .getPendingJobs()
+    .slice(0, 5)
+    .map(toStatusJob)
+  snapshot.sync.failed = syncService.getFailedJobs(5).map(toStatusJob)
+
+  // Rate limits
+  const rlStatus = createRateLimitsService(cacheDb).getStatus()
+  const now = Math.floor(Date.now() / 1000)
+  snapshot.rate_limits = {
+    api_calls_last_minute: rlStatus.totalCalls,
+    calls_by_method: rlStatus.callsByMethod,
+    active_flood_waits: rlStatus.activeFloodWaits.map((fw) => ({
+      account_id: accountId,
+      method: fw.method,
+      blocked_until: new Date(fw.blockedUntil * 1000).toISOString(),
+      wait_seconds: fw.waitSeconds,
+      remaining_seconds: Math.max(0, fw.blockedUntil - now),
+    })),
+  }
+
+  // Progress
+  const sampleChatsRows = cacheDb
+    .query(
+      `SELECT chat_id, chat_type, synced_messages, history_complete, forward_cursor, backward_cursor, sync_priority
+       FROM chat_sync_state
+       WHERE sync_enabled = 1
+       ORDER BY history_complete ASC, synced_messages DESC
+       LIMIT 5`,
+    )
+    .all() as Array<{
+    chat_id: number
+    chat_type: string
+    synced_messages: number
+    history_complete: number
+    forward_cursor: number | null
+    backward_cursor: number | null
+    sync_priority: number
+  }>
+
+  snapshot.progress = {
+    chats_total: count(
+      cacheDb,
+      'SELECT COUNT(*) as count FROM chat_sync_state',
+    ),
+    chats_enabled: count(
+      cacheDb,
+      'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1',
+    ),
+    chats_history_complete: count(
+      cacheDb,
+      'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 1',
+    ),
+    chats_history_pending: count(
+      cacheDb,
+      'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 0',
+    ),
+    chats_cached: count(cacheDb, 'SELECT COUNT(*) as count FROM chats_cache'),
+    messages_tracked: count(
+      cacheDb,
+      'SELECT COALESCE(SUM(synced_messages), 0) as count FROM chat_sync_state',
+    ),
+    messages_cached: count(
+      cacheDb,
+      'SELECT COUNT(*) as count FROM messages_cache',
+    ),
+    sample_chats: sampleChatsRows.map((row) => ({
+      account_id: accountId,
+      chat_id: row.chat_id,
+      chat_type: row.chat_type,
+      synced_messages: row.synced_messages,
+      history_complete: row.history_complete === 1,
+      forward_cursor: row.forward_cursor,
+      backward_cursor: row.backward_cursor,
+      sync_priority: row.sync_priority,
+    })),
+  }
+
+  return snapshot
+}
+
+/**
+ * The shared cache of an older version: set-aside files, and a move that
+ * waits for another process. Never fails the command.
+ */
+export function collectStorageStatus(dataDir: string) {
+  let migration: {
+    reason: string
+    path: string
+    suggestion: string
+  } | null = null
+
+  try {
+    const layout = ensureCacheLayout({ mode: 'report' })
+    if (
+      (layout.state === 'blocked' || layout.state === 'deferred') &&
+      layout.reason
+    ) {
+      migration = {
+        reason: layout.reason,
+        path: layout.path ?? getLegacyCachePath(),
+        suggestion: cacheUnavailableSuggestion(layout.reason),
+      }
+    }
+  } catch (err) {
+    const reason = isCacheUnavailableError(err) ? err.reason : 'move_failed'
+    migration = {
+      reason,
+      path: getLegacyCachePath(),
+      suggestion: cacheUnavailableSuggestion(reason),
+    }
+  }
+
+  let legacyCaches: Array<{ path: string; size_bytes: number }> = []
+  try {
+    legacyCaches = listSharedCaches(dataDir)
+  } catch {
+    // An unreadable data dir shows no files
+  }
+
+  return { legacy_caches: legacyCaches, migration }
+}
+
+function sumRecords(records: Array<Record<string, number>>) {
+  const total: Record<string, number> = {}
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record)) {
+      total[key] = (total[key] ?? 0) + value
+    }
+  }
+  return total
+}
+
+/**
+ * Collect all status information: every account's cache read on its own,
+ * then the totals over them
+ */
+export async function collectStatus(
+  pidFile: ReturnType<typeof createPidFile>,
+  options: { dataDir?: string } = {},
+) {
+  const dataDir = options.dataDir ?? getDataDir()
   const pid = pidFile.read()
   const isRunning = pid !== null && pidFile.isRunning()
 
-  // Daemon status
+  // Moves a shared cache first, so the accounts' files below are current
+  const storage = collectStorageStatus(dataDir)
+
+  const accounts = accountsDb.getAll()
+  const activeAccount = accountsDb.getActive()
+  const snapshots = accounts.map((account) => readAccountStatus(account.id))
+
+  // Daemon: only the rows the live daemon wrote count
+  const summary = summarizeDaemonStatus(
+    snapshots.flatMap((snapshot) => (snapshot.daemon ? [snapshot.daemon] : [])),
+    isRunning ? pid : null,
+  )
+  // A daemon that holds the PID file but hasn't written its rows yet (its
+  // first open after an upgrade can wait for the shared-cache move, and an
+  // older tg writes none to accounts/<id>/cache.db) compares nothing
+  const daemonWroteRows = isRunning && summary.totalAccounts > 0
   const daemonStatus: {
     status: 'running' | 'stopped'
     pid: number | null
@@ -116,246 +436,74 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
   } = {
     status: isRunning ? 'running' : 'stopped',
     pid: isRunning ? pid : null,
-    version: null,
-    version_mismatch: false,
-    uptime_seconds: null,
+    version: daemonWroteRows ? summary.version : null,
+    version_mismatch: daemonWroteRows && summary.version !== VERSION,
+    uptime_seconds:
+      isRunning && summary.startedAt
+        ? Math.floor((Date.now() - summary.startedAt) / 1000)
+        : null,
     memory_bytes: null,
-    started_at: null,
-    last_update: null,
-    connected_accounts: 0,
-    total_accounts: 0,
-    messages_synced: 0,
+    started_at:
+      isRunning && summary.startedAt
+        ? new Date(summary.startedAt).toISOString()
+        : null,
+    last_update: summary.lastUpdate
+      ? new Date(summary.lastUpdate).toISOString()
+      : null,
+    connected_accounts: summary.connectedAccounts,
+    total_accounts: summary.totalAccounts,
+    messages_synced: summary.messagesSynced,
+  }
+  if (isRunning && pid) {
+    daemonStatus.memory_bytes = await getProcessMemory(pid)
   }
 
   // Sync status. pending_jobs includes the jobs waiting for a retry;
-  // retrying_jobs counts those that failed at least once.
-  const syncStatus: {
-    pending_jobs: number
-    running_jobs: number
-    failed_jobs: number
-    retrying_jobs: number
-    jobs: Array<{
-      id: number
-      chat_id: number
-      type: string
-      status: string
-      messages_fetched: number
-      /** Failed tries so far */
-      attempts: number
-      /** The last error */
-      error: string | null
-      /** When a waiting job runs again (ISO); null if it is due */
-      next_run_at: string | null
-      /** The chat's sync mode; null if the chat has no sync state */
-      sync_mode: SyncMode | null
-    }>
-  } = {
-    pending_jobs: 0,
-    running_jobs: 0,
-    failed_jobs: 0,
-    retrying_jobs: 0,
-    jobs: [],
+  // retrying_jobs counts those that failed at least once. Jobs are listed
+  // by account: running ones, the next pending ones, the newest failed ones.
+  const sum = (pick: (snapshot: AccountStatusSnapshot) => number) =>
+    snapshots.reduce((total, snapshot) => total + pick(snapshot), 0)
+  const syncStatus = {
+    pending_jobs: sum((s) => s.sync.pending_jobs),
+    running_jobs: sum((s) => s.sync.running_jobs),
+    failed_jobs: sum((s) => s.sync.failed_jobs),
+    retrying_jobs: sum((s) => s.sync.retrying_jobs),
+    jobs: [
+      ...snapshots.flatMap((s) => s.sync.running),
+      ...snapshots.flatMap((s) => s.sync.pending),
+      ...snapshots.flatMap((s) => s.sync.failed),
+    ],
   }
 
-  // Rate limits status
-  const rateLimitsStatus: {
-    api_calls_last_minute: number
-    calls_by_method: Record<string, number>
-    active_flood_waits: Array<{
-      method: string
-      blocked_until: string
-      wait_seconds: number
-      remaining_seconds: number
-    }>
-  } = {
-    api_calls_last_minute: 0,
-    calls_by_method: {},
-    active_flood_waits: [],
+  const rateLimitsStatus = {
+    api_calls_last_minute: sum((s) => s.rate_limits.api_calls_last_minute),
+    calls_by_method: sumRecords(
+      snapshots.map((s) => s.rate_limits.calls_by_method),
+    ),
+    active_flood_waits: snapshots.flatMap(
+      (s) => s.rate_limits.active_flood_waits,
+    ),
   }
 
-  const progressStatus: {
-    chats_total: number
-    chats_enabled: number
-    chats_history_complete: number
-    chats_history_pending: number
-    chats_cached: number
-    messages_tracked: number
-    messages_cached: number
-    sample_chats: Array<{
-      chat_id: number
-      chat_type: string
-      synced_messages: number
-      history_complete: boolean
-      forward_cursor: number | null
-      backward_cursor: number | null
-      sync_priority: number
-    }>
-  } = {
-    chats_total: 0,
-    chats_enabled: 0,
-    chats_history_complete: 0,
-    chats_history_pending: 0,
-    chats_cached: 0,
-    messages_tracked: 0,
-    messages_cached: 0,
-    sample_chats: [],
+  const progressStatus = {
+    chats_total: sum((s) => s.progress.chats_total),
+    chats_enabled: sum((s) => s.progress.chats_enabled),
+    chats_history_complete: sum((s) => s.progress.chats_history_complete),
+    chats_history_pending: sum((s) => s.progress.chats_history_pending),
+    chats_cached: sum((s) => s.progress.chats_cached),
+    messages_tracked: sum((s) => s.progress.messages_tracked),
+    messages_cached: sum((s) => s.progress.messages_cached),
+    // The overall top 5, ordered like each account's
+    sample_chats: snapshots
+      .flatMap((s) => s.progress.sample_chats)
+      .sort(
+        (a, b) =>
+          Number(a.history_complete) - Number(b.history_complete) ||
+          b.synced_messages - a.synced_messages ||
+          a.account_id - b.account_id,
+      )
+      .slice(0, 5),
   }
-
-  // Try to read from database
-  try {
-    const cacheDb = getCacheDb()
-
-    // Daemon info
-    const daemonService = createDaemonStatusService(cacheDb)
-    const daemonInfo = daemonService.getDaemonInfo()
-
-    // A daemon that holds the PID file but hasn't written its rows yet (its
-    // first open after an upgrade can wait for the migration) compares nothing
-    if (isRunning && daemonInfo.pid === pid) {
-      daemonStatus.version = daemonInfo.version
-      daemonStatus.version_mismatch = daemonInfo.version !== VERSION
-    }
-
-    if (isRunning && daemonInfo.startedAt) {
-      daemonStatus.uptime_seconds = Math.floor(
-        (Date.now() - daemonInfo.startedAt) / 1000,
-      )
-      daemonStatus.started_at = new Date(daemonInfo.startedAt).toISOString()
-    }
-    if (daemonInfo.lastUpdate) {
-      daemonStatus.last_update = new Date(daemonInfo.lastUpdate).toISOString()
-    }
-    daemonStatus.connected_accounts = daemonInfo.connectedAccounts
-    daemonStatus.total_accounts = daemonInfo.totalAccounts
-    daemonStatus.messages_synced = daemonInfo.messagesSynced
-
-    // Get memory usage
-    if (isRunning && pid) {
-      const memory = await getProcessMemory(pid)
-      if (memory) {
-        daemonStatus.memory_bytes = memory
-      }
-    }
-
-    // Sync jobs
-    const syncService = createSyncJobsService(cacheDb)
-    const counts = syncService.countJobs()
-
-    syncStatus.pending_jobs = counts.pending
-    syncStatus.running_jobs = counts.running
-    syncStatus.failed_jobs = counts.failed
-    syncStatus.retrying_jobs = counts.retrying
-
-    // Running jobs, the next pending ones and the newest failed ones
-    const listedJobs = [
-      ...syncService.getRunningJobs(),
-      ...syncService.getPendingJobs().slice(0, 5),
-      ...syncService.getFailedJobs(5),
-    ]
-    const chatSyncState = createChatSyncStateService(cacheDb)
-    const nowMs = Date.now()
-    syncStatus.jobs = listedJobs.map((job) => ({
-      id: job.id,
-      chat_id: job.chat_id,
-      type: job.job_type,
-      status: job.status,
-      messages_fetched: job.messages_fetched,
-      attempts: job.attempts,
-      error: job.error_message,
-      next_run_at:
-        job.next_run_at > nowMs
-          ? new Date(job.next_run_at).toISOString()
-          : null,
-      sync_mode: chatSyncState.get(job.chat_id)?.sync_mode ?? null,
-    }))
-
-    // Rate limits
-    const rateLimitsService = createRateLimitsService(cacheDb)
-    const rlStatus = rateLimitsService.getStatus()
-
-    rateLimitsStatus.api_calls_last_minute = rlStatus.totalCalls
-    rateLimitsStatus.calls_by_method = rlStatus.callsByMethod
-
-    const now = Math.floor(Date.now() / 1000)
-    rateLimitsStatus.active_flood_waits = rlStatus.activeFloodWaits.map(
-      (fw) => ({
-        method: fw.method,
-        blocked_until: new Date(fw.blockedUntil * 1000).toISOString(),
-        wait_seconds: fw.waitSeconds,
-        remaining_seconds: Math.max(0, fw.blockedUntil - now),
-      }),
-    )
-
-    const totalChatsRow = cacheDb
-      .query('SELECT COUNT(*) as count FROM chat_sync_state')
-      .get() as { count: number } | null
-    const enabledChatsRow = cacheDb
-      .query(
-        'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1',
-      )
-      .get() as { count: number } | null
-    const completeChatsRow = cacheDb
-      .query(
-        'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 1',
-      )
-      .get() as { count: number } | null
-    const pendingChatsRow = cacheDb
-      .query(
-        'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 0',
-      )
-      .get() as { count: number } | null
-    const chatsCachedRow = cacheDb
-      .query('SELECT COUNT(*) as count FROM chats_cache')
-      .get() as { count: number } | null
-    const messagesTrackedRow = cacheDb
-      .query(
-        'SELECT COALESCE(SUM(synced_messages), 0) as count FROM chat_sync_state',
-      )
-      .get() as { count: number } | null
-    const messagesCachedRow = cacheDb
-      .query('SELECT COUNT(*) as count FROM messages_cache')
-      .get() as { count: number } | null
-    const sampleChatsRows = cacheDb
-      .query(
-        `SELECT chat_id, chat_type, synced_messages, history_complete, forward_cursor, backward_cursor, sync_priority
-         FROM chat_sync_state
-         WHERE sync_enabled = 1
-         ORDER BY history_complete ASC, synced_messages DESC
-         LIMIT 5`,
-      )
-      .all() as Array<{
-      chat_id: number
-      chat_type: string
-      synced_messages: number
-      history_complete: number
-      forward_cursor: number | null
-      backward_cursor: number | null
-      sync_priority: number
-    }>
-
-    progressStatus.chats_total = totalChatsRow?.count ?? 0
-    progressStatus.chats_enabled = enabledChatsRow?.count ?? 0
-    progressStatus.chats_history_complete = completeChatsRow?.count ?? 0
-    progressStatus.chats_history_pending = pendingChatsRow?.count ?? 0
-    progressStatus.chats_cached = chatsCachedRow?.count ?? 0
-    progressStatus.messages_tracked = messagesTrackedRow?.count ?? 0
-    progressStatus.messages_cached = messagesCachedRow?.count ?? 0
-    progressStatus.sample_chats = sampleChatsRows.map((row) => ({
-      chat_id: row.chat_id,
-      chat_type: row.chat_type,
-      synced_messages: row.synced_messages,
-      history_complete: row.history_complete === 1,
-      forward_cursor: row.forward_cursor,
-      backward_cursor: row.backward_cursor,
-      sync_priority: row.sync_priority,
-    }))
-  } catch {
-    // Database might not be initialized
-  }
-
-  // Account info
-  const accounts = accountsDb.getAll()
-  const activeAccount = accountsDb.getActive()
 
   const accountsStatus = {
     total: accounts.length,
@@ -380,11 +528,8 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
     progress: progressStatus,
     rate_limits: rateLimitsStatus,
     accounts: accountsStatus,
+    storage,
     cli_version: VERSION,
     timestamp: new Date().toISOString(),
   }
 }
-
-/**
- * Print status in a pretty, colored format
- */

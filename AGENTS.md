@@ -96,7 +96,12 @@ Steps: [docs/releasing.md](docs/releasing.md).
 - **CLI and daemon are the same binary**, in different entry modes.
 - **The daemon is read-only.** It never sends, edits or deletes anything. All mutations (send,
   edit, delete, create groups) go through the CLI.
-- **One database per account.** Never mix account data.
+- **One cache database per account.** `data.db` holds only the accounts. Each account's
+  cache, sync state, jobs and rate limits live in `accounts/<id>/cache.db`. A command opens
+  one account's cache: `resolveAccount` (`--account`, else the active account, else the only
+  one) and `getAccountCacheDb` in `src/db/index.ts`. The daemon keeps a runtime per account
+  (cache, scheduler, sync worker), and a job runs only on its own account's client. Never mix
+  account data.
 - **Don't touch mtcute internals or its `session.db`.** Keep our data in parallel tables in
   `data.db`.
 - **Credentials are read lazily.** `--help`, `--version` and cache-only commands must work
@@ -111,7 +116,7 @@ CLI mode (tg <cmd>)            Daemon mode (tg daemon start)
   query cache, on-demand API,    real-time updates, backfill,
   mutations                      rate-limit handling (max 5 accounts)
         \                           /
-         SQLite (WAL), one data.db per account
+   SQLite (WAL): data.db (accounts), accounts/<id>/cache.db per account
 ```
 
 ### Data rules
@@ -151,7 +156,8 @@ src/daemon/          daemon entry, loop, scheduler, update handlers, sync worker
 src/utils/           output, args, formatting, mappers, peer resolution
 src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integration__/  live API
 ~/.telegram-sync-cli/  user data: config.json, daemon.pid, data.db (accounts),
-                       cache.db (cache, sync state), session_<id>.db (mtcute)
+                       session_<id>.db (mtcute), accounts/<id>/cache.db (the
+                       account's cache, sync state, jobs, rate limits)
 ```
 
 New commands use `defineCommand` from citty and report through `success()`/`error()` in
@@ -175,10 +181,15 @@ not direct dependencies (and `@mtcute/tl` no longer exists since mtcute 0.29).
   const env = createTestEnvironment('my-test')
   env.initDatabase()
   env.seedAccounts([{ phone: '+15550000000', is_active: true }])
-  const result = await runCliSuccess(['accounts', 'list'], env.getCliOptions())
+  createChatsCache(env.openCacheDb(1)).upsertMany(chats) // env.cachePath(1)
+  const result = await runCliSuccess(['chats', 'list'], env.getCliOptions())
   expect(result.json?.success).toBe(true)
   env.cleanup()
   ```
+
+  A test that writes `<dataDir>/cache.db` (the shared cache of 0.3 and older) seeds it from a
+  child process with `seedInChild`: a file the test process wrote stays open after `close()`,
+  and tg moves the file only when no other process has it open.
 
 - Integration tests (`src/__integration__/`) are a live smoke suite against the real API and
   are never part of `test`. They need `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` (or the

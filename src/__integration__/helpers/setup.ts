@@ -19,6 +19,8 @@ export interface IntegrationEnvironment {
     name?: string | null
     username?: string | null
   }): Promise<void>
+  /** The account's cache, `accounts/<id>/cache.db`; tg creates it */
+  cachePath(accountId?: number): string
   cleanup(): void
   getCliOptions(extraEnv?: Record<string, string>): {
     env: Record<string, string>
@@ -148,6 +150,9 @@ export function createIntegrationEnvironment(
         options.sessionPath,
         join(dataDir, `session_${accountId}.db`),
       )
+    },
+    cachePath(accountId = activeAccountId) {
+      return join(dataDir, 'accounts', String(accountId), 'cache.db')
     },
     cleanup() {
       if (existsSync(dataDir)) {

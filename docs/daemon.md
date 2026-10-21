@@ -15,7 +15,8 @@ The `tg daemon` subcommand runs a long-lived process that:
 **Key Principles:**
 - **READ-ONLY**: The daemon never performs mutations (no sending/editing messages)
 - **Foreground execution**: Users manage backgrounding (tmux, systemd, etc.)
-- **Multi-account**: Connects all configured accounts (soft limit planned)
+- **Multi-account**: Connects all configured accounts (soft limit planned). Each account has
+  its own cache, `accounts/<id>/cache.db`, and its own scheduler and sync worker
 - **Resilient**: Reconnects with backoff; retries failed sync jobs with backoff; handles rate
   limits
 
@@ -58,26 +59,36 @@ PID file location:
 ┌──────────────────────────────────────────────┐
 │                tg daemon                     │
 ├──────────────────────────────────────────────┤
-│  Account Connections (mtcute clients)        │
-│    - per-account session_<id>.db             │
+│  Job loop: one job per tick, accounts take   │
+│  turns, 3 s between one account's jobs       │
+├──────────────────────────────────────────────┤
+│  Account runtime (one per account)           │
+│    - mtcute client, session_<id>.db          │
 │    - reconnection + backoff                  │
-│                                              │
-│  Update Handlers                             │
-│    - onNewMessage / onEditMessage / onDelete │
-│                                              │
-│  Sync Scheduler                              │
-│    - enqueues sync_jobs                      │
-│                                              │
-│  Sync Worker                                 │
-│    - forward catchup + backward history      │
-│                                              │
-│  Cache/Sync DB (cache.db)                    │
+│    - update handlers                         │
+│      (onNewMessage / onEditMessage / onDelete)│
+│    - sync scheduler: enqueues sync_jobs      │
+│    - sync worker: forward catchup + history  │
+│    - cache, sync state, jobs, rate limits:   │
+│      accounts/<id>/cache.db                  │
 └──────────────────────────────────────────────┘
 ```
 
+At start the daemon moves the shared cache of 0.3 and older (see
+[database-schema.md](database-schema.md#from-the-shared-cache-of-03-and-older)); if an older
+tg still holds it and there is one account, the daemon exits with an error. It then opens every
+account's cache. An account whose cache doesn't open (another account's file, a corrupt one) is
+logged, shown with status `error` and not connected; the others run. With no cache open the
+daemon exits with `AllAccountsFailed`.
+
+Everything an account receives or syncs lands only in its own cache: a live message, an edit,
+a delete without chat context, a dialog pass, a sync job. A job queued in an account's cache
+runs only on that account's client, with that account's access hashes and rate limits.
+
 ### Update Handling
 
-Real-time handlers update `messages_cache` and `chat_sync_state`:
+Real-time handlers update `messages_cache` and `chat_sync_state` in the receiving account's
+cache:
 - New message → insert/update message row
 - Edit message → update text/edit_date
 - Delete message → mark `is_deleted = 1`
@@ -100,6 +111,12 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
   next to catch-up; inside a lane, small chats go first
 - A refresh every ~30 seconds (daemon loop) and after each reconnect's dialog pass queues
   the work that is due again, such as chats first seen live
+- The job loop takes turns between accounts: each tick it runs the next job of the first
+  account after the one that ran last whose client is connected, which isn't waiting out a
+  FLOOD_WAIT, and whose own 3-second delay since its last job has passed. One account's
+  FLOOD_WAIT or lost connection doesn't stop the others; a disconnected account's jobs stay
+  pending until it reconnects. Jobs still run one at a time, so with three or more busy
+  accounts each one syncs more slowly
 
 See [sync-strategy.md](sync-strategy.md) for the rules.
 
@@ -125,7 +142,7 @@ Key files:
 
 ## Status Output
 
-`tg daemon status` returns:
+`tg daemon status` returns totals over every account's cache:
 - `status` (`running`/`stopped`)
 - `pid`
 - `uptime`
@@ -137,12 +154,19 @@ Key files:
 - `chatsHistoryComplete`
 - `lastUpdate`
 
+The daemon writes each account's figures to that account's `daemon_status` rows every second,
+in one transaction per account (keys: [database-schema.md](database-schema.md#table-daemon_status)),
+and marks every account stopped on shutdown. Only rows whose `daemon_pid` is the PID of the
+live daemon in `daemon.pid` count, so a stopped daemon's leftovers never do.
+
 ### Upgrading
 
 A running daemon keeps the code it started with. To upgrade, stop the daemon, upgrade tg and
 start the daemon again. The daemon records its version when it starts, and `tg status` says when
 the running daemon is another version: `daemon.version_mismatch` in JSON, and a Version row with
-the advice in `--format pretty`. `tg daemon status` doesn't report it.
+the advice in `--format pretty`. `tg daemon status` doesn't report it. A daemon of 0.3 or older
+writes nothing to the per-account caches, so it shows up instead as the shared-cache move that
+waits for it (`storage.migration`, `shared_cache_in_use`) in both status commands.
 
 ---
 
@@ -151,13 +175,13 @@ the advice in `--format pretty`. `tg daemon status` doesn't report it.
 ### Real-time Updates
 
 ```
-Telegram Updates → mtcute events → handlers → messages_cache + chat_sync_state
+Telegram Updates → account's mtcute client → handlers → that account's messages_cache + chat_sync_state
 ```
 
 ### Background Sync
 
 ```
-Scheduler → sync_jobs → worker → messages_cache + chat_sync_state
+account's scheduler → its sync_jobs → its worker and client → its messages_cache + chat_sync_state
 ```
 
 ---

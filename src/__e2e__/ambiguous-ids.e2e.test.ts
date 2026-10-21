@@ -5,15 +5,11 @@
  * marked IDs in `candidates`, without asking Telegram.
  */
 
-import { Database } from 'bun:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
-import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { createChatsCache } from '../db/chats-cache'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import { NO_CREDENTIALS, runCliFailure } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
@@ -30,16 +26,12 @@ describe('E2E: a bare ID that names a cached group and a cached channel', () => 
       { phone: '+15550000000', user_id: 999, name: 'Test', is_active: true },
     ])
 
-    const cacheDb = new Database(join(env.dataDir, 'cache.db'))
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
-    createChatsCache(cacheDb).upsertMany(
+    createChatsCache(env.openCacheDb(1)).upsertMany(
       [
         fakeDialog({ kind: 'group', id: 4242, title: 'Book Club' }),
         fakeDialog({ kind: 'channel', id: 4242, title: 'Example News' }),
       ].map(dialogToCacheInput),
     )
-    cacheDb.close()
   })
 
   afterAll(() => {

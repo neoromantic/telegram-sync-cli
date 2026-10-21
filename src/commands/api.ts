@@ -10,10 +10,8 @@ import { defineCommand } from 'citty'
 import { ConfigError } from '../config'
 import { getClientForAccount } from '../services/telegram'
 import { ErrorCodes } from '../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../utils/account-selector'
+import { openAccountCache } from '../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
 import { mergeArgs } from '../utils/args'
 import { error, success } from '../utils/output'
 import {
@@ -60,7 +58,6 @@ export const apiCommand = defineCommand({
   },
   async run({ args }) {
     const method = args.method as string
-    const accountId = resolveAccountSelector(args.account)
 
     // Validate method name format
     if (!method.includes('.')) {
@@ -70,10 +67,13 @@ export const apiCommand = defineCommand({
       )
     }
 
+    // Rate limits are kept in the account's cache
+    const { account } = openAccountCache(args.account)
+
     try {
       const client = wrapClientCallWithRateLimits(
-        getClientForAccount(accountId),
-        { context: 'cli:api' },
+        getClientForAccount(account.id),
+        { context: 'cli:api', accountId: account.id },
       )
 
       // Build request parameters

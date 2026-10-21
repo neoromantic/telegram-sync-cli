@@ -193,9 +193,11 @@ function createExtendedTestEnvironment(
       return db
     },
 
+    // The first account's cache; tg creates the tables this one lacks
     initCacheDatabase(): Database {
-      const cacheDbPath = join(dataDir, 'cache.db')
-      cacheDb = new Database(cacheDbPath)
+      const accountDir = join(dataDir, 'accounts', '1')
+      mkdirSync(accountDir, { recursive: true, mode: 0o700 })
+      cacheDb = new Database(join(accountDir, 'cache.db'))
       initCacheSchema(cacheDb)
       return cacheDb
     },
@@ -1257,12 +1259,21 @@ describe('E2E: Chats Commands', () => {
       )
     })
 
-    it('should report an ID the cache does not hold as a cache miss, without an account', async () => {
+    it('should ask to log in for a chat ID when there is no account', async () => {
       const db = new Database(join(env.dataDir, 'data.db'))
       db.run('DELETE FROM accounts')
       db.close()
 
-      expect(await getFailure(['--id=-1009999999999'])).toEqual(NOT_CACHED)
+      // Each account has its own cache, so with none there is no cache
+      const result = await runCliFailure(
+        ['chats', 'get', '--id=-1009999999999'],
+        2,
+        { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } },
+      )
+      expect(result.json).toMatchObject({
+        success: false,
+        error: { code: 'AUTH_REQUIRED' },
+      })
     })
 
     it('should reject an ID with --fresh before asking Telegram', async () => {

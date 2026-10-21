@@ -20,14 +20,14 @@ import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import {
+  addAccountRuntime,
+  createAccountCacheDb,
+} from './helpers/daemon-runtime'
 import { type FakeDialogInput, fakeDialogClient } from './helpers/fake-dialogs'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 let testCacheDb: Database
-
-mock.module('../db', () => ({
-  getCacheDb: () => testCacheDb,
-}))
 
 function createContext(): DaemonContext {
   return {
@@ -98,6 +98,7 @@ describe('bootstrapDialogs', () => {
     const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
     const fake = fakeDialogClient(dialogs, options)
     connect(ctx, 1, fake.client)
+    addAccountRuntime(ctx, 1, testCacheDb)
     await bootstrapDialogs(ctx)
     return fake
   }
@@ -319,18 +320,100 @@ describe('bootstrapDialogs', () => {
     ])
   })
 
-  it('checks unvisited chats when an account is not connected', async () => {
-    seedSynced(1001, 1000, 1000)
+  it("writes each account's dialogs to its own cache", async () => {
+    const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
+    const otherDb = createAccountCacheDb()
+    connect(ctx, 1, fakeDialogClient([{ kind: 'user', id: 1001 }]).client)
+    addAccountRuntime(ctx, 1, testCacheDb)
+    connect(
+      ctx,
+      2,
+      fakeDialogClient([{ kind: 'group', id: 4001, membersCount: 5 }]).client,
+    )
+    addAccountRuntime(ctx, 2, otherDb)
+
+    await bootstrapDialogs(ctx)
+
+    const chatIds = (db: Database) =>
+      db
+        .query('SELECT chat_id FROM chats_cache ORDER BY chat_id')
+        .all()
+        .map((row) => (row as { chat_id: string }).chat_id)
+    expect(chatIds(testCacheDb)).toEqual(['1001'])
+    expect(chatIds(otherDb)).toEqual(['-4001'])
+    expect(createChatSyncStateService(otherDb).get(1001)).toBeNull()
+    otherDb.close()
+  })
+
+  it("marks an account's left chats caught up even when another account's pass fails", async () => {
+    const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
+    // Account 1 left chat 1001; its pass completes
+    seedSynced(1001, 1000, 1200)
+    seedSynced(1003, 50, 50)
+    connect(
+      ctx,
+      1,
+      fakeDialogClient([{ kind: 'user', id: 1003, topMessage: 50 }]).client,
+    )
+    addAccountRuntime(ctx, 1, testCacheDb)
+    // Account 2's pass fails before it lists chat 2001
+    const otherDb = createAccountCacheDb()
+    const otherState = createChatSyncStateService(otherDb)
+    otherState.upsert({
+      chat_id: 2001,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+      forward_cursor: 700,
+      backward_cursor: 1,
+    })
+    otherState.raiseTopMessageId(2001, 700)
+    connect(
+      ctx,
+      2,
+      fakeDialogClient([{ kind: 'user', id: 2001, topMessage: 700 }], {
+        failAfter: 0,
+      }).client,
+    )
+    addAccountRuntime(ctx, 2, otherDb)
+
+    await bootstrapDialogs(ctx)
+
+    expect(chatSyncState.get(1001)?.top_message_id).toBe(1000)
+    expect(chatSyncState.get(1003)?.top_message_id).toBe(50)
+    // Unknown after a failed pass: it gets a checking page
+    expect(otherState.get(2001)?.top_message_id).toBeNull()
+    otherDb.close()
+  })
+
+  it('leaves the sync state of an account that is not connected as it is', async () => {
+    const otherDb = createAccountCacheDb()
+    const otherState = createChatSyncStateService(otherDb)
+    otherState.upsert({
+      chat_id: 2001,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+      forward_cursor: 1000,
+      backward_cursor: 1,
+    })
+    otherState.raiseTopMessageId(2001, 1200)
     ctx.state.accounts.set(2, {
       accountId: 2,
       phone: '+15550000002',
       name: null,
       status: 'error',
     })
+    addAccountRuntime(ctx, 2, otherDb)
+    seedSynced(1001, 1000, 1000)
 
     await runPass([])
 
-    expect(chatSyncState.get(1001)?.top_message_id).toBeNull()
+    expect(otherState.get(2001)?.top_message_id).toBe(1200)
+    expect(otherState.get(2001)?.forward_cursor).toBe(1000)
+    // Account 1's complete pass didn't list 1001: left, caught up
+    expect(chatSyncState.get(1001)?.top_message_id).toBe(1000)
+    otherDb.close()
   })
 
   it('leaves a supergroup without a member count off', async () => {

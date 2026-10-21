@@ -1,6 +1,6 @@
+import type { Database } from 'bun:sqlite'
 import { defineCommand } from 'citty'
-
-import { getCacheDb } from '../../db'
+import { createSchemaOnlyDb } from '../../db'
 import {
   getColumnNames,
   getTableAnnotation,
@@ -13,7 +13,7 @@ import { formatSchemaAsSql, formatSchemaAsText } from './schema-text'
 
 const SUPPORTED_OUTPUTS = ['json', 'text', 'sql'] as const
 
-function readTableInfo(db: ReturnType<typeof getCacheDb>, tableName: string) {
+function readTableInfo(db: Database, tableName: string) {
   return db.query(`PRAGMA table_info(${tableName})`).all() as Array<{
     name: string
     type: string
@@ -23,7 +23,7 @@ function readTableInfo(db: ReturnType<typeof getCacheDb>, tableName: string) {
   }>
 }
 
-function readIndexInfo(db: ReturnType<typeof getCacheDb>, tableName: string) {
+function readIndexInfo(db: Database, tableName: string) {
   const indexList = db.query(`PRAGMA index_list(${tableName})`).all() as Array<{
     name: string
     unique: number
@@ -51,7 +51,8 @@ function handleSingleTable(tableName: string, format: string): void {
     )
   }
 
-  const db = getCacheDb()
+  // Every account's cache has this schema: no account needed, no file created
+  const db = createSchemaOnlyDb()
 
   if (format === 'text') {
     console.log(formatSchemaAsText(tableName, annotation))
@@ -108,7 +109,7 @@ function handleAllTables(format: string): void {
   }
 
   if (format === 'sql') {
-    const db = getCacheDb()
+    const db = createSchemaOnlyDb()
     const tableNames = getTableNames()
     for (const name of tableNames) {
       const annotation = getTableAnnotation(name)

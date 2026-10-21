@@ -31,6 +31,7 @@ import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
+import { addAccountRuntime } from './helpers/daemon-runtime'
 import { fakeDialog } from './helpers/fake-dialogs'
 import {
   createMultiChatHistory,
@@ -139,10 +140,9 @@ describe('chats whose sync pages keep failing', () => {
       accountsDb: createTestDatabase().accountsDb,
       runtime: createDaemonRuntime(),
     }
-    ctx.runtime.scheduler = scheduler
-    ctx.runtime.syncWorkers.set(
-      1,
-      createRealSyncWorker({
+    addAccountRuntime(ctx, 1, db, {
+      scheduler,
+      worker: createRealSyncWorker({
         client,
         messagesCache,
         historyRanges: createHistoryRanges(db),
@@ -151,7 +151,7 @@ describe('chats whose sync pages keep failing', () => {
         rateLimits: createRateLimitsService(db),
         chatsCache,
       }),
-    )
+    })
     ctx.state.accounts.set(1, {
       accountId: 1,
       phone: '+15550000000',
@@ -324,4 +324,143 @@ describe('chats whose sync pages keep failing', () => {
       expectNoDuplicateRows()
     })
   }
+})
+
+describe('a chat that fails in one account', () => {
+  const realNow = Date.now
+  let now: number
+  let dbs: Database[]
+
+  beforeEach(() => {
+    now = T0
+    Date.now = () => now
+    dbs = []
+  })
+
+  afterEach(() => {
+    Date.now = realNow
+    for (const db of dbs) db.close()
+  })
+
+  /** An account with a DM with user 50001, 150 messages behind */
+  function seedAccount(
+    ctx: DaemonContext,
+    accountId: number,
+    failure?: () => unknown,
+  ) {
+    const db = createTestCacheDatabase().db
+    initSyncSchema(db)
+    dbs.push(db)
+    const chatSyncState = createChatSyncStateService(db)
+    const jobsService = createSyncJobsService(db)
+    const messagesCache = createMessagesCache(db)
+    chatSyncState.upsert({
+      chat_id: FAILING_CHAT,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+      forward_cursor: 1000,
+      backward_cursor: 1,
+    })
+    chatSyncState.markHistoryComplete(FAILING_CHAT)
+    chatSyncState.raiseTopMessageId(FAILING_CHAT, 1150)
+    const history = createMultiChatHistory()
+    history.set(FAILING_CHAT, range(1, 1150))
+    const client = {
+      call: async (request: GetHistoryRequest) => {
+        if (failure) throw failure()
+        return history.client.call(request as never)
+      },
+    } as unknown as TelegramClient
+    const scheduler = createSyncScheduler({
+      db,
+      jobsService,
+      chatSyncState,
+      messagesCache,
+    })
+    addAccountRuntime(ctx, accountId, db, {
+      scheduler,
+      worker: createRealSyncWorker({
+        client,
+        messagesCache,
+        historyRanges: createHistoryRanges(db),
+        chatSyncState,
+        jobsService,
+        rateLimits: createRateLimitsService(db),
+        chatsCache: createChatsCache(db),
+      }),
+    })
+    ctx.state.accounts.set(accountId, {
+      accountId,
+      phone: `+1555000000${accountId}`,
+      name: null,
+      status: 'connected',
+      client,
+    })
+    return { db, chatSyncState, jobsService, scheduler, history }
+  }
+
+  it("doesn't stop the other account from queueing the same chat", async () => {
+    const ctx: DaemonContext = {
+      dataDir: '/tmp/tgcli',
+      pidPath: '/tmp/tgcli/daemon.pid',
+      verbosity: 'normal',
+      reconnectConfig: {
+        initialDelayMs: 1000,
+        maxDelayMs: 4000,
+        maxAttempts: 3,
+        backoffMultiplier: 2,
+      },
+      shutdownTimeoutMs: 1_000_000,
+      logger: {
+        info: mock(() => {}),
+        debug: mock(() => {}),
+        warn: mock(() => {}),
+        error: mock(() => {}),
+      },
+      pidFile: {
+        acquire: () => {},
+        release: () => {},
+        read: () => null,
+        isRunning: () => false,
+        sendSignal: () => false,
+        getPath: () => '/tmp/tgcli/daemon.pid',
+      },
+      state: { running: true, accounts: new Map(), shutdownRequested: false },
+      accountsDb: createTestDatabase().accountsDb,
+      runtime: createDaemonRuntime(),
+    }
+    const first = seedAccount(ctx, 1)
+    const second = seedAccount(ctx, 2, () => new Error('connection reset'))
+    const accounts = [first, second]
+    for (const account of accounts)
+      await account.scheduler.initializeForStartup()
+
+    const runFor = async (ms: number) => {
+      const end = now + ms
+      while (now < end) {
+        now += 1000
+        if ((now - T0) % 30_000 === 0) {
+          for (const account of accounts) account.scheduler.refreshQueues()
+        }
+        await processJobs(ctx)
+      }
+    }
+
+    // Account 2 gives up on the chat after five attempts
+    await runFor(20 * MINUTE)
+    const failedRows = (service: SyncJobsService) =>
+      service.getFailedJobs(10).map((job) => job.chat_id)
+    expect(failedRows(second.jobsService)).toEqual([FAILING_CHAT])
+    expect(failedRows(first.jobsService)).toEqual([])
+    expect(first.chatSyncState.get(FAILING_CHAT)?.forward_cursor).toBe(1150)
+
+    // New messages: account 1 queues and runs the same chat again
+    first.history.set(FAILING_CHAT, range(1, 1200))
+    first.chatSyncState.raiseTopMessageId(FAILING_CHAT, 1200)
+    await runFor(2 * MINUTE)
+    expect(first.chatSyncState.get(FAILING_CHAT)?.forward_cursor).toBe(1200)
+    expect(second.chatSyncState.get(FAILING_CHAT)?.forward_cursor).toBe(1000)
+    expect(failedRows(second.jobsService)).toEqual([FAILING_CHAT])
+  }, 30_000)
 })

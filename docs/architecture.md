@@ -27,7 +27,7 @@ telegram-sync-cli is a command-line utility for interacting with Telegram's full
                └──────────────┬──────────────────────┘
                               ▼
                       SQLite (WAL mode)
-                       data.db / cache.db
+          data.db (accounts) + accounts/<id>/cache.db
 ```
 
 ## Data Layout (Current)
@@ -36,10 +36,11 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 
 ```
 ~/.telegram-sync-cli/
-├── data.db            # accounts
-├── cache.db           # cache + sync tables
-├── session_<id>.db    # mtcute session per account
-└── daemon.pid         # daemon PID when running
+├── data.db              # accounts
+├── session_<id>.db      # mtcute session per account
+├── accounts/<id>/
+│   └── cache.db         # the account's cache + sync tables
+└── daemon.pid           # daemon PID when running
 ```
 
 ## Technology Stack
@@ -70,7 +71,9 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 
 ### 3. Database Layer (`src/db/`)
 - **Accounts DB** (`data.db`) — account records
-- **Cache/Sync DB** (`cache.db`) — users/chats cache, messages, sync jobs/state
+- **Cache/Sync DB** (`accounts/<id>/cache.db`, one per account) — users/chats cache,
+  messages, sync jobs/state, rate limits. Opened with `getAccountCacheDb(accountId)`; a command
+  picks the account with `resolveAccount` (`src/utils/account-selector.ts`)
 - **Sessions** (`session_<id>.db`) — mtcute session storage per account
 
 > `TELEGRAM_SYNC_CLI_DATA_DIR` overrides the base data directory (defaults to `~/.telegram-sync-cli`).
@@ -83,7 +86,7 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 
 ### 5. Daemon & Sync (`src/daemon/`)
 - Long-running daemon process for real-time updates and background message sync
-- Per-account mtcute connections (max 5)
+- Per-account mtcute connections (max 5), each with its own cache, scheduler and sync worker
 - Sync jobs for forward catchup and backfill
 - Read-only to Telegram (no mutations)
 
@@ -94,7 +97,7 @@ User Input → CLI Parser → Command → Cache Check → Service → Telegram A
                               ↓                       ↓
                         Cache Services ←──────────────┘
                               ↓
-                    SQLite (data.db, cache.db)
+          SQLite (data.db, the account's accounts/<id>/cache.db)
 ```
 
 ### Caching Flow
@@ -139,10 +142,11 @@ Command Request
 
 ## Database Schema
 
-The project uses two SQLite databases under the data directory:
+The project keeps SQLite databases under the data directory:
 
 - `data.db` — account records (`accounts` table)
-- `cache.db` — users/chats cache, messages, sync jobs/state, daemon status
+- `accounts/<id>/cache.db` — one per account: users/chats cache, messages, sync jobs/state,
+  rate limits, daemon status
 
 For full table definitions, see `docs/database-schema.md`.
 

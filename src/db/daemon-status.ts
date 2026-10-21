@@ -6,7 +6,8 @@ import type { Database } from 'bun:sqlite'
 import { DaemonStatusRow } from './sync-schema'
 
 /**
- * Daemon info structure
+ * What the daemon last wrote to one account's cache. Each account's file has
+ * its own rows: a row counts only while its daemon_pid is the live daemon's.
  */
 export interface DaemonInfo {
   status: 'running' | 'stopped'
@@ -15,9 +16,22 @@ export interface DaemonInfo {
   version: string | null
   startedAt: number | null
   lastUpdate: number | null
-  connectedAccounts: number
-  totalAccounts: number
+  /** The account's connection: connected, reconnecting, error, … */
+  connectionStatus: string | null
+  lastError: string | null
+  /** Messages the daemon cached for this account since it started */
   messagesSynced: number
+  pendingJobs: number
+  runningJobs: number
+}
+
+/** One main-loop tick's figures for an account */
+export interface DaemonTick {
+  connectionStatus: string
+  lastError: string | null
+  messagesSynced: number
+  pendingJobs: number
+  runningJobs: number
 }
 
 /**
@@ -42,14 +56,72 @@ export interface DaemonStatusService {
   setDaemonStopped(): void
   /** Check if daemon is running */
   isDaemonRunning(): boolean
-  /** Update connected accounts count */
-  setConnectedAccounts(connected: number, total: number): void
   /** Update last update timestamp */
   updateLastUpdate(): void
   /** Set total messages synced */
   setMessagesSynced(count: number): void
+  /** Write a tick's figures and last_update in one transaction */
+  writeTick(tick: DaemonTick): void
   /** Get all daemon info */
   getDaemonInfo(): DaemonInfo
+}
+
+/** The daemon's figures over every account it runs */
+export interface DaemonSummary {
+  /** Accounts whose rows the live daemon wrote and that are connected */
+  connectedAccounts: number
+  /** Accounts whose rows the live daemon wrote */
+  totalAccounts: number
+  /**
+   * The version the live daemon recorded in its rows; null without live
+   * rows or when it recorded none
+   */
+  version: string | null
+  messagesSynced: number
+  /** The earliest start among the live rows */
+  startedAt: number | null
+  /** The newest update among the live rows */
+  lastUpdate: number | null
+}
+
+/**
+ * Sum the accounts' rows. Only rows whose daemon_pid is the live daemon's
+ * PID (from daemon.pid) count: a stopped daemon's or an older version's rows
+ * say nothing about now.
+ */
+export function summarizeDaemonStatus(
+  infos: DaemonInfo[],
+  livePid: number | null,
+): DaemonSummary {
+  const live =
+    livePid === null
+      ? []
+      : infos.filter(
+          (info) => info.status === 'running' && info.pid === livePid,
+        )
+  const startTimes = live.flatMap((info) =>
+    info.startedAt === null ? [] : [info.startedAt],
+  )
+  const updates = live.flatMap((info) =>
+    info.lastUpdate === null ? [] : [info.lastUpdate],
+  )
+  return {
+    connectedAccounts: live.filter(
+      (info) => info.connectionStatus === 'connected',
+    ).length,
+    totalAccounts: live.length,
+    // Every live row is the same daemon's
+    version: live.find((info) => info.version !== null)?.version ?? null,
+    messagesSynced: live.reduce((sum, info) => sum + info.messagesSynced, 0),
+    startedAt: startTimes.length > 0 ? Math.min(...startTimes) : null,
+    lastUpdate: updates.length > 0 ? Math.max(...updates) : null,
+  }
+}
+
+function parseNumber(value: string | null): number | null {
+  if (value === null) return null
+  const parsed = Number.parseInt(value, 10)
+  return Number.isNaN(parsed) ? null : parsed
 }
 
 /**
@@ -127,7 +199,9 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         service.set('daemon_pid', pid.toString())
         service.set('daemon_started_at', now.toString())
         service.set('daemon_status', 'running')
-      })()
+        service.set('messages_synced', '0')
+        service.delete('last_error')
+      }).immediate()
     },
 
     setDaemonStopped(): void {
@@ -137,16 +211,12 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         service.delete('daemon_version')
         service.delete('daemon_version_pid')
         service.set('daemon_status', 'stopped')
-      })()
+        service.set('connection_status', 'disconnected')
+      }).immediate()
     },
 
     isDaemonRunning(): boolean {
       return service.get('daemon_status') === 'running'
-    },
-
-    setConnectedAccounts(connected: number, total: number): void {
-      service.set('connected_accounts', connected.toString())
-      service.set('total_accounts', total.toString())
     },
 
     updateLastUpdate(): void {
@@ -157,33 +227,44 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       service.set('messages_synced', count.toString())
     },
 
-    getDaemonInfo(): DaemonInfo {
-      // One read transaction gives one snapshot (WAL), so a daemon that is
-      // starting or stopping is never seen half written
-      return db.transaction((): DaemonInfo => {
-        const pidStr = service.get('daemon_pid')
-        const startedAtStr = service.get('daemon_started_at')
-        const lastUpdateStr = service.get('last_update')
-        const connectedStr = service.get('connected_accounts')
-        const totalStr = service.get('total_accounts')
-        const syncedStr = service.get('messages_synced')
-        const versionPidStr = service.get('daemon_version_pid')
-
-        return {
-          status:
-            service.get('daemon_status') === 'running' ? 'running' : 'stopped',
-          pid: pidStr ? parseInt(pidStr, 10) : null,
-          version:
-            pidStr !== null && versionPidStr === pidStr
-              ? service.get('daemon_version')
-              : null,
-          startedAt: startedAtStr ? parseInt(startedAtStr, 10) : null,
-          lastUpdate: lastUpdateStr ? parseInt(lastUpdateStr, 10) : null,
-          connectedAccounts: connectedStr ? parseInt(connectedStr, 10) : 0,
-          totalAccounts: totalStr ? parseInt(totalStr, 10) : 0,
-          messagesSynced: syncedStr ? parseInt(syncedStr, 10) : 0,
+    writeTick(tick: DaemonTick): void {
+      db.transaction(() => {
+        service.set('connection_status', tick.connectionStatus)
+        if (tick.lastError === null) {
+          service.delete('last_error')
+        } else {
+          service.set('last_error', tick.lastError)
         }
-      })()
+        service.set('messages_synced', String(tick.messagesSynced))
+        service.set('pending_jobs', String(tick.pendingJobs))
+        service.set('running_jobs', String(tick.runningJobs))
+        service.set('last_update', Date.now().toString())
+      }).immediate()
+    },
+
+    getDaemonInfo(): DaemonInfo {
+      // One query reads every key from one snapshot (WAL), so a daemon that
+      // is starting or stopping is never seen half written. The
+      // connected_accounts and total_accounts rows of 0.3 are ignored.
+      const values = service.getAll()
+      const read = (key: string) => values[key] ?? null
+      const pid = read('daemon_pid')
+      return {
+        status: read('daemon_status') === 'running' ? 'running' : 'stopped',
+        pid: parseNumber(pid),
+        // Only the daemon that wrote daemon_pid vouches for the version
+        version:
+          pid !== null && read('daemon_version_pid') === pid
+            ? read('daemon_version')
+            : null,
+        startedAt: parseNumber(read('daemon_started_at')),
+        lastUpdate: parseNumber(read('last_update')),
+        connectionStatus: read('connection_status'),
+        lastError: read('last_error'),
+        messagesSynced: parseNumber(read('messages_synced')) ?? 0,
+        pendingJobs: parseNumber(read('pending_jobs')) ?? 0,
+        runningJobs: parseNumber(read('running_jobs')) ?? 0,
+      }
     },
   }
 

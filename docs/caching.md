@@ -154,13 +154,16 @@ If cache is empty, run `tg chats list --fresh` to populate it.
 
 ## Database Schema
 
-The cache uses a separate SQLite database (`cache.db`) initialized lazily on first use via `getCacheDb()`.
+Each account has its own cache database, `accounts/<id>/cache.db`, opened lazily on first use
+via `getAccountCacheDb(accountId)`. A command picks the account with `resolveAccount`
+(`--account`, else the active account, else the only one), so it never returns another
+account's rows.
 
 **Primary cache tables:**
 - `users_cache`
 - `chats_cache`
 
-**Sync tables (also in cache.db):**
+**Sync tables (also in the account's cache.db):**
 - `messages_cache`
 - `history_ranges`
 - `chat_sync_state`
@@ -218,18 +221,17 @@ success({ ...freshData, source: 'api', stale: false })
 ## Lazy Database Initialization
 
 ```typescript
-// From src/db/index.ts
-let cacheDb: Database | null = null
+// From src/utils/account-cache.ts: called before a command's try block
+const { account, db: cacheDb } = openAccountCache(args.account)
 
-export function getCacheDb(): Database {
-  if (!cacheDb) {
-    cacheDb = new Database(CACHE_DB_PATH)
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
-  }
-  return cacheDb
-}
+// src/db/index.ts keeps one connection per account: the first call moves a
+// shared cache from 0.3 if there is one, creates accounts/<id>/ (mode 0700),
+// runs the schema and its migrations, and checks the cache_meta owner stamp
+export function getAccountCacheDb(accountId: number): Database
 ```
+
+`openAccountCache` reports a cache that can't be opened as `CACHE_UNAVAILABLE` (exit 1). A
+failed open isn't remembered: the next call tries again.
 
 ## Background Refresh
 

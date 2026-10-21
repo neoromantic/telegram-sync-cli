@@ -33,6 +33,7 @@ import {
   SyncJobType,
   SyncPriority,
 } from '../db/sync-schema'
+import { addAccountRuntime } from './helpers/daemon-runtime'
 import {
   createMultiChatHistory,
   type GetHistoryRequest,
@@ -153,7 +154,7 @@ describe('job budget with 500 chats', () => {
       accountsDb: createTestDatabase().accountsDb,
       runtime: createDaemonRuntime(),
     }
-    ctx.runtime.scheduler = scheduler
+    addAccountRuntime(ctx, 1, db, { scheduler })
     useClient(history.client)
     ctx.state.accounts.set(1, {
       accountId: 1,
@@ -170,18 +171,20 @@ describe('job budget with 500 chats', () => {
 
   /** Give the account a sync worker on this client */
   function useClient(client: TelegramClient) {
-    ctx.runtime.syncWorkers.set(
-      1,
-      createRealSyncWorker({
-        client,
-        messagesCache: createMessagesCache(db),
-        historyRanges: createHistoryRanges(db),
-        chatSyncState,
-        jobsService,
-        rateLimits: createRateLimitsService(db),
-        chatsCache: createChatsCache(db),
-      }),
-    )
+    account().worker = createRealSyncWorker({
+      client,
+      messagesCache: createMessagesCache(db),
+      historyRanges: createHistoryRanges(db),
+      chatSyncState,
+      jobsService,
+      rateLimits: createRateLimitsService(db),
+      chatsCache: createChatsCache(db),
+    })
+  }
+
+  /** The account's runtime: its cache, scheduler and worker */
+  function account() {
+    return ctx.runtime.accounts.get(1)!
   }
 
   /**
@@ -195,7 +198,7 @@ describe('job budget with 500 chats', () => {
       if (ran.length > 0 && ran.length % 10 === 0) scheduler.refreshQueues()
       const job = scheduler.getNextJob()
       if (!job) break
-      ctx.runtime.lastJobProcessTime = 0
+      account().lastJobProcessTime = 0
       await processJobs(ctx)
       expect(jobsService.getById(job.id)?.status).toBe('completed')
       ran.push({ id: job.id, type: job.job_type })
@@ -296,7 +299,7 @@ describe('job budget with 500 chats', () => {
     const ran: SyncJobRow[] = []
     for (let i = 0; i < 4; i++) {
       ran.push(scheduler.getNextJob()!)
-      ctx.runtime.lastJobProcessTime = 0
+      account().lastJobProcessTime = 0
       await processJobs(ctx)
     }
     const floodedJob = ran[3]!
@@ -318,7 +321,7 @@ describe('job budget with 500 chats', () => {
     const requests = history.requestCount
     const pending = jobsService.getPendingJobs().length
     for (let i = 0; i < 5; i++) {
-      ctx.runtime.lastJobProcessTime = 0
+      account().lastJobProcessTime = 0
       await processJobs(ctx)
     }
     expect(history.requestCount).toBe(requests)
@@ -337,7 +340,7 @@ describe('job budget with 500 chats', () => {
       scheduler.refreshQueues()
       for (let i = 0; i < 1200 && scheduler.getNextJob(); i++) {
         if (i > 0 && i % 10 === 0) scheduler.refreshQueues()
-        ctx.runtime.lastJobProcessTime = 0
+        account().lastJobProcessTime = 0
         await processJobs(ctx)
       }
     } finally {
@@ -371,7 +374,7 @@ describe('job budget with 500 chats', () => {
     } as unknown as TelegramClient)
     scheduler.queueForwardCatchup(chatId)
 
-    ctx.runtime.lastJobProcessTime = 0
+    account().lastJobProcessTime = 0
     await processJobs(ctx)
 
     // The running page finished, but its full page queued nothing
@@ -385,4 +388,161 @@ describe('job budget with 500 chats', () => {
     scheduler.refreshQueues()
     expect(jobsService.getJobsForChat(chatId)).toHaveLength(1)
   })
+})
+
+describe('job budget with two accounts', () => {
+  let dbs: Database[]
+
+  beforeEach(() => {
+    dbs = []
+  })
+
+  afterEach(() => {
+    for (const db of dbs) db.close()
+  })
+
+  function seedAccount(
+    ctx: DaemonContext,
+    accountId: number,
+    chats: { gap?: number[]; history?: number[]; fresh?: number[] },
+    ran: Array<{ accountId: number; type: string }>,
+  ) {
+    const db = createTestCacheDatabase().db
+    initSyncSchema(db)
+    dbs.push(db)
+    const chatSyncState = createChatSyncStateService(db)
+    const jobsService = createSyncJobsService(db)
+    const messagesCache = createMessagesCache(db)
+    const history = createMultiChatHistory()
+    for (const chatId of chats.gap ?? []) {
+      chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: CURSOR,
+        backward_cursor: 1,
+      })
+      chatSyncState.markHistoryComplete(chatId)
+      chatSyncState.raiseTopMessageId(chatId, 1150)
+      history.set(chatId, range(1, 1150))
+    }
+    for (const chatId of chats.history ?? []) {
+      chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: CURSOR,
+        backward_cursor: 301,
+      })
+      chatSyncState.raiseTopMessageId(chatId, CURSOR)
+      history.set(chatId, range(1, CURSOR))
+    }
+    for (const chatId of chats.fresh ?? []) {
+      chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+      })
+      history.set(chatId, range(1, 300))
+    }
+    const scheduler = createSyncScheduler({
+      db,
+      jobsService,
+      chatSyncState,
+      messagesCache,
+    })
+    const recordJobRun = scheduler.recordJobRun.bind(scheduler)
+    scheduler.recordJobRun = (job) => {
+      ran.push({ accountId, type: job.job_type })
+      recordJobRun(job)
+    }
+    addAccountRuntime(ctx, accountId, db, {
+      scheduler,
+      worker: createRealSyncWorker({
+        client: history.client,
+        messagesCache,
+        historyRanges: createHistoryRanges(db),
+        chatSyncState,
+        jobsService,
+        rateLimits: createRateLimitsService(db),
+        chatsCache: createChatsCache(db),
+      }),
+    })
+    ctx.state.accounts.set(accountId, {
+      accountId,
+      phone: `+1555000000${accountId}`,
+      name: null,
+      status: 'connected',
+      client: history.client,
+    })
+    return { scheduler, chatSyncState }
+  }
+
+  it("doesn't let one account's catch-up backlog starve another's history", async () => {
+    const ctx: DaemonContext = {
+      dataDir: '/tmp/tgcli',
+      pidPath: '/tmp/tgcli/daemon.pid',
+      verbosity: 'normal',
+      reconnectConfig: {
+        initialDelayMs: 1000,
+        maxDelayMs: 4000,
+        maxAttempts: 3,
+        backoffMultiplier: 2,
+      },
+      shutdownTimeoutMs: 1_000_000,
+      logger: {
+        info: mock(() => {}),
+        debug: mock(() => {}),
+        warn: mock(() => {}),
+        error: mock(() => {}),
+      },
+      pidFile: {
+        acquire: () => {},
+        release: () => {},
+        read: () => null,
+        isRunning: () => false,
+        sendSignal: () => false,
+        getPath: () => '/tmp/tgcli/daemon.pid',
+      },
+      state: { running: true, accounts: new Map(), shutdownRequested: false },
+      accountsDb: createTestDatabase().accountsDb,
+      runtime: createDaemonRuntime(),
+    }
+    const ran: Array<{ accountId: number; type: string }> = []
+    const first = seedAccount(ctx, 1, { gap: GAP_CHATS.slice(0, 50) }, ran)
+    const second = seedAccount(
+      ctx,
+      2,
+      { history: HISTORY_CHATS.slice(0, 10), fresh: NEW_CHATS.slice(0, 10) },
+      ran,
+    )
+    await first.scheduler.initializeForStartup()
+    await second.scheduler.initializeForStartup()
+
+    for (let i = 0; i < 40; i++) {
+      for (const rt of ctx.runtime.accounts.values()) rt.lastJobProcessTime = 0
+      await processJobs(ctx)
+    }
+
+    // The accounts take turns
+    expect(ran.slice(0, 6).map((job) => job.accountId)).toEqual([
+      1, 2, 1, 2, 1, 2,
+    ])
+    // Account 2's first pages and history start at once
+    const secondTypes = ran
+      .filter((job) => job.accountId === 2)
+      .slice(0, 4)
+      .map((job) => job.type)
+    expect(secondTypes).toContain(SyncJobType.InitialLoad)
+    expect(secondTypes).toContain(SyncJobType.BackwardHistory)
+    expect(ran.filter((job) => job.accountId === 1)).toHaveLength(20)
+    expect(
+      ran
+        .filter((job) => job.accountId === 1)
+        .every((job) => job.type === SyncJobType.ForwardCatchup),
+    ).toBe(true)
+  }, 30_000)
 })

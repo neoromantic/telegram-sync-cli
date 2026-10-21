@@ -1,11 +1,15 @@
 /**
- * Tests for daemon scheduler logic (no module mocks)
+ * Tests for daemon scheduler logic (no module mocks). Each account has its
+ * own runtime: its cache, scheduler and sync worker.
  */
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import { sep } from 'node:path'
-import type { TelegramClient } from '@mtcute/bun'
-import type { DaemonContext } from '../daemon/daemon-context'
-import { createDaemonRuntime } from '../daemon/daemon-context'
+import type { Database } from 'bun:sqlite'
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import type { TelegramClient, tl } from '@mtcute/bun'
+import type { AccountRuntime, DaemonContext } from '../daemon/daemon-context'
+import {
+  createDaemonRuntime,
+  totalMessagesSynced,
+} from '../daemon/daemon-context'
 import {
   cleanupScheduler,
   initializeScheduler,
@@ -14,18 +18,17 @@ import {
 } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import type { RealSyncWorker } from '../daemon/sync-worker'
-import { getCacheDb, getDataDir } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
+import { createChatsCache } from '../db/chats-cache'
 import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache } from '../db/messages-cache'
-import { initCacheSchema } from '../db/schema'
+import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
+import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
 import {
-  initSyncSchema,
-  type SyncJobRow,
-  SyncJobType,
-  SyncPriority,
-} from '../db/sync-schema'
+  addAccountRuntime,
+  createAccountCacheDb,
+} from './helpers/daemon-runtime'
 import { fakeDialogClient } from './helpers/fake-dialogs'
 
 function createLogger() {
@@ -135,76 +138,137 @@ function createContext(): DaemonContext {
   }
 }
 
-describe('initializeScheduler', () => {
-  it('creates scheduler and workers for connected accounts', async () => {
-    const ctx = createContext()
-    const cacheDb = getCacheDb()
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
+/** Mark the account connected with a client */
+function connect(
+  ctx: DaemonContext,
+  accountId: number,
+  client: TelegramClient = asTelegramClient({}),
+) {
+  ctx.state.accounts.set(accountId, {
+    accountId,
+    phone: `+1555000000${accountId}`,
+    name: null,
+    status: 'connected',
+    client,
+  })
+}
 
-    ctx.state.accounts.set(1, {
-      accountId: 1,
-      phone: '+10000000001',
+/** A connected account with a scheduler and a worker (stubs by default) */
+function runAccount(
+  ctx: DaemonContext,
+  accountId: number,
+  parts: { scheduler?: SyncScheduler; worker?: RealSyncWorker } = {},
+): AccountRuntime {
+  connect(ctx, accountId)
+  return addAccountRuntime(ctx, accountId, createAccountCacheDb(), {
+    scheduler: parts.scheduler ?? createSchedulerStub(),
+    worker: parts.worker ?? createWorkerStub(),
+  })
+}
+
+function jobOf(jobType: SyncJobType, overrides: Partial<SyncJobRow> = {}) {
+  return {
+    id: 3,
+    chat_id: 55,
+    job_type: jobType,
+    priority: SyncPriority.High,
+    status: 'pending',
+    cursor_start: null,
+    cursor_end: null,
+    messages_fetched: 0,
+    error_message: null,
+    created_at: Date.now(),
+    started_at: null,
+    completed_at: null,
+    attempts: 0,
+    next_run_at: 0,
+    ...overrides,
+  } satisfies SyncJobRow
+}
+
+/** Replace Date.now with a clock the test moves */
+function useClock(start = 1_760_000_000_000) {
+  const originalNow = Date.now
+  let now = start
+  Date.now = () => now
+  return {
+    advance(ms: number) {
+      now += ms
+    },
+    restore() {
+      Date.now = originalNow
+    },
+  }
+}
+
+describe('initializeScheduler', () => {
+  it('creates a scheduler and a worker for each connected account', async () => {
+    const ctx = createContext()
+    connect(ctx, 1, asTelegramClient({ call: async () => ({}) }))
+    const first = addAccountRuntime(ctx, 1)
+    ctx.state.accounts.set(2, {
+      accountId: 2,
+      phone: '+15550000002',
       name: null,
-      status: 'connected',
-      client: asTelegramClient({ call: async () => ({}) }),
+      status: 'error',
     })
+    const second = addAccountRuntime(ctx, 2)
 
     await initializeScheduler(ctx)
 
-    expect(ctx.runtime.scheduler).not.toBeNull()
-    expect(ctx.runtime.syncWorkers.size).toBe(1)
+    expect(first.scheduler).not.toBeNull()
+    expect(first.worker).not.toBeNull()
+    expect(second.scheduler).toBeNull()
+    expect(second.worker).toBeNull()
   })
 })
 
 describe('rebuildSyncWorker', () => {
   it('replaces the account worker while the scheduler runs', () => {
     const ctx = createContext()
-    const cacheDb = getCacheDb()
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
     const oldWorker = createWorkerStub()
-    ctx.runtime.scheduler = createSchedulerStub()
-    ctx.runtime.syncWorkers.set(1, oldWorker)
+    const rt = runAccount(ctx, 1, { worker: oldWorker })
 
     const newClient = asTelegramClient({})
     rebuildSyncWorker(ctx, 1, newClient)
 
-    const worker = ctx.runtime.syncWorkers.get(1)
-    expect(worker).not.toBe(oldWorker)
-    expect(worker?.client).toBe(newClient)
+    expect(rt.worker).not.toBe(oldWorker)
+    expect(rt.worker?.client).toBe(newClient)
+  })
+
+  it("leaves the other accounts' workers alone", () => {
+    const ctx = createContext()
+    runAccount(ctx, 1)
+    const otherWorker = createWorkerStub()
+    const other = runAccount(ctx, 2, { worker: otherWorker })
+
+    rebuildSyncWorker(ctx, 1, asTelegramClient({}))
+
+    expect(other.worker).toBe(otherWorker)
   })
 
   it('does nothing without a scheduler', () => {
     const ctx = createContext()
+    const rt = addAccountRuntime(ctx, 1)
     const fake = fakeDialogClient([])
 
     expect(rebuildSyncWorker(ctx, 1, fake.client)).toBeUndefined()
 
-    expect(ctx.runtime.syncWorkers.size).toBe(0)
+    expect(rt.worker).toBeNull()
     expect(fake.calls).toHaveLength(0)
   })
 })
 
 describe('rebuildSyncWorker dialog pass', () => {
-  const cacheDb = getCacheDb()
-  const chatSyncState = createChatSyncStateService(cacheDb)
-  const jobsService = createSyncJobsService(cacheDb)
+  let cacheDb: Database
+  let otherDb: Database
+  let chatSyncState: ReturnType<typeof createChatSyncStateService>
+  let jobsService: ReturnType<typeof createSyncJobsService>
 
-  beforeEach(() => {
-    // The deletes below clear the file-backed cache database
-    if (!getDataDir().includes(`${sep}.tmp${sep}test-data-`)) {
-      throw new Error(`Refusing to clear a non-test data dir: ${getDataDir()}`)
-    }
-    initCacheSchema(cacheDb)
-    initSyncSchema(cacheDb)
-    // The cache database file is shared by the tests in this process
-    cacheDb.run('DELETE FROM chat_sync_state')
-    cacheDb.run('DELETE FROM sync_jobs')
-    cacheDb.run('DELETE FROM chats_cache')
-
+  function seedChats(db: Database) {
+    const state = createChatSyncStateService(db)
     for (const userId of [1001, 1002, 1003]) {
-      chatSyncState.upsert({
+      state.upsert({
         chat_id: userId,
         chat_type: 'private',
         sync_priority: SyncPriority.High,
@@ -212,24 +276,40 @@ describe('rebuildSyncWorker dialog pass', () => {
         forward_cursor: 1000,
         backward_cursor: 1,
       })
-      chatSyncState.markHistoryComplete(userId)
-      chatSyncState.raiseTopMessageId(userId, 1000)
+      state.markHistoryComplete(userId)
+      state.raiseTopMessageId(userId, 1000)
     }
+  }
+
+  beforeEach(() => {
+    cacheDb = createAccountCacheDb()
+    otherDb = createAccountCacheDb()
+    chatSyncState = createChatSyncStateService(cacheDb)
+    jobsService = createSyncJobsService(cacheDb)
+    seedChats(cacheDb)
+    seedChats(otherDb)
+  })
+
+  afterEach(() => {
+    cacheDb.close()
+    otherDb.close()
   })
 
   function createRunningContext() {
     const ctx = createContext()
-    ctx.runtime.scheduler = createSyncScheduler({
-      db: cacheDb,
-      jobsService,
-      chatSyncState,
-      messagesCache: createMessagesCache(cacheDb),
+    addAccountRuntime(ctx, 1, cacheDb, {
+      scheduler: createSyncScheduler({
+        db: cacheDb,
+        jobsService,
+        chatSyncState,
+        messagesCache: createMessagesCache(cacheDb),
+      }),
     })
     return ctx
   }
 
-  const pendingCatchups = () =>
-    jobsService
+  const pendingCatchups = (service = jobsService) =>
+    service
       .getPendingJobs()
       .filter((job) => job.job_type === SyncJobType.ForwardCatchup)
       .map((job) => job.chat_id)
@@ -245,12 +325,41 @@ describe('rebuildSyncWorker dialog pass', () => {
     await rebuildSyncWorker(ctx, 1, fake.client)
 
     expect(fake.calls).toEqual([{ archived: 'keep' }])
-    expect(ctx.runtime.syncWorkers.get(1)?.client).toBe(fake.client)
+    expect(ctx.runtime.accounts.get(1)?.worker?.client).toBe(fake.client)
     expect(chatSyncState.get(1002)?.top_message_id).toBe(1007)
-    // A complete pass of one account says nothing about chats it didn't list
+    // Marking unlisted chats caught up waits for the next commit
     expect(chatSyncState.get(1003)?.top_message_id).toBe(1000)
     expect(pendingCatchups()).toEqual([1002])
     expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
+  })
+
+  it("changes only the reconnected account's cache", async () => {
+    const ctx = createRunningContext()
+    const otherState = createChatSyncStateService(otherDb)
+    addAccountRuntime(ctx, 2, otherDb, {
+      scheduler: createSyncScheduler({
+        db: otherDb,
+        jobsService: createSyncJobsService(otherDb),
+        chatSyncState: otherState,
+        messagesCache: createMessagesCache(otherDb),
+      }),
+    })
+    const fake = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 1000 },
+        { kind: 'user', id: 1002, topMessage: 1007 },
+      ],
+      { failAfter: 1 },
+    )
+
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    expect(chatSyncState.get(1003)?.top_message_id).toBeNull()
+    for (const userId of [1001, 1002, 1003]) {
+      expect(otherState.get(userId)?.top_message_id).toBe(1000)
+    }
+    expect(pendingCatchups(createSyncJobsService(otherDb))).toEqual([])
+    expect(createChatsCache(otherDb).getById('1001')).toBeNull()
   })
 
   it('checks an opted-in chat that the pass did not list', async () => {
@@ -300,9 +409,11 @@ describe('rebuildSyncWorker dialog pass', () => {
   it('logs a pass that throws and lets the next reconnect run one', async () => {
     // Nothing awaits the pass in the daemon, so a throw must not escape
     const ctx = createContext()
-    ctx.runtime.scheduler = createSchedulerStub({
-      refreshQueues: mock(() => {
-        throw new Error('disk I/O error')
+    addAccountRuntime(ctx, 1, cacheDb, {
+      scheduler: createSchedulerStub({
+        refreshQueues: mock(() => {
+          throw new Error('disk I/O error')
+        }),
       }),
     })
     const fake = fakeDialogClient([
@@ -335,7 +446,7 @@ describe('rebuildSyncWorker dialog pass', () => {
     expect(first.calls).toHaveLength(1)
     expect(second.calls).toHaveLength(0)
     // The worker still moves to the newest client
-    expect(ctx.runtime.syncWorkers.get(1)?.client).toBe(second.client)
+    expect(ctx.runtime.accounts.get(1)?.worker?.client).toBe(second.client)
     expect(pendingCatchups()).toEqual([1002])
   })
 })
@@ -343,30 +454,12 @@ describe('rebuildSyncWorker dialog pass', () => {
 describe('processJobs', () => {
   it('queues follow-up jobs on success with hasMore', async () => {
     const ctx = createContext()
-
-    const job: SyncJobRow = {
-      id: 1,
-      chat_id: 10,
-      job_type: SyncJobType.BackwardHistory,
-      priority: SyncPriority.High,
-      status: 'pending',
-      cursor_start: null,
-      cursor_end: null,
-      messages_fetched: 0,
-      error_message: null,
-      created_at: Date.now(),
-      started_at: null,
-      completed_at: null,
-      attempts: 0,
-      next_run_at: 0,
-    }
-
+    const job = jobOf(SyncJobType.BackwardHistory, { id: 1, chat_id: 10 })
     const scheduler = createSchedulerStub({
       getNextJob: () => job,
       queueBackwardHistory: mock(() => {}),
       queueForwardCatchup: mock(() => {}),
     })
-
     const worker = createWorkerStub({
       processJobReal: mock(async () => ({
         success: true,
@@ -374,50 +467,24 @@ describe('processJobs', () => {
         hasMore: true,
       })),
     })
-
-    ctx.runtime.scheduler = scheduler
-    ctx.runtime.syncWorkers.set(1, worker)
-    ctx.state.accounts.set(1, {
-      accountId: 1,
-      phone: '+10000000001',
-      name: null,
-      status: 'connected',
-      client: asTelegramClient({}),
-    })
+    const rt = runAccount(ctx, 1, { scheduler, worker })
 
     await processJobs(ctx)
 
     expect(worker.processJobReal).toHaveBeenCalledWith(job)
     expect(scheduler.queueBackwardHistory).toHaveBeenCalledWith(10)
-    expect(ctx.runtime.totalMessagesSynced).toBe(4)
+    expect(rt.messagesSynced).toBe(4)
+    expect(totalMessagesSynced(ctx.runtime)).toBe(4)
   })
 
   it('records last job time when rate limited', async () => {
     const ctx = createContext()
-
-    const job: SyncJobRow = {
-      id: 2,
-      chat_id: 44,
-      job_type: SyncJobType.ForwardCatchup,
-      priority: SyncPriority.High,
-      status: 'pending',
-      cursor_start: null,
-      cursor_end: null,
-      messages_fetched: 0,
-      error_message: null,
-      created_at: Date.now(),
-      started_at: null,
-      completed_at: null,
-      attempts: 0,
-      next_run_at: 0,
-    }
-
+    const job = jobOf(SyncJobType.ForwardCatchup, { id: 2, chat_id: 44 })
     const scheduler = createSchedulerStub({
       getNextJob: () => job,
       queueBackwardHistory: mock(() => {}),
       queueForwardCatchup: mock(() => {}),
     })
-
     const worker = createWorkerStub({
       processJobReal: mock(async () => ({
         success: false,
@@ -426,52 +493,14 @@ describe('processJobs', () => {
         waitSeconds: 3,
       })),
     })
-
-    ctx.runtime.scheduler = scheduler
-    ctx.runtime.syncWorkers.set(1, worker)
-    ctx.state.accounts.set(1, {
-      accountId: 1,
-      phone: '+10000000001',
-      name: null,
-      status: 'connected',
-      client: asTelegramClient({}),
-    })
+    const rt = runAccount(ctx, 1, { scheduler, worker })
 
     await processJobs(ctx)
 
-    expect(ctx.runtime.lastJobProcessTime).toBeGreaterThan(0)
+    expect(rt.lastJobProcessTime).toBeGreaterThan(0)
+    expect(ctx.runtime.lastJobAccountId).toBe(1)
     expect(scheduler.queueForwardCatchup).not.toHaveBeenCalled()
   })
-
-  function jobOf(jobType: SyncJobType): SyncJobRow {
-    return {
-      id: 3,
-      chat_id: 55,
-      job_type: jobType,
-      priority: SyncPriority.High,
-      status: 'pending',
-      cursor_start: null,
-      cursor_end: null,
-      messages_fetched: 0,
-      error_message: null,
-      created_at: Date.now(),
-      started_at: null,
-      completed_at: null,
-      attempts: 0,
-      next_run_at: 0,
-    }
-  }
-
-  function connectWorker(ctx: DaemonContext, worker: RealSyncWorker) {
-    ctx.runtime.syncWorkers.set(1, worker)
-    ctx.state.accounts.set(1, {
-      accountId: 1,
-      phone: '+10000000001',
-      name: null,
-      status: 'connected',
-      client: asTelegramClient({}),
-    })
-  }
 
   it('moves to the next lane slot only after a job ran', async () => {
     const job = jobOf(SyncJobType.ForwardCatchup)
@@ -479,43 +508,47 @@ describe('processJobs', () => {
     // No worker: the job doesn't run and keeps its slot
     const idle = createContext()
     const idleScheduler = createSchedulerStub({ getNextJob: () => job })
-    idle.runtime.scheduler = idleScheduler
+    connect(idle, 1)
+    addAccountRuntime(idle, 1, createAccountCacheDb(), {
+      scheduler: idleScheduler,
+    })
     await processJobs(idle)
     expect(idleScheduler.recordJobRun).not.toHaveBeenCalled()
 
     // A worker that is rate limited doesn't run it either
     const blocked = createContext()
     const blockedScheduler = createSchedulerStub({ getNextJob: () => job })
-    blocked.runtime.scheduler = blockedScheduler
-    connectWorker(blocked, createWorkerStub({ canMakeApiCall: () => false }))
+    runAccount(blocked, 1, {
+      scheduler: blockedScheduler,
+      worker: createWorkerStub({ canMakeApiCall: () => false }),
+    })
     await processJobs(blocked)
     expect(blockedScheduler.recordJobRun).not.toHaveBeenCalled()
 
     // A job that ran uses the slot, even if it threw
     const ctx = createContext()
     const scheduler = createSchedulerStub({ getNextJob: () => job })
-    ctx.runtime.scheduler = scheduler
-    connectWorker(
-      ctx,
-      createWorkerStub({
+    runAccount(ctx, 1, {
+      scheduler,
+      worker: createWorkerStub({
         processJobReal: mock(async () => {
           throw new Error('boom')
         }),
       }),
-    )
+    })
     await processJobs(ctx)
     expect(scheduler.recordJobRun).toHaveBeenCalledTimes(1)
     expect(scheduler.recordJobRun).toHaveBeenCalledWith(job)
   })
 
   it('queues history right after a first page with history left', async () => {
-    const job = jobOf(SyncJobType.InitialLoad)
     const ctx = createContext()
-    const scheduler = createSchedulerStub({ getNextJob: () => job })
-    ctx.runtime.scheduler = scheduler
-    connectWorker(
-      ctx,
-      createWorkerStub({
+    const scheduler = createSchedulerStub({
+      getNextJob: () => jobOf(SyncJobType.InitialLoad),
+    })
+    runAccount(ctx, 1, {
+      scheduler,
+      worker: createWorkerStub({
         processJobReal: mock(async () => ({
           success: true,
           messagesFetched: 100,
@@ -523,7 +556,7 @@ describe('processJobs', () => {
           historyComplete: false,
         })),
       }),
-    )
+    })
 
     await processJobs(ctx)
 
@@ -531,13 +564,13 @@ describe('processJobs', () => {
   })
 
   it('queues no history after a first page that reached the start', async () => {
-    const job = jobOf(SyncJobType.InitialLoad)
     const ctx = createContext()
-    const scheduler = createSchedulerStub({ getNextJob: () => job })
-    ctx.runtime.scheduler = scheduler
-    connectWorker(
-      ctx,
-      createWorkerStub({
+    const scheduler = createSchedulerStub({
+      getNextJob: () => jobOf(SyncJobType.InitialLoad),
+    })
+    runAccount(ctx, 1, {
+      scheduler,
+      worker: createWorkerStub({
         processJobReal: mock(async () => ({
           success: true,
           messagesFetched: 12,
@@ -545,7 +578,7 @@ describe('processJobs', () => {
           historyComplete: true,
         })),
       }),
-    )
+    })
 
     await processJobs(ctx)
 
@@ -557,13 +590,12 @@ describe('processJobs', () => {
       result: Awaited<ReturnType<RealSyncWorker['processJobReal']>>,
     ) {
       const ctx = createContext()
-      ctx.runtime.scheduler = createSchedulerStub({
-        getNextJob: () => jobOf(SyncJobType.BackwardHistory),
+      runAccount(ctx, 1, {
+        scheduler: createSchedulerStub({
+          getNextJob: () => jobOf(SyncJobType.BackwardHistory),
+        }),
+        worker: createWorkerStub({ processJobReal: mock(async () => result) }),
       })
-      connectWorker(
-        ctx,
-        createWorkerStub({ processJobReal: mock(async () => result) }),
-      )
       await processJobs(ctx)
       const lines = (level: 'warn' | 'debug') =>
         (ctx.logger[level] as ReturnType<typeof mock>).mock.calls.map((call) =>
@@ -582,7 +614,7 @@ describe('processJobs', () => {
       })
 
       expect(warn).toEqual([
-        'Job 3 (backward_history, chat 55) failed, attempt 1 of 5, retry in 1m: connection reset',
+        '[Account 1] Job 3 (backward_history, chat 55) failed, attempt 1 of 5, retry in 1m: connection reset',
       ])
     })
 
@@ -626,48 +658,218 @@ describe('processJobs', () => {
       })
 
       expect(warn).toEqual([])
-      expect(debug).toContain('Job 3 waits out a FLOOD_WAIT of 600s')
+      expect(debug).toContain(
+        '[Account 1] Job 3 waits out a FLOOD_WAIT of 600s',
+      )
     })
   })
 
-  it('skips processing when inter-job delay not elapsed', async () => {
+  it("skips an account whose inter-job delay hasn't elapsed", async () => {
     const ctx = createContext()
-    const now = Date.now()
-    const originalNow = Date.now
-
-    Date.now = () => now
-    ctx.runtime.lastJobProcessTime = now
-    ctx.runtime.scheduler = createSchedulerStub({
-      getNextJob: mock(() => null),
+    const clock = useClock()
+    const getNextJob = mock(() => null)
+    const rt = runAccount(ctx, 1, {
+      scheduler: createSchedulerStub({ getNextJob }),
     })
+    rt.lastJobProcessTime = Date.now()
 
-    const scheduler = ctx.runtime.scheduler!
     try {
       await processJobs(ctx)
     } finally {
-      Date.now = originalNow
+      clock.restore()
     }
 
-    expect(scheduler.getNextJob).not.toHaveBeenCalled()
+    expect(getNextJob).not.toHaveBeenCalled()
+  })
+
+  it('takes turns between accounts, each waiting its own delay', async () => {
+    const ctx = createContext()
+    const ran: number[] = []
+    for (const accountId of [1, 2]) {
+      runAccount(ctx, accountId, {
+        scheduler: createSchedulerStub({
+          getNextJob: () => jobOf(SyncJobType.ForwardCatchup),
+        }),
+        worker: createWorkerStub({
+          processJobReal: mock(async () => {
+            ran.push(accountId)
+            return { success: true, messagesFetched: 1 }
+          }),
+        }),
+      })
+    }
+    const clock = useClock()
+
+    try {
+      for (let tick = 0; tick < 5; tick++) {
+        await processJobs(ctx)
+        clock.advance(1000)
+      }
+    } finally {
+      clock.restore()
+    }
+
+    // 1 and 2 at 0 s and 1 s; both wait 3 s from their own last job
+    expect(ran).toEqual([1, 2, 1, 2])
+  })
+})
+
+describe('processJobs with two accounts', () => {
+  const ALICE = 5001
+  let dbs: Database[]
+
+  beforeEach(() => {
+    dbs = []
+  })
+
+  afterEach(() => {
+    for (const db of dbs) db.close()
+  })
+
+  /** A client that records the getHistory peers it is asked for */
+  function recordingClient() {
+    const peers: tl.TypeInputPeer[] = []
+    const client = asTelegramClient({
+      call: mock(async (request: { _: string; peer?: tl.TypeInputPeer }) => {
+        if (request.peer) peers.push(request.peer)
+        return { _: 'messages.messages', messages: [], chats: [], users: [] }
+      }) as unknown as TelegramClient['call'],
+    })
+    return { client, peers }
+  }
+
+  /**
+   * An account whose cache knows Alice's DM with the account's own access
+   * hash, and is due for its first page
+   */
+  function seedAccount(
+    ctx: DaemonContext,
+    accountId: number,
+    options: { withChat: boolean },
+  ) {
+    const db = createAccountCacheDb()
+    dbs.push(db)
+    if (options.withChat) {
+      createChatsCache(db).upsert({
+        chat_id: String(ALICE),
+        type: 'private',
+        title: 'Alice Able',
+        username: null,
+        member_count: null,
+        access_hash: `${accountId}${accountId}${accountId}`,
+        is_creator: 0,
+        is_admin: 0,
+        last_message_id: null,
+        last_message_at: null,
+        fetched_at: Date.now(),
+        raw_json: '{}',
+      })
+      createChatSyncStateService(db).upsert({
+        chat_id: ALICE,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+      })
+    }
+    const recording = recordingClient()
+    connect(ctx, accountId, recording.client)
+    const rt = addAccountRuntime(ctx, accountId, db)
+    return { db, rt, ...recording }
+  }
+
+  const pendingJobs = (db: Database) =>
+    createSyncJobsService(db).getPendingJobs()
+
+  it("runs a job from account 2's cache on account 2's client", async () => {
+    const ctx = createContext()
+    const first = seedAccount(ctx, 1, { withChat: false })
+    const second = seedAccount(ctx, 2, { withChat: true })
+    await initializeScheduler(ctx)
+    expect(pendingJobs(second.db)).toHaveLength(1)
+
+    await processJobs(ctx)
+
+    expect(first.peers).toEqual([])
+    expect(second.peers).toHaveLength(1)
+    expect(second.peers[0]).toMatchObject({
+      _: 'inputPeerUser',
+      userId: ALICE,
+    })
+    expect((second.peers[0] as tl.RawInputPeerUser).accessHash.toString()).toBe(
+      '222',
+    )
+    expect(pendingJobs(second.db)).toHaveLength(0)
+  })
+
+  it("keeps a disconnected account's jobs pending", async () => {
+    const ctx = createContext()
+    const first = seedAccount(ctx, 1, { withChat: true })
+    const second = seedAccount(ctx, 2, { withChat: true })
+    await initializeScheduler(ctx)
+    // Account 1 drops its connection: its worker goes with the client
+    const firstState = ctx.state.accounts.get(1)!
+    firstState.status = 'reconnecting'
+    firstState.client = undefined
+    first.rt.worker = null
+    const clock = useClock()
+
+    try {
+      for (let tick = 0; tick < 4; tick++) {
+        await processJobs(ctx)
+        clock.advance(4000)
+      }
+    } finally {
+      clock.restore()
+    }
+
+    expect(pendingJobs(first.db)).toHaveLength(1)
+    expect(first.peers).toEqual([])
+    // Account 2 never ran account 1's job: every peer carries its own hash
+    expect(
+      second.peers.map((peer) =>
+        (peer as tl.RawInputPeerUser).accessHash.toString(),
+      ),
+    ).toEqual(['222'])
+  })
+
+  it("runs account 2's jobs while account 1 waits out a FLOOD_WAIT", async () => {
+    const ctx = createContext()
+    const first = seedAccount(ctx, 1, { withChat: true })
+    const second = seedAccount(ctx, 2, { withChat: true })
+    await initializeScheduler(ctx)
+    createRateLimitsService(first.db).setFloodWait('messages.getHistory', 600)
+
+    await processJobs(ctx)
+
+    expect(first.peers).toEqual([])
+    expect(second.peers).toHaveLength(1)
+    expect(pendingJobs(first.db)).toHaveLength(1)
+    expect(
+      createRateLimitsService(second.db).isBlocked('messages.getHistory'),
+    ).toBe(false)
   })
 })
 
 describe('cleanupScheduler', () => {
-  it('clears scheduler and workers after cleanup', () => {
+  it("cleans up every account's old jobs and drops its scheduler and worker", () => {
     const ctx = createContext()
-
-    const scheduler = createSchedulerStub({
-      cleanup: mock(() => 2),
+    const schedulers = [1, 2].map((accountId) => {
+      const scheduler = createSchedulerStub({ cleanup: mock(() => 2) })
+      runAccount(ctx, accountId, { scheduler })
+      return scheduler
     })
-
-    ctx.runtime.scheduler = scheduler
-    ctx.runtime.syncWorkers.set(1, createWorkerStub())
 
     cleanupScheduler(ctx)
 
-    expect(scheduler.cleanup).toHaveBeenCalled()
-    expect(ctx.logger.debug).toHaveBeenCalledWith('Cleaned up 2 old jobs')
-    expect(ctx.runtime.syncWorkers.size).toBe(0)
-    expect(ctx.runtime.scheduler).toBeNull()
+    for (const scheduler of schedulers) {
+      expect(scheduler.cleanup).toHaveBeenCalled()
+    }
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      '[Account 1] Cleaned up 2 old jobs',
+    )
+    for (const rt of ctx.runtime.accounts.values()) {
+      expect(rt.scheduler).toBeNull()
+      expect(rt.worker).toBeNull()
+    }
   })
 })

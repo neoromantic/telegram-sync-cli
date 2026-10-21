@@ -2,7 +2,7 @@ import {
   type AccountsDbInterface,
   accountsDb as defaultAccountsDb,
 } from '../db'
-import { ErrorCodes } from '../types'
+import { type Account, ErrorCodes } from '../types'
 import { error } from './output'
 
 export const ACCOUNT_SELECTOR_DESCRIPTION =
@@ -63,5 +63,54 @@ export function resolveAccountSelector(
   error(
     ErrorCodes.ACCOUNT_NOT_FOUND,
     `Account not found for selector "${trimmed}"`,
+  )
+}
+
+/**
+ * The account a command works on: `--account`, else the active account,
+ * else the only one. Each account has its own cache, so a command never
+ * guesses between several.
+ */
+export function resolveAccount(
+  selector: string | undefined,
+  accountsDb: AccountsDbInterface = defaultAccountsDb,
+): Account {
+  const selectedId = resolveAccountSelector(selector, accountsDb)
+  if (selectedId !== undefined) {
+    const selected = accountsDb.getById(selectedId)
+    if (selected) return selected
+    error(
+      ErrorCodes.ACCOUNT_NOT_FOUND,
+      `Account with ID ${selectedId} not found`,
+    )
+  }
+
+  const active = accountsDb.getActive()
+  if (active) return active
+
+  const accounts = accountsDb.getAll()
+  if (accounts.length === 1) return accounts[0]!
+
+  if (accounts.length === 0) {
+    error(
+      ErrorCodes.AUTH_REQUIRED,
+      'No account found. Please log in first with "tg auth login"',
+      undefined,
+      'Log in with tg auth login',
+    )
+  }
+
+  error(
+    ErrorCodes.NO_ACTIVE_ACCOUNT,
+    `${accounts.length} accounts and none is active`,
+    {
+      accounts: accounts.map((account) => ({
+        id: account.id,
+        phone: account.phone,
+        username: account.username,
+        label: account.label,
+      })),
+    },
+    'Pass --account <id|@username|label> or run tg accounts switch --id <id>',
   )
 }

@@ -94,6 +94,7 @@ export function getExitCode(code: ErrorCode): number {
     RATE_LIMITED: 5,
     ACCOUNT_NOT_FOUND: 6,
     NO_ACTIVE_ACCOUNT: 1,
+    CACHE_UNAVAILABLE: 1,
     PHONE_CODE_INVALID: 1,
     SESSION_PASSWORD_NEEDED: 1,
     DAEMON_NOT_RUNNING: 1,

@@ -31,7 +31,10 @@ Available on the root command:
 | `--verbose` | `-v` | Verbose logging | Off |
 | `--quiet` | `-q` | Minimal output | Off |
 
-> `--account` and `--fresh` are **per-command** options where supported. `--account` accepts an ID, `@username`, or label.
+> `--account` and `--fresh` are **per-command** options where supported. `--account` accepts an ID, `@username`, or label,
+> and picks the account whose cache the command reads and writes: each account has its own,
+> `accounts/<id>/cache.db`. Without it a command uses the active account, else the only one;
+> see [configuration.md](configuration.md#which-account-a-command-uses) for the errors.
 
 ## Core Commands
 
@@ -118,7 +121,8 @@ tg chats sync @examplenews --auto # follow the default policy again
   current mode retries it at the next refresh: `--auto` for a chat that follows the policy (the
   default), no flag for one turned on. Without a flag the command turns the chat on.
   `tg status` prints the command for each failed job.
-- `--account` is checked like in `chats search`; all accounts share one cache.
+- `--account` picks the account whose sync state changes; another account's chats aren't in
+  its cache, so the command reports them as not found (`details.account_id` names the account).
 - A chat you haven't joined, such as a public channel cached by `tg chats get --id @username`,
   gets its first page and history, but new messages only on daemon start and after reconnects:
   Telegram sends no live updates for it.
@@ -242,24 +246,34 @@ tg daemon status
 tg status
 
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
+tg sql --query "SELECT COUNT(*) AS n FROM messages_cache" --account 2
 tg sql print-schema --table=users_cache
 tg sql print-schema --table=users_cache --output=sql  # Annotated DDL
 ```
 
-`tg status` reads the cache, so it works without Telegram credentials. Its `sync` part counts
-the daemon's sync jobs and lists some of them:
+`tg status` reads every account's cache, so it works without Telegram credentials and needs no
+active account; it never creates a cache. Its totals are sums over the accounts. Its `sync`
+part counts the daemon's sync jobs and lists some of them:
 
 - `pending_jobs` includes the jobs waiting for a retry, `running_jobs`, `failed_jobs` (jobs that
   failed for good) and `retrying_jobs` (pending jobs that failed at least once).
-- `jobs` lists the running jobs, the next 5 pending ones and the 5 newest failed ones, each with
-  `attempts`, `error` (the last error, or `null`), `next_run_at` (when a waiting job runs
+- `jobs` lists, for each account in ID order, the running jobs, the next 5 pending ones and the
+  5 newest failed ones, each with `account_id` (whose cache holds it), `attempts`, `error` (the last error, or `null`), `next_run_at` (when a waiting job runs
   again, or `null` if it is due) and `sync_mode` (the chat's mode, or `null` if the chat has no
   sync state).
 - A failed job is retried after 24 hours or a daemon restart. `tg chats sync <chat_id>` with
   the flag of its `sync_mode` (`--auto` for `auto`, none for `on`) deletes the chat's failed
   jobs, so a running daemon retries them at its next refresh (30 seconds or less). Without a
   flag the command turns an `auto` chat on. `--format pretty` shows the same, with a Retrying
-  and a Failed row and the command for each chat with a failed job.
+  and a Failed row and the command for each chat with a failed job. With several accounts each
+  job line carries `acct:<id>` and the command adds `--account <id>`.
+- `progress.sample_chats` (the overall top 5) and `rate_limits.active_flood_waits` items carry
+  `account_id` too.
+- `storage` reports the shared cache of 0.3 and older: `legacy_caches` lists the files set
+  aside as `shared-cache*.db` (`path`, `size_bytes`), and `migration` is `null` or
+  `{ reason, path, suggestion }` while the move waits (see
+  [configuration.md](configuration.md#upgrading-to-per-account-caches)). Pretty output shows a
+  Storage section only when there is something in it.
 
 ```json
 {
@@ -269,6 +283,7 @@ the daemon's sync jobs and lists some of them:
   "retrying_jobs": 1,
   "jobs": [
     {
+      "account_id": 1,
       "id": 41,
       "chat_id": 1234567890,
       "type": "backward_history",
@@ -280,6 +295,7 @@ the daemon's sync jobs and lists some of them:
       "sync_mode": "auto"
     },
     {
+      "account_id": 1,
       "id": 42,
       "chat_id": -1001234567890,
       "type": "initial_load",
@@ -297,12 +313,14 @@ the daemon's sync jobs and lists some of them:
 The `daemon` part of `tg status` says which version the running daemon is, so you can tell
 when it needs a restart after an upgrade:
 
-- `daemon.version` is the version the running daemon recorded when it started. It is `null`
-  when the daemon is stopped, still starting, or was started by tg 0.3.0 or older, which record
-  none.
+- `daemon.version` is the version the running daemon recorded in the accounts' caches when it
+  started. It is `null` when the daemon is stopped or still starting.
 - `daemon.version_mismatch` is `true` when a running daemon's version differs from
-  `cli_version`, or when it was started by tg 0.3.0 or older and so recorded none. It is
-  `false` while the daemon is stopped or still starting.
+  `cli_version`, or when its rows record none. It is `false` while the daemon is stopped or
+  still starting.
+- A daemon of tg 0.3 or older writes nothing to `accounts/<id>/cache.db`, so it reads as still
+  starting (`version` `null`, `version_mismatch` `false`). While it holds the shared cache of
+  that version, `storage.migration` says so (`shared_cache_in_use`) and to stop it.
 - `cli_version` is this tg's version.
 - A daemon keeps the code it started with, so after an upgrade restart it (`tg daemon stop`,
   then `tg daemon start`). If `version` is newer than `cli_version`, this tg is the older

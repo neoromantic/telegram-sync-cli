@@ -1,0 +1,298 @@
+/**
+ * E2E: the first command after an upgrade from 0.3 or older finds the shared
+ * `<dataDir>/cache.db` and moves it to the only account, sets it aside for
+ * several, or deletes it when it holds nothing. Shared caches are written
+ * from a child process (see seed-in-child.ts). Made-up data only.
+ */
+import { Database } from 'bun:sqlite'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
+import { seedInChild } from '../__tests__/helpers/seed-in-child'
+import { readCacheMeta } from '../db/cache-meta'
+import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
+import { NO_CREDENTIALS, runCli, runCliSuccess } from './helpers/cli'
+import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
+
+const SQL_COUNT = 'SELECT COUNT(*) AS n FROM messages_cache'
+
+/** Rows of the tables a shared cache is kept for */
+function rowCounts(path: string) {
+  const db = new Database(path, { readonly: true })
+  try {
+    const count = (table: string) =>
+      (db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
+    return {
+      messages_cache: count('messages_cache'),
+      chats_cache: count('chats_cache'),
+      users_cache: count('users_cache'),
+    }
+  } finally {
+    db.close()
+  }
+}
+
+/** An older tg that keeps the shared cache open, idle, until released */
+function holdOpen(path: string) {
+  const holder = Bun.spawn(
+    [
+      'bun',
+      '--no-env-file',
+      '-e',
+      `
+        import { Database } from 'bun:sqlite'
+        const db = new Database(process.env.HOLD_PATH)
+        db.query('SELECT COUNT(*) FROM chats_cache').get()
+        console.log('open')
+        for await (const _ of console) break
+        db.close()
+      `,
+    ],
+    {
+      env: { ...process.env, HOLD_PATH: path },
+      stdin: 'pipe',
+      stdout: 'pipe',
+    },
+  )
+  return {
+    async ready() {
+      const decoder = new TextDecoder()
+      let text = ''
+      for await (const chunk of holder.stdout) {
+        text += decoder.decode(chunk, { stream: true })
+        if (text.includes('open')) return
+      }
+      throw new Error('holder exited before it opened the file')
+    },
+    async release() {
+      holder.stdin.write('done\n')
+      holder.stdin.end()
+      await holder.exited
+    },
+  }
+}
+
+const NOTICE = 'each account now has its own cache'
+
+describe('E2E: upgrading from the shared cache', () => {
+  let env: TestEnvironment
+  let shared: string
+
+  beforeEach(() => {
+    env = createTestEnvironment('cache-layout')
+    env.initDatabase()
+    shared = join(env.dataDir, 'cache.db')
+  })
+
+  afterEach(() => {
+    env.cleanup()
+  })
+
+  const options = () => ({
+    env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+  })
+
+  async function sqlCount(...extra: string[]) {
+    const result = await runCliSuccess(['sql', SQL_COUNT, ...extra], options())
+    return {
+      count: (result.json as { data: { rows: Array<{ n: number }> } }).data
+        .rows[0]!.n,
+      stderr: result.stderr,
+    }
+  }
+
+  describe('with one account', () => {
+    beforeEach(() => {
+      env.seedAccounts([
+        { phone: '+15550000001', user_id: 9001, is_active: true },
+      ])
+    })
+
+    it('moves a cache from 0.2.0 to the account and migrates its peer IDs', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      const before = rowCounts(shared)
+
+      const { count, stderr } = await sqlCount()
+
+      expect(count).toBe(before.messages_cache)
+      expect(stderr).not.toContain(NOTICE)
+      for (const path of [shared, `${shared}-wal`, `${shared}-shm`]) {
+        expect(existsSync(path)).toBe(false)
+      }
+      const moved = new Database(env.cachePath(1))
+      try {
+        expect(rowCounts(env.cachePath(1))).toEqual(before)
+        expect(moved.query('PRAGMA user_version').get()).toEqual({
+          user_version: PEER_ID_USER_VERSION,
+        })
+        assertPeerIdInvariants(moved)
+        expect(readCacheMeta(moved)).toEqual({
+          account_id: '1',
+          user_id: '9001',
+        })
+      } finally {
+        moved.close()
+      }
+      expect(statSync(join(env.dataDir, 'accounts', '1')).mode & 0o777).toBe(
+        0o700,
+      )
+    })
+
+    it('fails with CACHE_UNAVAILABLE while an older tg holds it, and moves it after', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      const bytes = readFileSync(shared)
+      const holder = holdOpen(shared)
+      await holder.ready()
+
+      try {
+        const result = await runCli(['sql', SQL_COUNT], options())
+        expect(result.exitCode).toBe(1)
+        expect(JSON.parse(result.stderr)).toMatchObject({
+          success: false,
+          error: {
+            code: 'CACHE_UNAVAILABLE',
+            details: { reason: 'shared_cache_in_use', path: shared },
+          },
+        })
+        expect(readFileSync(shared).equals(bytes)).toBe(true)
+        expect(existsSync(join(env.dataDir, 'accounts'))).toBe(false)
+
+        // tg status still works and says what waits
+        const status = await runCliSuccess(['status'], options())
+        expect(
+          (status.json as { data: { storage: unknown } }).data.storage,
+        ).toEqual({
+          legacy_caches: [],
+          migration: {
+            reason: 'shared_cache_in_use',
+            path: shared,
+            suggestion: expect.stringContaining('tg daemon stop'),
+          },
+        })
+        expect(existsSync(join(env.dataDir, 'accounts'))).toBe(false)
+      } finally {
+        await holder.release()
+      }
+
+      expect((await sqlCount()).count).toBe(5)
+      expect(existsSync(shared)).toBe(false)
+    }, 30_000)
+  })
+
+  it('moves the rows still in the WAL to an account with ID 3', async () => {
+    env.seedAccounts([
+      { phone: '+15550000001' },
+      { phone: '+15550000002' },
+      { phone: '+15550000003', is_active: true },
+    ])
+    const data = new Database(join(env.dataDir, 'data.db'))
+    data.run('DELETE FROM accounts WHERE id < 3')
+    data.close()
+    seedInChild(shared, 'cacheWithRowsInWal', { messages: 40 })
+    expect(statSync(`${shared}-wal`).size).toBeGreaterThan(0)
+
+    expect((await sqlCount()).count).toBe(40)
+
+    for (const path of [shared, `${shared}-wal`, `${shared}-shm`]) {
+      expect(existsSync(path)).toBe(false)
+    }
+    expect(rowCounts(env.cachePath(3)).messages_cache).toBe(40)
+  })
+
+  describe('with two accounts', () => {
+    beforeEach(() => {
+      env.seedAccounts([
+        { phone: '+15550000001', is_active: true },
+        { phone: '+15550000002' },
+      ])
+    })
+
+    it('sets the cache aside, says so once, and lists it in tg status', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      const before = rowCounts(shared)
+
+      const first = await sqlCount()
+      const second = await sqlCount()
+
+      const parked = join(env.dataDir, 'shared-cache.db')
+      expect(first.count).toBe(0)
+      expect(second.count).toBe(0)
+      expect(first.stderr.split(NOTICE)).toHaveLength(2)
+      expect(first.stderr).toContain(parked)
+      expect(second.stderr).not.toContain(NOTICE)
+      expect(existsSync(shared)).toBe(false)
+      expect(rowCounts(parked)).toEqual(before)
+      expect(rowCounts(env.cachePath(1)).messages_cache).toBe(0)
+
+      const status = await runCliSuccess(['status'], options())
+      expect(
+        (status.json as { data: { storage: unknown } }).data.storage,
+      ).toEqual({
+        legacy_caches: [{ path: parked, size_bytes: statSync(parked).size }],
+        migration: null,
+      })
+    })
+
+    it('prints no notice with --format quiet', async () => {
+      seedInChild(shared, 'legacySharedCache')
+
+      const result = await runCliSuccess(
+        ['--format', 'quiet', 'sql', SQL_COUNT],
+        options(),
+      )
+
+      expect(result.stderr).not.toContain(NOTICE)
+      expect(existsSync(join(env.dataDir, 'shared-cache.db'))).toBe(true)
+    })
+
+    it('deletes a shared cache that holds nothing', async () => {
+      seedInChild(shared, 'emptyCache')
+
+      const { stderr } = await sqlCount()
+
+      expect(stderr).not.toContain(NOTICE)
+      expect(existsSync(shared)).toBe(false)
+      expect(existsSync(join(env.dataDir, 'shared-cache.db'))).toBe(false)
+    })
+
+    it('leaves a held cache for a later run and goes on', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      const holder = holdOpen(shared)
+      await holder.ready()
+
+      try {
+        expect((await sqlCount()).count).toBe(0)
+        expect(existsSync(shared)).toBe(true)
+      } finally {
+        await holder.release()
+      }
+
+      await sqlCount()
+      expect(existsSync(shared)).toBe(false)
+      expect(existsSync(join(env.dataDir, 'shared-cache.db'))).toBe(true)
+    }, 30_000)
+  })
+
+  it('refuses a cache stamped for another Telegram user', async () => {
+    env.seedAccounts([
+      { phone: '+15550000001', user_id: 9001, is_active: true },
+    ])
+    env
+      .openCacheDb(1)
+      .run(
+        "INSERT INTO cache_meta (key, value) VALUES ('account_id', '1'), ('user_id', '9002')",
+      )
+
+    const result = await runCli(['sql', SQL_COUNT], options())
+
+    expect(result.exitCode).toBe(1)
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      error: {
+        code: 'CACHE_UNAVAILABLE',
+        details: { reason: 'owner_mismatch', path: env.cachePath(1) },
+      },
+    })
+  })
+})

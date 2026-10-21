@@ -1,6 +1,6 @@
 # SQL Command
 
-The `tg sql` command provides direct SQL access to the local cache database for power users, debugging, and AI agent integration.
+The `tg sql` command provides direct SQL access to an account's local cache database for power users, debugging, and AI agent integration.
 
 ## Key Features
 
@@ -12,10 +12,16 @@ The `tg sql` command provides direct SQL access to the local cache database for 
 
 ## Database Target
 
-The command operates on the **cache database**:
+The command reads **one account's cache database**, `<dataDir>/accounts/<id>/cache.db`:
 
-- Default: `~/.telegram-sync-cli/cache.db`
-- Override: `TELEGRAM_SYNC_CLI_DATA_DIR=/path` → `/path/cache.db`
+- the account `--account` selects (ID, `@username` or label);
+- otherwise the active account, otherwise the only account.
+
+`<dataDir>` is `~/.telegram-sync-cli`, or `TELEGRAM_SYNC_CLI_DATA_DIR` when set. With no
+account the command fails with `AUTH_REQUIRED`; with several and none active, with
+`NO_ACTIVE_ACCOUNT` (see [configuration.md](configuration.md#which-account-a-command-uses)).
+`ATTACH` stays blocked, so a query never reads two accounts: query each with its own
+`--account`. Message IDs, basic group IDs and job IDs are unique only within one account.
 
 | Table | Description | TTL |
 |-------|-------------|-----|
@@ -28,7 +34,8 @@ The command operates on the **cache database**:
 | `sync_jobs` | Background sync job queue | N/A |
 | `rate_limits` | API rate limiting data | N/A |
 | `api_activity` | API call audit log | N/A (no automatic cleanup yet) |
-| `daemon_status` | Daemon runtime state | N/A |
+| `daemon_status` | Daemon runtime state for this account | N/A |
+| `cache_meta` | Which account the file belongs to (`account_id`, `user_id`) | N/A |
 
 **Note:** Account information is stored separately in `data.db`. Use `tg accounts list` for account queries.
 
@@ -51,6 +58,9 @@ tg sql --query="SELECT * FROM messages_cache" --limit=5000
 
 # Unlimited rows
 tg sql --query="SELECT * FROM messages_cache" --limit=0
+
+# Another account's cache
+tg sql "SELECT COUNT(*) AS messages FROM messages_cache" --account work
 ```
 
 ### View Database Schema
@@ -80,6 +90,7 @@ tg sql print-schema --table=users_cache --output=sql
 | `--query` | `-q` | SQL query to execute | - |
 | `--output` | `-o` | Output format: `json`, `csv` | `json` |
 | `--limit` | `-l` | Max rows to return (0 = unlimited) | `1000` |
+| `--account` | - | The account whose cache to query: ID, `@username` or label | The active account, else the only one |
 
 ### `tg sql print-schema`
 
@@ -87,6 +98,9 @@ tg sql print-schema --table=users_cache --output=sql
 |------|-------|-------------|---------|
 | `--table` | `-t` | Show schema for specific table | All tables |
 | `--output` | `-o` | Output format: `json`, `text`, `sql` | `json` |
+
+Every account's cache has the same schema, so `print-schema` needs no account and creates no
+file.
 
 ---
 
@@ -271,6 +285,10 @@ tg sql --query="SELECT first_name, last_name, username, phone FROM users_cache W
 | `SQL_TABLE_NOT_FOUND` | Table doesn't exist |
 | `SQL_WRITE_NOT_ALLOWED` | Write operation attempted |
 | `SQL_OPERATION_BLOCKED` | Blocked operation (ATTACH, etc.) |
+| `AUTH_REQUIRED` | No account: log in with `tg auth login` (exit 2) |
+| `NO_ACTIVE_ACCOUNT` | Several accounts and none active: pass `--account` (exit 1) |
+| `ACCOUNT_NOT_FOUND` | `--account` matches no account (exit 6) |
+| `CACHE_UNAVAILABLE` | The account's cache can't be opened yet: an older tg still holds the shared cache, or the file belongs to another account (`details.reason`, exit 1) |
 
 ---
 

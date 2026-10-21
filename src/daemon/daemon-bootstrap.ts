@@ -1,6 +1,5 @@
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import { dialogToCacheInput } from '../commands/chats/helpers'
-import { getCacheDb } from '../db'
 import {
   type ChatSyncStateService,
   createChatSyncStateService,
@@ -9,7 +8,7 @@ import { createChatsCache } from '../db/chats-cache'
 import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { apiUserToCacheInput } from '../utils/telegram-mappers'
-import type { DaemonContext } from './daemon-context'
+import type { AccountRuntime, DaemonContext } from './daemon-context'
 import { formatError } from './daemon-utils'
 
 const DIALOG_BOOTSTRAP_BATCH_SIZE = 200
@@ -21,8 +20,15 @@ export interface DialogPassResult {
   complete: boolean
 }
 
+function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
+  const rt = ctx.runtime.accounts.get(accountId)
+  if (!rt) throw new Error(`Account ${accountId} has no cache open`)
+  return rt
+}
+
 /**
- * One pass over an account's dialogs, archived ones included. Every dialog
+ * One pass over an account's dialogs, archived ones included, into the
+ * account's own cache. Every dialog
  * updates `chats_cache`, so the sync jobs can build an InputPeer for it. A
  * dialog also updates the chat's sync state (type, member count, policy and
  * the newest message ID), but the pass creates no state for an archived chat
@@ -35,7 +41,7 @@ export async function syncAccountDialogs(
   accountId: number,
   client: TelegramClient,
 ): Promise<DialogPassResult> {
-  const cacheDb = getCacheDb()
+  const cacheDb = requireRuntime(ctx, accountId).db
   const chatsCache = createChatsCache(cacheDb)
   const usersCache = createUsersCache(cacheDb)
   const chatSyncState = createChatSyncStateService(cacheDb)
@@ -131,27 +137,28 @@ export async function syncAccountDialogs(
 }
 
 /**
- * Enabled chats with a cursor that no pass listed. After an incomplete pass
- * their newest message is unknown, so each gets one checking page.
+ * Enabled chats with a cursor in the account's cache that its pass didn't
+ * list. After an incomplete pass their newest message is unknown, so each
+ * gets one checking page.
  *
- * A complete pass over every account lists every chat the user is in, so
- * the others were left, deleted or migrated: with `markLeftCaughtUp` they
- * are marked caught up. A chat turned on with `tg chats sync` is the
- * exception: it may be a public channel the user never joined, which no
- * dialog list shows and no live update reaches, so it gets one checking
- * page after every pass.
+ * A complete pass lists every chat the account is in, and the account's
+ * cache holds only its own chats, so the others were left, deleted or
+ * migrated: with `markLeftCaughtUp` they are marked caught up. A chat turned
+ * on with `tg chats sync` is the exception: it may be a public channel the
+ * user never joined, which no dialog list shows and no live update reaches,
+ * so it gets one checking page after every pass.
  */
-function markUnvisitedChats(
+export function markUnvisitedChats(
   chatSyncState: ChatSyncStateService,
   visited: Set<number>,
-  everyPassComplete: boolean,
+  passComplete: boolean,
   markLeftCaughtUp: boolean,
 ): number {
   const unvisited = chatSyncState
     .getEnabledWithCursor()
     .filter((chat) => !visited.has(chat.chat_id))
 
-  if (!everyPassComplete) {
+  if (!passComplete) {
     chatSyncState.markTopUnknown(unvisited.map((chat) => chat.chat_id))
     return unvisited.length
   }
@@ -169,38 +176,43 @@ function markUnvisitedChats(
 }
 
 /**
- * The startup dialog pass, one per connected account. It seeds
- * `chats_cache` and `chat_sync_state` and tells the scheduler which chats
- * are behind.
+ * The startup dialog pass, one per connected account, each into its own
+ * cache. It seeds `chats_cache` and `chat_sync_state` and tells the
+ * scheduler which chats are behind. An account that didn't connect keeps
+ * its sync state as it is, and one account's failed pass doesn't change
+ * what another's complete pass marks.
  */
 export async function bootstrapDialogs(ctx: DaemonContext): Promise<void> {
-  const visited = new Set<number>()
-  let everyPassComplete = true
-
   for (const [accountId, accountState] of ctx.state.accounts) {
-    if (accountState.status !== 'connected' || !accountState.client) {
-      everyPassComplete = false
+    const rt = ctx.runtime.accounts.get(accountId)
+    if (!rt || accountState.status !== 'connected' || !accountState.client) {
       continue
     }
 
-    const result = await syncAccountDialogs(ctx, accountId, accountState.client)
-    for (const chatId of result.visited) visited.add(chatId)
-    if (!result.complete) everyPassComplete = false
-  }
-
-  const chatSyncState = createChatSyncStateService(getCacheDb())
-  const unvisited = markUnvisitedChats(
-    chatSyncState,
-    visited,
-    everyPassComplete,
-    true,
-  )
-  if (unvisited > 0) {
-    ctx.logger.debug(
-      everyPassComplete
-        ? `${unvisited} synced chat(s) are not in any dialog list`
-        : `${unvisited} synced chat(s) were not listed; checking each for new messages`,
-    )
+    try {
+      const { visited, complete } = await syncAccountDialogs(
+        ctx,
+        accountId,
+        accountState.client,
+      )
+      const unvisited = markUnvisitedChats(
+        createChatSyncStateService(rt.db),
+        visited,
+        complete,
+        true,
+      )
+      if (unvisited > 0) {
+        ctx.logger.debug(
+          complete
+            ? `[Account ${accountId}] ${unvisited} synced chat(s) are not in the dialog list`
+            : `[Account ${accountId}] ${unvisited} synced chat(s) were not listed; checking each for new messages`,
+        )
+      }
+    } catch (err) {
+      ctx.logger.warn(
+        `[Account ${accountId}] Failed to bootstrap dialogs: ${formatError(err)}`,
+      )
+    }
   }
 }
 
@@ -218,22 +230,21 @@ export async function refreshDialogsAfterReconnect(
   ctx.runtime.dialogPassesInFlight.add(accountId)
 
   try {
+    const rt = requireRuntime(ctx, accountId)
     const { visited, complete } = await syncAccountDialogs(
       ctx,
       accountId,
       client,
     )
-    // Every account shares one cache (#17), so unvisited chats may belong
-    // to another account; checking them all is a safe superset. A complete
-    // pass says nothing about other accounts' chats, so it marks none of
-    // them caught up.
+    // Unlisted chats get a checking page. A complete pass doesn't mark them
+    // caught up yet, as when every account shared one cache.
     markUnvisitedChats(
-      createChatSyncStateService(getCacheDb()),
+      createChatSyncStateService(rt.db),
       visited,
       complete,
       false,
     )
-    ctx.runtime.scheduler?.refreshQueues()
+    rt.scheduler?.refreshQueues()
   } catch (err) {
     ctx.logger.warn(
       `[Account ${accountId}] Dialog pass after reconnect failed: ${formatError(err)}`,

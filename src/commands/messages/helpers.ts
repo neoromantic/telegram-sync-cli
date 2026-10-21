@@ -1,7 +1,7 @@
 import type { TelegramClient } from '@mtcute/bun'
 
 import { ConfigError } from '../../config'
-import { accountsDb, getCacheDb } from '../../db'
+import { accountsDb, getAccountCacheDb } from '../../db'
 import { createChatsCache } from '../../db/chats-cache'
 import type { MessageSearchRow } from '../../db/messages-search'
 import { createUsersCache } from '../../db/users-cache'
@@ -167,14 +167,18 @@ export function createLazyClient(create: () => HistoryClient): HistoryClient {
   }
 }
 
-/** The cache and the lazy client that `tg messages list` and `get` read with */
-export function openHistory(accountId: number | undefined, context: string) {
-  const cacheDb = getCacheDb()
+/**
+ * The account's cache and the lazy client that `tg messages list` and `get`
+ * read with
+ */
+export function openHistory(accountId: number, context: string) {
+  const cacheDb = getAccountCacheDb(accountId)
   return {
     cacheDb,
     client: createLazyClient(() =>
       wrapClientCallWithRateLimits(getClientForAccount(accountId), {
         context,
+        accountId,
       }),
     ),
     usersCache: createUsersCache(cacheDb),

@@ -12,6 +12,7 @@ import {
   type UserCacheInput,
   type UsersCache,
 } from '../db/users-cache'
+import { mockDbModule } from './helpers/db-mock'
 
 // Note: We no longer mock the output module to avoid interfering with other tests.
 // The output module handles test mode properly (throws instead of process.exit)
@@ -28,11 +29,9 @@ mock.module('../services/telegram', () => ({
   getClientForAccount: mock(() => mockClient),
 }))
 
-// Mock getCacheDb
+// Each account reads the test cache
 let testCacheDb: Database
-mock.module('../db', () => ({
-  getCacheDb: () => testCacheDb,
-}))
+mock.module('../db', () => mockDbModule({ cacheFor: () => testCacheDb }))
 
 describe('Contacts Commands', () => {
   let usersCache: UsersCache

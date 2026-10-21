@@ -8,10 +8,11 @@ import { createDaemonRuntime } from '../daemon/daemon-context'
 import { mainLoop } from '../daemon/daemon-loop'
 import type { SyncScheduler } from '../daemon/scheduler'
 import type { AccountConnectionState } from '../daemon/types'
-import { getCacheDb } from '../db'
-import { createChatSyncStateService } from '../db/chat-sync-state'
-import type { DaemonStatusService } from '../db/daemon-status'
-import { createMessagesCache } from '../db/messages-cache'
+import type { DaemonStatusService, DaemonTick } from '../db/daemon-status'
+import {
+  addAccountRuntime,
+  createAccountCacheDb,
+} from './helpers/daemon-runtime'
 
 function createMockStatusService(
   overrides: Partial<DaemonStatusService> = {},
@@ -25,18 +26,20 @@ function createMockStatusService(
     setDaemonRunning: () => {},
     setDaemonStopped: () => {},
     isDaemonRunning: () => false,
-    setConnectedAccounts: () => {},
     updateLastUpdate: () => {},
     setMessagesSynced: () => {},
+    writeTick: () => {},
     getDaemonInfo: () => ({
       status: 'running',
       pid: null,
       version: null,
       startedAt: null,
       lastUpdate: null,
-      connectedAccounts: 0,
-      totalAccounts: 0,
+      connectionStatus: null,
+      lastError: null,
       messagesSynced: 0,
+      pendingJobs: 0,
+      runningJobs: 0,
     }),
   }
   return { ...base, ...overrides }
@@ -141,35 +144,97 @@ async function runWithImmediateTimeouts(run: () => Promise<void>) {
   }
 }
 
+/** Stop the loop after `ticks` status writes of account 1 */
+function stopAfterTicks(ctx: DaemonContext, ticks: number) {
+  let count = 0
+  return createMockStatusService({
+    writeTick: () => {
+      count += 1
+      if (count >= ticks) ctx.state.shutdownRequested = true
+    },
+  })
+}
+
 describe('mainLoop', () => {
   it('logs status update failures without crashing', async () => {
     const ctx = createContext()
-
-    ctx.runtime.statusService = createMockStatusService({
-      setMessagesSynced: () => {
-        ctx.state.shutdownRequested = true
-      },
-      updateLastUpdate: () => {
-        throw new Error('status fail')
-      },
+    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      statusService: createMockStatusService({
+        writeTick: () => {
+          ctx.state.shutdownRequested = true
+          throw new Error('status fail')
+        },
+      }),
     })
 
     await runWithImmediateTimeouts(() => mainLoop(ctx))
 
-    expect(ctx.logger.warn).toHaveBeenCalled()
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('[Account 1] Failed to update daemon status'),
+    )
+  })
+
+  it("writes each account's tick to its own cache", async () => {
+    const ctx = createContext()
+    const first = addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      messagesSynced: 40,
+    })
+    const second = addAccountRuntime(ctx, 2, createAccountCacheDb(), {
+      messagesSynced: 2,
+      scheduler: createMockScheduler({
+        getStatus: () => ({
+          pendingJobs: 3,
+          runningJobs: 1,
+          jobsByType: {},
+          jobsByPriority: {},
+        }),
+      }),
+    })
+    ctx.state.accounts.set(1, {
+      accountId: 1,
+      phone: '+15550000001',
+      name: null,
+      status: 'connected',
+    })
+    ctx.state.accounts.set(2, {
+      accountId: 2,
+      phone: '+15550000002',
+      name: null,
+      status: 'error',
+      lastError: 'AUTH_KEY_UNREGISTERED',
+    })
+    const ticks: Array<[number, DaemonTick]> = []
+    for (const rt of [first, second]) {
+      const writeTick = rt.statusService.writeTick.bind(rt.statusService)
+      rt.statusService.writeTick = (tick) => {
+        ticks.push([rt.accountId, tick])
+        writeTick(tick)
+        ctx.state.shutdownRequested = true
+      }
+    }
+
+    await runWithImmediateTimeouts(() => mainLoop(ctx))
+
+    expect(ticks).toHaveLength(2)
+    expect(first.statusService.getDaemonInfo()).toMatchObject({
+      connectionStatus: 'connected',
+      lastError: null,
+      messagesSynced: 40,
+      pendingJobs: 0,
+    })
+    expect(second.statusService.getDaemonInfo()).toMatchObject({
+      connectionStatus: 'error',
+      lastError: 'AUTH_KEY_UNREGISTERED',
+      messagesSynced: 2,
+      pendingJobs: 3,
+      runningJobs: 1,
+    })
   })
 
   it('runs health checks and schedules reconnects when idle', async () => {
     const ctx = createContext()
-
-    let loopCount = 0
-    ctx.runtime.statusService = createMockStatusService({
-      updateLastUpdate: () => {
-        loopCount += 1
-        if (loopCount >= 60) {
-          ctx.state.shutdownRequested = true
-        }
-      },
+    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      statusService: stopAfterTicks(ctx, 60),
     })
 
     const client = {
@@ -202,39 +267,46 @@ describe('mainLoop', () => {
     expect(ctx.state.accounts.get(1)?.nextReconnectAt).toBeDefined()
   })
 
-  it('cleans up old jobs on cleanup interval', async () => {
+  it("refreshes every account's queues, even when one fails", async () => {
     const ctx = createContext()
-    const cacheDb = getCacheDb()
-
-    ctx.runtime.scheduler = createMockScheduler({
-      cleanup: () => 2,
-      getStatus: () => ({
-        pendingJobs: 0,
-        runningJobs: 0,
-        jobsByType: {},
-        jobsByPriority: {},
+    const refreshed: number[] = []
+    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      statusService: stopAfterTicks(ctx, 30),
+      scheduler: createMockScheduler({
+        refreshQueues: () => {
+          throw new Error('disk I/O error')
+        },
       }),
-      getNextJob: () => null,
     })
-
-    ctx.runtime.statusService = createMockStatusService()
-
-    const statusService = ctx.runtime.statusService!
-    let loopCount = 0
-    statusService.updateLastUpdate = () => {
-      loopCount += 1
-      if (loopCount >= 300) {
-        ctx.state.shutdownRequested = true
-      }
-    }
-
-    const messagesCache = createMessagesCache(cacheDb)
-    const chatSyncState = createChatSyncStateService(cacheDb)
-    messagesCache.countByChatId(0)
-    chatSyncState.get(0)
+    addAccountRuntime(ctx, 2, createAccountCacheDb(), {
+      scheduler: createMockScheduler({
+        refreshQueues: () => {
+          refreshed.push(2)
+        },
+      }),
+    })
 
     await runWithImmediateTimeouts(() => mainLoop(ctx))
 
-    expect(ctx.logger.debug).toHaveBeenCalledWith('Cleaned up 2 old jobs')
+    expect(refreshed).toEqual([2])
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[Account 1] Failed to refresh sync queues: Error: disk I/O error',
+      ),
+    )
+  })
+
+  it('cleans up old jobs on cleanup interval', async () => {
+    const ctx = createContext()
+    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      statusService: stopAfterTicks(ctx, 300),
+      scheduler: createMockScheduler({ cleanup: () => 2 }),
+    })
+
+    await runWithImmediateTimeouts(() => mainLoop(ctx))
+
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      '[Account 1] Cleaned up 2 old jobs',
+    )
   })
 })

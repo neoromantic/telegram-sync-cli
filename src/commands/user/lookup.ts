@@ -1,15 +1,12 @@
 import type { TelegramClient, tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
-import { getCacheDb } from '../../db'
 import { isCacheStale } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
 import { ErrorCodes } from '../../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../../utils/account-selector'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { toLong } from '../../utils/long'
 import { error, success, verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
@@ -123,14 +120,14 @@ export const userCommand = defineCommand({
     },
   },
   async run({ args }) {
+    const { account, db: cacheDb } = openAccountCache(args.account)
+
     try {
       const identifier = args.identifier as string
-      const accountId = resolveAccountSelector(args.account)
       const fresh = args.fresh ?? false
 
       const parsed = parseUserIdentifier(identifier)
 
-      const cacheDb = getCacheDb()
       const usersCache = createUsersCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
@@ -154,8 +151,8 @@ export const userCommand = defineCommand({
 
       verbose('Fetching user from API...')
       const client = wrapClientCallWithRateLimits(
-        getClientForAccount(accountId),
-        { context: 'cli:user.lookup' },
+        getClientForAccount(account.id),
+        { context: 'cli:user.lookup', accountId: account.id },
       )
 
       const user = await resolveUserFromApi(client, parsed)

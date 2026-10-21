@@ -5,7 +5,9 @@ import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it } from 'bun:test'
 import {
   createDaemonStatusService,
+  type DaemonInfo,
   type DaemonStatusService,
+  summarizeDaemonStatus,
 } from '../db/daemon-status'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
@@ -174,12 +176,71 @@ describe('DaemonStatusService', () => {
       })
     })
 
-    describe('setConnectedAccounts', () => {
-      it('sets connected accounts count', () => {
-        service.setConnectedAccounts(3, 5)
+    describe('writeTick', () => {
+      it("writes the account's figures and last_update", () => {
+        const before = Date.now()
+        service.writeTick({
+          connectionStatus: 'connected',
+          lastError: null,
+          messagesSynced: 42,
+          pendingJobs: 3,
+          runningJobs: 1,
+        })
 
-        expect(service.get('connected_accounts')).toBe('3')
-        expect(service.get('total_accounts')).toBe('5')
+        expect(service.getAll()).toMatchObject({
+          connection_status: 'connected',
+          messages_synced: '42',
+          pending_jobs: '3',
+          running_jobs: '1',
+        })
+        expect(service.get('last_error')).toBeNull()
+        expect(Number(service.get('last_update'))).toBeGreaterThanOrEqual(
+          before,
+        )
+      })
+
+      it('writes a tick in one transaction', () => {
+        db.run(`
+          CREATE TRIGGER fail_running_jobs BEFORE INSERT ON daemon_status
+          WHEN NEW.key = 'running_jobs'
+          BEGIN SELECT RAISE(ABORT, 'disk full'); END
+        `)
+
+        expect(() =>
+          service.writeTick({
+            connectionStatus: 'connected',
+            lastError: null,
+            messagesSynced: 42,
+            pendingJobs: 3,
+            runningJobs: 1,
+          }),
+        ).toThrow('disk full')
+        expect(service.getAll()).toEqual({})
+      })
+
+      it('keeps the last error until a tick without one', () => {
+        const tick = {
+          connectionStatus: 'error',
+          lastError: 'AUTH_KEY_UNREGISTERED',
+          messagesSynced: 0,
+          pendingJobs: 0,
+          runningJobs: 0,
+        }
+        service.writeTick(tick)
+        expect(service.getDaemonInfo()).toMatchObject({
+          connectionStatus: 'error',
+          lastError: 'AUTH_KEY_UNREGISTERED',
+        })
+
+        service.writeTick({
+          ...tick,
+          connectionStatus: 'connected',
+          lastError: null,
+        })
+        expect(service.getDaemonInfo()).toMatchObject({
+          connectionStatus: 'connected',
+          lastError: null,
+        })
       })
     })
 
@@ -205,16 +266,26 @@ describe('DaemonStatusService', () => {
     describe('getDaemonInfo', () => {
       it('returns all daemon info', () => {
         service.setDaemonRunning(12345, '0.3.1')
-        service.setConnectedAccounts(3, 5)
         service.setMessagesSynced(1000)
+        service.set('connection_status', 'connected')
+        service.set('pending_jobs', '4')
 
         const info = service.getDaemonInfo()
         expect(info.status).toBe('running')
         expect(info.pid).toBe(12345)
         expect(info.startedAt).not.toBeNull()
-        expect(info.connectedAccounts).toBe(3)
-        expect(info.totalAccounts).toBe(5)
+        expect(info.connectionStatus).toBe('connected')
         expect(info.messagesSynced).toBe(1000)
+        expect(info.pendingJobs).toBe(4)
+        expect(info.runningJobs).toBe(0)
+      })
+
+      it('ignores the account totals that 0.3 wrote', () => {
+        service.set('connected_accounts', '3')
+        service.set('total_accounts', '5')
+
+        expect(service.getDaemonInfo()).not.toHaveProperty('connectedAccounts')
+        expect(service.getDaemonInfo()).not.toHaveProperty('totalAccounts')
       })
 
       it('returns null values when daemon not running', () => {
@@ -236,6 +307,65 @@ describe('DaemonStatusService', () => {
         expect(info.pid).toBe(222)
         expect(info.version).toBeNull()
       })
+    })
+  })
+})
+
+describe('summarizeDaemonStatus', () => {
+  const info = (overrides: Partial<DaemonInfo>): DaemonInfo => ({
+    status: 'running',
+    pid: 4242,
+    version: '0.4.0',
+    startedAt: 1_000,
+    lastUpdate: 5_000,
+    connectionStatus: 'connected',
+    lastError: null,
+    messagesSynced: 10,
+    pendingJobs: 0,
+    runningJobs: 0,
+    ...overrides,
+  })
+
+  it('sums only the rows the live daemon wrote', () => {
+    const summary = summarizeDaemonStatus(
+      [
+        info({ messagesSynced: 10, startedAt: 2_000, lastUpdate: 9_000 }),
+        info({
+          connectionStatus: 'reconnecting',
+          messagesSynced: 5,
+          startedAt: 1_500,
+          lastUpdate: 8_000,
+        }),
+        // A daemon that died without marking itself stopped
+        info({
+          pid: 1111,
+          version: '0.0.1',
+          messagesSynced: 99,
+          lastUpdate: 99_000,
+        }),
+        info({ status: 'stopped', pid: null, messagesSynced: 7 }),
+      ],
+      4242,
+    )
+
+    expect(summary).toEqual({
+      connectedAccounts: 1,
+      totalAccounts: 2,
+      version: '0.4.0',
+      messagesSynced: 15,
+      startedAt: 1_500,
+      lastUpdate: 9_000,
+    })
+  })
+
+  it('counts nothing without a live daemon', () => {
+    expect(summarizeDaemonStatus([info({})], null)).toEqual({
+      connectedAccounts: 0,
+      totalAccounts: 0,
+      version: null,
+      messagesSynced: 0,
+      startedAt: null,
+      lastUpdate: null,
     })
   })
 })

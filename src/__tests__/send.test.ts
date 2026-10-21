@@ -31,6 +31,7 @@ import { initSyncSchema } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { mockDbModule } from './helpers/db-mock'
 import { fakeDialog } from './helpers/fake-dialogs'
 
 // The send command reads the cache and the client through these modules
@@ -40,10 +41,7 @@ const commandCall = mock(async (_request: unknown): Promise<unknown> => {
 })
 // The command wraps call() in place, so each test gets a fresh client
 let commandClient = { call: commandCall }
-mock.module('../db', () => ({
-  getCacheDb: () => commandCacheDb,
-  accountsDb: {},
-}))
+mock.module('../db', () => mockDbModule({ cacheFor: () => commandCacheDb }))
 mock.module('../services/telegram', () => ({
   getClientForAccount: () => commandClient,
 }))

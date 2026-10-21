@@ -1,10 +1,8 @@
 import { defineCommand } from 'citty'
 
 import { ErrorCodes } from '../../types'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccountSelector,
-} from '../../utils/account-selector'
+import { openAccountCache } from '../../utils/account-cache'
+import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success } from '../../utils/output'
 import {
   CHAT_ARG_DESCRIPTION,
@@ -78,10 +76,10 @@ export const listMessagesCommand = defineCommand({
         { after, before },
       )
     }
-    const accountId = resolveAccountSelector(args.account)
+    const { account } = openAccountCache(args.account)
 
     try {
-      const deps = openHistory(accountId, 'cli:messages.list')
+      const deps = openHistory(account.id, 'cli:messages.list')
       const chat = await resolveHistoryChat(deps.client, args.chat, deps)
       const result = await listHistory({
         cacheDb: deps.cacheDb,

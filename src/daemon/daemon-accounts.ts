@@ -4,7 +4,6 @@ import {
   networkMiddlewares,
   TelegramClient,
 } from '@mtcute/bun'
-import { getCacheDb } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
@@ -167,8 +166,16 @@ export function setupEventHandlers(
     ctx.logger.warn(`Cannot setup handlers: no client for account ${accountId}`)
     return
   }
+  const rt = ctx.runtime.accounts.get(accountId)
+  if (!rt) {
+    ctx.logger.warn(
+      `Cannot setup handlers: account ${accountId} has no cache open`,
+    )
+    return
+  }
 
-  const cacheDb = getCacheDb()
+  // Updates land only in the cache of the account that received them
+  const cacheDb = rt.db
   const messagesCache = createMessagesCache(cacheDb)
   const chatSyncState = createChatSyncStateService(cacheDb)
 
@@ -178,7 +185,7 @@ export function setupEventHandlers(
     chatSyncState,
     chatsCache: createChatsCache(cacheDb),
     onMessagesSynced: (count) => {
-      ctx.runtime.totalMessagesSynced += count
+      rt.messagesSynced += count
     },
   })
 
@@ -414,6 +421,7 @@ export async function connectAccount(
         )
         ctx.accountsDb.delete(existingByUserId.id)
         ctx.accountsDb.update(accountId, { user_id: me.id })
+        dropAccountRuntime(ctx, existingByUserId.id)
       } else {
         ctx.logger.info(
           `Merging duplicate account: keeping #${existingByUserId.id} (${existingByUserId.phone}), removing #${accountId} (${phone})`,
@@ -422,6 +430,7 @@ export async function connectAccount(
         ctx.accountsDb.delete(accountId)
 
         ctx.state.accounts.delete(accountId)
+        dropAccountRuntime(ctx, accountId)
         await releaseClient(ctx, accountState, 'duplicate account merged')
         return false
       }
@@ -453,6 +462,23 @@ export async function connectAccount(
     accountState.lastError = errorMessage
 
     return false
+  }
+}
+
+/**
+ * Stop running an account that a duplicate merge removed. Its cache files
+ * stay where they are; its status rows say it stopped.
+ */
+function dropAccountRuntime(ctx: DaemonContext, accountId: number): void {
+  const rt = ctx.runtime.accounts.get(accountId)
+  if (!rt) return
+  ctx.runtime.accounts.delete(accountId)
+  try {
+    rt.statusService.setDaemonStopped()
+  } catch (err) {
+    ctx.logger.warn(
+      `[Account ${accountId}] Failed to mark the account stopped: ${formatError(err)}`,
+    )
   }
 }
 
@@ -499,7 +525,8 @@ async function releaseClient(
     )
   }
   accountState.client = undefined
-  ctx.runtime.syncWorkers.delete(accountId)
+  const rt = ctx.runtime.accounts.get(accountId)
+  if (rt) rt.worker = null
   await closeClientSafe(ctx, client, reason)
 }
 
