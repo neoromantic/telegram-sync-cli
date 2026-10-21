@@ -12,7 +12,7 @@ import {
 } from '../db'
 import { createDaemonStatusService } from '../db/daemon-status'
 import { initSyncSchema } from '../db/sync-schema'
-import { getDefaultConfig, validateConfig } from '../services/telegram'
+import { requireDefaultConfig } from '../services/telegram'
 import {
   connectAccount,
   disconnectAllAccounts,
@@ -174,11 +174,13 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
     exitCode = DaemonExitCode.AlreadyRunning
   }
 
-  const telegramConfig = getDefaultConfig()
-  const validation = validateConfig(telegramConfig)
-  if (exitCode === DaemonExitCode.Success && !validation.valid) {
-    ctx.logger.error(`Configuration error: ${validation.error}`)
-    exitCode = DaemonExitCode.Error
+  if (exitCode === DaemonExitCode.Success) {
+    try {
+      requireDefaultConfig()
+    } catch (err) {
+      ctx.logger.error(`Configuration error: ${formatError(err)}`)
+      exitCode = DaemonExitCode.Error
+    }
   }
 
   const accounts = ctx.accountsDb.getAll()

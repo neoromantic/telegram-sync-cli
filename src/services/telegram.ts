@@ -25,6 +25,7 @@ import { join } from 'node:path'
 import {
   type FloodWaiterOptions,
   networkMiddlewares,
+  proxyTransportFromUrl,
   TelegramClient,
 } from '@mtcute/bun'
 
@@ -46,6 +47,7 @@ export interface TelegramConfig {
   apiId: number
   apiHash: string
   logLevel: number
+  transport?: ReturnType<typeof proxyTransportFromUrl>
   /** FloodWaiter middleware options */
   floodWaiter?: FloodWaiterOptions
 }
@@ -80,7 +82,7 @@ const DEFAULT_FLOOD_WAITER_OPTIONS: FloodWaiterOptions = {
 export function getDefaultConfig(): TelegramConfig {
   // Read lazily so commands that never talk to Telegram (help, version,
   // cache queries, config) work without credentials.
-  return {
+  const config: TelegramConfig = {
     apiId: parseInt(process.env.TELEGRAM_API_ID ?? '0', 10),
     apiHash: process.env.TELEGRAM_API_HASH ?? '',
     // Verbose/debug mode - set via VERBOSE=1 or MTCUTE_LOG_LEVEL env var
@@ -89,6 +91,16 @@ export function getDefaultConfig(): TelegramConfig {
       10,
     ),
   }
+  if (process.env.TELEGRAM_PROXY !== undefined) {
+    try {
+      config.transport = proxyTransportFromUrl(process.env.TELEGRAM_PROXY)
+    } catch {
+      throw new ConfigError('Invalid TELEGRAM_PROXY URL', [
+        { path: 'TELEGRAM_PROXY', message: 'Expected a supported proxy URL' },
+      ])
+    }
+  }
+  return config
 }
 
 /**
@@ -171,6 +183,7 @@ export function createDefaultClientFactory(
         apiHash: config.apiHash,
         storage: getSessionPath(accountId, dataDir),
         logLevel: config.logLevel,
+        ...(config.transport && { transport: config.transport }),
         network: {
           middlewares,
         },

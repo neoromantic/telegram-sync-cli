@@ -2,6 +2,7 @@
  * Tests for Telegram client factory wiring
  */
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import * as mtcute from '@mtcute/bun'
 
 process.env.NODE_ENV = 'test'
 
@@ -24,6 +25,7 @@ class MockTelegramClient {
 }
 
 mock.module('@mtcute/bun', () => ({
+  ...mtcute,
   TelegramClient: MockTelegramClient,
 }))
 
@@ -81,5 +83,18 @@ describe('createDefaultClientFactory', () => {
     expect(floodWaiterImpl).toHaveBeenCalled()
     const options = lastClientOptions as { network: { middlewares: unknown[] } }
     expect(options.network.middlewares.length).toBe(1)
+    expect(lastClientOptions).not.toHaveProperty('transport')
+  })
+
+  it('passes the configured proxy transport to the client', async () => {
+    const { createDefaultClientFactory } = await import('../services/telegram')
+    const transport = mtcute.proxyTransportFromUrl('socks5://127.0.0.1:1080')
+    createDefaultClientFactory({
+      apiId: 123,
+      apiHash: 'hash',
+      logLevel: 2,
+      transport,
+    }).create(1)
+    expect(lastClientOptions?.transport).toBe(transport)
   })
 })

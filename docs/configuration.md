@@ -14,9 +14,30 @@ source of truth for Telegram API credentials.
 |----------|---------|
 | `TELEGRAM_API_ID` | Telegram API ID |
 | `TELEGRAM_API_HASH` | Telegram API hash |
+| `TELEGRAM_PROXY` | Optional proxy URL for CLI and daemon connections |
 | `TELEGRAM_SYNC_CLI_DATA_DIR` | Override data directory |
 | `MTCUTE_LOG_LEVEL` | mtcute log level |
 | `VERBOSE` | Verbose logging (`1`) |
+
+### Proxy
+
+```bash
+export TELEGRAM_PROXY=socks5://127.0.0.1:1080
+tg daemon start
+```
+
+The CLI and daemon use mtcute's URL parser: `socks4://`, `socks5://`, `http://`,
+`https://`, and MTProxy links (`tg://proxy?server=…&port=…&secret=…` or
+`https://t.me/proxy?server=…&port=…&secret=…`). Credentials go in the URL, for
+example `http://user:password@127.0.0.1:8080`. `socks5h://` and addresses without
+a scheme are unsupported.
+
+The variable is read only when connecting to Telegram. When unset, connections
+use the default direct TCP transport. `ALL_PROXY` and `HTTPS_PROXY` are ignored.
+Invalid URLs produce a configuration error (exit code 3 for CLI calls, exit
+code 1 on daemon start) without printing the URL. Restart a running daemon
+after changing the variable. Keep proxy credentials in the environment, not
+`config.json`.
 
 ## Storage Layout
 

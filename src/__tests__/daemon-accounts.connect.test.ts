@@ -9,6 +9,7 @@ import type {
   TelegramClient,
   tl,
 } from '@mtcute/bun'
+import * as mtcute from '@mtcute/bun'
 import {
   createDaemonRuntime,
   type DaemonContext,
@@ -130,6 +131,7 @@ const asDeleteUpdate = (input: DeleteMessageUpdateLike): DeleteMessageUpdate =>
   input as DeleteMessageUpdate
 
 mock.module('@mtcute/bun', () => ({
+  ...mtcute,
   TelegramClient: MockTelegramClient,
   networkMiddlewares: {
     basic: (options: unknown) => [{ kind: 'basic', options }],
@@ -261,6 +263,7 @@ describe('daemon-accounts: connection + event wiring', () => {
 
   afterEach(() => {
     testCacheDb.close()
+    delete process.env.TELEGRAM_PROXY
   })
 
   it('registers handlers and persists mapped message fields', async () => {
@@ -522,6 +525,19 @@ describe('daemon-accounts: connection + event wiring', () => {
       middlewares: Array<{ options: { floodWaiter: { maxWait: number } } }>
     }
     expect(network.middlewares[0]?.options.floodWaiter.maxWait).toBe(300_000)
+    expect(createdClients[0]?.options).not.toHaveProperty('transport')
+  })
+
+  it('uses the proxy transport when connecting an account', async () => {
+    process.env.TELEGRAM_PROXY = 'socks5://127.0.0.1:1080'
+    const ctx = createContext(
+      createAccountsDb([{ id: 1, phone: '+15550000000', user_id: null }]),
+    )
+    const { connectAccount } = await import('../daemon/daemon-accounts')
+    expect(await connectAccount(ctx, 1, '+15550000000', null)).toBe(true)
+    expect(createdClients[0]?.options.transport).toEqual(
+      mtcute.proxyTransportFromUrl(process.env.TELEGRAM_PROXY),
+    )
   })
 
   it('merges duplicate user_id by keeping existing real phone account', async () => {
