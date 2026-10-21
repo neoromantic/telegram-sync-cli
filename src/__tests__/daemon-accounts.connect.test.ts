@@ -99,6 +99,9 @@ const asDeleteUpdate = (input: DeleteMessageUpdateLike): DeleteMessageUpdate =>
 
 mock.module('@mtcute/bun', () => ({
   TelegramClient: MockTelegramClient,
+  networkMiddlewares: {
+    basic: (options: unknown) => [{ kind: 'basic', options }],
+  },
 }))
 
 mock.module('../db', () => ({
@@ -353,6 +356,22 @@ describe('daemon-accounts: connection + event wiring', () => {
     const account = accountsDb.getById(2)
     expect(account?.user_id).toBe(555)
     expect(createdClients[0]?.startUpdatesLoop).toHaveBeenCalled()
+  })
+
+  it('waits out long FLOOD_WAITs instead of failing daemon requests', async () => {
+    const accountsDb = createAccountsDb([
+      { id: 1, phone: '+111', user_id: null },
+    ])
+    const ctx = createContext(accountsDb)
+
+    const { connectAccount } = await import('../daemon/daemon-accounts')
+
+    expect(await connectAccount(ctx, 1, '+111', null)).toBe(true)
+
+    const network = createdClients[0]?.options.network as {
+      middlewares: Array<{ options: { floodWaiter: { maxWait: number } } }>
+    }
+    expect(network.middlewares[0]?.options.floodWaiter.maxWait).toBe(300_000)
   })
 
   it('merges duplicate user_id by keeping existing real phone account', async () => {

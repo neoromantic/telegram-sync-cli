@@ -1,5 +1,9 @@
 import { join } from 'node:path'
-import { type DeleteMessageUpdate, TelegramClient } from '@mtcute/bun'
+import {
+  type DeleteMessageUpdate,
+  networkMiddlewares,
+  TelegramClient,
+} from '@mtcute/bun'
 import { getCacheDb } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createMessagesCache } from '../db/messages-cache'
@@ -290,6 +294,48 @@ export function removeEventHandlers(
   ctx.logger.debug(`[Account ${accountId}] Event handlers removed`)
 }
 
+// The daemon runs in the background, so it waits out FLOOD_WAITs of up to
+// five minutes instead of failing the request (mtcute's default is 10s).
+const DAEMON_FLOOD_WAIT_MAX_MS = 5 * 60 * 1000
+
+function createDaemonClient(
+  ctx: DaemonContext,
+  accountId: number,
+  sessionPath: string,
+): TelegramClient {
+  const telegramConfig = getDefaultConfig()
+  const validation = validateConfig(telegramConfig)
+  if (!validation.valid) {
+    throw new Error(validation.error)
+  }
+
+  const client = new TelegramClient({
+    apiId: telegramConfig.apiId,
+    apiHash: telegramConfig.apiHash,
+    storage: sessionPath,
+    logLevel: ctx.verbosity === 'verbose' ? 5 : 2,
+    network: {
+      middlewares: networkMiddlewares.basic({
+        floodWaiter: {
+          maxWait: DAEMON_FLOOD_WAIT_MAX_MS,
+          maxRetries: 5,
+          store: true,
+          onBeforeWait: (waitCtx, seconds) => {
+            ctx.logger.info(
+              `[Account ${accountId}] ${waitCtx.request._}: FLOOD_WAIT, waiting ${seconds}s`,
+            )
+          },
+        },
+      }),
+    },
+  })
+  wrapClientCallWithRecordReplay(client, {
+    accountId,
+    dataDir: ctx.dataDir,
+  })
+  return client
+}
+
 export async function connectAccount(
   ctx: DaemonContext,
   accountId: number,
@@ -305,25 +351,10 @@ export async function connectAccount(
   ctx.state.accounts.set(accountId, accountState)
 
   try {
-    const telegramConfig = getDefaultConfig()
-    const validation = validateConfig(telegramConfig)
-    if (!validation.valid) {
-      throw new Error(validation.error)
-    }
-
     const sessionPath = join(ctx.dataDir, `session_${accountId}.db`)
     ctx.logger.debug(`Connecting account ${phone} (session: ${sessionPath})`)
 
-    const client = new TelegramClient({
-      apiId: telegramConfig.apiId,
-      apiHash: telegramConfig.apiHash,
-      storage: sessionPath,
-      logLevel: ctx.verbosity === 'verbose' ? 5 : 2,
-    })
-    wrapClientCallWithRecordReplay(client, {
-      accountId,
-      dataDir: ctx.dataDir,
-    })
+    const client = createDaemonClient(ctx, accountId, sessionPath)
 
     await client.start({
       phone: async () => {
@@ -434,12 +465,6 @@ export async function attemptReconnect(
   }
 
   try {
-    const telegramConfig = getDefaultConfig()
-    const validation = validateConfig(telegramConfig)
-    if (!validation.valid) {
-      throw new Error(validation.error)
-    }
-
     const sessionPath = join(
       ctx.dataDir,
       `session_${accountState.accountId}.db`,
@@ -448,16 +473,7 @@ export async function attemptReconnect(
       `Reconnecting account ${accountState.phone} (session: ${sessionPath})`,
     )
 
-    const client = new TelegramClient({
-      apiId: telegramConfig.apiId,
-      apiHash: telegramConfig.apiHash,
-      storage: sessionPath,
-      logLevel: ctx.verbosity === 'verbose' ? 5 : 2,
-    })
-    wrapClientCallWithRecordReplay(client, {
-      accountId: accountState.accountId,
-      dataDir: ctx.dataDir,
-    })
+    const client = createDaemonClient(ctx, accountState.accountId, sessionPath)
 
     await client.start({
       phone: async () => {
