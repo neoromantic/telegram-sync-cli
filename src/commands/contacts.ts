@@ -79,8 +79,7 @@ export const listContactsCommand = defineCommand({
 
       // Check cache first (unless --fresh)
       if (!fresh) {
-        const cachedUsers = usersCache.getAll({ limit: 1000 }) // Get all to check count
-        const contacts = cachedUsers.filter((u) => u.is_contact === 1)
+        const contacts = usersCache.getContacts()
 
         if (contacts.length > 0) {
           const response = buildCachePaginatedResponse(

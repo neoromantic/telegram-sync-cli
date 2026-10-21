@@ -153,6 +153,13 @@ export class UsersCache {
   }
 
   /**
+   * Get all cached contacts
+   */
+  getContacts(): CachedUser[] {
+    return this.statements.getContacts.all()
+  }
+
+  /**
    * Get stale users
    */
   getStale(ttlMs: number): CachedUser[] {
@@ -245,6 +252,14 @@ function createStatements(db: Database) {
         SELECT * FROM users_cache
         ORDER BY display_name ASC
         LIMIT $limit OFFSET $offset
+      `)
+      .as(UserCacheRow),
+
+    getContacts: db
+      .query(`
+        SELECT * FROM users_cache
+        WHERE is_contact = 1
+        ORDER BY display_name ASC
       `)
       .as(UserCacheRow),
 
