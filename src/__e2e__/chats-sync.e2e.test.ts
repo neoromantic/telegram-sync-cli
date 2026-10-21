@@ -231,6 +231,38 @@ describe('E2E: chats sync', () => {
     expect(stateOf(CHANNEL_PEER_ID)).toBeNull()
   })
 
+  it('rejects an account that does not exist', async () => {
+    const result = await runCliFailure(
+      ['chats', 'sync', '@examplenews', '--account', '99'],
+      6,
+      options(),
+    )
+
+    expect(result.json).toMatchObject({
+      success: false,
+      error: { code: 'ACCOUNT_NOT_FOUND' },
+    })
+    expect(stateOf(CHANNEL_PEER_ID)).toBeNull()
+  })
+
+  for (const args of [[], ['--off']]) {
+    it(`rejects a missing chat${args.length ? ` with ${args.join(' ')}` : ''}`, async () => {
+      const result = await runCliFailure(
+        ['chats', 'sync', ...args],
+        3,
+        options(),
+      )
+
+      expect(result.json).toMatchObject({
+        success: false,
+        error: {
+          code: 'INVALID_ARGS',
+          message: 'Missing chat: pass @username or a chat ID',
+        },
+      })
+    })
+  }
+
   it('rejects a chat that is not in the cache', async () => {
     const result = await runCliFailure(
       ['chats', 'sync', '@unknownchat'],
