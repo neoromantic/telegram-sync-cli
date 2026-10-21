@@ -13,8 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   policy leaves out, such as a large group or a channel; `--off` turns it off
   and `--auto` goes back to the policy. The choice survives daemon restarts.
   The chat is found in the cache by @username, by the ID `tg chats list`
-  shows or by a marked ID, without Telegram credentials. While the daemon
-  writes the cache, the command waits for the write lock instead of failing.
+  shows or by a marked ID, without Telegram credentials; for a chat that
+  isn't cached yet it suggests starting the daemon or running `tg chats get`.
+  While the daemon writes the cache, the command waits for the write lock
+  instead of failing.
   A chat you haven't joined, such as a public channel, gets new messages on
   daemon start and after reconnects.
 

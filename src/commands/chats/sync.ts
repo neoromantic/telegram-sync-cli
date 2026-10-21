@@ -174,7 +174,7 @@ export const syncChatCommand = defineCommand({
         ErrorCodes.INVALID_ARGS,
         `Chat not found in the cache: ${input}`,
         { chat: input },
-        'Run tg chats list --fresh or start the daemon, then retry',
+        'Start the daemon (its dialog pass lists every chat, archived ones too) or run tg chats get --id @username, then retry',
       )
     }
 
