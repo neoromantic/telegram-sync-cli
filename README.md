@@ -65,6 +65,34 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Rate-limit tracking, config and status tooling (`tg config`, `tg status`)
 - JSON output and a stable error schema for scripts and agents
 
+## How it compares
+
+`tg` keeps your Telegram in a local SQLite cache for offline search and SQL;
+[telegram-mcp](https://github.com/chigwell/telegram-mcp) is an MCP server that makes one live call
+per tool. Compared on 2026-10-21 from its README and tool list:
+
+| Feature | tg | telegram-mcp |
+|---|---|---|
+| Interface | CLI, JSON output, fixed exit codes | MCP server (stdio, HTTP, SSE) |
+| Agent integration | any agent with a shell | MCP clients, Claude Desktop bundle |
+| Local cache, offline queries | ✅ SQLite, cache-first, `--fresh` | ❌ live calls only |
+| Message search | ✅ full-text (FTS5) over cached messages | ✅ Telegram server search |
+| SQL over your data | ✅ read-only `tg sql` | ❌ |
+| Background sync | ✅ read-only daemon ([backfill: #6](https://github.com/neoromantic/telegram-sync-cli/issues/6)) | partial: waits for events, stores nothing |
+| Any MTProto method | ✅ `tg api <method>` | ❌ fixed tool set |
+| Read chat history | partial: `tg sql` or `tg api` ([#21](https://github.com/neoromantic/telegram-sync-cli/issues/21)) | ✅ |
+| Send text | ✅ replies, silent | ✅ replies, Markdown/HTML |
+| Edit, delete, forward, pin | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)) | ✅ |
+| Send and download media | ❌ ([#22](https://github.com/neoromantic/telegram-sync-cli/issues/22)) | ✅ files, albums, voice, transcription |
+| Wait for new messages | ❌ ([#24](https://github.com/neoromantic/telegram-sync-cli/issues/24)) | ✅ |
+| Groups, channels, admin rights | partial: via `tg api` | ✅ |
+| Contacts | list, search, get; the rest via `tg api` | ✅ add, import, block, export |
+| Reactions, polls, drafts, scheduled, folders | partial: via `tg api` | ✅ |
+| Multi-account | partial: `--account`, one shared cache ([#17](https://github.com/neoromantic/telegram-sync-cli/issues/17)) | ✅ |
+| Guardrails for agents | partial: daemon and SQL are read-only ([#26](https://github.com/neoromantic/telegram-sync-cli/issues/26)) | ✅ read-only mode, chat allowlist |
+| Install | Homebrew binary, or bun/npm with Bun | git clone + uv, pip from git, Docker |
+| Runtime, license | TypeScript on Bun ([mtcute](https://mtcute.dev)), MIT | Python ([Telethon](https://docs.telethon.dev)), Apache-2.0 |
+
 ## Usage
 
 ```bash
