@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-21
+
 ### Fixed
 
 - After a failed connection check the daemon reconnected without real-time
@@ -79,6 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/neoromantic/telegram-sync-cli/releases/tag/v0.1.2
