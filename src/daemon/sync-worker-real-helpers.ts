@@ -192,7 +192,7 @@ export async function fetchMessagesRaw(
     minId?: number
     maxId?: number
   },
-): Promise<{ messages: unknown[]; count?: number }> {
+): Promise<{ messages: unknown[]; count?: number; users: tl.TypeUser[] }> {
   const request: tl.messages.RawGetHistoryRequest = {
     _: 'messages.getHistory',
     peer: inputPeer,
@@ -207,8 +207,10 @@ export async function fetchMessagesRaw(
   const result = await client.call(request)
   const messages = 'messages' in result ? result.messages : []
   const count = 'count' in result ? result.count : undefined
+  // The senders of the page, for callers that cache them
+  const users = 'users' in result ? result.users : []
 
-  return { messages, count }
+  return { messages, count, users }
 }
 
 export function createMessageInputs(

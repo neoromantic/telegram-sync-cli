@@ -1,5 +1,17 @@
+import type { TelegramClient } from '@mtcute/bun'
+
+import { ConfigError } from '../../config'
+import { accountsDb, getCacheDb } from '../../db'
+import { createChatsCache } from '../../db/chats-cache'
 import type { MessageSearchRow } from '../../db/messages-search'
-import type { MessageSearchItem } from '../../types'
+import { createUsersCache } from '../../db/users-cache'
+import { getClientForAccount } from '../../services/telegram'
+import { ErrorCodes, type MessageSearchItem } from '../../types'
+import { error } from '../../utils/output'
+import {
+  isRateLimitError,
+  wrapClientCallWithRateLimits,
+} from '../../utils/telegram-rate-limits'
 
 /** The JSON item for a message row, shared by every `tg messages` command */
 export function messageRowToItem(row: MessageSearchRow): MessageSearchItem {
@@ -33,3 +45,101 @@ export function messageRowToItem(row: MessageSearchRow): MessageSearchItem {
     },
   }
 }
+
+interface IntegerRange {
+  min: number
+  max?: number
+}
+
+/**
+ * A non-negative integer flag, or the default when it is not given.
+ * Anything but plain digits in range is INVALID_ARGS: `Number.parseInt`
+ * would read `5abc` as 5.
+ */
+export function parseIntegerArg(
+  value: string | undefined,
+  name: string,
+  range: IntegerRange & { default: number },
+): number
+export function parseIntegerArg(
+  value: string | undefined,
+  name: string,
+  range: IntegerRange,
+): number | undefined
+export function parseIntegerArg(
+  value: string | undefined,
+  name: string,
+  { min, max, default: fallback }: IntegerRange & { default?: number },
+): number | undefined {
+  if (value === undefined) return fallback
+
+  const bounds = max === undefined ? `>= ${min}` : `from ${min} to ${max}`
+  const parsed = /^\d+$/.test(value.trim()) ? Number(value.trim()) : Number.NaN
+  if (
+    !Number.isSafeInteger(parsed) ||
+    parsed < min ||
+    (max !== undefined && parsed > max)
+  ) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      `Invalid --${name}: ${value}. Expected an integer ${bounds}.`,
+      { [name]: value },
+    )
+  }
+  return parsed
+}
+
+/** Report a failed history read with the error codes other commands use */
+export function reportHistoryError(err: unknown, action: string): never {
+  if (err instanceof ConfigError) {
+    error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+  }
+  if (isRateLimitError(err)) {
+    error(
+      ErrorCodes.RATE_LIMITED,
+      `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
+      { method: err.method, wait_seconds: err.waitSeconds },
+    )
+  }
+  const message = err instanceof Error ? err.message : 'Unknown error'
+  error(ErrorCodes.TELEGRAM_ERROR, `Failed to ${action}: ${message}`)
+}
+
+export type HistoryClient = Pick<TelegramClient, 'call' | 'getMe'>
+
+/**
+ * A client that is created on first use, so a read the cache answers needs
+ * no credentials and opens no connection.
+ */
+export function createLazyClient(create: () => HistoryClient): HistoryClient {
+  let client: HistoryClient | undefined
+  const get = () => {
+    client ??= create()
+    return client
+  }
+  return {
+    call: ((...args: Parameters<HistoryClient['call']>) =>
+      get().call(...args)) as HistoryClient['call'],
+    getMe: () => get().getMe(),
+  }
+}
+
+/** The cache and the lazy client that `tg messages list` and `get` read with */
+export function openHistory(accountId: number | undefined, context: string) {
+  const cacheDb = getCacheDb()
+  return {
+    cacheDb,
+    client: createLazyClient(() =>
+      wrapClientCallWithRateLimits(getClientForAccount(accountId), {
+        context,
+      }),
+    ),
+    usersCache: createUsersCache(cacheDb),
+    chatsCache: createChatsCache(cacheDb),
+    accounts: accountsDb,
+    accountId,
+  }
+}
+
+export const CHAT_ARG_DESCRIPTION =
+  'Chat: @username, user or chat ID (as tg chats list or tg messages search print it), phone number (+…), or me'

@@ -12,7 +12,7 @@
 | `accounts` | list, switch, remove, info |
 | `contacts` | list, search, get (cached; supports `--fresh`) |
 | `chats` | list, search (cache-only), get (@username only), sync (cache-only) |
-| `messages` | search (FTS5, cache-only) |
+| `messages` | list (cache-first, `--fresh`), search (FTS5, cache-only) |
 | `send` | send messages (`--to`, `--message`) |
 | `api` | raw Telegram API calls |
 | `me` | current user |
@@ -123,10 +123,37 @@ tg chats sync @examplenews --auto # follow the default policy again
 ### Messages
 
 ```bash
+tg messages list --chat @username                  # the newest 20, newest first
+tg messages list --chat @username --before 1200    # the page older than message 1200
+tg messages list --chat -1001234567890 --after 0   # from the first message on
+tg messages list --chat me --limit 5 --fresh       # from Telegram, then cached
 tg messages search --query "hello"
 tg messages search --query "hello" --chat @teamchat --sender @alice
 tg messages search --query "hello" --includeDeleted
 ```
+
+`tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
+`@username`, a user or chat ID as `tg chats list` or `tg messages search` prints it, a phone
+number with `+`, or `me`. To page back, pass `nextBefore` as `--before`; to page forward, pass
+`nextAfter` as `--after`; stop when `items` is empty. Both bounds are exclusive message IDs,
+`--after 0` starts at the first message, and with both set the page is the one right after
+`--after`. `--limit` is 1-100 (default 20).
+
+```json
+{ "chatId": -1001234567890, "items": [ … ], "limit": 20, "before": null, "after": null,
+  "nextBefore": 1181, "nextAfter": 1200, "source": "cache", "stale": false }
+```
+
+The cache answers when it holds any message of the window. Otherwise `tg` fetches that window
+from Telegram, caches it and returns `source: "api"`, which needs credentials and a connection.
+One exception: paging back past the oldest message of a chat the daemon synced completely
+returns an empty page from the cache. The cache can be behind or have gaps: without a running
+daemon the newest page can miss recent messages, history backfill doesn't run yet
+([#6](https://github.com/neoromantic/telegram-sync-cli/issues/6)), and pages fetched with
+`--fresh` can sit apart from the rest. `--fresh` always reads the window from Telegram.
+
+Items are exactly the objects `tg messages search` prints. Deleted messages are left out unless
+`--includeDeleted` is set.
 
 ### Send
 

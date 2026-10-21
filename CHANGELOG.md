@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of failing.
   A chat you haven't joined, such as a public channel, gets new messages on
   daemon start and after reconnects.
+- `tg messages list --chat <peer>` reads a chat's history newest first and
+  pages it with `--before` and `--after` (`--limit`, `--includeDeleted`). It
+  is cache-first: Telegram is asked only for a window the cache doesn't hold,
+  or always with `--fresh`, and fetched pages are cached. Items are the same
+  as in `tg messages search`.
 
 ### Changed
 

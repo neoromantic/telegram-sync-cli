@@ -61,6 +61,7 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
   groups and channels on request (`tg chats sync`); the CLI does all mutations (`tg send`)
 - Full Telegram API access through `tg api <method>`
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
+- Chat history with cursor paging (`tg messages list`), cache-first
 - Full-text search (FTS5) over cached messages
 - Contacts, chats and users (`tg contacts`, `tg chats`, `tg me`, `tg user`)
 - Read-only SQL over the cache (`tg sql`) with an annotated schema
@@ -104,6 +105,7 @@ tg accounts list
 tg contacts list --limit 50
 tg chats list --limit 20
 tg chats sync @examplenews          # also sync a large group or channel
+tg messages list --chat @username --limit 20
 tg messages search --query "hello"
 tg send --to @username --message "Hi there"
 tg api account.checkUsername --username myuser

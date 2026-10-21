@@ -93,6 +93,25 @@ tg contacts get --id @someone
 3. Store in cache with `fetched_at`
 4. Return result with `source: "api"`
 
+### Chat History
+
+```bash
+tg messages list --chat @username --before 1200
+```
+
+1. Read the window (`--before`, `--after`, `--limit`) from `messages_cache`
+2. If it holds any message: return it with `source: "cache"`
+3. If it is empty, reaches only back (`--before` without `--after`) and the chat has
+   `history_complete = 1` in `chat_sync_state`: return an empty page from the cache, since the
+   chat has nothing older
+4. Otherwise fetch that window with `messages.getHistory`, store the messages (and their senders
+   in `users_cache`) with `raw_json` and `fetched_at`, and return the page read back from the
+   cache with `source: "api"`
+
+`--fresh` always takes step 4. Fetched pages are searchable right away. The CLI doesn't move the
+daemon's sync cursors and never infers deletions. Without a running daemon the cache stops at
+the last sync, so the newest page can be behind Telegram; `--fresh` reads Telegram's view.
+
 ### Sent Messages
 
 ```bash

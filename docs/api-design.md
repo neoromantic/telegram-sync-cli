@@ -74,7 +74,9 @@ tg chats search --query "query"   # cache-only
 tg chats get --id @username        # username only
 tg chats sync @examplenews         # sync a large group or channel too (--off, --auto)
 
-# Messages (cache-only full-text search)
+# Messages: chat history (cache-first) and full-text search (cache-only)
+tg messages list --chat @username --limit 20
+tg messages list --chat @username --before 1200
 tg messages search --query "hello"
 tg messages search --query "hello" --chat @teamchat --sender @alice
 tg messages search --query "hello" --includeDeleted
