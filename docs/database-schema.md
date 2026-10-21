@@ -66,7 +66,7 @@ Every column that holds a chat holds its **marked peer ID**, the format mtcute u
 |------|-----------|---------|
 | Private chat | the user ID | `5550001` |
 | Basic group N | `-N` | `-4242` |
-| Supergroup or channel N | `-1000000000000 - N` (`-100…`) | `-1001234567890` |
+| Supergroup, channel or community N | `-1000000000000 - N` (`-100…`) | `-1001234567890` |
 
 That covers `chats_cache.chat_id`, `messages_cache.chat_id`, `chat_sync_state.chat_id`,
 `sync_jobs.chat_id` and `history_ranges.chat_id`, and the senders in `messages_cache.from_id`
@@ -106,7 +106,7 @@ CREATE INDEX idx_users_cache_fetched_at ON users_cache(fetched_at);
 ```sql
 CREATE TABLE chats_cache (
   chat_id TEXT PRIMARY KEY,      -- marked peer ID: user ID, -N, or -100… (see Peer IDs)
-  type TEXT NOT NULL,            -- 'private', 'group', 'supergroup', 'channel'
+  type TEXT NOT NULL,            -- 'private', 'group', 'supergroup', 'channel', 'community'
   title TEXT,
   username TEXT,
   member_count INTEGER,
@@ -126,6 +126,12 @@ CREATE INDEX idx_chats_cache_type ON chats_cache(type);
 CREATE INDEX idx_chats_cache_fetched_at ON chats_cache(fetched_at);
 CREATE INDEX idx_chats_cache_last_message_at ON chats_cache(last_message_at DESC);
 ```
+
+A `community` is a Telegram community, a collection of linked chats (mtcute's `community` and
+`communityForbidden`). It has a channel ID and an access hash like a channel,
+`tg chats list --type community` lists it, and it syncs only on request. 0.3.0 and older stored
+one as `group` without an access hash; such a row is corrected when the community is cached
+again.
 
 ### Table: sync_state
 
@@ -224,7 +230,7 @@ CREATE TABLE history_ranges (
 ```sql
 CREATE TABLE chat_sync_state (
   chat_id INTEGER PRIMARY KEY,
-  chat_type TEXT NOT NULL,
+  chat_type TEXT NOT NULL,       -- 'private', 'group', 'supergroup', 'channel', 'community'
   member_count INTEGER,
   forward_cursor INTEGER,
   backward_cursor INTEGER,

@@ -4,6 +4,7 @@
 import { Database } from 'bun:sqlite'
 import { describe, expect, it } from 'bun:test'
 
+import { CHAT_TYPE_VALUES } from '../commands/chats/helpers'
 import { applyQueryLimit, isReadOnlyQuery } from '../commands/sql/helpers'
 import { initCacheSchema } from '../db/schema'
 import {
@@ -242,6 +243,15 @@ describe('SQL Command', () => {
       expect(chatType?.enumValues).toContain('private')
       expect(chatType?.enumValues).toContain('group')
       expect(chatType?.enumValues).toContain('channel')
+    })
+
+    it('lists every chat type in the schema annotations', () => {
+      expect(getColumnAnnotation('chats_cache', 'type')?.enumValues).toEqual([
+        ...CHAT_TYPE_VALUES,
+      ])
+      expect(
+        getColumnAnnotation('chat_sync_state', 'chat_type')?.enumValues,
+      ).toEqual([...CHAT_TYPE_VALUES])
     })
 
     it('has schema version', () => {

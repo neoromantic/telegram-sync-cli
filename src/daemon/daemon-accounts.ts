@@ -96,6 +96,9 @@ export function resolveSyncChatType(
       case 'channel':
         resolved = 'channel'
         break
+      case 'community':
+        resolved = 'community'
+        break
       default:
         resolved = 'group'
         break

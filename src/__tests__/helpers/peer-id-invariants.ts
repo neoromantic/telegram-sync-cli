@@ -9,10 +9,11 @@ import { parseMarkedPeerId } from '@mtcute/bun'
 /** What a chats_cache type may be as an mtcute peer type */
 const KINDS_BY_TYPE: Record<string, string[]> = {
   private: ['user'],
-  // A community is stored as 'group' but has a channel ID
+  // 0.3.0 and older stored a community as 'group'
   group: ['chat', 'channel'],
   supergroup: ['channel'],
   channel: ['channel'],
+  community: ['channel'],
 }
 
 /** Tables whose chat_id is a marked peer ID, chat_sync_state aside */

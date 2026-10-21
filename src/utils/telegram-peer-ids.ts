@@ -117,12 +117,12 @@ export function toPeerIdFromInputPeer(
 
 /**
  * Marked peer ID for a bare ID and the chat type it was stored with. Only
- * for data that has no raw peer: a community is stored as 'group' but has a
- * channel ID, which only the raw peer or chat tells.
+ * for data that has no raw peer: 0.3.0 and older stored a community as
+ * 'group', but it has a channel ID, which only the raw peer or chat tells.
  */
 export function toMarkedPeerId(
   rawId: number,
-  type: 'private' | 'group' | 'supergroup' | 'channel',
+  type: 'private' | 'group' | 'supergroup' | 'channel' | 'community',
 ): number {
   switch (type) {
     case 'private':
@@ -131,6 +131,7 @@ export function toMarkedPeerId(
       return markChat(rawId)
     case 'supergroup':
     case 'channel':
+    case 'community':
       return markChannel(rawId)
   }
 }

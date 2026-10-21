@@ -14,20 +14,25 @@ import type { tl } from '@mtcute/bun'
 import {
   chatRowToItem,
   dialogToCacheInput,
+  filterChatsByType,
+  isValidChatType,
   rawChatToCacheInput,
   rawPeerToCacheInput,
   userToPrivateChatCacheInput,
 } from '../commands/chats/helpers'
+import { createChatSyncStateService } from '../db/chat-sync-state'
 import {
   type CachedChatInput,
   type ChatsCache,
   createChatsCache,
 } from '../db/chats-cache'
 import { createTestCacheDatabase } from '../db/schema'
+import { initSyncSchema, SyncPriority } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { getDefaultCacheConfig, isCacheStale } from '../db/types'
 import { toLong } from '../utils/long'
-import { fakeDialog } from './helpers/fake-dialogs'
+import { communityDialog, fakeDialog } from './helpers/fake-dialogs'
+import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 // =============================================================================
 // Test Helpers
@@ -1044,6 +1049,111 @@ describe('Chat cache rows', () => {
         title: 'Old Channel',
       }),
     ).toMatchObject({ chat_id: '-1001234567890', access_hash: '888' })
+  })
+
+  /** Example Community, a raw community with a channel ID */
+  const community: tl.RawCommunity = {
+    _: 'community',
+    id: 5555555556,
+    accessHash: toLong('888'),
+    title: 'Example Community',
+    photo: { _: 'chatPhotoEmpty' },
+    date: 1_700_000_000,
+  }
+
+  it('stores a community dialog as a community with its access hash', () => {
+    expect(
+      dialogToCacheInput(
+        communityDialog({ id: 5555555555, accessHash: '777' }),
+      ),
+    ).toMatchObject({
+      chat_id: '-1005555555555',
+      type: 'community',
+      title: 'Example Community',
+      access_hash: '777',
+      username: null,
+      member_count: null,
+    })
+  })
+
+  it('stores a raw community as a community with its access hash, forbidden or not', () => {
+    expect(rawChatToCacheInput(community)).toMatchObject({
+      chat_id: '-1005555555556',
+      type: 'community',
+      access_hash: '888',
+    })
+    expect(
+      rawChatToCacheInput({
+        _: 'communityForbidden',
+        id: 5555555557,
+        accessHash: toLong('889'),
+        title: 'Example Community',
+      }),
+    ).toMatchObject({
+      chat_id: '-1005555555557',
+      type: 'community',
+      access_hash: '889',
+    })
+    expect(
+      rawChatToCacheInput({
+        _: 'communityForbidden',
+        id: 5555555558,
+        title: 'Example Community',
+      }),
+    ).toMatchObject({
+      chat_id: '-1005555555558',
+      type: 'community',
+      access_hash: null,
+    })
+  })
+
+  it('caches a live community but skips a min one', () => {
+    expect(rawPeerToCacheInput(community)).toMatchObject({
+      chat_id: '-1005555555556',
+      type: 'community',
+      access_hash: '888',
+    })
+    expect(rawPeerToCacheInput({ ...community, min: true })).toBeNull()
+  })
+
+  it('lists communities under --type community only', () => {
+    const rows = [
+      dialogToCacheInput(
+        communityDialog({ id: 5555555555, accessHash: '777' }),
+      ),
+      rawChatToCacheInput(community),
+      dialogToCacheInput(fakeDialog({ kind: 'group', id: 4001 })),
+      dialogToCacheInput(fakeDialog({ kind: 'channel', id: 9876543210 })),
+    ]
+    const ids = (chats: { chat_id: string }[]) =>
+      chats.map(({ chat_id }) => chat_id)
+
+    expect(isValidChatType('community')).toBe(true)
+    expect(ids(filterChatsByType(rows, 'community'))).toEqual([
+      '-1005555555555',
+      '-1005555555556',
+    ])
+
+    const { db } = createTestCacheDatabase()
+    initSyncSchema(db)
+    const chatsCache = createChatsCache(db)
+    chatsCache.upsertMany(rows)
+    createChatSyncStateService(db).upsert({
+      chat_id: -1005555555555,
+      chat_type: 'community',
+      sync_priority: SyncPriority.Low,
+      sync_enabled: false,
+    })
+
+    expect(ids(chatsCache.list({ type: 'community' })).sort()).toEqual([
+      '-1005555555555',
+      '-1005555555556',
+    ])
+    expect(ids(chatsCache.list({ type: 'group' }))).toEqual(['-4001'])
+    expect(ids(chatsCache.list({ type: 'channel' }))).toEqual([
+      '-1009876543210',
+    ])
+    assertPeerIdInvariants(db)
   })
 })
 
