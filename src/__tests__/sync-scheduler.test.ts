@@ -77,6 +77,7 @@ describe('SyncScheduler', () => {
         chat_type: 'private',
         sync_priority: SyncPriority.High,
         sync_enabled: true,
+        forward_cursor: 600,
         backward_cursor: 500, // Has an existing cursor
       })
 
@@ -124,12 +125,14 @@ describe('SyncScheduler', () => {
     })
 
     it('queues backward history when backward_cursor is null but cached messages exist (issue-6 fix)', () => {
-      // Set up chat with no backward cursor but WITH cached messages
+      // A chat whose newest page came from catch-up: a forward cursor and
+      // cached messages, but no backward cursor yet
       chatSyncState.upsert({
         chat_id: 100,
         chat_type: 'private',
         sync_priority: SyncPriority.High,
         sync_enabled: true,
+        forward_cursor: 1000,
       })
 
       // Add a cached message
@@ -156,6 +159,7 @@ describe('SyncScheduler', () => {
         chat_type: 'private',
         sync_priority: SyncPriority.High,
         sync_enabled: true,
+        forward_cursor: 600,
         backward_cursor: 500, // Has a valid cursor
       })
 
@@ -165,6 +169,28 @@ describe('SyncScheduler', () => {
       const jobs = jobsService.getJobsForChat(100)
       expect(jobs).toHaveLength(1)
       expect(jobs[0]!.job_type).toBe(SyncJobType.BackwardHistory)
+    })
+
+    it('queues the first page instead for a chat without a forward cursor', () => {
+      chatSyncState.upsert({
+        chat_id: 100,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+      })
+      // A live message is cached, but the chat has no first page yet
+      messagesCache.upsert({
+        chat_id: 100,
+        message_id: 1000,
+        message_type: 'text',
+        date: Date.now(),
+        raw_json: '{}',
+      })
+
+      scheduler.queueBackwardHistory(100)
+
+      const jobs = jobsService.getJobsForChat(100)
+      expect(jobs.map((job) => job.job_type)).toEqual([SyncJobType.InitialLoad])
     })
 
     it('does not queue duplicate initial load when backward_cursor is null (issue-6 fix)', () => {
@@ -261,10 +287,9 @@ describe('SyncScheduler', () => {
       expect(initialLoadJobs[0]!.priority).toBe(SyncPriority.Medium)
     })
 
-    it('does not queue initial load for chats with synced messages', async () => {
-      // Add synced messages to high priority chat
+    it('queues initial load for a chat whose first messages arrived live', async () => {
+      // Live updates cached and counted messages, but set no cursor
       chatSyncState.incrementSyncedMessages(1, 5)
-      // Also add a cached message so queueBackwardHistory doesn't trigger ISSUE-6 initial load
       messagesCache.upsert({
         chat_id: 1,
         message_id: 100,
@@ -275,25 +300,36 @@ describe('SyncScheduler', () => {
 
       await scheduler.initializeForStartup()
 
-      // Chat 1 has synced messages, should not get initial load
-      const jobs = jobsService.getJobsForChat(1)
-      const initialLoadJobs = jobs.filter(
-        (j) => j.job_type === SyncJobType.InitialLoad,
-      )
-      expect(initialLoadJobs).toHaveLength(0)
+      const initialLoadJobs = jobsService
+        .getJobsForChat(1)
+        .filter((j) => j.job_type === SyncJobType.InitialLoad)
+      expect(initialLoadJobs).toHaveLength(1)
     })
 
-    it('does not queue initial load for chats with complete history', async () => {
-      // Mark high priority chat as history complete
+    it('queues initial load for a chat with complete history but no cursor', async () => {
+      // An empty chat from an older version: history complete, no cursor
       chatSyncState.markHistoryComplete(1)
 
       await scheduler.initializeForStartup()
 
-      // Chat 1 has complete history, should not get initial load
-      const jobs = jobsService.getJobsForChat(1)
-      const initialLoadJobs = jobs.filter(
-        (j) => j.job_type === SyncJobType.InitialLoad,
-      )
+      const initialLoadJobs = jobsService
+        .getJobsForChat(1)
+        .filter((j) => j.job_type === SyncJobType.InitialLoad)
+      expect(initialLoadJobs).toHaveLength(1)
+    })
+
+    it('does not queue initial load for chats with a forward cursor', async () => {
+      chatSyncState.updateCursors(1, {
+        forward_cursor: 100,
+        backward_cursor: 1,
+      })
+      chatSyncState.incrementSyncedMessages(1, 100)
+
+      await scheduler.initializeForStartup()
+
+      const initialLoadJobs = jobsService
+        .getJobsForChat(1)
+        .filter((j) => j.job_type === SyncJobType.InitialLoad)
       expect(initialLoadJobs).toHaveLength(0)
     })
   })

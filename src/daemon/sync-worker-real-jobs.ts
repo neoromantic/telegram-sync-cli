@@ -82,8 +82,8 @@ export async function processForwardCatchupReal(
     return result
   }
 
-  const storedCursor = ctx.chatSyncState.get(chatId)?.forward_cursor
-  const cursor = storedCursor && storedCursor > 0 ? storedCursor : null
+  // 0 is a real cursor: the first page of an empty chat leaves it there.
+  const cursor = ctx.chatSyncState.get(chatId)?.forward_cursor ?? null
   const floor = cursor ?? 0
 
   try {
@@ -245,6 +245,12 @@ export async function processBackwardHistoryReal(
   return result
 }
 
+/**
+ * The first page of a chat without a forward cursor: its newest messages.
+ * It sets both cursors, so catch-up pages up from the newest message and
+ * history pages down from the oldest. An empty chat gets cursors at 0, so
+ * its first message is caught up from the start.
+ */
 export async function processInitialLoadReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
@@ -260,6 +266,13 @@ export async function processInitialLoadReal(
       waitSeconds: getWaitTime(ctx),
     }
     return result
+  }
+
+  // A chat with a forward cursor already had its first page; moving the
+  // cursor to the newest message now could skip messages below it.
+  const state = ctx.chatSyncState.get(chatId)
+  if (state && state.forward_cursor !== null) {
+    return { success: true, messagesFetched: 0 }
   }
 
   const inputPeer = getInputPeer(ctx, chatId)
@@ -279,44 +292,53 @@ export async function processInitialLoadReal(
       limit: ctx.config.batchSize,
     })
 
-    if (messages.length === 0) {
-      ctx.chatSyncState.markHistoryComplete(chatId)
-      result = { success: true, messagesFetched: 0 }
+    // Empty messages hold no data, but they still count for the cursors.
+    const ids = messages.map(rawMessageId).filter((id) => id > 0)
+
+    if (ids.length === 0) {
+      ctx.chatSyncState.recordFirstPage(chatId, {
+        forward_cursor: 0,
+        backward_cursor: 0,
+        history_complete: true,
+        new_messages: 0,
+      })
+      result = {
+        success: true,
+        messagesFetched: 0,
+        newCursor: 0,
+        historyComplete: true,
+      }
       return result
     }
 
-    const { inputs, minId, maxId } = createMessageInputs(
-      messages,
-      chatId,
-      Number.MAX_SAFE_INTEGER,
-      0,
-    )
+    const maxId = Math.max(...ids)
+    const minId = Math.min(...ids)
+    const { inputs } = createMessageInputs(messages, chatId, minId, maxId)
+
+    // Live updates already counted the messages they cached.
+    const newCount = countUncached(ctx, chatId, inputs)
 
     if (inputs.length > 0) {
       ctx.messagesCache.upsertBatch(inputs)
     }
 
-    ctx.chatSyncState.updateCursors(chatId, {
+    const historyComplete = minId <= 1 || messages.length < ctx.config.batchSize
+    ctx.chatSyncState.recordFirstPage(chatId, {
       forward_cursor: maxId,
       backward_cursor: minId,
+      history_complete: historyComplete,
+      new_messages: newCount,
     })
-    ctx.chatSyncState.incrementSyncedMessages(chatId, inputs.length)
-    ctx.chatSyncState.updateLastSync(chatId, 'forward')
-
-    const historyComplete = messages.length < ctx.config.batchSize
-    if (historyComplete) {
-      ctx.chatSyncState.markHistoryComplete(chatId)
-    }
 
     ctx.jobsService.updateProgress(job.id, {
-      messages_fetched: inputs.length,
+      messages_fetched: newCount,
       cursor_start: maxId,
       cursor_end: minId,
     })
 
     result = {
       success: true,
-      messagesFetched: inputs.length,
+      messagesFetched: newCount,
       newCursor: maxId,
       historyComplete,
     }

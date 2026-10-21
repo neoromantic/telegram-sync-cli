@@ -33,6 +33,20 @@ export interface UpdateCursorsOptions {
 }
 
 /**
+ * The result of a chat's first page (the `initial_load` job)
+ */
+export interface FirstPageResult {
+  /** Newest message ID on the page, 0 for an empty chat */
+  forward_cursor: number
+  /** Oldest message ID on the page, 0 for an empty chat */
+  backward_cursor: number
+  /** The page reached the start of the chat */
+  history_complete: boolean
+  /** Messages on the page that weren't cached yet */
+  new_messages: number
+}
+
+/**
  * Options for resetting sync state
  */
 export interface ResetSyncStateOptions {
@@ -66,6 +80,13 @@ export interface ChatSyncStateService {
   getChatsByPriority(priority: SyncPriority): ChatSyncStateRow[]
   /** Get chats with incomplete history (for backfill) */
   getIncompleteHistory(): ChatSyncStateRow[]
+  /** Enabled chats without a forward cursor: they need their first page */
+  getInitialLoadDue(): ChatSyncStateRow[]
+  /**
+   * Store a chat's first page: both cursors, history_complete and the
+   * counter. Does nothing if the chat already has a forward cursor.
+   */
+  recordFirstPage(chatId: number, page: FirstPageResult): void
   /** Delete sync state for a chat */
   delete(chatId: number): void
   /** Update last sync timestamp */
@@ -159,6 +180,25 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       ORDER BY sync_priority ASC, chat_id ASC
     `)
       .as(ChatSyncStateRow),
+
+    getInitialLoadDue: db
+      .query(`
+      SELECT * FROM chat_sync_state
+      WHERE sync_enabled = 1 AND forward_cursor IS NULL
+      ORDER BY sync_priority ASC, chat_id ASC
+    `)
+      .as(ChatSyncStateRow),
+
+    recordFirstPage: db.prepare(`
+      UPDATE chat_sync_state
+      SET forward_cursor = $forward,
+          backward_cursor = $backward,
+          history_complete = $complete,
+          synced_messages = synced_messages + $count,
+          last_forward_sync = $now,
+          updated_at = $now
+      WHERE chat_id = $chat_id AND forward_cursor IS NULL
+    `),
 
     delete: db.prepare(`
       DELETE FROM chat_sync_state WHERE chat_id = $chat_id
@@ -266,6 +306,21 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
 
     getIncompleteHistory(): ChatSyncStateRow[] {
       return stmts.getIncompleteHistory.all()
+    },
+
+    getInitialLoadDue(): ChatSyncStateRow[] {
+      return stmts.getInitialLoadDue.all()
+    },
+
+    recordFirstPage(chatId: number, page: FirstPageResult): void {
+      stmts.recordFirstPage.run({
+        $chat_id: chatId,
+        $forward: page.forward_cursor,
+        $backward: page.backward_cursor,
+        $complete: page.history_complete ? 1 : 0,
+        $count: page.new_messages,
+        $now: Date.now(),
+      })
     },
 
     delete(chatId: number): void {

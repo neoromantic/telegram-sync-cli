@@ -759,4 +759,128 @@ describe('sync-worker real jobs', () => {
       expect(cachedIds()).toEqual(range(151, 250))
     })
   })
+
+  describe('initial load', () => {
+    const chatId = 4343
+
+    beforeEach(() => {
+      ctx.config.batchSize = 100
+      ctx.chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+      })
+    })
+
+    function runJob(jobType: SyncJobType) {
+      const job = ctx.jobsService.create({
+        chat_id: chatId,
+        job_type: jobType,
+        priority: SyncPriority.High,
+      })
+      return processJobReal(ctx, job)
+    }
+
+    it('counts only messages that were not cached yet', async () => {
+      // Two messages arrived live before the first page
+      for (const id of [249, 250]) {
+        ctx.messagesCache.upsert({
+          chat_id: chatId,
+          message_id: id,
+          message_type: 'text',
+          date: 1_700_000_000 + id,
+          raw_json: '{}',
+        })
+      }
+      ctx.chatSyncState.incrementSyncedMessages(chatId, 2)
+      ctx.client = createFakeHistory(range(1, 250)).client
+
+      const result = await runJob(SyncJobType.InitialLoad)
+
+      expect(result).toMatchObject({
+        success: true,
+        messagesFetched: 98,
+        newCursor: 250,
+        historyComplete: false,
+      })
+      const state = ctx.chatSyncState.get(chatId)
+      expect(state?.synced_messages).toBe(100)
+      expect(state?.forward_cursor).toBe(250)
+      expect(state?.backward_cursor).toBe(151)
+      expect(state?.history_complete).toBe(0)
+      const [job] = ctx.jobsService.getJobsForChat(chatId)
+      expect(job?.messages_fetched).toBe(98)
+    })
+
+    it('leaves an empty chat at cursor 0 so catch-up starts from its first message', async () => {
+      const history = createFakeHistory([])
+      ctx.client = history.client
+
+      const first = await runJob(SyncJobType.InitialLoad)
+
+      expect(first).toMatchObject({ success: true, messagesFetched: 0 })
+      let state = ctx.chatSyncState.get(chatId)
+      expect(state?.forward_cursor).toBe(0)
+      expect(state?.backward_cursor).toBe(0)
+      expect(state?.history_complete).toBe(1)
+
+      history.add(1, 2, 3)
+      const catchup = await runJob(SyncJobType.ForwardCatchup)
+
+      expect(history.requests[1]).toMatchObject({
+        offsetId: 1,
+        addOffset: -100,
+        minId: 0,
+      })
+      expect(catchup).toMatchObject({ messagesFetched: 3, newCursor: 3 })
+      state = ctx.chatSyncState.get(chatId)
+      expect(state?.forward_cursor).toBe(3)
+      expect(ctx.messagesCache.countByChatId(chatId)).toBe(3)
+    })
+
+    it('takes the cursors from empty messages too', async () => {
+      ctx.config.batchSize = 2
+      ctx.client = {
+        call: mock(async () => ({
+          messages: [
+            { _: 'messageEmpty', id: 31 },
+            { _: 'messageEmpty', id: 30 },
+          ],
+        })),
+      } as unknown as TelegramClient
+
+      const result = await runJob(SyncJobType.InitialLoad)
+
+      expect(result).toMatchObject({ success: true, newCursor: 31 })
+      const state = ctx.chatSyncState.get(chatId)
+      expect(state?.forward_cursor).toBe(31)
+      expect(state?.backward_cursor).toBe(30)
+      expect(state?.history_complete).toBe(0)
+    })
+
+    it('reopens history when a chat marked complete has a full page now', async () => {
+      // An empty chat from an older version: complete, but no cursor
+      ctx.chatSyncState.markHistoryComplete(chatId)
+      ctx.client = createFakeHistory(range(1, 150)).client
+
+      await runJob(SyncJobType.InitialLoad)
+
+      const state = ctx.chatSyncState.get(chatId)
+      expect(state?.backward_cursor).toBe(51)
+      expect(state?.history_complete).toBe(0)
+    })
+
+    it('makes no call for a chat that already has a forward cursor', async () => {
+      ctx.chatSyncState.updateCursors(chatId, { forward_cursor: 1000 })
+      const history = createFakeHistory(range(1, 1150))
+      ctx.client = history.client
+
+      const result = await runJob(SyncJobType.InitialLoad)
+
+      expect(result).toMatchObject({ success: true, messagesFetched: 0 })
+      expect(history.requests).toHaveLength(0)
+      expect(ctx.chatSyncState.get(chatId)?.forward_cursor).toBe(1000)
+    })
+  })
 })
