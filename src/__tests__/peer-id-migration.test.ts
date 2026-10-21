@@ -584,10 +584,15 @@ describe('peer ID migration', () => {
       }),
     ])
 
-    // It runs once: a row an older binary caches later keeps NULL
+    // It runs once: a 0.2.0 daemon still running caches a bare chat, so the
+    // migration runs again and re-keys it, but a row it caches keeps NULL
     createMessagesCache(db).upsertBatch([historyRow(alice, 10, 'running late')])
+    createChatsCache(db).upsert(
+      legacyChatRow({ kind: 'channel', id: 3333333333, title: 'Late News' }),
+    )
     initSyncSchema(db)
 
+    expect(chatIds(db)['Late News']).toBe('-1003333333333')
     expect(
       db
         .query('SELECT from_id FROM messages_cache WHERE message_id = 10')
