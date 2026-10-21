@@ -712,12 +712,17 @@ describe('getMessageWithContext', () => {
   function get(
     client: CallClient,
     messageId: number,
-    options: { context?: number; fresh?: boolean; includeDeleted?: boolean },
+    options: {
+      context?: number
+      fresh?: boolean
+      includeDeleted?: boolean
+      chat?: HistoryChat
+    },
   ) {
     return getMessageWithContext({
       cacheDb,
       client,
-      chat: TEAM_CHAT,
+      chat: options.chat ?? TEAM_CHAT,
       messageId,
       context: options.context ?? 0,
       includeDeleted: options.includeDeleted ?? false,
@@ -755,6 +760,71 @@ describe('getMessageWithContext', () => {
     expect(messageIds(deleted.older)).toEqual([7, 5])
     expect(messageIds(withDeleted.older)).toEqual([7, 6])
     expect(create).not.toHaveBeenCalled()
+  })
+
+  it('asks Telegram for older context when the cached message is the oldest', async () => {
+    // The daemon cached only the newest page of this chat
+    const aliceChat: HistoryChat = {
+      chatId: ALICE_ID,
+      inputPeer: {
+        _: 'inputPeerUser',
+        userId: ALICE_ID,
+        accessHash: toLong('1111'),
+      },
+    }
+    cacheMessages(cacheDb, ALICE_ID, range(50, 60))
+    const { client, requests } = historyClient(range(1, 60))
+
+    const result = await get(client, 50, { context: 3, chat: aliceChat })
+
+    expect(result.source).toBe('api')
+    expect(messageIds(result.newer)).toEqual([53, 52, 51])
+    expect(messageIds(result.older)).toEqual([49, 48, 47])
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({ offsetId: 51, addOffset: -3, limit: 7 })
+  })
+
+  it('asks Telegram for newer context when nothing newer is cached', async () => {
+    // 6 and 8 are deleted, so 7 is the newest message the cache can show
+    const { client, requests } = historyClient([1, 2, 3, 4, 5, 7, 9])
+
+    const result = await get(client, 7, { context: 2 })
+
+    expect(result.source).toBe('api')
+    expect(messageIds(result.newer)).toEqual([9])
+    expect(messageIds(result.older)).toEqual([5, 4])
+    expect(requests).toHaveLength(1)
+  })
+
+  it('serves no older context for the first message of a fully synced chat', async () => {
+    const state = createChatSyncStateService(cacheDb)
+    state.upsert({
+      chat_id: TEAM_CHAT_ID,
+      chat_type: 'supergroup',
+      sync_priority: SyncPriority.Medium,
+      sync_enabled: true,
+    })
+    state.markHistoryComplete(TEAM_CHAT_ID)
+    const create = throwingFactory()
+
+    const result = await get(createLazyClient(create), 1, { context: 2 })
+
+    expect(result.source).toBe('cache')
+    expect(messageIds(result.newer)).toEqual([3, 2])
+    expect(result.older).toEqual([])
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('keeps a cached message that Telegram no longer returns', async () => {
+    const { client, requests } = historyClient(range(1, 6))
+
+    const result = await get(client, 7, { context: 2 })
+
+    expect(result.source).toBe('cache')
+    expect(result.message.messageId).toBe(7)
+    expect(result.newer).toEqual([])
+    expect(messageIds(result.older)).toEqual([5, 4])
+    expect(requests).toHaveLength(1)
   })
 
   it('asks Telegram for a message the cache does not hold', async () => {

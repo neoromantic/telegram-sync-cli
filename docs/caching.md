@@ -108,9 +108,11 @@ tg messages list --chat @username --before 1200
    in `users_cache`) with `raw_json` and `fetched_at`, and return the page read back from the
    cache with `source: "api"`
 
-`tg messages get --chat @username --id 1200 --context 3` follows the same rule for one message:
-if it is cached, it and its context come from the cache; otherwise one `messages.getHistory`
-call fetches it with the messages around it.
+`tg messages get --chat @username --id 1200 --context 3` follows the same rule for one message
+and each side of its context: if the message is cached and the cache holds something on both
+sides (or the chat has `history_complete = 1` and the older side is empty), all of it comes from
+the cache; otherwise one `messages.getHistory` call fetches the message with the messages around
+it. A cached deleted message comes from the cache with whatever context the cache holds.
 
 `--fresh` always takes step 4. Fetched pages are searchable right away. The CLI doesn't move the
 daemon's sync cursors and never infers deletions. Without a running daemon the cache stops at
