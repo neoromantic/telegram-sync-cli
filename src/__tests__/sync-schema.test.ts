@@ -3,7 +3,10 @@
  * Tests the new tables: messages_cache, chat_sync_state, sync_jobs, daemon_status
  */
 import { Database } from 'bun:sqlite'
-import { beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { initCacheSchema } from '../db/schema'
 import {
   ChatSyncStateRow,
@@ -449,5 +452,95 @@ describe('determineSyncPolicy', () => {
     expect(determineSyncPolicy('supergroup', 101)).toEqual(off)
     expect(determineSyncPolicy('channel')).toEqual(off)
     expect(determineSyncPolicy('channel', 10)).toEqual(off)
+  })
+})
+
+describe('migration from 0.1.4', () => {
+  // chat_sync_state as 0.1.4 created it
+  const CHAT_SYNC_STATE_0_1_4 = `
+    CREATE TABLE chat_sync_state (
+      chat_id           INTEGER PRIMARY KEY,
+      chat_type         TEXT NOT NULL,
+      member_count      INTEGER,
+      forward_cursor    INTEGER,
+      backward_cursor   INTEGER,
+      sync_priority     INTEGER NOT NULL DEFAULT 3,
+      sync_enabled      INTEGER NOT NULL DEFAULT 0,
+      history_complete  INTEGER DEFAULT 0,
+      total_messages    INTEGER,
+      synced_messages   INTEGER DEFAULT 0,
+      last_forward_sync INTEGER,
+      last_backward_sync INTEGER,
+      created_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+      updated_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+    )
+  `
+
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'tg-sync-schema-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  function createOldDatabase(path: string): Database {
+    const db = new Database(path)
+    initCacheSchema(db)
+    db.run(CHAT_SYNC_STATE_0_1_4)
+    db.run(`
+      INSERT INTO chat_sync_state
+        (chat_id, chat_type, forward_cursor, backward_cursor, sync_priority, sync_enabled, synced_messages)
+      VALUES (42, 'private', 1000, 1, 1, 1, 1000)
+    `)
+    return db
+  }
+
+  const schemaOf = (db: Database) =>
+    db.query('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()
+  // prepare(), not query(): query() caches the statement and its columns
+  const rowOf = (db: Database) =>
+    db.prepare('SELECT * FROM chat_sync_state WHERE chat_id = 42').get()
+
+  it('adds the new columns and keeps existing rows', () => {
+    const db = createOldDatabase(join(dir, 'cache.db'))
+
+    initSyncSchema(db)
+
+    expect(rowOf(db)).toMatchObject({
+      chat_id: 42,
+      forward_cursor: 1000,
+      backward_cursor: 1,
+      sync_enabled: 1,
+      synced_messages: 1000,
+      top_message_id: null,
+    })
+
+    const schema = schemaOf(db)
+    const row = rowOf(db)
+    initSyncSchema(db)
+    expect(schemaOf(db)).toEqual(schema)
+    expect(rowOf(db)).toEqual(row)
+    db.close()
+  })
+
+  it('lets two connections to one file migrate it', () => {
+    const path = join(dir, 'cache.db')
+    const daemon = createOldDatabase(path)
+    const cli = new Database(path)
+    // The second connection has read the old schema already
+    expect(rowOf(cli)).not.toHaveProperty('top_message_id')
+
+    expect(() => {
+      initSyncSchema(daemon)
+      initSyncSchema(cli)
+    }).not.toThrow()
+
+    expect(rowOf(cli)).toHaveProperty('top_message_id', null)
+    expect(rowOf(daemon)).toHaveProperty('top_message_id', null)
+    cli.close()
+    daemon.close()
   })
 })

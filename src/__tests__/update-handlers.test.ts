@@ -224,6 +224,34 @@ describe('UpdateHandlers', () => {
       expect(chatSyncState.get(100)?.forward_cursor).toBe(5)
     })
 
+    it('never moves the forward cursor or the newest message ID', async () => {
+      chatSyncState.upsert({
+        chat_id: 100,
+        chat_type: 'private',
+        sync_priority: 1,
+        sync_enabled: true,
+        forward_cursor: 5,
+      })
+      chatSyncState.raiseTopMessageId(100, 5)
+
+      for (const messageId of [6, 50, 3]) {
+        await handlers.handleNewMessage(
+          { accountId: 1, receivedAt: Date.now() },
+          {
+            chatId: 100,
+            messageId,
+            text: `Live ${messageId}`,
+            date: 1_700_000_000 + messageId,
+            isOutgoing: false,
+          },
+        )
+      }
+
+      const state = chatSyncState.get(100)
+      expect(state?.forward_cursor).toBe(5)
+      expect(state?.top_message_id).toBe(5)
+    })
+
     it('does not set a forward cursor for a new chat', async () => {
       const ctx: UpdateContext = {
         accountId: 1,

@@ -8,6 +8,7 @@ The daemon synchronizes message history using a **dual cursor** system and a **p
 
 - **Forward cursor** marks how far forward the cache is complete: every message up to it is
   cached. Only sync jobs move it, never live updates.
+- **Newest message ID** (`top_message_id`) tells whether the forward cursor is behind
 - **Backward cursor** tracks how far history backfill has progressed
 - **sync_jobs** provides resumable, priority-based work
 
@@ -23,6 +24,8 @@ Timeline: [oldest] ---- [backward_cursor] ---- [forward_cursor] ---- [newest]
 
 Stored in `chat_sync_state`:
 - `forward_cursor` — every message up to this ID is cached; forward catch-up continues from here
+- `top_message_id` — the newest message ID Telegram reported; `NULL` means unknown and counts
+  as behind
 - `backward_cursor` — oldest synced message ID
 - `history_complete` — reached beginning of history
 
@@ -99,32 +102,70 @@ messages below it.
 
 Each `forward_catchup` job makes one `messages.getHistory` call:
 
-- **With a cursor** (`0` included), it fetches the oldest 100 messages above it (`offset_id = cursor + 1`,
-  `add_offset = -100`, `min_id = cursor`), caches them and moves the cursor to the newest one.
-  A full page means there may be more, so the scheduler queues the next page. One call per job
-  keeps paging under the rate limits and the inter-job delay. If a page fails (for example on
-  a FLOOD_WAIT), the next catch-up resumes from the cursor.
+- **With a cursor** (`0` included), it fetches the oldest 100 messages above it
+  (`offset_id = cursor + 1`, `add_offset = -100`, `min_id = cursor`), caches them and moves the
+  cursor to the newest one. A full page means there may be more, so the scheduler queues the
+  next page right away. One call per job keeps paging under the rate limits and the inter-job
+  delay. If a page fails (for example on a FLOOD_WAIT), the next catch-up resumes from the
+  cursor.
 - **Without a cursor** (a chat the daemon hasn't synced yet), it fetches the newest page and
   sets the cursor to its newest message. Older history is the backward job's.
 
 So after a restart, catch-up pages from the stored cursor up to the newest message, and every
 message that arrived while the daemon was stopped ends up in the cache, even if live messages
-arrive first. Messages received live are fetched again by the next catch-up; the upsert
-doesn't duplicate them, and only messages that weren't cached yet count towards
-`synced_messages`.
+arrive first.
+
+#### When catch-up runs
+
+There is no periodic polling. A chat is due for catch-up when it is enabled, has a forward
+cursor, and its `top_message_id` is `NULL` or above the cursor. A chat that is caught up costs
+no calls. What writes `top_message_id`:
+
+- **The dialog pass**, on start and after every reconnect, raises it to each listed dialog's
+  newest message (`topMessage`) and never lowers it. A dialog without one leaves it alone.
+- **The first page** raises it to at least the page's newest message.
+- **A catch-up page that isn't full** reached the newest message, so the same write that moves
+  the cursor sets `top_message_id` to the new cursor. If a dialog pass raised the top while the
+  page was in flight, the top stays and the chat stays due. A newest message that was deleted
+  settles after one call.
+- **Live updates never write it**, just as they never move the cursor.
+
+A full page leaves the top alone and queues the next page. A failed or FLOOD_WAITed page also
+leaves it alone, so the next refresh queues the chat again once calls are allowed.
+
+On start, after the dialog passes: if every account connected and every pass listed all its
+dialogs, an enabled chat with a cursor that no pass listed (left, deleted or migrated) is
+marked caught up (`top_message_id = forward_cursor`). Otherwise those chats get
+`top_message_id = NULL`, so each gets one checking page. After a reconnect, a pass that fails
+part-way does the same for the chats it didn't list; all accounts share one cache (#17), so
+that is a safe superset. A complete reconnect pass covers one account and marks nothing.
+
+Trade-off: live updates don't move the cursor, so an active chat's cursor trails its live
+messages for the whole run. The first catch-up after a restart or reconnect fetches them again,
+about one `getHistory` call per 100 live messages per chat. The upsert doesn't duplicate them,
+and only messages that weren't cached yet count towards `synced_messages`.
 
 mtcute's `catchUp` option stays off: forward catch-up already covers missed messages, and
 `getDifference` can't replay a long gap anyway (`differenceTooLong`).
 
-### Catch-up + Backfill
+### Scheduling
 
-0. **Bootstrap dialogs** on daemon startup (populate `chats_cache` + `chat_sync_state`)
-1. Scheduler inspects `chat_sync_state`
-2. Creates `sync_jobs` based on priority + gaps
-3. Worker executes jobs using API calls (`messages.getHistory`)
-4. Updates cursors and progress counters
+0. **Dialog pass** on start, one per connected account: fills `chats_cache` and updates
+   `chat_sync_state` (type, member count, policy, `top_message_id`)
+1. The scheduler recovers jobs a crash left running, drops pending catch-ups (older versions
+   left one for every chat) and queues the work that is due: catch-up for chats that are
+   behind, first pages and history
+2. Every 30 seconds, and after each reconnect's dialog pass, it queues due work again: chats
+   first seen live, pages that failed
+3. The worker runs jobs with `messages.getHistory` and updates cursors and counters
 
 The scheduler uses the database as the single source of truth. There is **no in-memory priority queue**.
+
+### Archived chats
+
+The dialog pass lists archived dialogs too. They update `chats_cache`, so sync jobs can build an
+InputPeer for them, and the sync state of chats that already have one. An archived chat without
+a state row doesn't get one: archived chats don't start syncing on their own.
 
 ## Batch Size
 
@@ -139,8 +180,8 @@ Rate limits are tracked per API method:
 ## Notes
 
 - Catchup and realtime run concurrently; realtime handlers do not wait for catchup to complete.
-- Daemon bootstraps dialogs on startup to seed `chats_cache` + `chat_sync_state`.
-- Scheduler refreshes job queues periodically to pick up newly discovered chats.
+- Daemon bootstraps dialogs on startup to seed `chats_cache` + `chat_sync_state`, and runs the
+  same pass in the background after each reconnect.
 - Contact sync remains **CLI-driven**; the daemon does not refresh contacts.
 
 ## Implementation References

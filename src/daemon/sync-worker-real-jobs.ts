@@ -52,6 +52,11 @@ function countUncached(
  * just above the cursor and moves the cursor to its newest message; a full
  * page means there may be more, so the scheduler queues the next page.
  *
+ * A page that isn't full reached the newest message, so the same write sets
+ * `top_message_id` to the new cursor and the chat stops being due. If a
+ * dialog pass raised the top while the page was in flight, the top stays and
+ * the chat stays due.
+ *
  * A chat without a cursor gets its newest page; older history is the
  * backward job's.
  */
@@ -82,9 +87,11 @@ export async function processForwardCatchupReal(
     return result
   }
 
+  const state = ctx.chatSyncState.get(chatId)
   // 0 is a real cursor: the first page of an empty chat leaves it there.
-  const cursor = ctx.chatSyncState.get(chatId)?.forward_cursor ?? null
+  const cursor = state?.forward_cursor ?? null
   const floor = cursor ?? 0
+  const topBefore = state?.top_message_id ?? null
 
   try {
     recordApiCall(ctx)
@@ -99,7 +106,17 @@ export async function processForwardCatchupReal(
     const above = messages.filter((message) => rawMessageId(message) > floor)
 
     if (above.length === 0) {
-      ctx.chatSyncState.updateLastSync(chatId, 'forward')
+      if (cursor === null) {
+        ctx.chatSyncState.updateLastSync(chatId, 'forward')
+      } else {
+        // Nothing above the cursor: the chat is caught up.
+        ctx.chatSyncState.recordCatchupPage(chatId, {
+          forward_cursor: cursor,
+          new_messages: 0,
+          caught_up: true,
+          top_before: topBefore,
+        })
+      }
       result = { success: true, messagesFetched: 0, hasMore: false }
       return result
     }
@@ -115,9 +132,13 @@ export async function processForwardCatchupReal(
       ctx.messagesCache.upsertBatch(inputs)
     }
 
-    ctx.chatSyncState.updateCursors(chatId, { forward_cursor: top })
-    ctx.chatSyncState.incrementSyncedMessages(chatId, newCount)
-    ctx.chatSyncState.updateLastSync(chatId, 'forward')
+    const hasMore = cursor !== null && above.length >= ctx.config.batchSize
+    ctx.chatSyncState.recordCatchupPage(chatId, {
+      forward_cursor: top,
+      new_messages: newCount,
+      caught_up: !hasMore,
+      top_before: topBefore,
+    })
 
     ctx.jobsService.updateProgress(job.id, {
       messages_fetched: newCount,
@@ -127,7 +148,7 @@ export async function processForwardCatchupReal(
     result = {
       success: true,
       messagesFetched: newCount,
-      hasMore: cursor !== null && above.length >= ctx.config.batchSize,
+      hasMore,
       newCursor: top,
     }
   } catch (err) {

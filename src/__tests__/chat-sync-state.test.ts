@@ -90,6 +90,107 @@ describe('ChatSyncStateService', () => {
     })
   })
 
+  describe('top_message_id', () => {
+    beforeEach(() => {
+      service.upsert({
+        chat_id: 100,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 1000,
+      })
+    })
+
+    const due = () => service.getCatchupDue().map((chat) => chat.chat_id)
+
+    it('starts unknown, which counts as behind', () => {
+      expect(service.get(100)?.top_message_id).toBeNull()
+      expect(due()).toEqual([100])
+    })
+
+    it('only rises', () => {
+      service.raiseTopMessageId(100, 1150)
+      service.raiseTopMessageId(100, 1100)
+      expect(service.get(100)?.top_message_id).toBe(1150)
+      expect(due()).toEqual([100])
+    })
+
+    it('is not due once the top is at or below the cursor', () => {
+      service.raiseTopMessageId(100, 1000)
+      expect(due()).toEqual([])
+    })
+
+    it('is due only for enabled chats with a cursor', () => {
+      service.upsert({
+        chat_id: 200,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+      })
+      service.upsert({
+        chat_id: 300,
+        chat_type: 'channel',
+        sync_priority: SyncPriority.Low,
+        sync_enabled: false,
+        forward_cursor: 10,
+      })
+      expect(due()).toEqual([100])
+    })
+
+    it('settles at the new cursor after a page that reached the newest message', () => {
+      service.raiseTopMessageId(100, 1200)
+      service.recordCatchupPage(100, {
+        forward_cursor: 1150,
+        new_messages: 150,
+        caught_up: true,
+        top_before: 1200,
+      })
+
+      const state = service.get(100)
+      expect(state?.forward_cursor).toBe(1150)
+      expect(state?.top_message_id).toBe(1150)
+      expect(state?.synced_messages).toBe(150)
+      expect(state?.last_forward_sync).not.toBeNull()
+      expect(due()).toEqual([])
+    })
+
+    it('keeps a top that rose during the fetch', () => {
+      service.raiseTopMessageId(100, 1150)
+      // A dialog pass saw a newer message while the page was in flight
+      service.raiseTopMessageId(100, 1160)
+      service.recordCatchupPage(100, {
+        forward_cursor: 1150,
+        new_messages: 150,
+        caught_up: true,
+        top_before: 1150,
+      })
+
+      expect(service.get(100)?.top_message_id).toBe(1160)
+      expect(due()).toEqual([100])
+    })
+
+    it('leaves the top alone after a full page', () => {
+      service.raiseTopMessageId(100, 1150)
+      service.recordCatchupPage(100, {
+        forward_cursor: 1100,
+        new_messages: 100,
+        caught_up: false,
+        top_before: 1150,
+      })
+
+      expect(service.get(100)?.top_message_id).toBe(1150)
+      expect(due()).toEqual([100])
+    })
+
+    it('marks chats caught up or unknown', () => {
+      service.markCaughtUp([100])
+      expect(service.get(100)?.top_message_id).toBe(1000)
+
+      service.markTopUnknown([100])
+      expect(service.get(100)?.top_message_id).toBeNull()
+    })
+  })
+
   describe('updateCursors', () => {
     beforeEach(() => {
       service.upsert({

@@ -186,6 +186,34 @@ function ensureMessageSearchIndex(db: Database): void {
 }
 
 /**
+ * Add a column that an older version's table lacks. The CLI and the daemon
+ * can both run this on the first start of a new version, so a column the
+ * other one just added is fine.
+ */
+function ensureColumn(
+  db: Database,
+  table: string,
+  column: string,
+  definition: string,
+): void {
+  const columns = db.query(`PRAGMA table_info(${table})`).all() as Array<{
+    name: string
+  }>
+  if (columns.some((col) => col.name === column)) return
+
+  try {
+    db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+  } catch (err) {
+    if (
+      !(err instanceof Error) ||
+      !err.message.includes('duplicate column name')
+    ) {
+      throw err
+    }
+  }
+}
+
+/**
  * Initialize the sync schema
  * Creates all tables and indexes for the sync system
  */
@@ -262,9 +290,13 @@ export function initSyncSchema(db: Database): void {
       last_forward_sync INTEGER,
       last_backward_sync INTEGER,
       created_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
-      updated_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+      updated_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+      top_message_id    INTEGER
     )
   `)
+
+  // Columns added after 0.1.4
+  ensureColumn(db, 'chat_sync_state', 'top_message_id', 'INTEGER')
 
   // Chat sync state indexes
   db.run(`
@@ -363,6 +395,8 @@ export class ChatSyncStateRow {
   last_backward_sync!: number | null
   created_at!: number
   updated_at!: number
+  /** Newest message ID Telegram reported; NULL means unknown */
+  top_message_id!: number | null
 }
 
 /** Sync job row class */
