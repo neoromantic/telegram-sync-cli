@@ -71,7 +71,9 @@ tg chats sync @examplenews        # sync this chat in the background
 ```
 
 `--type` takes `private`, `group`, `supergroup`, `channel` or `community` (a Telegram
-community, a collection of linked chats).
+community, a collection of linked chats). tg doesn't cache joined communities yet
+([#58](https://github.com/neoromantic/telegram-sync-cli/issues/58)), so `--type community`
+finds none so far.
 
 `tg chats get --id` reads an ID like `tg chats sync` does. A bare 0.2.0 ID that names both a
 cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
@@ -80,8 +82,9 @@ cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
 ### Chat sync
 
 The daemon syncs DMs and groups of up to 100 members by default. Archived ones start when a
-message arrives in them live, or with `tg chats sync`. Groups of unknown size or over 100
-members, channels and communities get catch-up and history only on request:
+message arrives in them live, or with `tg chats sync`. A community is off by default; the chats
+linked to it are ordinary supergroups and channels and sync as such. Groups of unknown size or
+over 100 members and channels get catch-up and history only on request:
 
 ```bash
 tg chats sync @examplenews        # turn sync on
@@ -101,9 +104,9 @@ tg chats sync @examplenews --auto # follow the default policy again
   both a cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
   `details: { chat, candidates }`, `candidates` being both marked IDs.
 - Cache-only: the chat must be in `chats_cache` or have sync state from the daemon. No Telegram
-  credentials needed. A daemon start caches every chat, archived ones too;
-  `tg chats get --id @username` caches one chat; `tg chats list --fresh` caches only the 200
-  newest dialogs that aren't archived.
+  credentials needed. A daemon start caches every chat, archived ones too (communities not yet,
+  #58); `tg chats get --id @username` caches one chat; `tg chats list --fresh` caches only the
+  200 newest dialogs that aren't archived.
 - A chat that isn't found fails with `INVALID_ARGS` (exit 3) and the suggestion to start the
   daemon or run `tg chats get --id @username`. `--off` with `--auto` is `INVALID_ARGS` too.
 - A running daemon applies the change at its next refresh (30 seconds or less). A chat turned

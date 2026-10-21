@@ -454,7 +454,7 @@ describe('determineSyncPolicy', () => {
     expect(determineSyncPolicy('channel', 10)).toEqual(off)
   })
 
-  it('keeps communities off until synced on request', () => {
+  it('leaves communities off', () => {
     expect(determineSyncPolicy('community')).toEqual(off)
     expect(determineSyncPolicy('community', 10)).toEqual(off)
   })
