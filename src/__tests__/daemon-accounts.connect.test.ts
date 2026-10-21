@@ -3,25 +3,39 @@
  */
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { DeleteMessageUpdate, Message, TelegramClient } from '@mtcute/bun'
+import type {
+  DeleteMessageUpdate,
+  Message,
+  TelegramClient,
+  tl,
+} from '@mtcute/bun'
 import {
   createDaemonRuntime,
   type DaemonContext,
 } from '../daemon/daemon-context'
+import { buildInputPeer } from '../daemon/sync-worker-real-helpers'
 import type { AccountConnectionState } from '../daemon/types'
 import type { AccountsDbInterface } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
+import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import type { Account } from '../types'
+import { toLong } from '../utils/long'
 
 type AccountCreateInput = Parameters<AccountsDbInterface['create']>[0]
 type AccountUpdateInput = Parameters<AccountsDbInterface['update']>[1]
 type AccountSeed = Pick<Account, 'id' | 'phone'> & { user_id?: number | null }
 type MessageLike = {
   id: number
-  chat: { id: number; type: string; chatType?: string; membersCount?: number }
+  chat: {
+    id: number
+    type: string
+    chatType?: string
+    membersCount?: number
+    raw?: tl.TypeUser | tl.TypeChat
+  }
   sender?: { id: number } | null
   text: string
   date: Date
@@ -329,6 +343,50 @@ describe('daemon-accounts: connection + event wiring', () => {
     const state = createChatSyncStateService(testCacheDb).get(-4001)
     expect(state?.member_count).toBe(10)
     expect(state?.sync_enabled).toBe(1)
+  })
+
+  it('caches the chat of a live message from a chat no dialog pass listed', async () => {
+    const ctx = createContext(createAccountsDb([{ id: 1, phone: '+111' }]))
+    const { setupEventHandlers } = await import('../daemon/daemon-accounts')
+    const accountState: AccountConnectionState = {
+      accountId: 1,
+      phone: '+111',
+      name: null,
+      status: 'connected',
+      client: createClient(),
+    }
+    setupEventHandlers(ctx, accountState)
+
+    const chatsCache = createChatsCache(testCacheDb)
+    expect(chatsCache.getById('5550001')).toBeNull()
+
+    accountState.eventHandlers?.onNewMessage(
+      asMessage({
+        id: 1,
+        chat: {
+          id: 5550001,
+          type: 'user',
+          raw: {
+            _: 'user',
+            id: 5550001,
+            accessHash: toLong(777),
+            firstName: 'Alex',
+          } as tl.RawUser,
+        },
+        sender: { id: 5550001 },
+        text: 'Hello',
+        date: new Date('2024-01-01T00:00:00Z'),
+        isOutgoing: false,
+      }),
+    )
+
+    // The first page of this DM builds its InputPeer from this row
+    expect(chatsCache.getById('5550001')?.access_hash).toBe('777')
+    expect(buildInputPeer(5550001, chatsCache)).toEqual({
+      _: 'inputPeerUser',
+      userId: 5550001,
+      accessHash: toLong(777),
+    })
   })
 
   it('handles delete updates without chat context', async () => {
