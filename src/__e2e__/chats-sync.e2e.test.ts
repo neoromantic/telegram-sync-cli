@@ -257,6 +257,27 @@ describe('E2E: chats sync', () => {
     })
   })
 
+  it('takes a positive ID with DM sync state as that DM, not as the basic group', async () => {
+    // User 4001's DM, seen only live: sync state, no chats_cache row
+    createChatSyncStateService(cacheDb).upsert({
+      chat_id: GROUP_ID,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+    })
+
+    const result = await sync(String(GROUP_ID), '--off')
+
+    expect(result.data).toMatchObject({
+      id: GROUP_ID,
+      peerId: GROUP_ID,
+      type: 'private',
+      mode: 'off',
+    })
+    expect(stateOf(GROUP_ID)).toMatchObject({ sync_mode: 'off' })
+    expect(stateOf(GROUP_PEER_ID)).toBeNull()
+  })
+
   it('runs the retry command that tg status prints for a failed channel', async () => {
     createChatSyncStateService(cacheDb).upsert({
       chat_id: CHANNEL_PEER_ID,

@@ -89,8 +89,10 @@ tg chats sync @examplenews --auto # follow the default policy again
 - `--off` and the default policy control catch-up, first pages and history. While the daemon
   runs, it caches messages that arrive live in every chat, including one that is off.
 - `id` and `peerId` are the same marked ID; `peerId` stays for scripts written against 0.2.0,
-  where `id` was the bare one. A bare ID that names both a cached basic group and a cached
-  channel is `INVALID_ARGS`, with both marked IDs in `details.candidates`.
+  where `id` was the bare one. A positive ID is a user's DM first, as in `tg send --to`: the
+  bare group or channel ID counts only when the cache doesn't know user N. A bare ID that names
+  both a cached basic group and a cached channel is `INVALID_ARGS`, with both marked IDs in
+  `details.candidates`.
 - Cache-only: the chat must be in `chats_cache` or have sync state from the daemon. No Telegram
   credentials needed. A daemon start caches every chat, archived ones too;
   `tg chats get --id @username` caches one chat; `tg chats list --fresh` caches only the 200

@@ -241,6 +241,9 @@ refuse a user or channel found without an access hash; cache reads don't need on
 `@username` or phone lookup returns are cached, so the next lookup by ID needs no API call.
 
 Note: `tg chats get` fetches from Telegram by **@username only**; an ID works for a cached chat.
+`tg chats get --id` and `tg chats sync` read a cached ID in the same order: a positive number the
+cache knows as a user (a private chat, a cached user, a DM with sync state or cached messages) is
+that user, and only otherwise a group or channel ID as 0.2.0 printed it.
 
 ## Type System
 
