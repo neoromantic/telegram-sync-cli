@@ -209,6 +209,11 @@ printed still works when the cache knows the chat; if it names both a cached bas
 cached channel, the command fails with `INVALID_ARGS` (exit 3) and
 `details: { to, candidates }`, `candidates` being both marked IDs.
 
+A positive number the cache doesn't know is a user ID, never a basic group (basic group N is
+`-N`); with 10 or more digits it is tried as a phone number first. `tg` has no access hash for
+such a user, so Telegram may refuse it. Send to the user's `@username` or `+phone` once: `tg`
+caches the user, and the ID works after that.
+
 A sent message goes into the message cache right away, so `tg messages search`
 finds it without the daemon.
 

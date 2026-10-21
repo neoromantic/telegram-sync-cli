@@ -333,6 +333,26 @@ describe('resolveHistoryChat', () => {
     },
   )
 
+  it('reads an unknown positive ID as that user DM, not the basic group', async () => {
+    const create = throwingFactory()
+
+    const user = await resolveHistoryChat(
+      createLazyClient(create),
+      '4343',
+      deps,
+    )
+    const group = await resolveHistoryChat(
+      createLazyClient(create),
+      '-4343',
+      deps,
+    )
+
+    expect(user.chatId).toBe(4343)
+    expect(user.inputPeer._).toBe('inputPeerUser')
+    expect(group.chatId).toBe(-4343)
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('asks Telegram for the own user ID once when the account lacks it', async () => {
     const account = accounts.create({ phone: '+15550000001' })
     const getMe = mock(async () => ({ id: 1001 }))

@@ -360,15 +360,17 @@ function resolveCachedId(
 }
 
 /**
- * An ID the cache doesn't know is taken as a basic group. Only plain digits
- * count: `Number.parseInt` would read `-12.5` as -12 and `1e1` as 1.
+ * A positive ID the cache doesn't know is a user, as a positive marked ID
+ * always is; basic group N is -N. It gets access hash 0, like a cached user
+ * without one: Telegram may refuse it, but it never names a group. Only
+ * plain digits count: `Number.parseInt` would read `-12.5` as -12 and `1e1`
+ * as 1.
  */
 function resolveUncachedId(identifier: string): ResolvedPeer {
-  const numericId = /^\d+$/.test(identifier) ? Number(identifier) : 0
-  if (!Number.isSafeInteger(numericId) || numericId === 0) {
-    throw new InvalidPeerError(identifier)
-  }
-  return buildGroupPeer(numericId, `Chat ${numericId}`)
+  const userId = /^\d+$/.test(identifier) ? Number(identifier) : 0
+  const inputPeer = toInputPeerFromPeerId(userId, null)
+  if (!inputPeer) throw new InvalidPeerError(identifier)
+  return { inputPeer, name: `User ${userId}` }
 }
 
 /**
@@ -433,7 +435,8 @@ export async function resolvePeer(
 
   // A positive number is an ID when the cache knows it: a user, a DM with
   // sync state or cached messages, or a group or channel ID as 0.2.0
-  // printed it. Otherwise 10+ digits are still a phone number.
+  // printed it. Otherwise 10+ digits are still a phone number, and a
+  // shorter one is a user ID.
   const cached = /^\d+$/.test(normalized)
     ? resolveCachedId(normalized, deps)
     : null

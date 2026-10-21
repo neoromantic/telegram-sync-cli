@@ -394,15 +394,30 @@ describe('resolvePeer with numeric IDs', () => {
       expect(call).not.toHaveBeenCalled()
     })
 
-    it('still takes an unknown short number as a basic group', async () => {
-      cacheMessage(-12)
-      const { call, client } = throwingClient()
+    it.each([
+      ['an empty cache', () => {}],
+      ['messages cached only in group -4242', () => cacheMessage(-4242)],
+    ])(
+      'takes an unknown positive ID as a user and -N as the basic group, with %s',
+      async (_name, seed) => {
+        seed()
+        const { call, client } = throwingClient()
 
-      const peer = await resolve('12', client)
+        const user = await resolve('4242', client)
+        const group = await resolve('-4242', client)
 
-      expect(peer.inputPeer).toEqual({ _: 'inputPeerChat', chatId: 12 })
-      expect(call).not.toHaveBeenCalled()
-    })
+        expect(user).toEqual({
+          inputPeer: {
+            _: 'inputPeerUser',
+            userId: 4242,
+            accessHash: toLong(0),
+          },
+          name: 'User 4242',
+        })
+        expect(group.inputPeer).toEqual({ _: 'inputPeerChat', chatId: 4242 })
+        expect(call).not.toHaveBeenCalled()
+      },
+    )
 
     it.each(['-12.5', '1e1', '0x10', '12.0', '', '0', '-0', '+1e5'])(
       'rejects the malformed number %p without an API call',
