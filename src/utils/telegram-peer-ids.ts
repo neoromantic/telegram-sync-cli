@@ -1,12 +1,48 @@
+/**
+ * Peer IDs, the only place that converts them. Every cache table stores
+ * marked peer IDs, the format mtcute uses: a user keeps its ID, basic group
+ * N is -N and channel or supergroup N is -100…N (-1000000000000 - N).
+ * Telegram's raw peers carry bare IDs, which are converted here on the way
+ * in and back to bare IDs only for an InputPeer.
+ */
 import type { tl } from '@mtcute/bun'
 
+import { toLong } from './long'
+
 export const CHANNEL_PEER_ID_OFFSET = 1_000_000_000_000
+
+/** The lowest marked basic group ID; anything lower is a channel */
+const MIN_MARKED_CHAT_ID = -999_999_999_999
 
 type RawPeerLike = {
   _?: string
   userId?: number
   chatId?: number
   channelId?: number
+}
+
+type RawChatLike = {
+  _?: string
+  id?: unknown
+}
+
+type PeerKind = 'user' | 'chat' | 'channel'
+
+function markChat(chatId: number): number {
+  return -chatId
+}
+
+function markChannel(channelId: number): number {
+  return -CHANNEL_PEER_ID_OFFSET - channelId
+}
+
+/** What a marked ID names, or null for 0, -1000000000000 and non-integers */
+function peerKind(peerId: number): PeerKind | null {
+  if (!Number.isSafeInteger(peerId)) return null
+  if (peerId > 0) return 'user'
+  if (peerId < 0 && peerId >= MIN_MARKED_CHAT_ID) return 'chat'
+  if (peerId < -CHANNEL_PEER_ID_OFFSET) return 'channel'
+  return null
 }
 
 export function toPeerIdFromRawPeer(
@@ -17,11 +53,35 @@ export function toPeerIdFromRawPeer(
     case 'peerUser':
       return typeof peer.userId === 'number' ? peer.userId : null
     case 'peerChat':
-      return typeof peer.chatId === 'number' ? -peer.chatId : null
+      return typeof peer.chatId === 'number' ? markChat(peer.chatId) : null
     case 'peerChannel':
       return typeof peer.channelId === 'number'
-        ? -CHANNEL_PEER_ID_OFFSET - peer.channelId
+        ? markChannel(peer.channelId)
         : null
+    default:
+      return null
+  }
+}
+
+/**
+ * Marked peer ID for a raw user or chat object, as `users`/`chats` lists
+ * and updates carry them. A community has a channel ID, like a channel.
+ */
+export function toPeerIdFromRawChat(
+  chat: RawChatLike | null | undefined,
+): number | null {
+  if (!chat || typeof chat.id !== 'number') return null
+  switch (chat._) {
+    case 'user':
+      return chat.id
+    case 'chat':
+    case 'chatForbidden':
+      return markChat(chat.id)
+    case 'channel':
+    case 'channelForbidden':
+    case 'community':
+    case 'communityForbidden':
+      return markChannel(chat.id)
     default:
       return null
   }
@@ -56,8 +116,9 @@ export function toPeerIdFromInputPeer(
 }
 
 /**
- * Marked peer ID for a raw ID as `chats_cache` stores it: users keep theirs,
- * basic groups are negative, supergroups and channels get the -100 prefix.
+ * Marked peer ID for a bare ID and the chat type it was stored with. Only
+ * for data that has no raw peer: a community is stored as 'group' but has a
+ * channel ID, which only the raw peer or chat tells.
  */
 export function toMarkedPeerId(
   rawId: number,
@@ -67,29 +128,68 @@ export function toMarkedPeerId(
     case 'private':
       return rawId
     case 'group':
-      return -rawId
+      return markChat(rawId)
     case 'supergroup':
     case 'channel':
-      return -CHANNEL_PEER_ID_OFFSET - rawId
+      return markChannel(rawId)
   }
 }
 
-export function toChannelIdFromPeerId(peerId: number): number {
-  const abs = Math.abs(peerId)
-  return abs > CHANNEL_PEER_ID_OFFSET ? abs - CHANNEL_PEER_ID_OFFSET : abs
+/**
+ * The bare ID inside a marked peer ID, the inverse of `toMarkedPeerId`:
+ * user ID, basic group ID or channel ID. Null for 0 and -1000000000000.
+ */
+export function toRawPeerId(peerId: number): number | null {
+  switch (peerKind(peerId)) {
+    case 'user':
+      return peerId
+    case 'chat':
+      return -peerId
+    case 'channel':
+      return -CHANNEL_PEER_ID_OFFSET - peerId
+    default:
+      return null
+  }
 }
 
-export function getCandidateChatIds(peerId: number): number[] {
-  const candidates = new Set<number>()
-  candidates.add(peerId)
-
-  if (peerId < 0) {
-    const abs = Math.abs(peerId)
-    candidates.add(abs)
-    if (abs > CHANNEL_PEER_ID_OFFSET) {
-      candidates.add(abs - CHANNEL_PEER_ID_OFFSET)
-    }
+/**
+ * The InputPeer for a marked peer ID. A basic group needs no access hash;
+ * without one a user or channel gets 0, which Telegram may refuse. Null for
+ * an ID that names no peer (0, -1000000000000).
+ */
+export function toInputPeerFromPeerId(
+  peerId: number,
+  accessHash: string | null,
+): tl.TypeInputPeer | null {
+  const rawId = toRawPeerId(peerId)
+  if (rawId === null) return null
+  switch (peerKind(peerId)) {
+    case 'user':
+      return {
+        _: 'inputPeerUser',
+        userId: rawId,
+        accessHash: toLong(accessHash),
+      }
+    case 'chat':
+      return { _: 'inputPeerChat', chatId: rawId }
+    default:
+      return {
+        _: 'inputPeerChannel',
+        channelId: rawId,
+        accessHash: toLong(accessHash),
+      }
   }
+}
 
-  return Array.from(candidates)
+/**
+ * The marked IDs a bare positive chat ID from 0.2.0 or older can mean:
+ * `tg chats list` printed basic group N and channel N as N. Basic group
+ * first; a number too large for a basic group gives only the channel.
+ */
+export function legacyChatIdCandidates(bareId: number): number[] {
+  if (!Number.isSafeInteger(bareId) || bareId <= 0) return []
+  const candidates: number[] = []
+  if (markChat(bareId) >= MIN_MARKED_CHAT_ID) candidates.push(markChat(bareId))
+  candidates.push(markChannel(bareId))
+  return candidates
 }

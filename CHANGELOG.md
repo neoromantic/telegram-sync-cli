@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `id` in `tg chats list`, `get`, `search` and `sync` is now the
+  chat's marked peer ID, the one `tg messages search` and `tg sql` print: the
+  user ID for a private chat, `-N` for basic group N, `-100…` for a supergroup
+  or channel. `chats_cache.chat_id` in `tg sql` holds the same IDs, so it
+  joins `messages_cache.chat_id`. `tg chats sync` still prints `peerId`, now
+  equal to `id`. The bare group or channel ID that 0.2.0 printed still works
+  in `tg send --to`, `tg messages list` and `get --chat`, `tg chats get --id`
+  and `tg chats sync` when the cache knows the chat; one that names both a
+  cached basic group and a cached channel fails with `INVALID_ARGS` and lists
+  both marked IDs.
+  To upgrade, stop the daemon, upgrade, then start it. The first run of the
+  new version converts the cache and rebuilds the search index once. A 0.2.0
+  daemon left running fails group and channel sync jobs until it is
+  restarted, and the chats it caches are converted on the next run.
+  Downgrading after that is not supported.
+
+### Fixed
+
+- `tg messages search`, `list` and `get` printed `null` for the title,
+  username and type of every group and channel chat, because `chats_cache`
+  stored those chats under bare IDs and `messages_cache` under marked ones.
+  `--chat @username`, SQL joins between the two tables and a search for a
+  chat's title now find group and channel messages too (#18).
+- User N and basic group N were stored under the same `chats_cache` key and
+  overwrote each other, so the daemon could build a user peer for the group's
+  sync jobs. They are now separate rows.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added

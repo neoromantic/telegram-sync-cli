@@ -14,14 +14,24 @@ import {
 } from 'bun:test'
 import { join } from 'node:path'
 
+import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import {
+  initLegacySchema,
+  LEGACY,
+  seedLegacyCache,
+} from '../__tests__/helpers/legacy-cache'
+import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
+import { dialogToCacheInput } from '../commands/chats/helpers'
+import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
+import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
-import type { ChatType } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import type { MessageSearchItem } from '../types'
+import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import { NO_CREDENTIALS, runCli, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
@@ -116,13 +126,222 @@ describe('E2E: Messages Search', () => {
     expect(response.data.total).toBe(2)
     expect(messageIds).toEqual([1, 2])
   })
+
+  async function search(...args: string[]): Promise<MessageSearchItem[]> {
+    const result = await runCliSuccess(
+      ['messages', 'search', ...args],
+      env.getCliOptions(),
+    )
+    return (result.json as { data: { results: MessageSearchItem[] } }).data
+      .results
+  }
+
+  it('returns the chat of a supergroup message', async () => {
+    const results = await search('--query', 'hello')
+    const hit = results.find((item) => item.chatId === TEAM_CHAT_ID)
+
+    expect(hit?.chat).toEqual({
+      id: TEAM_CHAT_ID,
+      title: 'Team Chat',
+      username: 'teamchat',
+      type: 'supergroup',
+    })
+
+    const filtered = await search('--query', 'hello', '--chat', '@teamchat')
+    expect(filtered.map((item) => [item.chatId, item.messageId])).toEqual([
+      [TEAM_CHAT_ID, 1],
+    ])
+  })
+
+  it('gives every result its chat title and type', async () => {
+    const results = await search('--query', 'hello')
+
+    expect(results.map((item) => [item.chatId, item.chat.type])).toEqual([
+      [ALICE_ID, 'private'],
+      [NEWS_ID, 'channel'],
+      [BOOK_CLUB_ID, 'group'],
+      [TEAM_CHAT_ID, 'supergroup'],
+    ])
+    for (const item of results) {
+      expect(item.chat.title).toEqual(expect.any(String))
+    }
+    const fromAlice = results.filter((item) => item.fromId === ALICE_ID)
+    expect(fromAlice.map((item) => item.sender.firstName)).toEqual([
+      'Alice',
+      'Alice',
+    ])
+  })
+
+  it('prints each chat under the ID that tg chats list prints', async () => {
+    const list = await runCliSuccess(['chats', 'list'], env.getCliOptions())
+    const listed = (
+      list.json as { data: { items: Array<{ id: number; type: string }> } }
+    ).data.items
+    const results = await search('--query', 'hello')
+
+    expect(listed.map((chat) => chat.type).sort()).toEqual([
+      'channel',
+      'group',
+      'private',
+      'supergroup',
+    ])
+    for (const chat of listed) {
+      const hit = results.find((item) => item.chat.type === chat.type)
+      expect([hit?.chatId, hit?.chat.id]).toEqual([chat.id, chat.id])
+    }
+  })
+
+  it('finds a message by the title of its chat', async () => {
+    const results = await search('--query', 'Book Club')
+
+    expect(results.map((item) => [item.chatId, item.text])).toEqual([
+      [BOOK_CLUB_ID, 'hello club'],
+    ])
+  })
+
+  it('leaves the cache in one peer ID format', async () => {
+    await search('--query', 'hello')
+
+    const db = new Database(join(env.dataDir, 'cache.db'))
+    try {
+      assertPeerIdInvariants(db)
+    } finally {
+      db.close()
+    }
+  })
 })
 
+describe('E2E: Messages Search on a cache from 0.2.0', () => {
+  let env: TestEnvironment
+
+  beforeAll(() => {
+    env = createTestEnvironment('messages-search-legacy')
+    env.initDatabase()
+    env.seedAccounts([
+      { phone: '+15550000000', name: 'Test Account', is_active: true },
+    ])
+    const cacheDb = new Database(join(env.dataDir, 'cache.db'))
+    initLegacySchema(cacheDb)
+    seedLegacyCache(cacheDb)
+    cacheDb.close()
+  })
+
+  afterAll(() => {
+    env.cleanup()
+  })
+
+  const options = () => ({
+    env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+  })
+
+  async function search(query: string): Promise<MessageSearchItem[]> {
+    const result = await runCliSuccess(
+      ['messages', 'search', '--query', query],
+      options(),
+    )
+    return (result.json as { data: { results: MessageSearchItem[] } }).data
+      .results
+  }
+
+  it('shows group and channel titles on the first run', async () => {
+    const results = await search('hello')
+
+    expect(
+      results.map((item) => [item.chatId, item.chat.title, item.chat.type]),
+    ).toEqual(
+      expect.arrayContaining([
+        [LEGACY.teamChat.marked, 'Team Chat', 'supergroup'],
+        [LEGACY.bookClub.marked, 'Book Club', 'group'],
+        [LEGACY.news.marked, 'Example News', 'channel'],
+        [LEGACY.alice.id, 'Alice Able', 'private'],
+      ]),
+    )
+    expect(results).toHaveLength(4)
+  })
+
+  it('lists the chats under their marked IDs', async () => {
+    const list = await runCliSuccess(['chats', 'list'], options())
+    const ids = (list.json as { data: { items: Array<{ id: number }> } }).data
+      .items
+
+    expect(ids.map((chat) => chat.id).sort()).toEqual(
+      [
+        LEGACY.alice.id,
+        LEGACY.teamChat.marked,
+        LEGACY.bookClub.marked,
+        LEGACY.news.marked,
+      ].sort(),
+    )
+  })
+
+  it('finds a message by the title of its chat', async () => {
+    const results = await search('Team Chat')
+
+    expect(results.map((item) => item.text)).toEqual([
+      'weekly digest is out',
+      'hello team',
+    ])
+  })
+
+  it('joins every cached message to its chat in SQL', async () => {
+    const result = await runCliSuccess(
+      [
+        'sql',
+        '--query',
+        'SELECT COUNT(DISTINCT m.chat_id) AS orphans FROM messages_cache m LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT) WHERE c.chat_id IS NULL',
+      ],
+      options(),
+    )
+
+    expect(result.json).toMatchObject({ data: { rows: [{ orphans: 0 }] } })
+
+    const db = new Database(join(env.dataDir, 'cache.db'))
+    try {
+      expect(db.query('PRAGMA user_version').get()).toEqual({
+        user_version: PEER_ID_USER_VERSION,
+      })
+      assertPeerIdInvariants(db)
+    } finally {
+      db.close()
+    }
+  })
+})
+
+/** Raw peers of the search fixture */
+const TEAM_CHAT_PEER = { _: 'peerChannel', channelId: 1234567890 } as const
+const BOOK_CLUB_PEER = { _: 'peerChat', chatId: 4242 } as const
+const NEWS_PEER = { _: 'peerChannel', channelId: 2222222222 } as const
+const ALICE_PEER = { _: 'peerUser', userId: 10 } as const
+const BOB_PEER = { _: 'peerUser', userId: 11 } as const
+
+/** A cached message, mapped from a raw one the way the sync worker maps it */
+function syncedMessage(
+  peer: Parameters<typeof toPeerIdFromRawPeer>[0] & object,
+  id: number,
+  text: string,
+  from?: typeof ALICE_PEER | typeof BOB_PEER,
+) {
+  return parseRawMessage(
+    {
+      _: 'message',
+      id,
+      peerId: peer,
+      ...(from ? { fromId: from } : {}),
+      message: text,
+      date: Math.floor(Date.now() / 1000) - 3600 + id * 60,
+    },
+    toPeerIdFromRawPeer(peer)!,
+  )!
+}
+
+/**
+ * Four chats, seeded the way the daemon caches them: the supergroup Team
+ * Chat (@teamchat), the basic group Book Club, the channel Example News and
+ * a DM with Alice
+ */
 function seedCacheData(db: Database): void {
   const now = Date.now()
   const usersCache = createUsersCache(db)
-  const chatsCache = createChatsCache(db)
-  const messagesCache = createMessagesCache(db)
 
   usersCache.upsert({
     user_id: '10',
@@ -142,66 +361,37 @@ function seedCacheData(db: Database): void {
     raw_json: '{}',
   })
 
-  chatsCache.upsert({
-    chat_id: '-100',
-    type: 'supergroup',
-    title: 'Team Chat',
-    username: 'teamchat',
-    member_count: 3,
-    access_hash: null,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: now,
-    raw_json: '{}',
-  })
+  createChatsCache(db).upsertMany(
+    [
+      fakeDialog({
+        kind: 'supergroup',
+        id: 1234567890,
+        title: 'Team Chat',
+        username: 'teamchat',
+        membersCount: 3,
+      }),
+      fakeDialog({ kind: 'group', id: 4242, title: 'Book Club' }),
+      fakeDialog({
+        kind: 'channel',
+        id: 2222222222,
+        title: 'Example News',
+        username: 'examplenews',
+      }),
+      fakeDialog({ kind: 'user', id: 10, title: 'Alice Able' }),
+    ].map(dialogToCacheInput),
+  )
 
-  chatsCache.upsert({
-    chat_id: '-200',
-    type: 'group',
-    title: 'Random',
-    username: 'randomchat',
-    member_count: 2,
-    access_hash: null,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: now,
-    raw_json: '{}',
-  })
-
-  messagesCache.upsert({
-    chat_id: -100,
-    message_id: 1,
-    from_id: 10,
-    text: 'hello team',
-    message_type: 'text',
-    date: now - 1000,
-    raw_json: '{}',
-  })
-
-  messagesCache.upsert({
-    chat_id: -100,
-    message_id: 2,
-    from_id: 11,
-    text: 'hello deleted',
-    message_type: 'text',
-    is_deleted: true,
-    date: now - 900,
-    raw_json: '{}',
-  })
-
-  messagesCache.upsert({
-    chat_id: -200,
-    message_id: 3,
-    from_id: 11,
-    text: 'hello random',
-    message_type: 'text',
-    date: now - 500,
-    raw_json: '{}',
-  })
+  createMessagesCache(db).upsertBatch([
+    syncedMessage(TEAM_CHAT_PEER, 1, 'hello team', ALICE_PEER),
+    {
+      ...syncedMessage(TEAM_CHAT_PEER, 2, 'hello deleted', BOB_PEER),
+      is_deleted: true,
+    },
+    syncedMessage(BOOK_CLUB_PEER, 3, 'hello club', BOB_PEER),
+    // A channel post has no sender
+    syncedMessage(NEWS_PEER, 4, 'hello subscribers'),
+    syncedMessage(ALICE_PEER, 5, 'hello from Alice', ALICE_PEER),
+  ])
 }
 
 interface ListData {
@@ -228,6 +418,7 @@ const SECOND_ACCOUNT_ID = 2
 const ALICE_ID = 10
 const TEAM_CHAT_ID = -1001234567890
 const BOOK_CLUB_ID = -4242
+const NEWS_ID = -1002222222222
 /** Bob is in users_cache without an access hash */
 const BOB_ID = 11
 /** A private chat with cached messages and no users_cache or chats_cache row */
@@ -705,30 +896,6 @@ describe('E2E: Messages Get', () => {
   })
 })
 
-function cacheChat(
-  db: Database,
-  chatId: string,
-  type: ChatType,
-  title: string,
-  username: string | null,
-  accessHash: string | null,
-) {
-  createChatsCache(db).upsert({
-    chat_id: chatId,
-    type,
-    title,
-    username,
-    member_count: null,
-    access_hash: accessHash,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: Date.now(),
-    raw_json: '{}',
-  })
-}
-
 function seedHistory(db: Database): void {
   const now = Date.now()
   const usersCache = createUsersCache(db)
@@ -752,9 +919,23 @@ function seedHistory(db: Database): void {
     raw_json: '{}',
   })
 
-  cacheChat(db, '10', 'private', 'Alice Able', 'alice', '1111')
-  cacheChat(db, '1234567890', 'supergroup', 'Team Chat', 'teamchat', '2222')
-  cacheChat(db, '4242', 'group', 'Book Club', null, null)
+  createChatsCache(db).upsertMany(
+    [
+      fakeDialog({
+        kind: 'user',
+        id: ALICE_ID,
+        title: 'Alice Able',
+        username: 'alice',
+      }),
+      fakeDialog({
+        kind: 'supergroup',
+        id: 1234567890,
+        title: 'Team Chat',
+        username: 'teamchat',
+      }),
+      fakeDialog({ kind: 'group', id: 4242, title: 'Book Club' }),
+    ].map(dialogToCacheInput),
+  )
 
   const base = Math.floor(now / 1000) - 3600
   const message = (

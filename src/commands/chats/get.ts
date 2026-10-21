@@ -20,6 +20,7 @@ import {
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import { resolveUsername } from '../../utils/telegram-resolve'
+import { AmbiguousPeerError } from '../send/peer-resolver'
 import {
   chatRowToItem,
   type ResolvedChat,
@@ -31,16 +32,37 @@ function isResolvedChat(peer: tl.TypeChat | undefined): peer is ResolvedChat {
   return Boolean(peer && peer._ !== 'chatEmpty')
 }
 
+/**
+ * The cached chat for @username or a marked ID. A bare group or channel ID
+ * as 0.2.0 printed it matches too, unless it names two cached chats.
+ */
+function findCachedChat(
+  chatsCache: ReturnType<typeof createChatsCache>,
+  identifier: string,
+  isUsername: boolean,
+) {
+  if (isUsername) return chatsCache.getByUsername(identifier)
+
+  const exact = chatsCache.getById(identifier)
+  if (exact || !/^\d+$/.test(identifier)) return exact
+
+  const legacy = chatsCache.getByLegacyId(Number(identifier))
+  if (legacy.length > 1) {
+    throw new AmbiguousPeerError(
+      identifier,
+      legacy.map((chat) => Number(chat.chat_id)),
+    )
+  }
+  return legacy[0] ?? null
+}
+
 function getCachedChat(
   chatsCache: ReturnType<typeof createChatsCache>,
   identifier: string,
   isUsername: boolean,
   cacheConfig: Awaited<ReturnType<typeof getResolvedCacheConfig>>,
 ) {
-  const cached = isUsername
-    ? chatsCache.getByUsername(identifier)
-    : chatsCache.getById(identifier)
-
+  const cached = findCachedChat(chatsCache, identifier, isUsername)
   if (!cached) return null
 
   const stale = isCacheStale(cached.fetched_at, cacheConfig.staleness.dialogs)
@@ -165,6 +187,12 @@ export const getChatCommand = defineCommand({
       const result = await fetchChatFromApi(chatsCache, client, identifier)
       success(result)
     } catch (err) {
+      if (err instanceof AmbiguousPeerError) {
+        error(ErrorCodes.INVALID_ARGS, err.message, {
+          identifier,
+          candidates: err.candidates,
+        })
+      }
       if (err instanceof ConfigError) {
         error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
       }

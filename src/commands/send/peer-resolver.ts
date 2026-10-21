@@ -11,11 +11,7 @@ import {
 import { toLong } from '../../utils/long'
 import { verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
-import {
-  CHANNEL_PEER_ID_OFFSET,
-  getCandidateChatIds,
-  toPeerIdFromInputPeer,
-} from '../../utils/telegram-peer-ids'
+import { toInputPeerFromPeerId } from '../../utils/telegram-peer-ids'
 import { resolveUsername } from '../../utils/telegram-resolve'
 
 export type ResolvedPeer = { inputPeer: tl.TypeInputPeer; name: string }
@@ -28,6 +24,26 @@ export class InvalidPeerError extends Error {
     super(`Invalid peer identifier: ${identifier}`)
     this.name = 'InvalidPeerError'
     this.identifier = identifier
+  }
+}
+
+/**
+ * A bare ID that 0.2.0 or older printed for a chat, which the cache knows as
+ * both basic group N and channel N: bad input, the caller passes the
+ * marked ID it means.
+ */
+export class AmbiguousPeerError extends Error {
+  readonly identifier: string
+  /** The marked IDs of the cached chats the number can name */
+  readonly candidates: number[]
+
+  constructor(identifier: string, candidates: number[]) {
+    super(
+      `Ambiguous chat ID ${identifier}: pass one of the marked IDs ${candidates.join(', ')}`,
+    )
+    this.name = 'AmbiguousPeerError'
+    this.identifier = identifier
+    this.candidates = candidates
   }
 }
 
@@ -86,20 +102,6 @@ function cacheResolvedUser(usersCache: UsersCache, user: tl.RawUser): void {
   }
 }
 
-function buildChannelPeerFromCache(
-  chat: CachedChat,
-  fallbackName: string,
-): ResolvedPeer {
-  return {
-    inputPeer: {
-      _: 'inputPeerChannel',
-      channelId: Number(chat.chat_id),
-      accessHash: toLong(chat.access_hash),
-    },
-    name: chat.title || fallbackName,
-  }
-}
-
 type ResolvedChannel = tl.RawChannel | tl.RawChannelForbidden
 
 function buildChannelPeerFromApi(
@@ -150,8 +152,11 @@ async function resolveByUsername(
     cachedChat?.access_hash &&
     (cachedChat.type === 'channel' || cachedChat.type === 'supergroup')
   ) {
-    verbose(`Found chat @${username} in cache`)
-    return buildChannelPeerFromCache(cachedChat, `@${username}`)
+    const peer = peerFromCachedChat(cachedChat, `@${username}`)
+    if (peer?.inputPeer._ === 'inputPeerChannel') {
+      verbose(`Found chat @${username} in cache`)
+      return peer
+    }
   }
 
   verbose(`Resolving @${username} via API...`)
@@ -216,47 +221,69 @@ async function resolveByPhone(
   throw new Error(`Could not resolve phone number ${identifier}`)
 }
 
-/** The input peer for a chats_cache row, which holds raw (unmarked) IDs */
-function peerFromCachedChat(chat: CachedChat): ResolvedPeer {
+/**
+ * The input peer for a chats_cache row, built from its marked ID. Null for
+ * a row whose ID names no peer.
+ */
+function peerFromCachedChat(
+  chat: CachedChat,
+  fallbackName?: string,
+): ResolvedPeer | null {
   const id = Number(chat.chat_id)
-  switch (chat.type) {
-    case 'private':
-      return {
-        inputPeer: {
-          _: 'inputPeerUser',
-          userId: id,
-          accessHash: toLong(chat.access_hash),
-        },
-        name: chat.title || `User ${id}`,
-      }
-    case 'group':
-      return buildGroupPeer(id, chat.title || `Group ${id}`)
-    default:
-      return buildChannelPeerFromCache(chat, `Channel ${id}`)
-  }
+  const inputPeer = toInputPeerFromPeerId(id, chat.access_hash)
+  if (!inputPeer) return null
+  return { inputPeer, name: chat.title || fallbackName || `Chat ${id}` }
 }
 
 /**
- * A bare ID the cache knows: a user with an access hash, then a chats_cache
- * row, then a user known without one. messages_cache stores a private chat
- * under the positive user ID, so messages cached under N also make N a user.
- * Telegram may refuse a user peer without an access hash, but the peer is
- * the right one, and cache reads need no hash.
+ * A bare positive number that 0.2.0 or older printed for a group or channel:
+ * `tg chats list` showed basic group N and channel N as N. Only the cache
+ * answers. Two cached chats for one number are an error, since either could
+ * be meant.
+ */
+function resolveLegacyChatId(
+  identifier: string,
+  { chatsCache }: CacheDeps,
+): ResolvedPeer | null {
+  const matches = chatsCache.getByLegacyId(Number(identifier))
+  if (matches.length > 1) {
+    throw new AmbiguousPeerError(
+      identifier,
+      matches.map((chat) => Number(chat.chat_id)),
+    )
+  }
+  const [chat] = matches
+  if (!chat) return null
+  verbose(`Found chat ${chat.chat_id} in cache for the old ID ${identifier}`)
+  return peerFromCachedChat(chat)
+}
+
+/**
+ * A bare ID the cache knows. A positive marked ID is a user, so users come
+ * first: one with an access hash, then a chats_cache row (a private chat),
+ * then a user known without a hash. messages_cache stores a private chat
+ * under the user ID, so messages cached under N also make N a user. Telegram
+ * may refuse a user peer without an access hash, but the peer is the right
+ * one, and cache reads need no hash. Last, a group or channel ID as 0.2.0
+ * printed it.
  */
 function resolveCachedId(
   identifier: string,
-  { usersCache, chatsCache, messagesCache }: CacheDeps,
+  deps: CacheDeps,
 ): ResolvedPeer | null {
+  const { usersCache, chatsCache, messagesCache } = deps
   const cachedUser = usersCache.getById(identifier)
   if (cachedUser?.access_hash) {
     verbose(`Found user ID ${identifier} in cache`)
     return buildUserPeerFromCache(cachedUser, `User ${identifier}`)
   }
 
+  // Only a private chat has a positive marked ID. A group or channel row
+  // under one is a bare row from an older binary, re-keyed on the next open.
   const cachedChat = chatsCache.getById(identifier)
-  if (cachedChat) {
+  if (cachedChat?.type === 'private') {
     verbose(`Found chat ID ${identifier} in cache`)
-    return peerFromCachedChat(cachedChat)
+    return peerFromCachedChat(cachedChat, `User ${identifier}`)
   }
 
   const id = Number(identifier)
@@ -275,7 +302,7 @@ function resolveCachedId(
     )
   }
 
-  return null
+  return resolveLegacyChatId(identifier, deps)
 }
 
 /**
@@ -291,11 +318,10 @@ function resolveUncachedId(identifier: string): ResolvedPeer {
 }
 
 /**
- * A marked ID, as messages_cache stores it: -N is basic group N and
- * -100… is a channel or supergroup. chats_cache holds raw IDs, so try each
- * raw candidate and keep a row only if it maps back to the same marked ID;
- * that stops user 4242 from answering for group -4242. Without a cached row
- * the peer is built from the ID alone, with no API call.
+ * A marked ID, as every cache table stores it: -N is basic group N and
+ * -100… is a channel or supergroup. A cached row gives the access hash and
+ * the title; without one the peer is built from the ID alone, with no API
+ * call.
  */
 function resolveByMarkedId(
   identifier: string,
@@ -306,28 +332,16 @@ function resolveByMarkedId(
     throw new InvalidPeerError(identifier)
   }
 
-  for (const candidate of getCandidateChatIds(marked)) {
-    const cachedChat = chatsCache.getById(String(candidate))
-    if (!cachedChat) continue
-    const peer = peerFromCachedChat(cachedChat)
-    if (toPeerIdFromInputPeer(peer.inputPeer, null) === marked) {
-      verbose(`Found chat ID ${identifier} in cache`)
-      return peer
-    }
+  const cachedChat = chatsCache.getById(String(marked))
+  const cachedPeer = cachedChat ? peerFromCachedChat(cachedChat) : null
+  if (cachedPeer) {
+    verbose(`Found chat ID ${identifier} in cache`)
+    return cachedPeer
   }
 
-  const abs = Math.abs(marked)
-  if (abs > CHANNEL_PEER_ID_OFFSET) {
-    return {
-      inputPeer: {
-        _: 'inputPeerChannel',
-        channelId: abs - CHANNEL_PEER_ID_OFFSET,
-        accessHash: toLong(0),
-      },
-      name: `Chat ${identifier}`,
-    }
-  }
-  return buildGroupPeer(abs, `Chat ${identifier}`)
+  const inputPeer = toInputPeerFromPeerId(marked, null)
+  if (!inputPeer) throw new InvalidPeerError(identifier)
+  return { inputPeer, name: `Chat ${identifier}` }
 }
 
 const SELF_IDENTIFIERS = new Set(['me', 'self'])
@@ -363,9 +377,9 @@ export async function resolvePeer(
     return resolveByMarkedId(normalized, deps)
   }
 
-  // A bare number is an ID when the cache knows it, as a user, a chat or a
-  // private chat with cached messages. Otherwise 10+ digits are still a
-  // phone number.
+  // A positive number is an ID when the cache knows it: a user, a private
+  // chat with cached messages, or a group or channel ID as 0.2.0 printed it.
+  // Otherwise 10+ digits are still a phone number.
   const cached = /^\d+$/.test(normalized)
     ? resolveCachedId(normalized, deps)
     : null

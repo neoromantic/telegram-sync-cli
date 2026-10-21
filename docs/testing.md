@@ -92,6 +92,26 @@ The last three run the real scheduler, sync worker and job loop against a fake
 `messages.getHistory` (`helpers/fake-history.ts`; `createMultiChatHistory` routes on the
 request's peer).
 
+- `telegram-peer-ids.test.ts` — marked peer IDs, cross-checked against mtcute's
+  `getMarkedPeerId` and `parseMarkedPeerId`
+- `peer-id-migration.test.ts` — the move of a 0.2.0 cache to marked IDs: rows re-keyed from
+  `raw_json` or their type, duplicates merged, a failure rolled back and retried, a second run
+  that changes nothing
+
+### Peer ID fixtures
+
+Seed `chats_cache` the way `tg` writes it: through `dialogToCacheInput(fakeDialog(…))`
+(`helpers/fake-dialogs.ts`), `rawChatToCacheInput` or `userToPrivateChatCacheInput`, and
+messages through `parseRawMessage` of a raw TL message, or with valid marked IDs. A hand-made
+row under a bare group or channel ID is the 0.2.0 format, which the next `initSyncSchema`
+migrates.
+
+- `helpers/legacy-cache.ts` builds a cache as 0.2.0 left it (`initLegacySchema`,
+  `seedLegacyCache`), for migration tests.
+- `helpers/peer-id-invariants.ts` has `assertPeerIdInvariants(db)`: every `chats_cache` ID
+  fits its type, and every chat ID in the other tables parses with mtcute. The bootstrap,
+  update handler, send cache and e2e tests run it at the end.
+
 ### Snapshot Tests
 
 Snapshot tests lock down formatted output to catch regressions.
@@ -140,7 +160,7 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `daemon.e2e.test.ts` — daemon start/stop/status
 - `sql.e2e.test.ts` — `tg sql` queries through the real argument parser
 - `messages.e2e.test.ts` — `tg messages search`, `list` and `get` on a seeded cache, without
-  credentials
+  credentials; chat titles and IDs in search results, and the first run on a 0.2.0 cache
 - `chats-sync.e2e.test.ts` — `tg chats sync` against a seeded cache, without credentials
 - `status.e2e.test.ts` — `tg status` counts and lists running, pending, retrying and failed
   sync jobs from a seeded cache, in JSON and pretty output, without credentials; the retry

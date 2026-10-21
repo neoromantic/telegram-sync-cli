@@ -9,7 +9,6 @@ import { createChatsCache } from '../db/chats-cache'
 import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { apiUserToCacheInput } from '../utils/telegram-mappers'
-import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import type { DaemonContext } from './daemon-context'
 import { formatError } from './daemon-utils'
 
@@ -76,11 +75,8 @@ export async function syncAccountDialogs(
       if (usersBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushUsers()
     }
 
-    const rawPeer = dialog.raw?.peer as
-      | { _?: string; userId?: number; chatId?: number; channelId?: number }
-      | undefined
-    const chatId =
-      toPeerIdFromRawPeer(rawPeer ?? null) ?? Number(chatInput.chat_id)
+    // chats_cache and chat_sync_state share the marked peer ID
+    const chatId = Number(chatInput.chat_id)
     visited.add(chatId)
 
     const existing = chatSyncState.get(chatId)

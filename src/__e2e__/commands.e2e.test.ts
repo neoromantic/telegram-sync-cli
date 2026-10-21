@@ -760,14 +760,14 @@ describe('E2E: Chats Commands', () => {
           last_message_at: now - 1000,
         },
         {
-          chat_id: '200',
+          chat_id: '-200',
           type: 'group',
           title: 'Friends Group',
           member_count: 15,
           last_message_at: now - 2000,
         },
         {
-          chat_id: '300',
+          chat_id: '-1000000000300',
           type: 'channel',
           title: 'News Channel',
           username: 'newschannel',
@@ -808,8 +808,8 @@ describe('E2E: Chats Commands', () => {
     it('should filter by chat type - private', async () => {
       env.seedChats([
         { chat_id: '100', type: 'private', title: 'Private Chat' },
-        { chat_id: '200', type: 'group', title: 'Group Chat' },
-        { chat_id: '300', type: 'channel', title: 'Channel' },
+        { chat_id: '-200', type: 'group', title: 'Group Chat' },
+        { chat_id: '-1000000000300', type: 'channel', title: 'Channel' },
       ])
 
       const result = await runCliSuccess(
@@ -834,8 +834,12 @@ describe('E2E: Chats Commands', () => {
     it('should filter by chat type - group', async () => {
       env.seedChats([
         { chat_id: '100', type: 'private', title: 'Private Chat' },
-        { chat_id: '200', type: 'group', title: 'Group Chat' },
-        { chat_id: '300', type: 'supergroup', title: 'Supergroup Chat' },
+        { chat_id: '-200', type: 'group', title: 'Group Chat' },
+        {
+          chat_id: '-1000000000300',
+          type: 'supergroup',
+          title: 'Supergroup Chat',
+        },
       ])
 
       const result = await runCliSuccess(
@@ -858,9 +862,9 @@ describe('E2E: Chats Commands', () => {
 
     it('should filter by chat type - channel', async () => {
       env.seedChats([
-        { chat_id: '100', type: 'channel', title: 'Channel 1' },
-        { chat_id: '200', type: 'channel', title: 'Channel 2' },
-        { chat_id: '300', type: 'group', title: 'Group Chat' },
+        { chat_id: '-1000000000100', type: 'channel', title: 'Channel 1' },
+        { chat_id: '-1000000000200', type: 'channel', title: 'Channel 2' },
+        { chat_id: '-300', type: 'group', title: 'Group Chat' },
       ])
 
       const result = await runCliSuccess(
@@ -883,9 +887,17 @@ describe('E2E: Chats Commands', () => {
 
     it('should filter by chat type - supergroup', async () => {
       env.seedChats([
-        { chat_id: '100', type: 'supergroup', title: 'Supergroup 1' },
-        { chat_id: '200', type: 'group', title: 'Group Chat' },
-        { chat_id: '300', type: 'supergroup', title: 'Supergroup 2' },
+        {
+          chat_id: '-1000000000100',
+          type: 'supergroup',
+          title: 'Supergroup 1',
+        },
+        { chat_id: '-200', type: 'group', title: 'Group Chat' },
+        {
+          chat_id: '-1000000000300',
+          type: 'supergroup',
+          title: 'Supergroup 2',
+        },
       ])
 
       const result = await runCliSuccess(
@@ -999,14 +1011,18 @@ describe('E2E: Chats Commands', () => {
           title: 'Alice Smith',
           username: 'alice',
         },
-        { chat_id: '200', type: 'group', title: 'Developers Club' },
+        { chat_id: '-200', type: 'group', title: 'Developers Club' },
         {
-          chat_id: '300',
+          chat_id: '-1000000000300',
           type: 'channel',
           title: 'Tech News',
           username: 'technews',
         },
-        { chat_id: '400', type: 'supergroup', title: 'Alice Fans Club' },
+        {
+          chat_id: '-1000000000400',
+          type: 'supergroup',
+          title: 'Alice Fans Club',
+        },
       ])
     })
 
@@ -1079,9 +1095,9 @@ describe('E2E: Chats Commands', () => {
     it('should respect limit parameter', async () => {
       // Seed more chats with similar names
       env.seedChats([
-        { chat_id: '500', type: 'group', title: 'Test Group 1' },
-        { chat_id: '501', type: 'group', title: 'Test Group 2' },
-        { chat_id: '502', type: 'group', title: 'Test Group 3' },
+        { chat_id: '-500', type: 'group', title: 'Test Group 1' },
+        { chat_id: '-501', type: 'group', title: 'Test Group 2' },
+        { chat_id: '-502', type: 'group', title: 'Test Group 3' },
       ])
 
       const result = await runCliSuccess(
@@ -1106,7 +1122,7 @@ describe('E2E: Chats Commands', () => {
     beforeEach(() => {
       env.seedChats([
         {
-          chat_id: '12345',
+          chat_id: '-1000000012345',
           type: 'channel',
           title: 'Test Channel',
           username: 'testchannel',
@@ -1123,35 +1139,49 @@ describe('E2E: Chats Commands', () => {
       ])
     })
 
-    it('should get chat by ID', async () => {
+    type ChatData = {
+      id: number
+      type: string
+      title: string
+      username: string | null
+      memberCount: number | null
+      isCreator: boolean
+      isAdmin: boolean
+      source: string
+      stale: boolean
+    }
+
+    it('should get chat by the marked ID tg chats list prints', async () => {
       const result = await runCliSuccess(
-        ['chats', 'get', '--id', '12345'],
+        ['chats', 'get', '--id=-1000000012345'],
         env.getCliOptions(),
       )
 
-      const response = result.json as {
-        success: boolean
-        data: {
-          id: number
-          type: string
-          title: string
-          username: string | null
-          memberCount: number | null
-          isCreator: boolean
-          isAdmin: boolean
-          source: string
-          stale: boolean
-        }
-      }
+      const response = result.json as { success: boolean; data: ChatData }
 
       expect(response.success).toBe(true)
-      expect(response.data.id).toBe(12345)
+      expect(response.data.id).toBe(-1000000012345)
       expect(response.data.type).toBe('channel')
       expect(response.data.title).toBe('Test Channel')
       expect(response.data.username).toBe('testchannel')
       expect(response.data.memberCount).toBe(5000)
       expect(response.data.isAdmin).toBe(true)
       expect(response.data.source).toBe('cache')
+    })
+
+    it('should get chat by the bare ID that 0.2.0 printed', async () => {
+      const bare = await runCliSuccess(
+        ['chats', 'get', '--id', '12345'],
+        env.getCliOptions(),
+      )
+      const marked = await runCliSuccess(
+        ['chats', 'get', '--id', '-1000000012345'],
+        env.getCliOptions(),
+      )
+
+      expect((bare.json as { data: ChatData }).data).toEqual(
+        (marked.json as { data: ChatData }).data,
+      )
     })
 
     it('should get chat by username', async () => {
@@ -1274,9 +1304,9 @@ describe('E2E: Cross-command Integration', () => {
     env.seedChats([
       { chat_id: '1', type: 'private', title: 'DM 1' },
       { chat_id: '2', type: 'private', title: 'DM 2' },
-      { chat_id: '3', type: 'group', title: 'Group 1' },
-      { chat_id: '4', type: 'supergroup', title: 'Supergroup 1' },
-      { chat_id: '5', type: 'channel', title: 'Channel 1' },
+      { chat_id: '-3', type: 'group', title: 'Group 1' },
+      { chat_id: '-1000000000004', type: 'supergroup', title: 'Supergroup 1' },
+      { chat_id: '-1000000000005', type: 'channel', title: 'Channel 1' },
     ])
 
     // Count all chats

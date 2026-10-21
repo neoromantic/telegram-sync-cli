@@ -73,7 +73,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       ttlMs: 7 * 24 * 60 * 60 * 1000,
       columns: {
         user_id: {
-          description: 'Telegram user ID (unique identifier)',
+          description:
+            'Telegram user ID (unique identifier); the same as the chat_id of the private chat with the user',
           semanticType: 'bigint_string',
           nullable: false,
         },
@@ -159,7 +160,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       ttlMs: 7 * 24 * 60 * 60 * 1000,
       columns: {
         chat_id: {
-          description: 'Telegram chat/channel ID (unique identifier)',
+          description:
+            'Marked peer ID, as messages_cache.chat_id holds it: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel',
           semanticType: 'bigint_string',
           nullable: false,
         },
@@ -243,7 +245,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       primaryKey: ['chat_id', 'message_id'],
       columns: {
         chat_id: {
-          description: 'Chat this message belongs to',
+          description:
+            'Marked peer ID of the chat: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel. Joins chats_cache on chats_cache.chat_id = CAST(chat_id AS TEXT)',
           nullable: false,
         },
         message_id: {
@@ -367,7 +370,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       primaryKey: ['chat_id', 'low'],
       columns: {
         chat_id: {
-          description: 'Chat the range belongs to, as in messages_cache',
+          description:
+            'Marked peer ID of the chat the range belongs to, as in messages_cache',
           nullable: false,
         },
         low: {
@@ -485,7 +489,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       primaryKey: 'chat_id',
       columns: {
         chat_id: {
-          description: 'Chat being synchronized',
+          description:
+            'Marked peer ID of the chat being synchronized, as in messages_cache',
           nullable: false,
         },
         chat_type: {
@@ -585,7 +590,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: false,
         },
         chat_id: {
-          description: 'Chat to sync',
+          description:
+            'Marked peer ID of the chat to sync, as in messages_cache',
           nullable: false,
         },
         job_type: {

@@ -225,19 +225,22 @@ Peers can be specified in multiple formats:
 - Username: `@username`
 - Phone: `+15551234567`
 - User ID: `123456789`
-- Chat ID: `-123456789`
-- Channel ID: `-1001234567890`
+- Basic group ID: `-123456789`
+- Channel or supergroup ID: `-1001234567890`
 
-A bare number is looked up in the cache first: a user with an access hash, then a chat ID as
-`tg chats list` prints it, then a user known without an access hash or a private chat with
-cached messages (`tg messages search` prints a private chat under the user ID). If the cache
-doesn't know the number, one with 10 or more digits is tried as a phone number and a shorter one
-is taken as a basic group ID. Write phone numbers with `+` to skip the ID lookup. Marked IDs
-(`-…`) resolve from the cache, or from the ID alone with no API call. Telegram may refuse a user
-found without an access hash; cache reads don't need one. Users that an `@username` or phone
-lookup returns are cached, so the next lookup by ID needs no API call.
+These are marked peer IDs, the format every command prints (`tg chats list`, `tg messages search`,
+`tg sql`) and every cache table stores. A positive number is a user, so a bare number is looked
+up in the cache as one first: a user with an access hash, then a private chat in `chats_cache`,
+then a user known without an access hash or a private chat with cached messages. Next it may be
+a group or channel ID as 0.2.0 printed it (N for basic group -N or channel -100…N), when the
+cache knows that chat; a number that names both is `INVALID_ARGS`. If the cache doesn't know the
+number, one with 10 or more digits is tried as a phone number and a shorter one is taken as a
+basic group ID. Write phone numbers with `+` to skip the ID lookup. Negative IDs resolve from
+the cache, with the chat's access hash, or from the ID alone with no API call. Telegram may
+refuse a user or channel found without an access hash; cache reads don't need one. Users that an
+`@username` or phone lookup returns are cached, so the next lookup by ID needs no API call.
 
-Note: `tg chats get` currently accepts **@username only**.
+Note: `tg chats get` fetches from Telegram by **@username only**; an ID works for a cached chat.
 
 ## Type System
 

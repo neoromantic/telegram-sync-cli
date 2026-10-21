@@ -47,7 +47,7 @@ describe('MessagesSearch', () => {
     })
 
     chatsCache.upsert({
-      chat_id: '-100',
+      chat_id: '-1001234567890',
       type: 'supergroup',
       title: 'Team Chat',
       username: 'teamchat',
@@ -77,7 +77,7 @@ describe('MessagesSearch', () => {
     })
 
     messagesCache.upsert({
-      chat_id: -100,
+      chat_id: -1001234567890,
       message_id: 1,
       from_id: 10,
       text: 'hello team',
@@ -97,7 +97,7 @@ describe('MessagesSearch', () => {
     })
 
     messagesCache.upsert({
-      chat_id: -100,
+      chat_id: -1001234567890,
       message_id: 3,
       from_id: 11,
       text: 'hello deleted',
@@ -147,11 +147,11 @@ describe('MessagesSearch', () => {
 
     const search = createMessagesSearch(db)
 
-    // Filter by chat_id -100 (Team Chat)
-    const results = search.search('hello', { chatId: -100 })
+    // Filter by chat_id -1001234567890 (Team Chat)
+    const results = search.search('hello', { chatId: -1001234567890 })
 
     expect(results).toHaveLength(1)
-    expect(results[0]!.chat_id).toBe(-100)
+    expect(results[0]!.chat_id).toBe(-1001234567890)
     expect(results[0]!.message_id).toBe(1)
     expect(results[0]!.text).toBe('hello team')
 
@@ -192,21 +192,27 @@ describe('MessagesSearch', () => {
     const search = createMessagesSearch(db)
 
     // Both chatId and senderId matching (Alice in Team Chat)
-    const results = search.search('hello', { chatId: -100, senderId: 10 })
+    const results = search.search('hello', {
+      chatId: -1001234567890,
+      senderId: 10,
+    })
 
     expect(results).toHaveLength(1)
-    expect(results[0]!.chat_id).toBe(-100)
+    expect(results[0]!.chat_id).toBe(-1001234567890)
     expect(results[0]!.from_id).toBe(10)
     expect(results[0]!.message_id).toBe(1)
 
     // chatId matches but senderId doesn't match any non-deleted messages
-    const results2 = search.search('hello', { chatId: -100, senderId: 11 })
+    const results2 = search.search('hello', {
+      chatId: -1001234567890,
+      senderId: 11,
+    })
 
     expect(results2).toHaveLength(0)
 
     // Include deleted to find Bob's message in Team Chat
     const results3 = search.search('hello', {
-      chatId: -100,
+      chatId: -1001234567890,
       senderId: 11,
       includeDeleted: true,
     })
@@ -229,7 +235,7 @@ describe('MessagesSearch', () => {
     })
 
     chatsCache.upsert({
-      chat_id: '-100',
+      chat_id: '-1001234567890',
       type: 'supergroup',
       title: 'Test Chat',
       username: 'testchat',
@@ -245,7 +251,7 @@ describe('MessagesSearch', () => {
 
     // Message with hyphen (Russian "che-nit" slang)
     messagesCache.upsert({
-      chat_id: -100,
+      chat_id: -1001234567890,
       message_id: 1,
       from_id: 10,
       text: 'привет, че-нить новое?',
@@ -256,7 +262,7 @@ describe('MessagesSearch', () => {
 
     // Message with asterisk
     messagesCache.upsert({
-      chat_id: -100,
+      chat_id: -1001234567890,
       message_id: 2,
       from_id: 10,
       text: 'test*value here',
@@ -267,7 +273,7 @@ describe('MessagesSearch', () => {
 
     // Message with parentheses
     messagesCache.upsert({
-      chat_id: -100,
+      chat_id: -1001234567890,
       message_id: 3,
       from_id: 10,
       text: 'function(arg) call',

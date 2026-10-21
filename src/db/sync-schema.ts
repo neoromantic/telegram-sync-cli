@@ -8,6 +8,8 @@
  */
 import type { Database } from 'bun:sqlite'
 
+import { migratePeerIds } from './peer-id-migration'
+
 const SEARCH_INDEX_VERSION = 1
 const MESSAGE_SEARCH_COLUMNS = ['text', 'sender', 'chat', 'files'] as const
 
@@ -119,7 +121,8 @@ function createMessageSearchSchema(db: Database): void {
   `)
 }
 
-function rebuildMessageSearchIndex(db: Database): void {
+/** Fill the search index again from messages_cache, in one transaction */
+export function rebuildMessageSearchIndex(db: Database): void {
   const senderExpr = buildSenderSearchExpr('m')
   const chatExpr = buildChatSearchExpr('m')
 
@@ -381,6 +384,10 @@ export function initSyncSchema(db: Database): void {
       updated_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
     )
   `)
+
+  // Caches from 0.2.0 and older keep groups and channels in chats_cache
+  // under bare IDs (#18)
+  migratePeerIds(db, rebuildMessageSearchIndex)
 }
 
 // Row class types for typed queries

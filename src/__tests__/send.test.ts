@@ -11,8 +11,8 @@
  */
 
 import type { Database } from 'bun:sqlite'
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { TelegramClient, tl } from '@mtcute/bun'
+import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
+import { type TelegramClient, tl } from '@mtcute/bun'
 
 type MockCall = <T extends tl.RpcMethod>(
   request: T,
@@ -23,11 +23,30 @@ type MockClient = {
   getMe: TelegramClient['getMe']
 }
 
+import { dialogToCacheInput } from '../commands/chats/helpers'
+import { resolvePeer } from '../commands/send/peer-resolver'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
 import { createTestCacheDatabase } from '../db/schema'
+import { initSyncSchema } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { fakeDialog } from './helpers/fake-dialogs'
+
+// The send command reads the cache and the client through these modules
+let commandCacheDb: Database
+const commandCall = mock(async (_request: unknown): Promise<unknown> => {
+  throw new Error('Unexpected API call')
+})
+// The command wraps call() in place, so each test gets a fresh client
+let commandClient = { call: commandCall }
+mock.module('../db', () => ({
+  getCacheDb: () => commandCacheDb,
+  accountsDb: {},
+}))
+mock.module('../services/telegram', () => ({
+  getClientForAccount: () => commandClient,
+}))
 
 function expectLongEqual(actual: tl.Long, expected: string | number | bigint) {
   expect(actual.toString()).toBe(toLong(expected).toString())
@@ -96,7 +115,7 @@ function createTestUser(overrides = {}) {
  */
 function createTestChat(overrides = {}) {
   return {
-    chat_id: '789012',
+    chat_id: '-789012',
     type: 'group' as ChatType,
     title: 'Test Group',
     username: 'testgroup',
@@ -107,7 +126,7 @@ function createTestChat(overrides = {}) {
     last_message_id: 100,
     last_message_at: Date.now() - 1000,
     fetched_at: Date.now(),
-    raw_json: JSON.stringify({ id: 789012, title: 'Test Group' }),
+    raw_json: JSON.stringify({ _: 'chat', id: 789012, title: 'Test Group' }),
     ...overrides,
   }
 }
@@ -131,203 +150,6 @@ function createMockClient(overrides: Partial<MockClient> = {}) {
   } satisfies MockClient
 
   return client
-}
-
-/**
- * Peer resolution logic extracted for testing
- * (mirrors the logic in send.ts resolvePeer function)
- */
-function isRawUser(user: tl.TypeUser): user is tl.RawUser {
-  return user._ === 'user'
-}
-
-async function resolvePeer(
-  client: Pick<MockClient, 'call'>,
-  identifier: string,
-  usersCache: UsersCache,
-  chatsCache: ChatsCache,
-): Promise<{ inputPeer: tl.TypeInputPeer; name: string }> {
-  // Check if it's a username
-  if (identifier.startsWith('@')) {
-    const username = identifier.slice(1)
-
-    // Check users cache first
-    const cachedUser = usersCache.getByUsername(username)
-    if (cachedUser?.access_hash) {
-      return {
-        inputPeer: {
-          _: 'inputPeerUser',
-          userId: Number(cachedUser.user_id),
-          accessHash: toLong(cachedUser.access_hash),
-        },
-        name: cachedUser.display_name || `@${username}`,
-      }
-    }
-
-    // Check chats cache
-    const cachedChat = chatsCache.getByUsername(username)
-    if (cachedChat?.access_hash) {
-      if (cachedChat.type === 'channel' || cachedChat.type === 'supergroup') {
-        return {
-          inputPeer: {
-            _: 'inputPeerChannel',
-            channelId: Number(cachedChat.chat_id),
-            accessHash: toLong(cachedChat.access_hash),
-          },
-          name: cachedChat.title || `@${username}`,
-        }
-      }
-    }
-
-    // Resolve via API
-    const request: tl.contacts.RawResolveUsernameRequest = {
-      _: 'contacts.resolveUsername',
-      username,
-    }
-    const resolved = await client.call(request)
-
-    const user = resolved.users?.find(isRawUser)
-    if (user) {
-      return {
-        inputPeer: {
-          _: 'inputPeerUser',
-          userId: user.id,
-          accessHash: toLong(user.accessHash),
-        },
-        name:
-          [user.firstName, user.lastName].filter(Boolean).join(' ') ||
-          `@${username}`,
-      }
-    }
-
-    const chat = resolved.chats?.[0]
-    if (chat && (chat._ === 'channel' || chat._ === 'channelForbidden')) {
-      return {
-        inputPeer: {
-          _: 'inputPeerChannel',
-          channelId: chat.id,
-          accessHash: toLong(chat.accessHash),
-        },
-        name: chat.title || `@${username}`,
-      }
-    }
-    if (chat && (chat._ === 'chat' || chat._ === 'chatForbidden')) {
-      return {
-        inputPeer: {
-          _: 'inputPeerChat',
-          chatId: chat.id,
-        },
-        name: chat.title || `@${username}`,
-      }
-    }
-
-    throw new Error(`Could not resolve @${username}`)
-  }
-
-  // Check if it's a phone number
-  if (identifier.startsWith('+') || /^\d{10,}$/.test(identifier)) {
-    const phone = identifier.replace(/[\s\-+()]/g, '')
-
-    // Check users cache
-    const cachedUser = usersCache.getByPhone(phone)
-    if (cachedUser?.access_hash) {
-      return {
-        inputPeer: {
-          _: 'inputPeerUser',
-          userId: Number(cachedUser.user_id),
-          accessHash: toLong(cachedUser.access_hash),
-        },
-        name: cachedUser.display_name || identifier,
-      }
-    }
-
-    // Try to resolve via contacts.resolvePhone
-    try {
-      const request: tl.contacts.RawResolvePhoneRequest = {
-        _: 'contacts.resolvePhone',
-        phone,
-      }
-      const resolved = await client.call(request)
-      const user = resolved.users?.find(isRawUser)
-      if (user) {
-        return {
-          inputPeer: {
-            _: 'inputPeerUser',
-            userId: user.id,
-            accessHash: toLong(user.accessHash),
-          },
-          name:
-            [user.firstName, user.lastName].filter(Boolean).join(' ') ||
-            identifier,
-        }
-      }
-    } catch {
-      throw new Error(`Could not resolve phone number ${identifier}`)
-    }
-
-    throw new Error(`Could not resolve phone number ${identifier}`)
-  }
-
-  // It's a numeric ID
-  const numericId = Number.parseInt(identifier, 10)
-  if (Number.isNaN(numericId)) {
-    throw new Error(`Invalid peer identifier: ${identifier}`)
-  }
-
-  // Check users cache
-  const cachedUser = usersCache.getById(identifier)
-  if (cachedUser?.access_hash) {
-    return {
-      inputPeer: {
-        _: 'inputPeerUser',
-        userId: numericId,
-        accessHash: toLong(cachedUser.access_hash),
-      },
-      name: cachedUser.display_name || `User ${numericId}`,
-    }
-  }
-
-  // Check chats cache
-  const cachedChat = chatsCache.getById(identifier)
-  if (cachedChat) {
-    if (cachedChat.type === 'private') {
-      return {
-        inputPeer: {
-          _: 'inputPeerUser',
-          userId: numericId,
-          accessHash: toLong(cachedChat.access_hash),
-        },
-        name: cachedChat.title || `User ${numericId}`,
-      }
-    }
-    if (cachedChat.type === 'group') {
-      return {
-        inputPeer: {
-          _: 'inputPeerChat',
-          chatId: numericId,
-        },
-        name: cachedChat.title || `Group ${numericId}`,
-      }
-    }
-    // channel or supergroup
-    return {
-      inputPeer: {
-        _: 'inputPeerChannel',
-        channelId: numericId,
-        accessHash: toLong(cachedChat.access_hash),
-      },
-      name: cachedChat.title || `Channel ${numericId}`,
-    }
-  }
-
-  // Try as basic chat (legacy group)
-  return {
-    inputPeer: {
-      _: 'inputPeerChat',
-      chatId: numericId,
-    },
-    name: `Chat ${numericId}`,
-  }
 }
 
 // =============================================================================
@@ -423,7 +245,7 @@ describe('Peer Resolution - By Username', () => {
     it('should resolve @username from chats cache for channel', async () => {
       chatsCache.upsert(
         createTestChat({
-          chat_id: '444',
+          chat_id: '-1000000000444',
           type: 'channel',
           username: 'newschannel',
           title: 'News Channel',
@@ -449,7 +271,7 @@ describe('Peer Resolution - By Username', () => {
     it('should resolve @username from chats cache for supergroup', async () => {
       chatsCache.upsert(
         createTestChat({
-          chat_id: '555',
+          chat_id: '-1000000000555',
           type: 'supergroup',
           username: 'community',
           title: 'Community Group',
@@ -474,7 +296,7 @@ describe('Peer Resolution - By Username', () => {
       // Regular groups cannot have usernames, so this tests cache filtering
       chatsCache.upsert(
         createTestChat({
-          chat_id: '666',
+          chat_id: '-666',
           type: 'group',
           username: 'regulargroup', // This shouldn't happen in practice
           title: 'Regular Group',
@@ -840,7 +662,7 @@ describe('Peer Resolution - By Phone Number', () => {
           if (request._ !== 'contacts.resolvePhone') {
             throw new Error('Unexpected API call')
           }
-          throw new Error('PHONE_NOT_FOUND')
+          throw new tl.RpcError(400, 'PHONE_NOT_OCCUPIED')
         }),
       })
 
@@ -961,10 +783,10 @@ describe('Peer Resolution - By Numeric ID', () => {
       expect(result.name).toBe('Private Chat')
     })
 
-    it('should resolve group chat ID from chats cache', async () => {
+    it('should resolve a marked group chat ID from chats cache', async () => {
       chatsCache.upsert(
         createTestChat({
-          chat_id: '777888',
+          chat_id: '-777888',
           type: 'group',
           title: 'Group Chat',
           access_hash: null, // Groups don't have access_hash
@@ -974,7 +796,7 @@ describe('Peer Resolution - By Numeric ID', () => {
       const mockClient = createMockClient()
       const result = await resolvePeer(
         mockClient,
-        '777888',
+        '-777888',
         usersCache,
         chatsCache,
       )
@@ -982,12 +804,13 @@ describe('Peer Resolution - By Numeric ID', () => {
       assertInputPeerChat(result.inputPeer)
       expect(result.inputPeer.chatId).toBe(777888)
       expect(result.name).toBe('Group Chat')
+      expect(mockClient.call).not.toHaveBeenCalled()
     })
 
-    it('should resolve channel ID from chats cache', async () => {
+    it('should resolve a marked channel ID with the cached access hash', async () => {
       chatsCache.upsert(
         createTestChat({
-          chat_id: '888999',
+          chat_id: '-1000000888999',
           type: 'channel',
           title: 'My Channel',
           access_hash: '111222333',
@@ -997,7 +820,7 @@ describe('Peer Resolution - By Numeric ID', () => {
       const mockClient = createMockClient()
       const result = await resolvePeer(
         mockClient,
-        '888999',
+        '-1000000888999',
         usersCache,
         chatsCache,
       )
@@ -1006,29 +829,78 @@ describe('Peer Resolution - By Numeric ID', () => {
       expect(result.inputPeer.channelId).toBe(888999)
       expectLongEqual(result.inputPeer.accessHash, '111222333')
       expect(result.name).toBe('My Channel')
+      expect(mockClient.call).not.toHaveBeenCalled()
     })
 
-    it('should resolve supergroup ID from chats cache', async () => {
+    it('should resolve a marked supergroup ID from chats cache', async () => {
       chatsCache.upsert(
-        createTestChat({
-          chat_id: '999000',
-          type: 'supergroup',
-          title: 'Supergroup',
-          access_hash: '444555666',
-        }),
+        dialogToCacheInput(
+          fakeDialog({ kind: 'supergroup', id: 999000, title: 'Supergroup' }),
+        ),
       )
 
       const mockClient = createMockClient()
       const result = await resolvePeer(
         mockClient,
-        '999000',
+        '-1000000999000',
         usersCache,
         chatsCache,
       )
 
       assertInputPeerChannel(result.inputPeer)
       expect(result.inputPeer.channelId).toBe(999000)
+      expectLongEqual(result.inputPeer.accessHash, '777')
       expect(result.name).toBe('Supergroup')
+    })
+
+    it('should resolve the bare channel ID that 0.2.0 printed without a phone lookup', async () => {
+      chatsCache.upsert(
+        dialogToCacheInput(
+          fakeDialog({
+            kind: 'supergroup',
+            id: 1234567890,
+            title: 'Team Chat',
+          }),
+        ),
+      )
+
+      const mockClient = createMockClient()
+      const bare = await resolvePeer(
+        mockClient,
+        '1234567890',
+        usersCache,
+        chatsCache,
+      )
+      const marked = await resolvePeer(
+        mockClient,
+        '-1001234567890',
+        usersCache,
+        chatsCache,
+      )
+
+      expect(bare).toEqual(marked)
+      assertInputPeerChannel(bare.inputPeer)
+      expect(bare.inputPeer.channelId).toBe(1234567890)
+      expect(mockClient.call).not.toHaveBeenCalled()
+    })
+
+    it('should reject a bare ID that names a cached group and a cached channel', async () => {
+      chatsCache.upsertMany(
+        [
+          fakeDialog({ kind: 'group', id: 4242, title: 'Book Club' }),
+          fakeDialog({ kind: 'channel', id: 4242, title: 'Example News' }),
+        ].map(dialogToCacheInput),
+      )
+
+      const mockClient = createMockClient()
+
+      await expect(
+        resolvePeer(mockClient, '4242', usersCache, chatsCache),
+      ).rejects.toMatchObject({
+        name: 'AmbiguousPeerError',
+        candidates: [-4242, -1000000004242],
+      })
+      expect(mockClient.call).not.toHaveBeenCalled()
     })
   })
 
@@ -1052,8 +924,8 @@ describe('Peer Resolution - By Numeric ID', () => {
       const mockClient = createMockClient()
 
       await expect(
-        resolvePeer(mockClient, 'not_a_number', usersCache, chatsCache),
-      ).rejects.toThrow('Invalid peer identifier: not_a_number')
+        resolvePeer(mockClient, '12.5', usersCache, chatsCache),
+      ).rejects.toThrow('Invalid peer identifier: 12.5')
     })
   })
 })
@@ -1335,8 +1207,9 @@ describe('Error Handling', () => {
 
       // Not a username (@), not a phone (+/10+ digits), not a valid number
       await expect(
-        resolvePeer(mockClient, 'invalid-peer!', usersCache, chatsCache),
+        resolvePeer(mockClient, '-12.5', usersCache, chatsCache),
       ).rejects.toThrow('Invalid peer identifier')
+      expect(mockClient.call).not.toHaveBeenCalled()
     })
 
     it('should throw when username resolution fails', async () => {
@@ -1368,7 +1241,7 @@ describe('Error Handling', () => {
           if (request._ !== 'contacts.resolvePhone') {
             throw new Error('Unexpected API call')
           }
-          throw new Error('PHONE_NOT_OCCUPIED')
+          throw new tl.RpcError(400, 'PHONE_NOT_OCCUPIED')
         }),
       })
 
@@ -1506,9 +1379,10 @@ describe('Error Handling', () => {
         chatsCache,
       )
 
-      // Falls back to inputPeerChat when user has no access_hash
-      assertInputPeerChat(result.inputPeer)
-      expect(result.inputPeer.chatId).toBe(333333)
+      // A known user stays a user, with hash 0, not basic group 333333
+      assertInputPeerUser(result.inputPeer)
+      expect(result.inputPeer.userId).toBe(333333)
+      expectLongEqual(result.inputPeer.accessHash, 0)
     })
   })
 })
@@ -1627,7 +1501,7 @@ describe('Resolution Priority', () => {
     )
     chatsCache.upsert(
       createTestChat({
-        chat_id: '333',
+        chat_id: '-1000000000333',
         type: 'channel',
         username: 'shared',
         access_hash: '444',
@@ -1647,28 +1521,30 @@ describe('Resolution Priority', () => {
     expect(result.inputPeer.userId).toBe(111)
   })
 
-  it('should prefer users cache over chats cache for numeric ID', async () => {
-    // Same ID in both caches
+  it('should take a positive ID as the cached user before a cached group', async () => {
     usersCache.upsert(
       createTestUser({
-        user_id: '555',
+        user_id: '4242',
         access_hash: '666',
       }),
     )
     chatsCache.upsert(
-      createTestChat({
-        chat_id: '555',
-        type: 'channel',
-        access_hash: '777',
-      }),
+      dialogToCacheInput(
+        fakeDialog({ kind: 'group', id: 4242, title: 'Book Club' }),
+      ),
     )
 
     const mockClient = createMockClient()
-    const result = await resolvePeer(mockClient, '555', usersCache, chatsCache)
+    const result = await resolvePeer(mockClient, '4242', usersCache, chatsCache)
 
-    // Should resolve to user, not channel
     assertInputPeerUser(result.inputPeer)
-    expect(result.inputPeer.userId).toBe(555)
+    expect(result.inputPeer.userId).toBe(4242)
+    expectLongEqual(result.inputPeer.accessHash, '666')
+
+    const group = await resolvePeer(mockClient, '-4242', usersCache, chatsCache)
+    assertInputPeerChat(group.inputPeer)
+    expect(group.inputPeer.chatId).toBe(4242)
+    expect(group.name).toBe('Book Club')
   })
 
   it('should fall through to chats cache when user has no access_hash', async () => {
@@ -1681,7 +1557,7 @@ describe('Resolution Priority', () => {
     )
     chatsCache.upsert(
       createTestChat({
-        chat_id: '777',
+        chat_id: '-1000000000777',
         type: 'channel',
         username: 'fallthrough',
         access_hash: '888',
@@ -1716,5 +1592,44 @@ describe('Resolution Priority', () => {
     assertInputPeerChannel(result.inputPeer)
     expect(result.inputPeer.channelId).toBe(777)
     expect(mockClient.call).not.toHaveBeenCalled()
+  })
+})
+
+// =============================================================================
+// Send Command
+// =============================================================================
+
+describe('send command', () => {
+  beforeEach(() => {
+    commandCacheDb = createTestCacheDatabase().db
+    initSyncSchema(commandCacheDb)
+    commandCall.mockClear()
+    commandClient = { call: commandCall }
+  })
+
+  it('rejects a bare ID that names a cached group and a cached channel with INVALID_ARGS', async () => {
+    createChatsCache(commandCacheDb).upsertMany(
+      [
+        fakeDialog({ kind: 'group', id: 4242, title: 'Book Club' }),
+        fakeDialog({ kind: 'channel', id: 4242, title: 'Example News' }),
+      ].map(dialogToCacheInput),
+    )
+    const { sendCommand } = await import('../commands/send')
+    const run = sendCommand.run as (input: {
+      args: Record<string, unknown>
+    }) => Promise<void>
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      await expect(
+        run({ args: { to: '4242', message: 'hi', silent: false, _: [] } }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_ARGS',
+        details: { to: '4242', candidates: [-4242, -1000000004242] },
+      })
+    } finally {
+      errorSpy.mockRestore()
+    }
+    expect(commandCall).not.toHaveBeenCalled()
   })
 })

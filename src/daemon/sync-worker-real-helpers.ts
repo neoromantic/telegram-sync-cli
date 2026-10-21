@@ -2,7 +2,7 @@ import type { TelegramClient, tl } from '@mtcute/bun'
 import type { ChatsCache } from '../db/chats-cache'
 import type { MessageInput } from '../db/messages-cache'
 import { toLong } from '../utils/long'
-import { getCandidateChatIds } from '../utils/telegram-peer-ids'
+import { toInputPeerFromPeerId } from '../utils/telegram-peer-ids'
 import { bigIntReplacer } from './daemon-utils'
 
 const MEDIA_TYPE_MAP: Record<string, string> = {
@@ -21,49 +21,20 @@ const MEDIA_TYPE_MAP: Record<string, string> = {
   messageMediaSticker: 'sticker',
 }
 
+/**
+ * The InputPeer for a marked chat ID, with the access hash chats_cache holds
+ * for it. Without a row a basic group needs no hash and a user gets hash 0,
+ * which Telegram may refuse; a channel can't be reached without one.
+ */
 export function buildInputPeer(
   chatId: number,
   chatsCache: ChatsCache,
 ): tl.TypeInputPeer | null {
-  const candidates = getCandidateChatIds(chatId)
+  const chat = chatsCache.getById(String(chatId))
+  if (chat) return toInputPeerFromPeerId(chatId, chat.access_hash)
 
-  for (const candidateId of candidates) {
-    const chat = chatsCache.getById(String(candidateId))
-    if (!chat) continue
-
-    switch (chat.type) {
-      case 'private':
-        return {
-          _: 'inputPeerUser',
-          userId: Number(chat.chat_id),
-          accessHash: toLong(chat.access_hash),
-        }
-      case 'group':
-        return {
-          _: 'inputPeerChat',
-          chatId: Number(chat.chat_id),
-        }
-      case 'supergroup':
-      case 'channel':
-        return {
-          _: 'inputPeerChannel',
-          channelId: Number(chat.chat_id),
-          accessHash: toLong(chat.access_hash),
-        }
-      default:
-        return null
-    }
-  }
-
-  if (chatId < 0) {
-    return null
-  }
-
-  return {
-    _: 'inputPeerUser',
-    userId: chatId,
-    accessHash: toLong(0),
-  }
+  const peer = toInputPeerFromPeerId(chatId, null)
+  return peer?._ === 'inputPeerChannel' ? null : peer
 }
 
 function resolveMessageType(message: Record<string, unknown>): {

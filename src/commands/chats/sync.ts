@@ -16,16 +16,12 @@ import {
 } from '../../utils/account-selector'
 import { isUsernameIdentifier } from '../../utils/identifiers'
 import { error, success } from '../../utils/output'
-import {
-  getCandidateChatIds,
-  toChannelIdFromPeerId,
-  toMarkedPeerId,
-} from '../../utils/telegram-peer-ids'
+import { AmbiguousPeerError } from '../send/peer-resolver'
 
 export interface ResolvedChat {
-  /** Raw ID, as `tg chats list` shows it */
+  /** Marked peer ID, as `tg chats list` shows it and every cache table stores it */
   id: number
-  /** Marked peer ID, as the sync tables store it */
+  /** The same marked ID; kept for scripts written against 0.2.0 */
   peerId: number
   type: SyncChatType
   title: string | null
@@ -37,7 +33,7 @@ function fromCachedChat(chat: CachedChat): ResolvedChat {
   const id = Number(chat.chat_id)
   return {
     id,
-    peerId: toMarkedPeerId(id, chat.type),
+    peerId: id,
     type: chat.type,
     title: chat.title,
     username: chat.username,
@@ -46,9 +42,11 @@ function fromCachedChat(chat: CachedChat): ResolvedChat {
 }
 
 /**
- * Find the chat in the cache: by @username, by the raw ID `tg chats list`
- * shows or a marked ID (-100…, -N), then by a marked ID the daemon has sync
- * state for (a chat seen only live).
+ * Find the chat in the cache: by @username, by the marked ID `tg chats list`
+ * shows (-100… for channels, -N for basic groups), by a bare group or
+ * channel ID as 0.2.0 showed it, then by a marked ID the daemon has sync
+ * state for (a chat seen only live). A bare ID that names two cached chats
+ * throws AmbiguousPeerError.
  */
 function resolveChat(db: Database, input: string): ResolvedChat | null {
   const chatsCache = createChatsCache(db)
@@ -61,20 +59,41 @@ function resolveChat(db: Database, input: string): ResolvedChat | null {
   const id = Number(input)
   if (!Number.isSafeInteger(id) || id === 0) return null
 
-  for (const candidate of getCandidateChatIds(id)) {
-    const chat = chatsCache.getById(String(candidate))
-    if (chat) return fromCachedChat(chat)
+  const cached = chatsCache.getById(String(id))
+  if (cached) return fromCachedChat(cached)
+
+  const legacy = chatsCache.getByLegacyId(id)
+  if (legacy.length > 1) {
+    throw new AmbiguousPeerError(
+      input,
+      legacy.map((chat) => Number(chat.chat_id)),
+    )
   }
+  if (legacy[0]) return fromCachedChat(legacy[0])
 
   const state = createChatSyncStateService(db).get(id)
   if (!state) return null
   return {
-    id: toChannelIdFromPeerId(id),
+    id,
     peerId: id,
     type: state.chat_type as SyncChatType,
     title: null,
     username: null,
     memberCount: state.member_count,
+  }
+}
+
+function resolveChatOrFail(db: Database, input: string): ResolvedChat | null {
+  try {
+    return resolveChat(db, input)
+  } catch (err) {
+    if (err instanceof AmbiguousPeerError) {
+      error(ErrorCodes.INVALID_ARGS, err.message, {
+        chat: input,
+        candidates: err.candidates,
+      })
+    }
+    throw err
   }
 }
 
@@ -136,7 +155,7 @@ export const syncChatCommand = defineCommand({
     chat: {
       type: 'positional',
       description:
-        'Chat: @username, the ID from "tg chats list", or a marked ID (-100…)',
+        'Chat: @username or the ID from "tg chats list" (-100… for channels, -N for basic groups)',
       // Checked in run(): the parser reads a marked ID such as -100… as flags
       required: false,
     },
@@ -176,7 +195,7 @@ export const syncChatCommand = defineCommand({
     const mode: SyncMode = args.off ? 'off' : args.auto ? 'auto' : 'on'
 
     const db = getCacheDb()
-    const chat = resolveChat(db, input)
+    const chat = resolveChatOrFail(db, input)
     if (!chat) {
       error(
         ErrorCodes.INVALID_ARGS,

@@ -6,7 +6,6 @@ The list is in priority order.
 
 ## Reliability
 
-- [Messages and chats are cached with different peer ID formats](https://github.com/neoromantic/telegram-sync-cli/issues/18)
 - [Delete events without chat context can skip valid deletions](https://github.com/neoromantic/telegram-sync-cli/issues/7)
 - [Daemon doesn't sync contacts](https://github.com/neoromantic/telegram-sync-cli/issues/8)
 - [All accounts share one cache database](https://github.com/neoromantic/telegram-sync-cli/issues/17)

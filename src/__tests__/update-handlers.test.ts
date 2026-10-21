@@ -4,6 +4,7 @@
 import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import type { tl } from '@mtcute/bun'
+import { dialogToCacheInput } from '../commands/chats/helpers'
 import {
   createUpdateHandlers,
   type UpdateContext,
@@ -21,6 +22,8 @@ import {
   SyncPriority,
 } from '../db/sync-schema'
 import { toLong } from '../utils/long'
+import { fakeDialog } from './helpers/fake-dialogs'
+import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 describe('UpdateHandlers', () => {
   let db: Database
@@ -484,6 +487,63 @@ describe('UpdateHandlers', () => {
         access_hash: '555',
         last_message_id: 9,
       })
+    })
+
+    const teamChat = {
+      _: 'channel',
+      id: 1234567890,
+      megagroup: true,
+      accessHash: toLong(888),
+      title: 'Team Chat',
+    } as tl.RawChannel
+
+    it('caches a supergroup once, under its marked ID', async () => {
+      await receive(-1001234567890, 'supergroup', teamChat)
+      await handlers.handleNewMessage(
+        { accountId: 1, receivedAt: Date.now() },
+        {
+          chatId: -1001234567890,
+          chatType: 'supergroup',
+          messageId: 2,
+          text: 'Again',
+          date: 1_700_000_001,
+          isOutgoing: false,
+          rawChat: { ...teamChat, title: 'Renamed' },
+        },
+      )
+
+      expect(
+        db.query('SELECT chat_id, type, title FROM chats_cache').all(),
+      ).toEqual([
+        { chat_id: '-1001234567890', type: 'supergroup', title: 'Team Chat' },
+      ])
+      assertPeerIdInvariants(db)
+    })
+
+    it('leaves a supergroup row a dialog pass wrote alone', async () => {
+      chatsCache.upsert(
+        dialogToCacheInput(
+          fakeDialog({
+            kind: 'supergroup',
+            id: 1234567890,
+            title: 'Team Chat',
+            topMessage: 41,
+          }),
+        ),
+      )
+
+      await receive(-1001234567890, 'supergroup', {
+        ...teamChat,
+        title: 'Renamed',
+      })
+
+      expect(chatsCache.getById('-1001234567890')).toMatchObject({
+        title: 'Team Chat',
+        access_hash: '777',
+        last_message_id: 41,
+      })
+      expect(chatsCache.count()).toBe(1)
+      assertPeerIdInvariants(db)
     })
   })
 

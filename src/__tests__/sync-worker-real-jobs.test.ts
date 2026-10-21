@@ -80,8 +80,9 @@ describe('sync-worker real jobs', () => {
   })
 
   it('returns error when input peer is missing (forward catchup)', async () => {
+    // A channel can't be reached without the access hash chats_cache holds
     const job = ctx.jobsService.create({
-      chat_id: -123,
+      chat_id: -1000000000123,
       job_type: SyncJobType.ForwardCatchup,
       priority: SyncPriority.High,
     })

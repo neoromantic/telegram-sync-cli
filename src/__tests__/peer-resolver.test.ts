@@ -2,7 +2,12 @@ import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import { type TelegramClient, tl } from '@mtcute/bun'
 
-import { InvalidPeerError, resolvePeer } from '../commands/send/peer-resolver'
+import { dialogToCacheInput } from '../commands/chats/helpers'
+import {
+  AmbiguousPeerError,
+  InvalidPeerError,
+  resolvePeer,
+} from '../commands/send/peer-resolver'
 import { ConfigError } from '../config'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
 import { createMessagesCache, type MessagesCache } from '../db/messages-cache'
@@ -12,6 +17,7 @@ import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { RateLimitError } from '../utils/telegram-rate-limits'
+import { fakeDialog } from './helpers/fake-dialogs'
 
 function throwingClient(
   failure: () => Error = () => new Error('unexpected API call'),
@@ -117,9 +123,9 @@ describe('resolvePeer with numeric IDs', () => {
     )
   }
 
-  describe('marked IDs, as tg messages search and tg sql print them', () => {
-    it('resolves a cached channel from its raw ID', async () => {
-      cacheChat('1234567890', 'supergroup', 'Team Chat', '2222')
+  describe('marked IDs, as every tg command prints them', () => {
+    it('resolves a cached channel with its access hash', async () => {
+      cacheChat('-1001234567890', 'supergroup', 'Team Chat', '2222')
       const { call, client } = throwingClient()
 
       const peer = await resolve('-1001234567890', client)
@@ -136,7 +142,7 @@ describe('resolvePeer with numeric IDs', () => {
     })
 
     it('resolves a cached basic group', async () => {
-      cacheChat('4242', 'group', 'Book Club')
+      cacheChat('-4242', 'group', 'Book Club')
       const { call, client } = throwingClient()
 
       const peer = await resolve('-4242', client)
@@ -148,8 +154,7 @@ describe('resolvePeer with numeric IDs', () => {
       expect(call).not.toHaveBeenCalled()
     })
 
-    it('rejects a cached row whose own marked ID is different', async () => {
-      // A private chat with raw ID 4242 is user 4242, not group -4242
+    it('does not take user 4242 for group -4242', async () => {
       cacheChat('4242', 'private', 'Alice Able', '1111')
       const { call, client } = throwingClient()
 
@@ -182,14 +187,43 @@ describe('resolvePeer with numeric IDs', () => {
     })
   })
 
-  describe('bare numbers', () => {
-    it('resolves a cached 10-digit chat ID without a phone lookup', async () => {
-      cacheChat('1234567890', 'supergroup', 'Team Chat', '2222')
+  describe('@username', () => {
+    it('resolves a cached supergroup to its bare channel ID', async () => {
+      chatsCache.upsert(
+        dialogToCacheInput(
+          fakeDialog({
+            kind: 'supergroup',
+            id: 1234567890,
+            title: 'Team Chat',
+            username: 'teamchat',
+          }),
+        ),
+      )
       const { call, client } = throwingClient()
 
-      const peer = await resolve('1234567890', client)
+      const peer = await resolve('@teamchat', client)
 
-      expect(peer.inputPeer).toEqual({
+      expect(peer).toEqual({
+        inputPeer: {
+          _: 'inputPeerChannel',
+          channelId: 1234567890,
+          accessHash: toLong(777),
+        },
+        name: 'Team Chat',
+      })
+      expect(call).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('bare chat IDs from 0.2.0', () => {
+    it('resolves the bare ID of a cached channel without a phone lookup', async () => {
+      cacheChat('-1001234567890', 'supergroup', 'Team Chat', '2222')
+      const { call, client } = throwingClient()
+
+      const bare = await resolve('1234567890', client)
+
+      expect(bare).toEqual(await resolve('-1001234567890', client))
+      expect(bare.inputPeer).toEqual({
         _: 'inputPeerChannel',
         channelId: 1234567890,
         accessHash: toLong('2222'),
@@ -197,6 +231,54 @@ describe('resolvePeer with numeric IDs', () => {
       expect(call).not.toHaveBeenCalled()
     })
 
+    it('resolves the bare ID of a cached basic group', async () => {
+      cacheChat('-4242', 'group', 'Book Club')
+      const { call, client } = throwingClient()
+
+      const peer = await resolve('4242', client)
+
+      expect(peer).toEqual({
+        inputPeer: { _: 'inputPeerChat', chatId: 4242 },
+        name: 'Book Club',
+      })
+      expect(call).not.toHaveBeenCalled()
+    })
+
+    it('takes a positive ID as the cached user before a cached group', async () => {
+      cacheChat('4242', 'private', 'Alice Able', '1111')
+      cacheChat('-4242', 'group', 'Book Club')
+      const { call, client } = throwingClient()
+
+      const peer = await resolve('4242', client)
+
+      expect(peer).toEqual({
+        inputPeer: {
+          _: 'inputPeerUser',
+          userId: 4242,
+          accessHash: toLong('1111'),
+        },
+        name: 'Alice Able',
+      })
+      expect(call).not.toHaveBeenCalled()
+    })
+
+    it('rejects a bare ID that names a cached group and a cached channel', async () => {
+      cacheChat('-4242', 'group', 'Book Club')
+      cacheChat('-1000000004242', 'channel', 'Example News', '2222')
+      const { call, client } = throwingClient()
+
+      const failure = resolve('4242', client)
+
+      await expect(failure).rejects.toBeInstanceOf(AmbiguousPeerError)
+      await expect(failure).rejects.toMatchObject({
+        identifier: '4242',
+        candidates: [-4242, -1000000004242],
+      })
+      expect(call).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('bare numbers', () => {
     it('resolves a cached 10-digit user ID without a phone lookup', async () => {
       usersCache.upsert({
         user_id: '1234567890',

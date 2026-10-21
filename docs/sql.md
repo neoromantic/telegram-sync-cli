@@ -230,6 +230,17 @@ tg sql --query="DELETE FROM users_cache"
 tg sql --query="SELECT chat_id, COUNT(*) as count FROM messages_cache GROUP BY chat_id ORDER BY count DESC LIMIT 10"
 ```
 
+### Messages per chat, with titles
+```bash
+tg sql --query="SELECT m.chat_id, c.title, c.type, COUNT(*) AS messages FROM messages_cache m LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT) GROUP BY m.chat_id ORDER BY messages DESC, m.chat_id LIMIT 10"
+```
+
+Every table stores a chat under the same marked peer ID (`-100…` for supergroups and channels,
+`-N` for basic groups, the user ID for a private chat; see
+[database-schema.md](database-schema.md#peer-ids)). `chats_cache.chat_id` is TEXT and
+`messages_cache.chat_id` is INTEGER, so the join casts the message side, which lets SQLite use
+the `chats_cache` primary key.
+
 ### Find users by username pattern
 ```bash
 tg sql --query="SELECT user_id, username, first_name FROM users_cache WHERE username LIKE '%john%'"
@@ -274,4 +285,4 @@ Source files:
 
 ---
 
-*Last updated: 2026-02-03*
+*Last updated: 2026-10-21*

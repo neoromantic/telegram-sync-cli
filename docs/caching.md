@@ -138,7 +138,8 @@ tg send --to me -m "Note to self"
 ```
 
 `tg send` writes the sent message to `messages_cache` from Telegram's response,
-with the same `chat_id` format as the daemon. Telegram doesn't push an update
+with the same marked `chat_id` as the daemon and `chats_cache` (see
+[database-schema.md](database-schema.md#peer-ids)). Telegram doesn't push an update
 for it to the session that sent it, and the daemon shares that session, so
 without this the message would reach the cache only on a later sync. If the
 cache write fails, the send still reports success.
