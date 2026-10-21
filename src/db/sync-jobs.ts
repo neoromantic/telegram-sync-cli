@@ -93,8 +93,8 @@ export interface SyncJobsService {
    */
   failOrDrop(id: number, errorMessage: string): SyncJobFailResult
   /**
-   * Make a running job pending again, due at `runAt`. If its chat was turned
-   * off while it ran, delete it instead.
+   * Make a running job pending again, due at `runAt`, at its chat's current
+   * lane priority. If its chat was turned off while it ran, delete it instead.
    */
   retryLater(id: number, retry: SyncJobRetry): SyncJobRetryResult
   /** Update job progress */
@@ -208,10 +208,21 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         )
     `),
 
+    // The chat's mode may have changed while the job ran, and tg chats sync
+    // cancels only pending jobs, so the retry takes the chat's lane priority
+    // now, like alignPendingPriorities.
     retryLater: db.prepare(`
       UPDATE sync_jobs
       SET status = $pending_status, attempts = attempts + $inc,
-          next_run_at = $run_at, error_message = $error, started_at = NULL
+          next_run_at = $run_at, error_message = $error, started_at = NULL,
+          priority = COALESCE((
+            SELECT CASE
+              WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
+              ELSE s.sync_priority
+            END
+            FROM chat_sync_state s
+            WHERE s.chat_id = sync_jobs.chat_id
+          ), priority)
       WHERE id = $id AND status = $running_status
         AND EXISTS (
           SELECT 1 FROM chat_sync_state s

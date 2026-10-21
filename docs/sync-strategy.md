@@ -105,7 +105,8 @@ for a retry.
 
 ### Retries
 
-A job that fails is pending again after a backoff, with the same ID and its place in its lane:
+A job that fails is pending again after a backoff, with the same ID, in its lane at its chat's
+priority at that time (a chat turned on while its first page ran gets the retry at P0):
 
 - **Backoff**: the job waits 1, 2, 4 and 8 minutes after its first four failures; `attempts`
   counts them and `error_message` holds the last error. The fifth failure marks it `failed`.
