@@ -115,7 +115,8 @@ the cache; otherwise one `messages.getHistory` call fetches the message with the
 it. A cached deleted message comes from the cache with whatever context the cache holds.
 
 `--fresh` always takes step 4. Fetched pages are searchable right away. The CLI doesn't move the
-daemon's sync cursors and never infers deletions. Without a running daemon the cache stops at
+daemon's sync cursors and never infers deletions, and backfill doesn't read progress from cached
+pages (see [sync-strategy.md](sync-strategy.md#history)). Without a running daemon the cache stops at
 the last sync, so the newest page can be behind Telegram; `--fresh` reads Telegram's view.
 
 ### Sent Messages

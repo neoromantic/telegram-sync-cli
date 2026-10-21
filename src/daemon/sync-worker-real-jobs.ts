@@ -193,9 +193,12 @@ export async function processBackwardHistoryReal(
   ) {
     backwardCursor = forwardCursor + 1
   }
-  if (backwardCursor === null) {
-    backwardCursor = ctx.messagesCache.getOldestMessageId(chatId) ?? 0
-  }
+  // Without either cursor, backfill starts at the newest page. The oldest
+  // cached message marks no progress: tg send and tg messages list and get
+  // cache messages anywhere in a chat, and starting below such a page would
+  // skip the gap above it, or reach the start early and mark history
+  // complete.
+  backwardCursor ??= 0
 
   let result: RealJobResult
 
@@ -217,7 +220,7 @@ export async function processBackwardHistoryReal(
       const minId = ids.length > 0 ? Math.min(...ids) : backwardCursor
       const { inputs } = createMessageInputs(messages, chatId, minId, minId)
 
-      // The first page and live updates may have cached some of them.
+      // The first page, live updates and pages the CLI cached may hold some
       const newCount = countUncached(ctx, chatId, inputs)
 
       if (inputs.length > 0) {

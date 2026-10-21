@@ -48,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Groups whose member count Telegram doesn't report are off by default, like
   groups over 100 members, instead of getting a full-history sync. The daemon
   keeps the last known count when a dialog leaves it out.
+- History backfill for a chat without a forward or backward cursor starts at
+  the newest page instead of below the oldest cached message, so pages that
+  `tg send` or `tg messages list` and `get` cache can't make it skip a gap or
+  mark a chat's history complete early.
 
 ### Fixed
 
