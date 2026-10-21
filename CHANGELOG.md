@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cursors now start at 0, so its first message is caught up like any other.
 - The first page counted messages that live updates had already cached, and a
   page of only deleted messages set the backward cursor past every message.
+- A CLI command that writes the cache (for example `tg send` or
+  `tg chats list --fresh`) failed with "database is locked" if the daemon was
+  writing at that moment. It now waits up to 5 seconds for the lock.
 
 ## [0.1.4] - 2026-10-21
 

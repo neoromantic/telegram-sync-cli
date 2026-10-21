@@ -293,9 +293,11 @@ At startup the CLI/daemon ensures:
 
 ```sql
 PRAGMA journal_mode = WAL;
+PRAGMA busy_timeout = 5000;  -- cache.db only
 ```
 
-(Other PRAGMAs are not currently applied.)
+The CLI and the daemon write `cache.db` at the same time, so a write waits up to 5 seconds for
+the other process's write lock instead of failing with "database is locked".
 
 ## Migrations
 
