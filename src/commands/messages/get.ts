@@ -7,6 +7,7 @@ import {
 import { success } from '../../utils/output'
 import {
   CHAT_ARG_DESCRIPTION,
+  MAX_MESSAGE_ID,
   openHistory,
   parseIntegerArg,
   reportHistoryError,
@@ -55,7 +56,10 @@ export const getMessageCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const messageId = parseIntegerArg(args.id, 'id', { min: 1 })
+    const messageId = parseIntegerArg(args.id, 'id', {
+      min: 1,
+      max: MAX_MESSAGE_ID - 1,
+    })
     const context = parseIntegerArg(args.context, 'context', {
       min: 0,
       max: MAX_CONTEXT,

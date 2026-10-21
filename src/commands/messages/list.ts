@@ -8,6 +8,7 @@ import {
 import { error, success } from '../../utils/output'
 import {
   CHAT_ARG_DESCRIPTION,
+  MAX_MESSAGE_ID,
   openHistory,
   parseIntegerArg,
   reportHistoryError,
@@ -62,8 +63,14 @@ export const listMessagesCommand = defineCommand({
       max: 100,
       default: 20,
     })
-    const before = parseIntegerArg(args.before, 'before', { min: 1 })
-    const after = parseIntegerArg(args.after, 'after', { min: 0 })
+    const before = parseIntegerArg(args.before, 'before', {
+      min: 1,
+      max: MAX_MESSAGE_ID,
+    })
+    const after = parseIntegerArg(args.after, 'after', {
+      min: 0,
+      max: MAX_MESSAGE_ID - 1,
+    })
     if (before !== undefined && after !== undefined && after >= before) {
       error(
         ErrorCodes.INVALID_ARGS,

@@ -428,7 +428,9 @@ describe('E2E: Messages List', () => {
     '--limit 5abc',
     '--before 0',
     '--before abc',
+    '--before 2147483648',
     '--after -1',
+    '--after 2147483647',
     '--after 5 --before 5',
   ])('rejects %p with INVALID_ARGS', async (flags) => {
     const { exitCode, json } = await listFailure(
@@ -566,18 +568,21 @@ describe('E2E: Messages Get', () => {
     expect(json.error.message).toContain('TELEGRAM_API_ID')
   })
 
-  it.each(['--id 0', '--id abc', '--id 4 --context -1', '--id 4 --context 50'])(
-    'rejects %p with INVALID_ARGS',
-    async (flags) => {
-      const { exitCode, json } = await getFailure(
-        '--chat',
-        '@alice',
-        ...flags.split(' '),
-      )
-      expect(exitCode).toBe(3)
-      expect(json.error.code).toBe('INVALID_ARGS')
-    },
-  )
+  it.each([
+    '--id 0',
+    '--id abc',
+    '--id 2147483647',
+    '--id 4 --context -1',
+    '--id 4 --context 50',
+  ])('rejects %p with INVALID_ARGS', async (flags) => {
+    const { exitCode, json } = await getFailure(
+      '--chat',
+      '@alice',
+      ...flags.split(' '),
+    )
+    expect(exitCode).toBe(3)
+    expect(json.error.code).toBe('INVALID_ARGS')
+  })
 
   it('requires --id', async () => {
     const result = await runCli(

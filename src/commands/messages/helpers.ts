@@ -48,6 +48,12 @@ export function messageRowToItem(row: MessageSearchRow): MessageSearchItem {
   }
 }
 
+/**
+ * Message IDs are TL int32, and mtcute wraps a larger value silently.
+ * `--after` and `--id` go to getHistory as ID + 1, so they stop one lower.
+ */
+export const MAX_MESSAGE_ID = 2_147_483_647
+
 interface IntegerRange {
   min: number
   max?: number
