@@ -346,6 +346,14 @@ export async function resolvePeer(
     return { inputPeer: { _: 'inputPeerSelf' }, name: 'Saved Messages' }
   }
 
+  // `+` always means a phone number, with or without spaces, dashes and
+  // brackets, which would otherwise read as a username
+  if (normalized.startsWith('+')) {
+    const phone = normalizePhone(normalized)
+    if (!phone) throw new InvalidPeerError(normalized)
+    return resolveByPhone(client, normalized, phone, deps)
+  }
+
   if (isUsernameIdentifier(normalized)) {
     const username = normalizeUsername(normalized)
     return resolveByUsername(client, username, deps)
@@ -357,7 +365,7 @@ export async function resolvePeer(
 
   // A bare number is an ID when the cache knows it, as a user, a chat or a
   // private chat with cached messages. Otherwise 10+ digits are still a
-  // phone number; `+` always means a phone number.
+  // phone number.
   const cached = /^\d+$/.test(normalized)
     ? resolveCachedId(normalized, deps)
     : null
