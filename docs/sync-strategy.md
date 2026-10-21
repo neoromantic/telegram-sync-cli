@@ -167,6 +167,12 @@ messages count for the cursor, so a page of deleted messages still moves it, and
 any message ID ends the history. Only messages that weren't cached yet count towards
 `synced_messages`. A page that isn't full or reaches message 1 marks history complete.
 
+Older versions could leave a chat with a forward cursor but no backward cursor (0.1.4's
+catch-up, and live updates before it, set only the forward one), or with a backward cursor
+above the forward one. Such a chat's history starts just above the forward cursor
+(`offset_id = forward_cursor + 1`), so every message below it is fetched, not only those below
+the oldest cached message.
+
 ### Scheduling
 
 0. **Dialog pass** on start, one per connected account: fills `chats_cache` and updates
