@@ -257,6 +257,23 @@ describe('E2E: chats sync', () => {
     })
   })
 
+  for (const flag of ['--format', '-f']) {
+    it(`takes a marked ID from tg chats list before ${flag} pretty`, async () => {
+      const result = await runCliSuccess(
+        ['chats', 'sync', String(CHANNEL_PEER_ID), flag, 'pretty'],
+        options(),
+      )
+
+      // Pretty output is the data without the envelope
+      expect(result.json).toMatchObject({
+        id: CHANNEL_PEER_ID,
+        title: 'Example News',
+        mode: 'on',
+      })
+      expect(stateOf(CHANNEL_PEER_ID)).toMatchObject({ sync_mode: 'on' })
+    })
+  }
+
   it('takes a positive ID with DM sync state as that DM, not as the basic group', async () => {
     // User 4001's DM, seen only live: sync state, no chats_cache row
     createChatSyncStateService(cacheDb).upsert({
