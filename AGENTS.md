@@ -77,8 +77,9 @@ bun run lint:fix                 # Biome autofix (also the pre-commit hook)
 - `bin/tg.js` is a 3-line ESM shim (`#!/usr/bin/env bun`) that runs `src/index.ts`. The npm
   package ships source, not `dist/tg`, and has no `postinstall`. Requires Bun >= 1.4.
 - The version lives only in `package.json` (read by `src/version.ts`).
-- The compiled binary (~60 MB, embedded Bun + SQLite) is built locally or in CI, never shipped
-  in the npm tarball. Targets: darwin arm64/x64, linux x64/arm64, windows x64.
+- The compiled binary (70–100 MB, embedded Bun + SQLite) is never shipped in the npm tarball.
+  The release workflow attaches one per target to the GitHub Release, and the Homebrew formula
+  `neoromantic/tap/tg` installs it. Targets: darwin arm64/x64, linux x64/arm64, windows x64.
 - Git hooks: `lefthook.yml` runs `lint:fix` and `typecheck` on commit, plus devkit's gitleaks
   and privacy scan (needs `gitleaks` on `PATH`).
 - CI: `.github/workflows/ci.yml` calls devkit's `ci-bun` (check, build, test, test:e2e) and
@@ -86,6 +87,14 @@ bun run lint:fix                 # Biome autofix (also the pre-commit hook)
   installs it globally and runs `tg --help`/`--version` with no Telegram credentials. A weekly
   run (Monday) uses Bun canary and refreshes dependencies within their ranges. The required
   check is `ci`.
+
+### Releasing
+
+Releases are tag-driven: a `chore(release): X.Y.Z` PR bumps `package.json` and dates the
+`CHANGELOG.md` section, then a pushed `vX.Y.Z` tag runs `.github/workflows/release.yml` (npm with
+trusted publishing, the GitHub Release with binaries, the Homebrew formula). This replaces the
+shared rule about Release PRs; until then, changes add their entry under `## [Unreleased]`.
+Steps: [docs/releasing.md](docs/releasing.md).
 
 ### Architecture rules
 

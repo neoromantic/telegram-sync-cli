@@ -4,10 +4,15 @@
 
 ## Overview
 
-telegram-sync-cli ships as source (Bun-run TypeScript). The `tg` bin is an
-ESM shim (`bin/tg.js`, `#!/usr/bin/env bun`) that imports `src/index.ts`.
-Nothing is compiled at install time and there is no `postinstall` step.
-Requires Bun >= 1.4. `bun run build` still compiles a standalone binary locally.
+telegram-sync-cli ships two ways:
+
+- npm: source (Bun-run TypeScript). The `tg` bin is an ESM shim (`bin/tg.js`,
+  `#!/usr/bin/env bun`) that imports `src/index.ts`. Nothing is compiled at
+  install time and there is no `postinstall` step. Requires Bun >= 1.4.
+- GitHub Releases and Homebrew: standalone binaries (Bun runtime and SQLite
+  included) for every platform below, built by the release workflow. The
+  Homebrew formula `neoromantic/tap/tg` installs them; see
+  [releasing.md](releasing.md).
 
 ## Build Commands
 
@@ -56,7 +61,7 @@ bun i -g @goodit/telegram-sync-cli
 
 ## Notes
 
-- The compiled binary includes the Bun runtime and SQLite; size is ~60MB.
+- The compiled binary includes the Bun runtime and SQLite; size is 70–100 MB.
 - The npm tarball excludes the binary; `tg` runs from source with Bun.
 - The version comes only from `package.json` (`src/version.ts` reads it).
 - `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` are required only by commands that

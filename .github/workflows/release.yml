@@ -1,0 +1,132 @@
+name: release
+
+# Push a vX.Y.Z tag to release (see docs/releasing.md). The tag must match
+# package.json and have a section in CHANGELOG.md. The workflow checks the
+# code, builds the binaries, publishes the npm package with trusted
+# publishing, publishes the GitHub Release with the binaries, then updates
+# the Homebrew formula. Every step is safe to re-run.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+          no-cache: true
+      # npm would publish a prerelease as latest, so only X.Y.Z is released.
+      - name: Check the tag matches package.json
+        run: |
+          case "${TAG}" in
+            *-*) echo "::error::Prerelease tags aren't supported: ${TAG}"; exit 1 ;;
+          esac
+          version="$(bun -p 'require("./package.json").version')"
+          if [ "v${version}" != "${TAG}" ]; then
+            echo "::error::Tag ${TAG} does not match package.json version ${version}"
+            exit 1
+          fi
+      # Before anything is built, so a missing section stops the release.
+      - name: Check the CHANGELOG.md section
+        run: bun scripts/changelog-section.ts "${TAG}" >/dev/null
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run test
+      - run: bun run test:e2e
+      - name: Build and run the Linux binary
+        run: |
+          bun build ./src/index.ts --compile --minify --target=bun-linux-x64 --outfile "${RUNNER_TEMP}/tg"
+          test "$("${RUNNER_TEMP}/tg" --version)" = "${TAG#v}"
+
+  # macOS, so the darwin binaries are built and signed where they run. Bun
+  # cross-compiles the others.
+  release:
+    needs: verify
+    runs-on: macos-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write # the GitHub Release
+      id-token: write # npm trusted publishing, build attestations
+      attestations: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+          no-cache: true
+      # Node 24: older npm versions fail trusted publishing with a 404.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - run: bun install --frozen-lockfile
+      - name: Release notes
+        run: bun scripts/changelog-section.ts "${TAG}" >"${RUNNER_TEMP}/notes.md"
+      - name: Build the binaries
+        run: bun run build:all
+      - name: Check the binaries
+        run: |
+          test "$(./dist/tg-darwin-arm64 --version)" = "${TAG#v}"
+          (cd dist && shasum -a 256 tg-* >checksums.txt && shasum -a 256 --strict -c checksums.txt)
+          test "$(wc -l <dist/checksums.txt)" -eq 5
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/tg-*
+      # Bun can't publish with OIDC yet, so Bun packs and npm publishes.
+      - name: Publish to npm
+        run: |
+          name="$(node -p 'require("./package.json").name')"
+          if npm view "${name}@${TAG#v}" version >/dev/null 2>&1; then
+            echo "${name}@${TAG#v} is already on npm"
+          else
+            bun pm pack --destination "${RUNNER_TEMP}/pack"
+            npm publish "${RUNNER_TEMP}"/pack/*.tgz
+          fi
+      # Created as a draft and published after the upload: a published
+      # release is immutable, and releases/latest never points at a release
+      # whose files are still uploading.
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            if [ "$(gh release view "${TAG}" --json isDraft --jq .isDraft)" = "true" ]; then
+              gh release upload "${TAG}" dist/tg-* dist/checksums.txt --clobber
+            fi
+          else
+            gh release create "${TAG}" dist/tg-* dist/checksums.txt --draft --verify-tag \
+              --title "${TAG}" --notes-file "${RUNNER_TEMP}/notes.md"
+          fi
+          gh release edit "${TAG}" --draft=false
+      # Fails until the release environment has the secret HOMEBREW_TAP_KEY,
+      # the tap's deploy key. brew audit reads GitHub's API with the job's
+      # token, so a shared runner's anonymous limit doesn't fail it.
+      - name: Update the Homebrew tap
+        env:
+          TAP_KEY: ${{ secrets.HOMEBREW_TAP_KEY }}
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
+        run: sh .github/scripts/tap.sh "${TAG}" dist/checksums.txt
