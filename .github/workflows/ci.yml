@@ -45,6 +45,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Temp files go to the runner's temp dir: tmpfs on oss-linux, where /tmp is on disk
+      - name: Use the runner temp dir
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -84,6 +87,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Temp files go to the runner's temp dir: tmpfs on oss-linux, where /tmp is on disk
+      - name: Use the runner temp dir
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
