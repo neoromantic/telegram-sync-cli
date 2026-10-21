@@ -152,7 +152,7 @@ function logJobOutcome(
         ? 'permanent error'
         : `after ${outcome.attempts} attempts`
       ctx.logger.warn(
-        `${label} failed for good (${why}): ${result.error}; retried after 24 h or on daemon restart`,
+        `${label} failed for good (${why}): ${result.error}; retried after 24 h, on daemon restart or with tg chats sync`,
       )
       return
     }

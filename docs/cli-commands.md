@@ -97,6 +97,10 @@ tg chats sync @examplenews --auto # follow the default policy again
 - A running daemon applies the change at its next refresh (30 seconds or less). A chat turned
   on gets its first page ahead of other first pages. A changed mode cancels the chat's pending
   jobs; a job that is running finishes.
+- In any mode, and even when the mode didn't change, the command deletes the chat's failed
+  sync jobs (`clearedFailedJobs` counts them). A failed job keeps the daemon from queueing its
+  chat again until it is cleaned up a day later, so running `tg chats sync <chat>` again
+  retries it at the next refresh.
 - `--account` is checked like in `chats search`; all accounts share one cache.
 - A chat you haven't joined, such as a public channel cached by `tg chats get --id @username`,
   gets its first page and history, but new messages only on daemon start and after reconnects:
@@ -115,7 +119,8 @@ tg chats sync @examplenews --auto # follow the default policy again
     "syncEnabled": true,
     "historyComplete": false,
     "syncedMessages": 0,
-    "changed": true
+    "changed": true,
+    "clearedFailedJobs": 0
   }
 }
 ```

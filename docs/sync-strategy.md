@@ -64,6 +64,9 @@ the dialog pass and live updates never overwrite it: an upsert keeps `sync_enabl
 `on` and 0 for `off`, and `sync_priority` at High for `on`, while the chat type and member
 count still update. A chat turned on gets the High tier and its first page at P0.
 
+Running `tg chats sync <chat>` again, even with the same mode, deletes the chat's failed jobs,
+so the daemon retries them at its next refresh (see [Retries](#retries)).
+
 The mode and the policy control catch-up, first pages and history only. While the daemon runs,
 it caches messages that arrive live in every chat, including one that is off.
 
@@ -115,7 +118,8 @@ A job that fails is pending again after a backoff, with the same ID and its plac
   and database errors.
 - **Failed jobs**: a `failed` row blocks its chat's jobs of that type, so no refresh queues the
   chat for it again. The daemon deletes failed rows after 24 hours, and all of them on start;
-  the next refresh then queues the chat again.
+  `tg chats sync <chat>` deletes the chat's failed rows at once, in any mode. The next refresh
+  then queues the chat again.
 - **A chat turned off** while its job runs: if the job fails, it is dropped instead of waiting
   for a retry.
 - **A crash** doesn't count as an attempt: on start, the jobs it left running are pending again.

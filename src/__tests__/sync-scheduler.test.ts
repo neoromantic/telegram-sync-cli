@@ -3,6 +3,7 @@
  */
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { applySyncMode } from '../commands/chats/sync'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createMessagesCache } from '../db/messages-cache'
@@ -600,6 +601,33 @@ describe('SyncScheduler', () => {
           'pending',
         ])
       }
+    })
+
+    it('queues a chat again once tg chats sync cleared its failed job', () => {
+      const chat = {
+        id: 1234567890,
+        peerId: -1001234567890,
+        type: 'channel' as const,
+        title: 'Example News',
+        username: 'examplenews',
+        memberCount: 5000,
+      }
+      applySyncMode(db, chat, 'on')
+      scheduler.refreshQueues()
+      const [firstPage] = jobsOf(chat.peerId, SyncJobType.InitialLoad)
+      failJob(firstPage!.id)
+
+      scheduler.refreshQueues()
+      expect(jobsService.getPendingJobs()).toEqual([])
+
+      expect(applySyncMode(db, chat, 'on')).toMatchObject({
+        changed: false,
+        clearedFailedJobs: 1,
+      })
+      scheduler.refreshQueues()
+      expect(jobsService.getPendingJobs()).toMatchObject([
+        { chat_id: chat.peerId, job_type: SyncJobType.InitialLoad },
+      ])
     })
 
     it('queues the first page for an enabled chat without a cursor', () => {

@@ -81,7 +81,9 @@ function resolveChat(db: Database, input: string): ResolvedChat | null {
 /**
  * Store the mode and the sync_enabled it means, in one transaction. A mode
  * that changed cancels the chat's pending jobs, so the daemon queues them
- * again at the right priority; a running job finishes.
+ * again at the right priority; a running job finishes. Whatever the mode,
+ * the chat's failed jobs are deleted: a failed job keeps the daemon from
+ * queueing its chat again, so running the command again retries them.
  *
  * The transaction takes the write lock before its first read (BEGIN
  * IMMEDIATE). A deferred one would read first, and in WAL mode a write
@@ -113,8 +115,13 @@ export function applySyncMode(
     if (changed) {
       jobsService.cancelPendingForChat(chat.peerId)
     }
+    const clearedFailedJobs = jobsService.deleteFailed(chat.peerId)
 
-    return { state: chatSyncState.get(chat.peerId)!, changed }
+    return {
+      state: chatSyncState.get(chat.peerId)!,
+      changed,
+      clearedFailedJobs,
+    }
   })
   return apply.immediate()
 }
@@ -179,7 +186,7 @@ export const syncChatCommand = defineCommand({
       )
     }
 
-    const { state, changed } = applySyncMode(db, chat, mode)
+    const { state, changed, clearedFailedJobs } = applySyncMode(db, chat, mode)
 
     success({
       id: chat.id,
@@ -192,6 +199,7 @@ export const syncChatCommand = defineCommand({
       historyComplete: state.history_complete === 1,
       syncedMessages: state.synced_messages,
       changed,
+      clearedFailedJobs,
     })
   },
 })

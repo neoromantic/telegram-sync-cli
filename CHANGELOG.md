@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows or by a marked ID, without Telegram credentials; for a chat that
   isn't cached yet it suggests starting the daemon or running `tg chats get`.
   While the daemon writes the cache, the command waits for the write lock
-  instead of failing.
+  instead of failing. Running it again on a chat whose sync jobs failed
+  deletes them, so the daemon retries them at its next refresh.
   A chat you haven't joined, such as a public channel, gets new messages on
   daemon start and after reconnects.
 - `tg messages list --chat <peer>` reads a chat's history newest first and
