@@ -377,7 +377,10 @@ the new columns.
 The first open after an upgrade runs the steps in one `BEGIN IMMEDIATE` transaction, waiting up
 to 60 seconds for another process's write lock. A failure rolls everything back, `user_version`
 included, and the next open tries again. The move of bare `chats_cache` rows also runs on every
-later open that finds one, which repairs rows that an older daemon still running writes. Opens
+later open that finds one, which repairs rows that an older daemon still running writes. Step `2`
+runs once, because finding bare sender IDs means reading the `raw_json` of every message: a group
+or channel sender or forward source that an older daemon still running, or a second 0.2.0
+install, caches after the upgrade keeps its bare ID until the message is fetched again. Opens
 with nothing to do only read. Going back to an older version after the migration is not
 supported: it would not find groups and channels in `chats_cache`.
 

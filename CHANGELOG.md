@@ -24,7 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   To upgrade, stop the daemon, upgrade, then start it. The first run of the
   new version converts the cache and rebuilds the search index once. A 0.2.0
   daemon left running fails group and channel sync jobs until it is
-  restarted, and the chats it caches are converted on the next run.
+  restarted, and the chats it caches are converted on the next run. The
+  group and channel senders and forward sources in the messages that it, or
+  a second 0.2.0 install, caches after the upgrade keep their bare IDs in
+  `fromId` and `forwardFromId`, and may show the name of the user with that
+  ID, until the message is fetched again (`tg messages list --fresh`).
   Downgrading after that is not supported.
 - **Breaking:** `fromId`, `sender.id` and `forwardFromId` in
   `tg messages search`, `list` and `get` hold the marked ID of a group or
