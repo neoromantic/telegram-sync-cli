@@ -739,6 +739,17 @@ describe('listHistory', () => {
     expect(requests).toHaveLength(1)
   })
 
+  it('asks Telegram when the range ends below --before', async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 8)
+    const { client, requests } = historyClient(range(1, 12))
+
+    const result = await list(client, { limit: 5, after: 5, before: 12 })
+
+    expect(result.source).toBe('api')
+    expect(messageIds(result.items)).toEqual([10, 9, 8, 7, 6])
+    expect(requests).toHaveLength(1)
+  })
+
   it('serves a short page between --after and --before that a range covers', async () => {
     cacheRun(cacheDb, TEAM_CHAT_ID, 1, 8)
     const create = throwingFactory()
@@ -761,6 +772,24 @@ describe('listHistory', () => {
       history = historyClient(range(1, 1000))
       cacheRun(cacheDb, TEAM_CHAT_ID, 951, 1000)
     })
+
+    it.each<[string, HistoryWindow, number[]]>([
+      ['the newest page', { limit: 100 }, range(901, 1000).reverse()],
+      [
+        'a page below --before',
+        { limit: 5, before: 953 },
+        [952, 951, 950, 949, 948],
+      ],
+    ])(
+      'asks Telegram when %s runs past the recorded range',
+      async (_name, window, expected) => {
+        const result = await list(history.client, window)
+
+        expect(result.source).toBe('api')
+        expect(messageIds(result.items)).toEqual(expected)
+        expect(history.requests).toHaveLength(1)
+      },
+    )
 
     it('starts --after 0 at the first message', async () => {
       const result = await list(history.client, { limit: 5, after: 0 })
@@ -1114,6 +1143,27 @@ describe('getMessageWithContext', () => {
     await expect(get(client, 11, { context: 2 })).rejects.toThrow(
       'PEER_ID_INVALID',
     )
+  })
+
+  it('asks Telegram when a context side runs past the recorded range', async () => {
+    // Telegram holds 1-1000; the daemon cached the newest page, 951-1000
+    const { client, requests } = historyClient(range(1, 1000))
+    cacheRun(cacheDb, ALICE_ID, 951, 1000)
+    const aliceChat: HistoryChat = {
+      chatId: ALICE_ID,
+      inputPeer: {
+        _: 'inputPeerUser',
+        userId: ALICE_ID,
+        accessHash: toLong('1111'),
+      },
+    }
+
+    const result = await get(client, 952, { context: 3, chat: aliceChat })
+
+    expect(result.source).toBe('api')
+    expect(messageIds(result.newer)).toEqual([955, 954, 953])
+    expect(messageIds(result.older)).toEqual([951, 950, 949])
+    expect(requests).toHaveLength(1)
   })
 
   it('asks Telegram for context across a gap in the cache', async () => {
