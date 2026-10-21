@@ -54,6 +54,17 @@ Columns:
 CLI commands wrap API calls using `wrapClientCallWithRateLimits()` so manual
 commands and the daemon share the same rate-limit state.
 
+## Waiting Out FLOOD_WAITs
+
+Both clients use mtcute's flood-waiter middleware, which sleeps and retries the request
+instead of failing it:
+
+- CLI commands wait up to 60 seconds.
+- The daemon waits up to 5 minutes (for example during the dialog bootstrap on accounts
+  with thousands of chats) and logs each wait.
+
+Longer waits fail the request and are recorded as described above.
+
 ## Notes
 
 - Rate-limit tracking is per-method (e.g., `messages.getHistory`).
