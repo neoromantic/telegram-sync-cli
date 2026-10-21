@@ -19,7 +19,10 @@ import {
 import { toLong } from '../../utils/long'
 import { verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
-import { toInputPeerFromPeerId } from '../../utils/telegram-peer-ids'
+import {
+  toInputPeerFromPeerId,
+  toMarkedPeerId,
+} from '../../utils/telegram-peer-ids'
 import { resolveUsername } from '../../utils/telegram-resolve'
 
 export type ResolvedPeer = { inputPeer: tl.TypeInputPeer; name: string }
@@ -299,12 +302,25 @@ function resolveLegacyChatId(
 }
 
 /**
+ * A group or channel row under its bare ID, which an older binary that is
+ * still running writes until the next open re-keys it: the chat 0.2.0
+ * printed as N.
+ */
+function peerFromBareChatRow(chat: CachedChat | null): ResolvedPeer | null {
+  if (!chat || chat.type === 'private') return null
+  const marked = toMarkedPeerId(Number(chat.chat_id), chat.type)
+  verbose(`Found chat ${marked} in cache under the old ID ${chat.chat_id}`)
+  return peerFromCachedChat({ ...chat, chat_id: String(marked) })
+}
+
+/**
  * A bare ID the cache knows. A positive marked ID is a user, so users come
  * first: one with an access hash, then a chats_cache row (a private chat),
  * then any other user the cache knows (isKnownUserId): one without a hash,
  * or a DM with sync state or cached messages. Telegram may refuse a user
  * peer without an access hash, but the peer is the right one, and cache
- * reads need no hash. Last, a group or channel ID as 0.2.0 printed it.
+ * reads need no hash. Last, a group or channel ID as 0.2.0 printed it:
+ * cached under its marked ID, or under the bare one by an older binary.
  */
 function resolveCachedId(
   identifier: string,
@@ -338,7 +354,9 @@ function resolveCachedId(
     )
   }
 
-  return resolveLegacyChatId(identifier, deps)
+  return (
+    resolveLegacyChatId(identifier, deps) ?? peerFromBareChatRow(cachedChat)
+  )
 }
 
 /**

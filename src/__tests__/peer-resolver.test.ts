@@ -299,6 +299,25 @@ describe('resolvePeer with numeric IDs', () => {
       expect(call).not.toHaveBeenCalled()
     })
 
+    it('takes a bare channel row from an older binary for the channel', async () => {
+      chatsCache.upsert(
+        legacyChatRow({ kind: 'channel', id: 4242, title: 'Example News' }),
+      )
+      const { call, client } = throwingClient()
+
+      const peer = await resolve('4242', client)
+
+      expect(peer).toEqual({
+        inputPeer: {
+          _: 'inputPeerChannel',
+          channelId: 4242,
+          accessHash: toLong(777),
+        },
+        name: 'Example News',
+      })
+      expect(call).not.toHaveBeenCalled()
+    })
+
     it('rejects a bare ID that names a cached group and a cached channel', async () => {
       cacheChat('-4242', 'group', 'Book Club')
       cacheChat('-1000000004242', 'channel', 'Example News', '2222')
