@@ -62,6 +62,11 @@ export function parseIntegerArg(
   range: IntegerRange & { default: number },
 ): number
 export function parseIntegerArg(
+  value: string,
+  name: string,
+  range: IntegerRange,
+): number
+export function parseIntegerArg(
   value: string | undefined,
   name: string,
   range: IntegerRange,
@@ -89,8 +94,22 @@ export function parseIntegerArg(
   return parsed
 }
 
+/** The chat has no message with this ID, in the cache or on Telegram */
+export class MessageNotFoundError extends Error {
+  readonly details: { chatId: number; messageId: number }
+
+  constructor(chatId: number, messageId: number) {
+    super(`Message ${messageId} not found in chat ${chatId}`)
+    this.name = 'MessageNotFoundError'
+    this.details = { chatId, messageId }
+  }
+}
+
 /** Report a failed history read with the error codes other commands use */
 export function reportHistoryError(err: unknown, action: string): never {
+  if (err instanceof MessageNotFoundError) {
+    error(ErrorCodes.TELEGRAM_ERROR, err.message, err.details)
+  }
   if (err instanceof ConfigError) {
     error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
   }

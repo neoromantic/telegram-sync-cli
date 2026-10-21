@@ -16,12 +16,16 @@ import type { TelegramClient, tl } from '@mtcute/bun'
 import {
   createLazyClient,
   type HistoryClient,
+  MessageNotFoundError,
   parseIntegerArg,
   reportHistoryError,
 } from '../commands/messages/helpers'
 import {
+  aroundRequest,
   cacheHistoryResponse,
   fetchHistoryPage,
+  fetchMessageAround,
+  getMessageWithContext,
   type HistoryChat,
   type HistoryWindow,
   historyRequest,
@@ -594,6 +598,176 @@ describe('listHistory', () => {
   })
 })
 
+describe('aroundRequest', () => {
+  it('asks for the message with N messages on each side', () => {
+    expect(aroundRequest(50, 3)).toEqual({
+      offsetId: 51,
+      addOffset: -3,
+      limit: 7,
+    })
+    expect(aroundRequest(50, 0)).toEqual({
+      offsetId: 51,
+      addOffset: 0,
+      limit: 1,
+    })
+  })
+})
+
+describe('fetchMessageAround', () => {
+  let cacheDb: Database
+
+  beforeEach(() => {
+    cacheDb = createCacheDb()
+  })
+
+  afterEach(() => {
+    cacheDb.close()
+  })
+
+  it.each<[number, number, number[], number[]]>([
+    [5, 2, [7, 6], [4, 3]],
+    [10, 2, [], [9, 8]],
+    [1, 2, [3, 2], []],
+    [5, 0, [], []],
+  ])(
+    'fetches message %p with %p around it',
+    async (messageId, context, newer, older) => {
+      const { client } = historyClient(range(1, 10))
+
+      const around = await fetchMessageAround(
+        client,
+        cacheDb,
+        TEAM_CHAT,
+        messageId,
+        context,
+      )
+
+      expect(around.message.message_id).toBe(messageId)
+      expect(rowIds(around.newer)).toEqual(newer)
+      expect(rowIds(around.older)).toEqual(older)
+      expect(storedIds(cacheDb)).toEqual(
+        [...newer, messageId, ...older].sort((a, b) => b - a),
+      )
+    },
+  )
+
+  it('keeps the closest messages when Telegram returns more', async () => {
+    const { client } = unboundedClient(range(1, 10))
+
+    const around = await fetchMessageAround(client, cacheDb, TEAM_CHAT, 5, 1)
+
+    expect(rowIds(around.newer)).toEqual([6])
+    expect(rowIds(around.older)).toEqual([4])
+    expect(storedIds(cacheDb)).toEqual([6, 5, 4])
+  })
+
+  it('sends limit 1 without context', async () => {
+    const { client, requests } = historyClient(range(1, 10))
+
+    await fetchMessageAround(client, cacheDb, TEAM_CHAT, 5, 0)
+
+    expect(requests[0]).toMatchObject({ offsetId: 6, addOffset: 0, limit: 1 })
+  })
+
+  it('reports a message Telegram does not return as not found', async () => {
+    const { client } = historyClient(range(1, 10))
+
+    const failure = fetchMessageAround(client, cacheDb, TEAM_CHAT, 99, 2)
+
+    await expect(failure).rejects.toBeInstanceOf(MessageNotFoundError)
+    await expect(failure).rejects.toThrow(
+      `Message 99 not found in chat ${TEAM_CHAT_ID}`,
+    )
+    expect(storedIds(cacheDb)).toEqual([])
+  })
+})
+
+describe('getMessageWithContext', () => {
+  let cacheDb: Database
+
+  beforeEach(() => {
+    cacheDb = createCacheDb()
+    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 8))
+    createMessagesCache(cacheDb).markDeleted(TEAM_CHAT_ID, [6, 8])
+  })
+
+  afterEach(() => {
+    cacheDb.close()
+  })
+
+  function get(
+    client: CallClient,
+    messageId: number,
+    options: { context?: number; fresh?: boolean; includeDeleted?: boolean },
+  ) {
+    return getMessageWithContext({
+      cacheDb,
+      client,
+      chat: TEAM_CHAT,
+      messageId,
+      context: options.context ?? 0,
+      includeDeleted: options.includeDeleted ?? false,
+      fresh: options.fresh ?? false,
+    })
+  }
+
+  it('serves a cached message and its context without a client', async () => {
+    const create = throwingFactory()
+
+    const result = await get(createLazyClient(create), 4, { context: 2 })
+
+    expect(result).toMatchObject({
+      chatId: TEAM_CHAT_ID,
+      message: { messageId: 4, isDeleted: false },
+      source: 'cache',
+      stale: false,
+    })
+    expect(messageIds(result.newer)).toEqual([7, 5])
+    expect(messageIds(result.older)).toEqual([3, 2])
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('returns a cached deleted message, with context by --includeDeleted', async () => {
+    const create = throwingFactory()
+    const client = createLazyClient(create)
+
+    const deleted = await get(client, 8, { context: 2 })
+    const withDeleted = await get(client, 8, {
+      context: 2,
+      includeDeleted: true,
+    })
+
+    expect(deleted.message).toMatchObject({ messageId: 8, isDeleted: true })
+    expect(messageIds(deleted.older)).toEqual([7, 5])
+    expect(messageIds(withDeleted.older)).toEqual([7, 6])
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('asks Telegram for a message the cache does not hold', async () => {
+    const { client, requests } = historyClient(range(1, 12))
+
+    const result = await get(client, 11, { context: 1 })
+
+    expect(result.source).toBe('api')
+    expect(result.message.messageId).toBe(11)
+    expect(messageIds(result.newer)).toEqual([12])
+    expect(messageIds(result.older)).toEqual([10])
+    expect(requests).toHaveLength(1)
+  })
+
+  it('always asks Telegram with fresh', async () => {
+    const { client, requests } = historyClient(range(1, 8))
+
+    const result = await get(client, 4, { context: 1, fresh: true })
+
+    expect(result.source).toBe('api')
+    expect(messageIds(result.newer)).toEqual([5])
+    expect(messageIds(result.older)).toEqual([3])
+    expect(result.message.text).toBe('msg 4')
+    expect(requests).toHaveLength(1)
+  })
+})
+
 describe('parseIntegerArg', () => {
   let errorSpy: ReturnType<typeof spyOn>
 
@@ -668,6 +842,20 @@ describe('reportHistoryError', () => {
     expect(codeOf(new RateLimitError('messages.getHistory', 30)).code).toBe(
       'RATE_LIMITED',
     )
+  })
+
+  it('maps a missing message to TELEGRAM_ERROR with its IDs', () => {
+    let reported: { code?: string; message: string; details?: unknown }
+    try {
+      reportHistoryError(new MessageNotFoundError(TEAM_CHAT_ID, 99), 'get')
+    } catch (thrown) {
+      reported = thrown as typeof reported
+    }
+    expect(reported!).toMatchObject({
+      code: 'TELEGRAM_ERROR',
+      message: `Message 99 not found in chat ${TEAM_CHAT_ID}`,
+      details: { chatId: TEAM_CHAT_ID, messageId: 99 },
+    })
   })
 
   it('maps everything else to TELEGRAM_ERROR', () => {

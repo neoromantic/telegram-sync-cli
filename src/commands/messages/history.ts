@@ -1,6 +1,7 @@
 /**
- * Chat history for `tg messages list`: cache-first reads, and Telegram pages
- * written back to the cache so they are read back exactly like cached ones.
+ * Chat history for `tg messages list` and `tg messages get`: cache-first
+ * reads, and Telegram pages written back to the cache so they are read back
+ * exactly like cached ones.
  */
 import type { Database } from 'bun:sqlite'
 import type { TelegramClient, tl } from '@mtcute/bun'
@@ -23,7 +24,11 @@ import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import { toPeerIdFromInputPeer } from '../../utils/telegram-peer-ids'
 import { resolvePeer } from '../send/peer-resolver'
 import { resolveSelfId } from '../send/sent-message-cache'
-import { type HistoryClient, messageRowToItem } from './helpers'
+import {
+  type HistoryClient,
+  MessageNotFoundError,
+  messageRowToItem,
+} from './helpers'
 
 type CallClient = Pick<TelegramClient, 'call'>
 
@@ -254,6 +259,153 @@ export async function listHistory(
     nextBefore: ids.length > 0 ? Math.min(...ids) : null,
     nextAfter: ids.length > 0 ? Math.max(...ids) : null,
     source,
+    stale: false,
+  }
+}
+
+/**
+ * The `messages.getHistory` page around one message: `offsetId` one above
+ * it makes the page start at the message, and a negative `addOffset` adds
+ * the `context` newer ones, so `2 * context + 1` covers both sides.
+ */
+export function aroundRequest(messageId: number, context: number) {
+  return {
+    offsetId: messageId + 1,
+    addOffset: context > 0 ? -context : 0,
+    limit: 2 * context + 1,
+  }
+}
+
+export interface MessageAround {
+  message: MessageSearchRow
+  /** Up to `context` newer messages, newest first */
+  newer: MessageSearchRow[]
+  /** Up to `context` older messages, newest first */
+  older: MessageSearchRow[]
+}
+
+function closest(ids: number[], to: number, side: 1 | -1, count: number) {
+  return ids
+    .filter((id) => side * (id - to) > 0)
+    .sort((a, b) => side * (a - b))
+    .slice(0, count)
+}
+
+/**
+ * Fetch a message and `context` messages on each side from Telegram, cache
+ * them and read them back from the cache.
+ */
+export async function fetchMessageAround(
+  client: CallClient,
+  cacheDb: Database,
+  chat: HistoryChat,
+  messageId: number,
+  context: number,
+): Promise<MessageAround> {
+  const { messages, users } = await callHistory(
+    client,
+    chat,
+    aroundRequest(messageId, context),
+  )
+  const ids = messages.map(rawMessageId)
+  if (!ids.includes(messageId)) {
+    throw new MessageNotFoundError(chat.chatId, messageId)
+  }
+
+  const keep = new Set([
+    messageId,
+    ...closest(ids, messageId, 1, context),
+    ...closest(ids, messageId, -1, context),
+  ])
+  const page = messages.filter((message) => keep.has(rawMessageId(message)))
+  const stored = cacheHistoryResponse(cacheDb, chat.chatId, page, users)
+  const rows = createMessagesHistory(cacheDb).getMany(chat.chatId, stored)
+
+  const message = rows.find((row) => row.message_id === messageId)
+  if (!message) {
+    throw new MessageNotFoundError(chat.chatId, messageId)
+  }
+  return {
+    message,
+    newer: rows.filter((row) => row.message_id > messageId),
+    older: rows.filter((row) => row.message_id < messageId),
+  }
+}
+
+export interface GetMessageOptions {
+  cacheDb: Database
+  client: CallClient
+  chat: HistoryChat
+  messageId: number
+  /** Messages on each side of the target */
+  context: number
+  includeDeleted: boolean
+  fresh: boolean
+}
+
+export interface GetMessageResult {
+  chatId: number
+  message: MessageSearchItem
+  /** Newest first, so `[...newer, message, ...older]` reads like a list page */
+  newer: MessageSearchItem[]
+  /** Newest first */
+  older: MessageSearchItem[]
+  source: 'cache' | 'api'
+  stale: false
+}
+
+function readAroundFromCache(
+  cacheDb: Database,
+  chatId: number,
+  messageId: number,
+  context: number,
+  includeDeleted: boolean,
+): MessageAround | null {
+  const history = createMessagesHistory(cacheDb)
+  const [message] = history.getMany(chatId, [messageId])
+  if (!message) return null
+
+  // A deleted target is still returned; its context follows --includeDeleted
+  const side = (bound: 'after' | 'before') =>
+    context > 0
+      ? history.list(chatId, {
+          limit: context,
+          [bound]: messageId,
+          includeDeleted,
+        })
+      : []
+  return { message, newer: side('after'), older: side('before') }
+}
+
+/**
+ * One message with up to `context` messages on each side. The cache answers
+ * when it holds the message, and its context then comes from the cache too;
+ * otherwise, or with `fresh`, Telegram does.
+ */
+export async function getMessageWithContext(
+  options: GetMessageOptions,
+): Promise<GetMessageResult> {
+  const { cacheDb, client, chat, messageId, context } = options
+
+  const cached = options.fresh
+    ? null
+    : readAroundFromCache(
+        cacheDb,
+        chat.chatId,
+        messageId,
+        context,
+        options.includeDeleted,
+      )
+  const around =
+    cached ??
+    (await fetchMessageAround(client, cacheDb, chat, messageId, context))
+
+  return {
+    chatId: chat.chatId,
+    message: messageRowToItem(around.message),
+    newer: around.newer.map(messageRowToItem),
+    older: around.older.map(messageRowToItem),
+    source: cached ? 'cache' : 'api',
     stale: false,
   }
 }

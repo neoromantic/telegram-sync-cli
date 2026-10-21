@@ -1,5 +1,6 @@
 import { defineCommand } from 'citty'
 
+import { getMessageCommand } from './messages/get'
 import { listMessagesCommand } from './messages/list'
 import { searchMessagesCommand } from './messages/search'
 
@@ -13,8 +14,9 @@ export const messagesCommand = defineCommand({
   },
   subCommands: {
     list: listMessagesCommand,
+    get: getMessageCommand,
     search: searchMessagesCommand,
   },
 })
 
-export { listMessagesCommand, searchMessagesCommand }
+export { getMessageCommand, listMessagesCommand, searchMessagesCommand }

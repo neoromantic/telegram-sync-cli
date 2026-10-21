@@ -183,6 +183,8 @@ tg messages search \
 - Search is cache-only. Results depend on what the daemon has synced.
 - Deleted messages are excluded unless `--includeDeleted` (or `--include-deleted`) is set.
 - Results are ordered by message date (descending).
+- Read a hit in context with `tg messages get --chat <chatId> --id <messageId> --context 5`;
+  `chatId` and `messageId` come from the result.
 
 ## Future Enhancements
 

@@ -12,7 +12,7 @@
 | `accounts` | list, switch, remove, info |
 | `contacts` | list, search, get (cached; supports `--fresh`) |
 | `chats` | list, search (cache-only), get (@username only), sync (cache-only) |
-| `messages` | list (cache-first, `--fresh`), search (FTS5, cache-only) |
+| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only) |
 | `send` | send messages (`--to`, `--message`) |
 | `api` | raw Telegram API calls |
 | `me` | current user |
@@ -127,6 +127,7 @@ tg messages list --chat @username                  # the newest 20, newest first
 tg messages list --chat @username --before 1200    # the page older than message 1200
 tg messages list --chat -1001234567890 --after 0   # from the first message on
 tg messages list --chat me --limit 5 --fresh       # from Telegram, then cached
+tg messages get --chat @username --id 1200 --context 3   # 3 newer and 3 older around it
 tg messages search --query "hello"
 tg messages search --query "hello" --chat @teamchat --sender @alice
 tg messages search --query "hello" --includeDeleted
@@ -151,6 +152,14 @@ returns an empty page from the cache. The cache can be behind or have gaps: with
 daemon the newest page can miss recent messages, history backfill doesn't run yet
 ([#6](https://github.com/neoromantic/telegram-sync-cli/issues/6)), and pages fetched with
 `--fresh` can sit apart from the rest. `--fresh` always reads the window from Telegram.
+
+`tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each
+side: `{ chatId, message, newer, older, source, stale }`. `newer` and `older` are newest first,
+so `[...newer, message, ...older]` reads like a `list` page. The cache answers when it holds the
+message, and the context then comes from the cache too; otherwise, or with `--fresh`, all of it
+comes from Telegram and is cached. A missing message is a `TELEGRAM_ERROR` with
+`details: { chatId, messageId }`. A deleted message that is cached is returned with
+`isDeleted: true`.
 
 Items are exactly the objects `tg messages search` prints. Deleted messages are left out unless
 `--includeDeleted` is set.
