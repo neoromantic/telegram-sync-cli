@@ -4,7 +4,6 @@ import { defineCommand } from 'citty'
 import { ConfigError } from '../config'
 import { accountsDb, getCacheDb } from '../db'
 import { createChatsCache } from '../db/chats-cache'
-import { createMessagesCache } from '../db/messages-cache'
 import { createUsersCache } from '../db/users-cache'
 import { getClientForAccount } from '../services/telegram'
 import { ErrorCodes } from '../types'
@@ -18,7 +17,11 @@ import {
   isRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
-import { AmbiguousPeerError, resolvePeer } from './send/peer-resolver'
+import {
+  AmbiguousPeerError,
+  createDmLookup,
+  resolvePeer,
+} from './send/peer-resolver'
 import { cacheSentMessage, resolveSelfId } from './send/sent-message-cache'
 
 function extractMessageInfo(result: tl.TypeUpdates): {
@@ -144,7 +147,7 @@ export const sendCommand = defineCommand({
         recipient,
         usersCache,
         chatsCache,
-        createMessagesCache(cacheDb),
+        createDmLookup(cacheDb),
       )
 
       verbose(`Sending message to ${name}...`)

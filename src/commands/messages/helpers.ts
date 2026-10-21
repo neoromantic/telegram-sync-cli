@@ -3,7 +3,6 @@ import type { TelegramClient } from '@mtcute/bun'
 import { ConfigError } from '../../config'
 import { accountsDb, getCacheDb } from '../../db'
 import { createChatsCache } from '../../db/chats-cache'
-import { createMessagesCache } from '../../db/messages-cache'
 import type { MessageSearchRow } from '../../db/messages-search'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
@@ -13,7 +12,11 @@ import {
   isRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
-import { AmbiguousPeerError, InvalidPeerError } from '../send/peer-resolver'
+import {
+  AmbiguousPeerError,
+  createDmLookup,
+  InvalidPeerError,
+} from '../send/peer-resolver'
 
 /** The JSON item for a message row, shared by every `tg messages` command */
 export function messageRowToItem(row: MessageSearchRow): MessageSearchItem {
@@ -176,7 +179,7 @@ export function openHistory(accountId: number | undefined, context: string) {
     ),
     usersCache: createUsersCache(cacheDb),
     chatsCache: createChatsCache(cacheDb),
-    messagesCache: createMessagesCache(cacheDb),
+    dms: createDmLookup(cacheDb),
     accounts: accountsDb,
     accountId,
   }
