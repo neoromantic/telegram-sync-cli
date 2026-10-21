@@ -453,7 +453,7 @@ describe('SyncJobsService', () => {
       const job = service.create({
         chat_id: chatId,
         job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.Medium,
+        priority: SyncPriority.High,
       })
       service.markRunning(job.id)
       return job
@@ -479,6 +479,36 @@ describe('SyncJobsService', () => {
         next_run_at: now + 60_000,
         error_message: 'connection reset',
         started_at: null,
+      })
+    })
+
+    it("takes the chat's priority now, after a mode change while it ran", () => {
+      // An auto supergroup of 50 members: its first page is queued at P2
+      createChatSyncStateService(db).upsert({
+        chat_id: -1001234567890,
+        chat_type: 'supergroup',
+        member_count: 50,
+        sync_priority: SyncPriority.Medium,
+        sync_enabled: true,
+      })
+      const job = service.create({
+        chat_id: -1001234567890,
+        job_type: SyncJobType.InitialLoad,
+        priority: SyncPriority.Medium,
+      })
+      service.markRunning(job.id)
+
+      // tg chats sync --on while the job runs
+      createChatSyncStateService(db).setSyncMode(-1001234567890, 'on')
+      service.retryLater(job.id, {
+        error: 'connection reset',
+        runAt: now,
+        countAttempt: true,
+      })
+
+      expect(service.getById(job.id)).toMatchObject({
+        status: SyncJobStatus.Pending,
+        priority: SyncPriority.Realtime,
       })
     })
 
