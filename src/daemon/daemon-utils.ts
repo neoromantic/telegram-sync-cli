@@ -30,3 +30,11 @@ export function getErrorMessage(err: unknown): string {
   }
   return String(err)
 }
+
+/** JSON.stringify replacer that keeps BigInt values as strings */
+export function bigIntReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === 'bigint') {
+    return value.toString()
+  }
+  return value
+}

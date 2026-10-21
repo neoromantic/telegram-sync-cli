@@ -275,6 +275,9 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(cached?.has_media).toBe(1)
     expect(cached?.reply_to_id).toBe(9)
     expect(cached?.forward_from_id).toBe(333)
+    expect(JSON.parse(cached?.raw_json ?? '{}').fwdFrom?.fromId?.userId).toBe(
+      333,
+    )
 
     const state = chatSyncState.get(1000)
     expect(state?.chat_type).toBe('channel')
