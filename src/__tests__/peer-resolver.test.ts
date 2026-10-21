@@ -18,6 +18,7 @@ import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { RateLimitError } from '../utils/telegram-rate-limits'
 import { fakeDialog } from './helpers/fake-dialogs'
+import { legacyChatRow } from './helpers/legacy-cache'
 
 function throwingClient(
   failure: () => Error = () => new Error('unexpected API call'),
@@ -259,6 +260,20 @@ describe('resolvePeer with numeric IDs', () => {
         },
         name: 'Alice Able',
       })
+      expect(call).not.toHaveBeenCalled()
+    })
+
+    it('does not take a bare group row from an older binary for a user', async () => {
+      // A 0.2.0 daemon wrote it after this process migrated the cache
+      chatsCache.upsert(
+        legacyChatRow({ kind: 'group', id: 4242, title: 'Book Club' }),
+      )
+      const { call, client } = throwingClient()
+
+      const peer = await resolve('4242', client)
+
+      expect(peer.inputPeer._).not.toBe('inputPeerUser')
+      expect(peer.inputPeer).toEqual({ _: 'inputPeerChat', chatId: 4242 })
       expect(call).not.toHaveBeenCalled()
     })
 
