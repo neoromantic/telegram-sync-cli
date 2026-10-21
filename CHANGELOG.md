@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows or by a marked ID, without Telegram credentials; for a chat that
   isn't cached yet it suggests starting the daemon or running `tg chats get`.
   While the daemon writes the cache, the command waits for the write lock
-  instead of failing. Running it again on a chat whose sync jobs failed
-  deletes them, so the daemon retries them at its next refresh.
+  instead of failing. Running it again with the chat's mode on a chat whose
+  sync jobs failed deletes them, so the daemon retries them at its next
+  refresh.
   A chat you haven't joined, such as a public channel, gets new messages on
   daemon start and after reconnects.
 - `tg messages list --chat <peer>` reads a chat's history newest first and
@@ -108,7 +109,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again then. A job whose chat is turned off while it runs is dropped if it
   fails (#9).
 - `tg status` counts failed sync jobs (`failed_jobs` was always 0) and lists
-  the newest ones with their attempts and error. It also counts the jobs
+  the newest ones with their attempts, error and chat mode (`sync_mode`), and
+  the pretty output prints the `tg chats sync` command that retries each
+  chat's failed jobs without changing its mode. It also counts the jobs
   waiting for a retry (`retrying_jobs`) and shows when they run again.
 
 ## [0.1.4] - 2026-10-21

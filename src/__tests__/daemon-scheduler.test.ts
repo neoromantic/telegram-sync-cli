@@ -605,6 +605,11 @@ describe('processJobs', () => {
       expect(permanent.warn).toHaveLength(1)
       expect(permanent.warn[0]).toContain('failed for good (permanent error)')
       expect(permanent.warn[0]).toContain('CHANNEL_PRIVATE')
+      // Bare tg chats sync would turn an auto chat on; tg status prints the
+      // command with the chat's mode
+      expect(permanent.warn[0]).toContain(
+        'tg status shows the tg chats sync command',
+      )
       expect(exhausted.warn).toHaveLength(1)
       expect(exhausted.warn[0]).toContain(
         '(after 5 attempts): connection reset',

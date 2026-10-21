@@ -171,8 +171,9 @@ Scheduler → sync_jobs → worker → messages_cache + chat_sync_state
 - A sync job that fails retries after 1, 2, 4 and 8 minutes and is marked failed after the
   fifth attempt; a permanent error (such as `CHANNEL_PRIVATE`) fails it at once, and a
   FLOOD_WAIT only delays it. A failed job's chat isn't queued again for that job type until
-  the failed row is deleted: after 24 hours, on the next start or by `tg chats sync <chat>`.
-  Each failure is logged as a warning (see [sync-strategy.md](sync-strategy.md#retries))
+  the failed row is deleted: after 24 hours, on the next start or by `tg chats sync <chat>`
+  with the chat's current mode (`--auto` unless it was turned on; `tg status` prints the
+  command). Each failure is logged as a warning (see [sync-strategy.md](sync-strategy.md#retries))
 - Tracks last activity to avoid noisy health checks
 - Validates sync job state transitions
 - Uses rate limit service with flood wait tracking
