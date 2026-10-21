@@ -1,20 +1,27 @@
 import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { TelegramClient } from '@mtcute/bun'
+import { type TelegramClient, tl } from '@mtcute/bun'
 
 import { resolvePeer } from '../commands/send/peer-resolver'
+import { ConfigError } from '../config'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
 import { createTestCacheDatabase } from '../db/schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { RateLimitError } from '../utils/telegram-rate-limits'
 
-function throwingClient() {
+function throwingClient(
+  failure: () => Error = () => new Error('unexpected API call'),
+) {
   const call = mock(async (_request: unknown) => {
-    throw new Error('unexpected API call')
+    throw failure()
   })
   return { call, client: { call } as unknown as Pick<TelegramClient, 'call'> }
 }
+
+/** What Telegram answers for a number no account uses */
+const phoneNotOccupied = () => new tl.RpcError(400, 'PHONE_NOT_OCCUPIED')
 
 describe('resolvePeer', () => {
   it.each(['me', 'self', ' Me '])(
@@ -183,7 +190,7 @@ describe('resolvePeer with numeric IDs', () => {
     })
 
     it('still looks up an uncached 10-digit number as a phone', async () => {
-      const { call, client } = throwingClient()
+      const { call, client } = throwingClient(phoneNotOccupied)
 
       await expect(resolve('5550000000', client)).rejects.toThrow(
         'Could not resolve phone number 5550000000',
@@ -197,7 +204,7 @@ describe('resolvePeer with numeric IDs', () => {
 
     it('always takes the phone path for a number with +', async () => {
       cacheChat('15550000000', 'private', 'Bob Baker', '4444')
-      const { call, client } = throwingClient()
+      const { call, client } = throwingClient(phoneNotOccupied)
 
       await expect(resolve('+15550000000', client)).rejects.toThrow(
         'Could not resolve phone number +15550000000',
@@ -206,6 +213,29 @@ describe('resolvePeer with numeric IDs', () => {
         _: 'contacts.resolvePhone',
         phone: '15550000000',
       })
+    })
+
+    it.each([
+      [
+        'missing credentials',
+        () =>
+          new ConfigError(
+            'TELEGRAM_API_ID environment variable is required',
+            [],
+          ),
+      ],
+      [
+        'a blocked method',
+        () => new RateLimitError('contacts.resolvePhone', 30),
+      ],
+      ['a FLOOD_WAIT', () => new tl.RpcError(420, 'FLOOD_WAIT_30')],
+      ['a lost connection', () => new Error('Connection closed')],
+    ])('passes on %s from the phone lookup', async (_name, failure) => {
+      const { client } = throwingClient(failure)
+
+      await expect(resolve('+15550000000', client)).rejects.toThrow(
+        failure().message,
+      )
     })
   })
 })

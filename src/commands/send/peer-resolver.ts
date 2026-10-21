@@ -1,4 +1,4 @@
-import type { TelegramClient, tl } from '@mtcute/bun'
+import { type TelegramClient, tl } from '@mtcute/bun'
 
 import type { CachedChat, ChatsCache } from '../../db/chats-cache'
 import type { CachedUser, UsersCache } from '../../db/users-cache'
@@ -170,7 +170,11 @@ async function resolveByPhone(
     resolvedUser =
       resolved.users?.find((user): user is tl.RawUser => user._ === 'user') ??
       null
-  } catch {
+  } catch (err) {
+    // An RPC error means Telegram has no user with this number. Anything
+    // else (missing credentials, a rate limit, a lost connection) is not an
+    // answer, and the caller reports it.
+    if (!tl.RpcError.is(err) || err.code === tl.RpcError.FLOOD) throw err
     resolvedUser = null
   }
 
