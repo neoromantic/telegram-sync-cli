@@ -2,8 +2,13 @@
  * Telegram service tests
  */
 
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { TelegramClient } from '@mtcute/bun'
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import {
+  HttpProxyTcpTransport,
+  SocksProxyTcpTransport,
+  type TelegramClient,
+} from '@mtcute/bun'
+import { ConfigError } from '../config'
 import { type AccountsDbInterface, createTestDatabase } from '../db'
 import {
   type ClientFactory,
@@ -22,6 +27,10 @@ process.env.BUN_ENV = 'test'
 
 describe('Telegram Service', () => {
   describe('getDefaultConfig', () => {
+    afterEach(() => {
+      delete process.env.TELEGRAM_PROXY
+    })
+
     it('should return config from environment', () => {
       const config = getDefaultConfig()
 
@@ -31,6 +40,45 @@ describe('Telegram Service', () => {
       expect(typeof config.apiId).toBe('number')
       expect(typeof config.apiHash).toBe('string')
       expect(typeof config.logLevel).toBe('number')
+      expect(config).not.toHaveProperty('transport')
+    })
+
+    it('parses a SOCKS5 proxy with credentials', () => {
+      process.env.TELEGRAM_PROXY = 'socks5://user:secret@127.0.0.1:1080'
+      expect(getDefaultConfig().transport).toEqual(
+        new SocksProxyTcpTransport({
+          version: 5,
+          host: '127.0.0.1',
+          port: 1080,
+          user: 'user',
+          password: 'secret',
+        }),
+      )
+    })
+
+    it('parses an HTTP proxy with credentials', () => {
+      process.env.TELEGRAM_PROXY = 'http://user:secret@127.0.0.1:8080'
+      expect(getDefaultConfig().transport).toEqual(
+        new HttpProxyTcpTransport({
+          tls: false,
+          host: '127.0.0.1',
+          port: 8080,
+          user: 'user',
+          password: 'secret',
+        }),
+      )
+    })
+
+    it.each([
+      '',
+      '127.0.0.1:1080',
+      'socks5h://user:secret@127.0.0.1:1080',
+      'http://user:secret@127.0.0.1:invalid',
+      'tg://proxy?server=localhost&port=443&secret=invalid',
+    ])('rejects an invalid proxy without exposing it: %s', (url) => {
+      process.env.TELEGRAM_PROXY = url
+      expect(getDefaultConfig).toThrow(ConfigError)
+      expect(getDefaultConfig).toThrow('Invalid TELEGRAM_PROXY URL')
     })
   })
 

@@ -59,4 +59,31 @@ describe('E2E: Credentials are only required for Telegram calls', () => {
     expect(response.error.code).toBe('INVALID_ARGS')
     expect(response.error.message).toContain('TELEGRAM_API_ID')
   })
+
+  it('invalid proxy URLs fail without exposing credentials', async () => {
+    env.seedAccounts([{ phone: '+10000000000', is_active: true }])
+    const cliOptions = {
+      env: {
+        ...env.getCliOptions().env,
+        TELEGRAM_PROXY: 'socks5h://user:secret@127.0.0.1:1080',
+      },
+    }
+    const result = await runCliFailure(['api', 'help.getConfig'], 3, cliOptions)
+    expect(result.json).toMatchObject({
+      success: false,
+      error: { code: 'INVALID_ARGS', message: 'Invalid TELEGRAM_PROXY URL' },
+    })
+    expect(result.stdout + result.stderr).not.toContain('secret')
+
+    const daemon = await runCliFailure(['daemon', 'start'], 1, cliOptions)
+    expect(daemon.stdout + daemon.stderr).toContain('Configuration error:')
+    expect(daemon.stdout + daemon.stderr).toContain(
+      'Invalid TELEGRAM_PROXY URL',
+    )
+    expect(daemon.stdout + daemon.stderr).not.toContain('secret')
+
+    await runCliSuccess(['--help'], cliOptions)
+    await runCliSuccess(['--version'], cliOptions)
+    await runCliSuccess(['accounts', 'list'], cliOptions)
+  })
 })

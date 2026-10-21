@@ -30,6 +30,7 @@ for (const key of ['TELEGRAM_API_ID', 'TELEGRAM_API_HASH'] as const) {
 }
 process.env.TELEGRAM_API_ID = '12345'
 process.env.TELEGRAM_API_HASH = 'test-api-hash'
+delete process.env.TELEGRAM_PROXY
 
 // Pre-import modules with barrel exports to ensure they're properly resolved
 // This helps prevent race conditions during parallel test loading

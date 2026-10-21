@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `TELEGRAM_PROXY` routes CLI and daemon connections through a proxy using
+  mtcute's URL parser: `socks4://`, `socks5://`, `http://`, `https://` and
+  MTProxy links. Credentials go in the URL; `socks5h://` and addresses without
+  a scheme are unsupported. Invalid URLs fail with a configuration error
+  without printing the URL. Unset keeps direct TCP; `ALL_PROXY` and
+  `HTTPS_PROXY` are ignored (#48).
+
 ### Changed
 
 - **Breaking:** `id` in `tg chats list`, `get`, `search` and `sync` is now the

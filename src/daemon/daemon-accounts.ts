@@ -319,6 +319,7 @@ function createDaemonClient(
     apiHash: telegramConfig.apiHash,
     storage: sessionPath,
     logLevel: ctx.verbosity === 'verbose' ? 5 : 2,
+    ...(telegramConfig.transport && { transport: telegramConfig.transport }),
     network: {
       middlewares: networkMiddlewares.basic({
         floodWaiter: {

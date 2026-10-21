@@ -124,9 +124,15 @@ Global options: `--format json|pretty|quiet`, `--verbose`, `--quiet`. Many comma
 |----------|-------------|
 | `TELEGRAM_API_ID` | Your Telegram API ID |
 | `TELEGRAM_API_HASH` | Your Telegram API hash |
+| `TELEGRAM_PROXY` | Optional proxy URL for CLI and daemon connections |
 | `TELEGRAM_SYNC_CLI_DATA_DIR` | Override the data directory (default `~/.telegram-sync-cli`) |
 | `MTCUTE_LOG_LEVEL` | mtcute log level |
 | `VERBOSE` | Verbose logging (`1`) |
+
+For a proxy, set `TELEGRAM_PROXY=socks5://127.0.0.1:1080`. Supports `socks4://`,
+`socks5://`, `http://`, `https://` and MTProxy links, with credentials in the URL.
+`socks5h://` and addresses without a scheme are unsupported. See
+[proxy configuration](docs/configuration.md#proxy).
 
 Reference: [CLI commands](docs/cli-commands.md), [authentication](docs/auth.md),
 [configuration](docs/configuration.md), [architecture](docs/architecture.md),
