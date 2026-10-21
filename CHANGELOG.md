@@ -79,6 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   short ID became the basic group with the same number and a 10-digit one a
   phone number. Users found by `@username` or phone are cached, so the next
   lookup by ID needs no API call.
+- `tg send --to` rejects a malformed number such as `-12.5`, `1e1` or `12.0`
+  instead of reading its leading digits as a basic group ID.
 
 ## [0.1.4] - 2026-10-21
 

@@ -33,6 +33,7 @@ import {
   type ResolveHistoryChatDeps,
   resolveHistoryChat,
 } from '../commands/messages/history'
+import { InvalidPeerError } from '../commands/send/peer-resolver'
 import { ConfigError } from '../config'
 import { type AccountsDbInterface, createTestDatabase } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
@@ -849,6 +850,12 @@ describe('reportHistoryError', () => {
     )
     expect(reported.code).toBe('INVALID_ARGS')
     expect(reported.message).toContain('TELEGRAM_API_ID')
+  })
+
+  it('maps a malformed chat to INVALID_ARGS', () => {
+    const reported = codeOf(new InvalidPeerError('-12.5'))
+    expect(reported.code).toBe('INVALID_ARGS')
+    expect(reported.message).toStartWith('Invalid --chat: -12.5.')
   })
 
   it('maps rate limits to RATE_LIMITED', () => {

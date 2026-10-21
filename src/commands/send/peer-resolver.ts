@@ -20,6 +20,17 @@ import { resolveUsername } from '../../utils/telegram-resolve'
 
 export type ResolvedPeer = { inputPeer: tl.TypeInputPeer; name: string }
 
+/** The identifier can't name a peer: bad input, not a Telegram failure */
+export class InvalidPeerError extends Error {
+  readonly identifier: string
+
+  constructor(identifier: string) {
+    super(`Invalid peer identifier: ${identifier}`)
+    this.name = 'InvalidPeerError'
+    this.identifier = identifier
+  }
+}
+
 type TelegramClientLike = Pick<TelegramClient, 'call'>
 
 /** The cache lookups a bare ID needs */
@@ -119,7 +130,8 @@ function normalizePhone(identifier: string): string | null {
   if (!identifier.startsWith('+') && !/^\d{10,}$/.test(identifier)) {
     return null
   }
-  return identifier.replace(/[\s\-+()]/g, '')
+  const phone = identifier.replace(/[\s\-+()]/g, '')
+  return /^\d+$/.test(phone) ? phone : null
 }
 
 async function resolveByUsername(
@@ -266,11 +278,14 @@ function resolveCachedId(
   return null
 }
 
-/** An ID the cache doesn't know is taken as a basic group */
+/**
+ * An ID the cache doesn't know is taken as a basic group. Only plain digits
+ * count: `Number.parseInt` would read `-12.5` as -12 and `1e1` as 1.
+ */
 function resolveUncachedId(identifier: string): ResolvedPeer {
-  const numericId = Number.parseInt(identifier, 10)
-  if (Number.isNaN(numericId)) {
-    throw new Error(`Invalid peer identifier: ${identifier}`)
+  const numericId = /^\d+$/.test(identifier) ? Number(identifier) : 0
+  if (!Number.isSafeInteger(numericId) || numericId === 0) {
+    throw new InvalidPeerError(identifier)
   }
   return buildGroupPeer(numericId, `Chat ${numericId}`)
 }
@@ -287,8 +302,8 @@ function resolveByMarkedId(
   { chatsCache }: CacheDeps,
 ): ResolvedPeer {
   const marked = Number(identifier)
-  if (!Number.isSafeInteger(marked)) {
-    throw new Error(`Invalid peer identifier: ${identifier}`)
+  if (!Number.isSafeInteger(marked) || marked >= 0) {
+    throw new InvalidPeerError(identifier)
   }
 
   for (const candidate of getCandidateChatIds(marked)) {

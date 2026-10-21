@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import { type TelegramClient, tl } from '@mtcute/bun'
 
-import { resolvePeer } from '../commands/send/peer-resolver'
+import { InvalidPeerError, resolvePeer } from '../commands/send/peer-resolver'
 import { ConfigError } from '../config'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
 import { createMessagesCache, type MessagesCache } from '../db/messages-cache'
@@ -265,6 +265,22 @@ describe('resolvePeer with numeric IDs', () => {
       expect(peer.inputPeer).toEqual({ _: 'inputPeerChat', chatId: 12 })
       expect(call).not.toHaveBeenCalled()
     })
+
+    it.each(['-12.5', '1e1', '0x10', '12.0', '', '0', '-0', '+1e5'])(
+      'rejects the malformed number %p without an API call',
+      async (identifier) => {
+        cacheChat('12', 'private', 'Alice Able', '1111')
+        const { call, client } = throwingClient()
+
+        const failure = resolve(identifier, client)
+
+        await expect(failure).rejects.toBeInstanceOf(InvalidPeerError)
+        await expect(failure).rejects.toThrow(
+          `Invalid peer identifier: ${identifier}`,
+        )
+        expect(call).not.toHaveBeenCalled()
+      },
+    )
 
     it('still looks up an uncached 10-digit number as a phone', async () => {
       const { call, client } = throwingClient(phoneNotOccupied)
