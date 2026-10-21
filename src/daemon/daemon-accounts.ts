@@ -361,6 +361,8 @@ export async function connectAccount(
     ctx.logger.debug(`Connecting account ${phone} (session: ${sessionPath})`)
 
     const client = createDaemonClient(ctx, accountId, sessionPath)
+    // Track it right away, so a failed connect below closes it too.
+    accountState.client = client
 
     await client.start({
       phone: async () => {
@@ -400,7 +402,7 @@ export async function connectAccount(
         ctx.accountsDb.delete(accountId)
 
         ctx.state.accounts.delete(accountId)
-        await closeClientSafe(ctx, client, 'duplicate account merged')
+        await releaseClient(ctx, accountState, 'duplicate account merged')
         return false
       }
     } else if (!existingByUserId) {
@@ -411,7 +413,6 @@ export async function connectAccount(
       }
     }
 
-    accountState.client = client
     accountState.status = 'connected'
     accountState.lastActivity = Date.now()
 
@@ -425,6 +426,8 @@ export async function connectAccount(
   } catch (err) {
     const errorMessage = getErrorMessage(err)
     ctx.logger.error(`Failed to connect account ${phone}: ${formatError(err)}`)
+
+    await releaseClient(ctx, accountState, 'connect failed')
 
     accountState.status = 'error'
     accountState.lastError = errorMessage
@@ -457,7 +460,8 @@ export function scheduleReconnect(
 
 /**
  * Detach the account's client: remove its handlers, drop the sync worker
- * bound to it and close it.
+ * bound to it and close it. The client leaves the account state before it is
+ * closed, so each client is closed once.
  */
 async function releaseClient(
   ctx: DaemonContext,
@@ -467,7 +471,13 @@ async function releaseClient(
   const { client, accountId } = accountState
   if (!client) return
 
-  removeEventHandlers(ctx, accountState)
+  try {
+    removeEventHandlers(ctx, accountState)
+  } catch (err) {
+    ctx.logger.warn(
+      `Error removing event handlers for ${accountState.phone}: ${formatError(err)}`,
+    )
+  }
   accountState.client = undefined
   ctx.runtime.syncWorkers.delete(accountId)
   await closeClientSafe(ctx, client, reason)
@@ -548,30 +558,19 @@ export async function attemptReconnect(
   }
 }
 
+/**
+ * Close every account's client on shutdown, so mtcute saves and closes each
+ * session. The clients close in parallel: one slow close doesn't use up the
+ * shutdown timeout for the rest.
+ */
 export async function disconnectAllAccounts(ctx: DaemonContext): Promise<void> {
   ctx.logger.debug('Disconnecting all accounts...')
 
-  for (const [, accountState] of ctx.state.accounts) {
-    if (accountState.eventHandlers) {
-      try {
-        removeEventHandlers(ctx, accountState)
-      } catch (err) {
-        ctx.logger.warn(
-          `Error removing event handlers for ${accountState.phone}: ${formatError(err)}`,
-        )
-      }
-    }
-
-    if (accountState.client) {
-      try {
-        ctx.logger.debug(`Disconnected account ${accountState.phone}`)
-      } catch (err) {
-        ctx.logger.warn(
-          `Error disconnecting account ${accountState.phone}: ${formatError(err)}`,
-        )
-      }
-    }
-    accountState.status = 'disconnected'
-    accountState.client = undefined
-  }
+  await Promise.all(
+    Array.from(ctx.state.accounts.values(), async (accountState) => {
+      await releaseClient(ctx, accountState, 'shutdown')
+      accountState.status = 'disconnected'
+      ctx.logger.debug(`Disconnected account ${accountState.phone}`)
+    }),
+  )
 }

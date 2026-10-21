@@ -557,7 +557,114 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(accountsDb.setActive).toHaveBeenCalledWith(1)
     expect(accountsDb.delete).toHaveBeenCalledWith(2)
     expect(ctx.state.accounts.has(2)).toBe(false)
-    expect(createdClients[0]?.destroy).toHaveBeenCalled()
+    expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1)
+
+    const { disconnectAllAccounts } = await import('../daemon/daemon-accounts')
+    await disconnectAllAccounts(ctx)
+    expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  for (const step of ['start', 'getMe', 'updates loop'] as const) {
+    it(`connectAccount closes the client when ${step} fails`, async () => {
+      const ctx = createContext(
+        createAccountsDb([{ id: 1, phone: '+15550000001', user_id: null }]),
+      )
+      const { connectAccount, disconnectAllAccounts } = await import(
+        '../daemon/daemon-accounts'
+      )
+
+      const failure = new Error('AUTH_KEY_UNREGISTERED')
+      if (step === 'start') startError = failure
+      if (step === 'getMe') getMeError = failure
+      if (step === 'updates loop') updatesLoopError = failure
+
+      expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(false)
+
+      const client = createdClients[0]!
+      const accountState = ctx.state.accounts.get(1)
+      expect(client.destroy).toHaveBeenCalledTimes(1)
+      expect(client.onNewMessage.handlers).toHaveLength(0)
+      expect(accountState?.client).toBeUndefined()
+      expect(accountState?.eventHandlers).toBeUndefined()
+      expect(accountState?.status).toBe('error')
+      expect(accountState?.lastError).toBe('AUTH_KEY_UNREGISTERED')
+
+      // Shutdown doesn't close it a second time
+      await disconnectAllAccounts(ctx)
+      expect(client.destroy).toHaveBeenCalledTimes(1)
+    })
+  }
+
+  it('disconnectAllAccounts closes every client once on shutdown', async () => {
+    const accountsDb = createAccountsDb([
+      { id: 1, phone: '+15550000001', user_id: null },
+      { id: 2, phone: '+15550000002', user_id: null },
+      { id: 3, phone: '+15550000003', user_id: null },
+    ])
+    const ctx = createContext(accountsDb)
+    const { connectAccount, disconnectAllAccounts } = await import(
+      '../daemon/daemon-accounts'
+    )
+
+    nextGetMe = { id: 5550001, firstName: 'Alex', lastName: 'Example' }
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
+    nextGetMe = { id: 5550002, firstName: 'Sam', lastName: 'Example' }
+    expect(await connectAccount(ctx, 2, '+15550000002', null)).toBe(true)
+    startError = new Error('connection refused')
+    expect(await connectAccount(ctx, 3, '+15550000003', null)).toBe(false)
+
+    expect(createdClients).toHaveLength(3)
+    expect(createdClients[0]!.destroy).not.toHaveBeenCalled()
+    expect(createdClients[1]!.destroy).not.toHaveBeenCalled()
+
+    await disconnectAllAccounts(ctx)
+
+    for (const client of createdClients) {
+      expect(client.destroy).toHaveBeenCalledTimes(1)
+      expect(client.onNewMessage.handlers).toHaveLength(0)
+      expect(client.onEditMessage.handlers).toHaveLength(0)
+      expect(client.onDeleteMessage.handlers).toHaveLength(0)
+    }
+    for (const accountState of ctx.state.accounts.values()) {
+      expect(accountState.status).toBe('disconnected')
+      expect(accountState.client).toBeUndefined()
+      expect(accountState.eventHandlers).toBeUndefined()
+    }
+
+    // A second call finds nothing left to close
+    await disconnectAllAccounts(ctx)
+    for (const client of createdClients) {
+      expect(client.destroy).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('disconnectAllAccounts closes the other clients when one fails to close', async () => {
+    const ctx = createContext(
+      createAccountsDb([
+        { id: 1, phone: '+15550000001', user_id: null },
+        { id: 2, phone: '+15550000002', user_id: null },
+      ]),
+    )
+    const { connectAccount, disconnectAllAccounts } = await import(
+      '../daemon/daemon-accounts'
+    )
+
+    nextGetMe = { id: 5550001, firstName: 'Alex', lastName: 'Example' }
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
+    nextGetMe = { id: 5550002, firstName: 'Sam', lastName: 'Example' }
+    expect(await connectAccount(ctx, 2, '+15550000002', null)).toBe(true)
+
+    createdClients[0]!.destroy.mockImplementation(async () => {
+      throw new Error('storage is locked')
+    })
+
+    await disconnectAllAccounts(ctx)
+
+    expect(createdClients[0]!.destroy).toHaveBeenCalledTimes(1)
+    expect(createdClients[1]!.destroy).toHaveBeenCalledTimes(1)
+    expect(ctx.logger.warn).toHaveBeenCalled()
+    expect(ctx.state.accounts.get(1)?.status).toBe('disconnected')
+    expect(ctx.state.accounts.get(2)?.status).toBe('disconnected')
   })
 
   it('attemptReconnect resets attempts on success', async () => {
@@ -677,6 +784,13 @@ describe('daemon-accounts: connection + event wiring', () => {
     const worker = ctx.runtime.syncWorkers.get(1)
     expect(worker).not.toBe(oldWorker)
     expect(worker?.client).toBe(newClient as unknown as TelegramClient)
+
+    // Shutdown closes the new client and leaves the old one alone
+    const { disconnectAllAccounts } = await import('../daemon/daemon-accounts')
+    await disconnectAllAccounts(ctx)
+    expect(oldClient.destroy).toHaveBeenCalledTimes(1)
+    expect(newClient.destroy).toHaveBeenCalledTimes(1)
+    expect(newClient.onNewMessage.handlers).toHaveLength(0)
   })
 
   it('attemptReconnect cleans up the new client when updates fail to start', async () => {
