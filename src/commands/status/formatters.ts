@@ -62,7 +62,7 @@ export function printRow(label: string, value: string, indent = 2): void {
 }
 
 export function jobStatusIcon(status: SyncJobStatus): string {
-  return status === 'running'
-    ? c.success(icons.running)
-    : c.yellow(icons.pending)
+  if (status === 'running') return c.success(icons.running)
+  if (status === 'failed') return c.red(icons.error)
+  return c.yellow(icons.pending)
 }

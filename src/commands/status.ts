@@ -118,22 +118,31 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
     messages_synced: 0,
   }
 
-  // Sync status
+  // Sync status. pending_jobs includes the jobs waiting for a retry;
+  // retrying_jobs counts those that failed at least once.
   const syncStatus: {
     pending_jobs: number
     running_jobs: number
     failed_jobs: number
+    retrying_jobs: number
     jobs: Array<{
       id: number
       chat_id: number
       type: string
       status: string
       messages_fetched: number
+      /** Failed tries so far */
+      attempts: number
+      /** The last error */
+      error: string | null
+      /** When a waiting job runs again (ISO); null if it is due */
+      next_run_at: string | null
     }>
   } = {
     pending_jobs: 0,
     running_jobs: 0,
     failed_jobs: 0,
+    retrying_jobs: 0,
     jobs: [],
   }
 
@@ -212,20 +221,32 @@ export async function collectStatus(pidFile: ReturnType<typeof createPidFile>) {
 
     // Sync jobs
     const syncService = createSyncJobsService(cacheDb)
-    const pendingJobs = syncService.getPendingJobs()
-    const runningJobs = syncService.getRunningJobs()
+    const counts = syncService.countJobs()
 
-    syncStatus.pending_jobs = pendingJobs.length
-    syncStatus.running_jobs = runningJobs.length
+    syncStatus.pending_jobs = counts.pending
+    syncStatus.running_jobs = counts.running
+    syncStatus.failed_jobs = counts.failed
+    syncStatus.retrying_jobs = counts.retrying
 
-    // Get recent jobs for display
-    const recentJobs = [...runningJobs, ...pendingJobs.slice(0, 5)]
-    syncStatus.jobs = recentJobs.map((job) => ({
+    // Running jobs, the next pending ones and the newest failed ones
+    const listedJobs = [
+      ...syncService.getRunningJobs(),
+      ...syncService.getPendingJobs().slice(0, 5),
+      ...syncService.getFailedJobs(5),
+    ]
+    const nowMs = Date.now()
+    syncStatus.jobs = listedJobs.map((job) => ({
       id: job.id,
       chat_id: job.chat_id,
       type: job.job_type,
       status: job.status,
       messages_fetched: job.messages_fetched,
+      attempts: job.attempts,
+      error: job.error_message,
+      next_run_at:
+        job.next_run_at > nowMs
+          ? new Date(job.next_run_at).toISOString()
+          : null,
     }))
 
     // Rate limits

@@ -217,6 +217,38 @@ tg sql print-schema --table=users_cache
 tg sql print-schema --table=users_cache --output=sql  # Annotated DDL
 ```
 
+`tg status` reads the cache, so it works without Telegram credentials. Its `sync` part counts
+the daemon's sync jobs and lists some of them:
+
+- `pending_jobs` includes the jobs waiting for a retry, `running_jobs`, `failed_jobs` (jobs that
+  failed for good) and `retrying_jobs` (pending jobs that failed at least once).
+- `jobs` lists the running jobs, the next 5 pending ones and the 5 newest failed ones, each with
+  `attempts`, `error` (the last error, or `null`) and `next_run_at` (when a waiting job runs
+  again, or `null` if it is due).
+- A failed job is retried after 24 hours or a daemon restart; `tg chats sync <chat>` retries the
+  chat's failed jobs at once. `--format pretty` shows the same, with a Retrying and a Failed row.
+
+```json
+{
+  "pending_jobs": 2,
+  "running_jobs": 1,
+  "failed_jobs": 1,
+  "retrying_jobs": 1,
+  "jobs": [
+    {
+      "id": 42,
+      "chat_id": -1001234567890,
+      "type": "initial_load",
+      "status": "failed",
+      "messages_fetched": 0,
+      "attempts": 1,
+      "error": "Telegram API error 400: CHANNEL_PRIVATE",
+      "next_run_at": null
+    }
+  ]
+}
+```
+
 ## Output Shape
 
 All commands use a consistent wrapper in JSON mode:

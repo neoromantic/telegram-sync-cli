@@ -142,6 +142,8 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `messages.e2e.test.ts` — `tg messages search`, `list` and `get` on a seeded cache, without
   credentials
 - `chats-sync.e2e.test.ts` — `tg chats sync` against a seeded cache, without credentials
+- `status.e2e.test.ts` — `tg status` counts and lists running, pending, retrying and failed
+  sync jobs from a seeded cache, in JSON and pretty output, without credentials
 
 ### E2E Helpers
 

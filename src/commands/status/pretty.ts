@@ -1,10 +1,12 @@
+import { SYNC_RETRY_CONFIG } from '../../daemon/sync-retry'
 import { SyncJobStatus } from '../../db/sync-schema'
 import { formatBytes, formatRelativeTime } from '../../utils/formatting'
 import { formatDuration } from '../../utils/time'
 import type { collectStatus } from '../status'
-import { c, icons, printHeader, printRow } from './formatters'
+import { c, icons, jobStatusIcon, printHeader, printRow } from './formatters'
 
 export type StatusSnapshot = Awaited<ReturnType<typeof collectStatus>>
+type StatusJob = StatusSnapshot['sync']['jobs'][number]
 
 function printDaemonSection(status: StatusSnapshot): void {
   printHeader('Daemon')
@@ -55,34 +57,69 @@ function printDaemonSection(status: StatusSnapshot): void {
   }
 }
 
+/** What a failed job or one waiting to run again is waiting for */
+function jobRetryDetail(job: StatusJob): string {
+  const error = job.error ? `: ${job.error}` : ''
+
+  if (job.status === SyncJobStatus.Failed) {
+    const tries =
+      job.attempts > 0
+        ? ` after ${job.attempts} attempt${job.attempts === 1 ? '' : 's'}`
+        : ''
+    return c.red(` failed${tries}${error}`)
+  }
+  if (job.status !== SyncJobStatus.Pending) return ''
+
+  const next = job.next_run_at
+    ? `next in ${formatDuration(Math.max(0, Date.parse(job.next_run_at) - Date.now()))}`
+    : null
+  if (job.attempts > 0) {
+    const attempt = `attempt ${job.attempts} of ${SYNC_RETRY_CONFIG.maxAttempts}`
+    return c.yellow(` ${[attempt, next].filter(Boolean).join(', ')}${error}`)
+  }
+  return next ? c.dim(` ${next}`) : ''
+}
+
 function printSyncJobsSection(status: StatusSnapshot): void {
   printHeader('Sync Jobs')
 
-  const totalJobs = status.sync.pending_jobs + status.sync.running_jobs
-  if (totalJobs === 0) {
+  const { pending_jobs, running_jobs, failed_jobs, retrying_jobs } = status.sync
+  if (pending_jobs + running_jobs + failed_jobs === 0) {
     printRow('Queue', c.dim('Empty'))
     return
   }
 
-  if (status.sync.running_jobs > 0) {
-    printRow('Running', c.success(`${status.sync.running_jobs} jobs`))
+  if (running_jobs > 0) {
+    printRow('Running', c.success(`${running_jobs} jobs`))
   }
-  if (status.sync.pending_jobs > 0) {
-    printRow('Pending', c.warning(`${status.sync.pending_jobs} jobs`))
+  if (pending_jobs > 0) {
+    printRow('Pending', c.warning(`${pending_jobs} jobs`))
+  }
+  if (retrying_jobs > 0) {
+    printRow('Retrying', c.yellow(`${retrying_jobs} jobs`))
+  }
+  if (failed_jobs > 0) {
+    printRow('Failed', c.red(`${failed_jobs} jobs`))
   }
 
-  if (status.sync.jobs.length === 0) return
+  if (status.sync.jobs.length > 0) {
+    console.log()
+    for (const job of status.sync.jobs) {
+      const statusIcon = jobStatusIcon(job.status as SyncJobStatus)
+      const fetched =
+        job.messages_fetched > 0 ? c.dim(` (${job.messages_fetched} msgs)`) : ''
+      console.log(
+        `    ${statusIcon} ${c.cyan(`#${job.id}`)} ${c.value(job.type)} ${c.dim(`chat:${job.chat_id}`)}${fetched}${jobRetryDetail(job)}`,
+      )
+    }
+  }
 
-  console.log()
-  for (const job of status.sync.jobs) {
-    const statusIcon =
-      job.status === SyncJobStatus.Running
-        ? c.success(icons.running)
-        : c.yellow(icons.pending)
-    const fetched =
-      job.messages_fetched > 0 ? c.dim(` (${job.messages_fetched} msgs)`) : ''
+  if (failed_jobs > 0) {
+    console.log()
     console.log(
-      `    ${statusIcon} ${c.cyan(`#${job.id}`)} ${c.value(job.type)} ${c.dim(`chat:${job.chat_id}`)}${fetched}`,
+      c.dim(
+        '  Retried after 24 h or a daemon restart; tg chats sync <chat> retries now',
+      ),
     )
   }
 }

@@ -6,7 +6,6 @@ The list is in priority order.
 
 ## Reliability
 
-- [Retry failed sync jobs with backoff](https://github.com/neoromantic/telegram-sync-cli/issues/9)
 - [Messages and chats are cached with different peer ID formats](https://github.com/neoromantic/telegram-sync-cli/issues/18)
 - [Delete events without chat context can skip valid deletions](https://github.com/neoromantic/telegram-sync-cli/issues/7)
 - [Daemon doesn't sync contacts](https://github.com/neoromantic/telegram-sync-cli/issues/8)
