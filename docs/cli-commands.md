@@ -82,6 +82,7 @@ tg messages search --query "hello" --includeDeleted
 ```bash
 tg send --to @username --message "Hello"
 tg send --to @username -m "Reply" --reply-to 123
+tg send --to me -m "Note to self"   # Saved Messages
 ```
 
 ### API

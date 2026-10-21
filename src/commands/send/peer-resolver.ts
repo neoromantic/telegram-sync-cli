@@ -216,6 +216,8 @@ function resolveByNumericId(
   return buildGroupPeer(numericId, `Chat ${numericId}`)
 }
 
+const SELF_IDENTIFIERS = new Set(['me', 'self'])
+
 export async function resolvePeer(
   client: TelegramClientLike,
   identifier: string,
@@ -224,6 +226,10 @@ export async function resolvePeer(
 ): Promise<ResolvedPeer> {
   const normalized = identifier.trim()
   const deps = { usersCache, chatsCache }
+
+  if (SELF_IDENTIFIERS.has(normalized.toLowerCase())) {
+    return { inputPeer: { _: 'inputPeerSelf' }, name: 'Saved Messages' }
+  }
 
   if (isUsernameIdentifier(normalized)) {
     const username = normalizeUsername(normalized)
