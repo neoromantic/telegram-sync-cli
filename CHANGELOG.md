@@ -32,9 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Telegram can't be asked, a cached message comes back with the context the
   cache holds.
 - The cache records the message ID ranges of each chat that it holds without
-  a gap, in the new `history_ranges` table. Every page the daemon or
-  `tg messages list` and `get` cache adds one, so reads can't run across
-  messages the cache lacks.
+  a gap, in the new `history_ranges` table, which `tg sql print-schema`
+  describes. Every page the daemon or `tg messages list` and `get` cache adds
+  one, so reads can't run across messages the cache lacks.
 
 ### Changed
 
