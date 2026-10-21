@@ -149,6 +149,7 @@ real Telegram API. It is skipped unless the variables below are set, and it neve
 | auth status and me | the session is valid; `me --fresh` writes the profile and `me` reads it back from the cache |
 | chats and contacts | dialogs and contacts come from the API, then `chats list` serves them from the cache |
 | send to Saved Messages | `send --to me` delivers a message; `tg api messages.getMessages` reads it back |
+| send caches for search | with no daemon running, `messages search` finds a message right after `send --to me`, under the own user ID |
 | daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs), syncs messages into the cache, shows up in `tg status` and stops cleanly with `tg daemon stop` |
 
 Each test copies the session into its own temp data dir. Messages go only to the account's
