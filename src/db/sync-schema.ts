@@ -522,8 +522,9 @@ export const SYNC_MODES: readonly SyncMode[] = ['auto', 'on', 'off']
  * - private chats and groups under 20 members: High, full history
  * - groups of 20-100 members: Medium, the newest 100 messages, then history
  *   after the small chats
- * - groups of unknown size or over 100 members, channels and communities:
- *   off, synced only on request (`tg chats sync`)
+ * - groups of unknown size or over 100 members, and channels: off, synced
+ *   only on request (`tg chats sync`)
+ * - communities: off; the chats linked to one have their own policy
  *
  * Telegram often leaves the member count out of a supergroup's dialog, and
  * such a group may have thousands of members, so an unknown count is treated

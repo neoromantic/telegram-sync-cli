@@ -37,7 +37,7 @@ Stored in `chat_sync_state`:
 |----------|----------|---------------|
 | **P1** | DMs + small groups (<20 members) | Full history sync |
 | **P2** | Medium groups (20–100 members) | Newest 100 messages, then history after the P1 chats |
-| **P3** | Groups of unknown size, large groups (>100), channels & communities | On request only (`tg chats sync`) |
+| **P3** | Groups of unknown size, large groups (>100) & channels | On request only (`tg chats sync`) |
 
 Live updates don't go through the queue: they are cached as they arrive. A chat's tier
 (`sync_priority`) is also the priority of its jobs inside each lane (see
@@ -54,7 +54,8 @@ Implemented in `determineSyncPolicy`:
   - `< 20` → enabled, **High**
   - `20–100` → enabled, **Medium**
   - `> 100` → disabled, **Low**
-- `channel`, `community` → disabled, **Low**
+- `channel`, `community` → disabled, **Low**. A community is a collection of linked chats; the
+  chats linked to it are ordinary supergroups and channels and get their own policy.
 
 ### Turning a chat on or off
 
