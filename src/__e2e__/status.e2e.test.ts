@@ -291,9 +291,24 @@ describe('E2E: status', () => {
 
   it('shows failed jobs and their errors in pretty output', async () => {
     seedFailed()
+    // Jobs that haven't failed are listed, but get no retry command
+    seedChat(1002, 'private', 'auto')
+    seedJob({
+      chat_id: 1002,
+      job_type: SyncJobType.BackwardHistory,
+      status: 'running',
+    })
+    seedChat(1003, 'private', 'on')
+    seedJob({
+      chat_id: 1003,
+      job_type: SyncJobType.InitialLoad,
+      status: 'pending',
+    })
 
     const output = await prettyStatus()
 
+    expect(output).toContain('chat:1002')
+    expect(output).toContain('chat:1003')
     expect(output).toMatch(/Failed\s+2 jobs/)
     expect(output).toContain(
       'failed after 1 attempt: Telegram API error 400: CHANNEL_PRIVATE',
