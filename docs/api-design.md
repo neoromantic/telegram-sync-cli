@@ -231,7 +231,7 @@ Peers can be specified in multiple formats:
 These are marked peer IDs, the format every command prints (`tg chats list`, `tg messages search`,
 `tg sql`) and every cache table stores. A positive number is a user, so a bare number is looked
 up in the cache as one first: a user with an access hash, then a private chat in `chats_cache`,
-then a user known without an access hash or a private chat with cached messages. Next it may be
+then a user known without an access hash, or a DM with sync state or cached messages. Next it may be
 a group or channel ID as 0.2.0 printed it (N for basic group -N or channel -100…N), when the
 cache knows that chat; a number that names both is `INVALID_ARGS`. If the cache doesn't know the
 number, one with 10 or more digits is tried as a phone number and a shorter one is taken as a
@@ -243,9 +243,10 @@ refuse a user or channel found without an access hash; cache reads don't need on
 Note: `tg chats get` fetches from Telegram by **@username only**; an ID works for a cached chat.
 An ID the cache doesn't hold, or any ID with `--fresh`, is `INVALID_ARGS` (exit 3) before any
 Telegram call, so it needs no account or credentials.
-`tg chats get --id` and `tg chats sync` read a cached ID in the same order: a positive number the
-cache knows as a user (a private chat, a cached user, a DM with sync state or cached messages) is
-that user, and only otherwise a group or channel ID as 0.2.0 printed it.
+`tg chats get --id` and `tg chats sync` read a cached ID with the same check as `tg send --to` and
+`tg messages --chat`: a positive number the cache knows as a user (a private chat, a cached user, a
+DM with sync state or cached messages) is that user, and only otherwise a group or channel ID as
+0.2.0 printed it.
 
 ## Type System
 

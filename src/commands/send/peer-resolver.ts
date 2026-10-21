@@ -1,8 +1,16 @@
+import type { Database } from 'bun:sqlite'
 import { type TelegramClient, tl } from '@mtcute/bun'
 
 import { getErrorMessage } from '../../daemon/daemon-utils'
+import {
+  type ChatSyncStateService,
+  createChatSyncStateService,
+} from '../../db/chat-sync-state'
 import type { CachedChat, ChatsCache } from '../../db/chats-cache'
-import type { MessagesCache } from '../../db/messages-cache'
+import {
+  createMessagesCache,
+  type MessagesCache,
+} from '../../db/messages-cache'
 import type { CachedUser, UsersCache } from '../../db/users-cache'
 import {
   isUsernameIdentifier,
@@ -49,13 +57,45 @@ export class AmbiguousPeerError extends Error {
 
 type TelegramClientLike = Pick<TelegramClient, 'call'>
 
-/** The cache lookups a bare ID needs */
-export type HistoryLookup = Pick<MessagesCache, 'getOldestMessageId'>
+/**
+ * The cache tables that know a DM without a users_cache row: sync state (a
+ * positive chat ID in chat_sync_state is always a user) and messages cached
+ * under the user ID, which only a private chat has
+ */
+export type DmLookup = {
+  chatSyncState: Pick<ChatSyncStateService, 'get'>
+  messagesCache: Pick<MessagesCache, 'getOldestMessageId'>
+}
+
+export function createDmLookup(db: Database): DmLookup {
+  return {
+    chatSyncState: createChatSyncStateService(db),
+    messagesCache: createMessagesCache(db),
+  }
+}
+
+/**
+ * Whether the cache knows user N: a users_cache row, sync state for the DM
+ * or messages cached under N. Every command that reads a chat ID asks this
+ * before it takes a positive ID as a group or channel ID as 0.2.0 printed
+ * it, so `tg send`, `tg messages` and `tg chats` name the same chat.
+ */
+export function isKnownUserId(
+  usersCache: Pick<UsersCache, 'getById'>,
+  dms: DmLookup | undefined,
+  id: number,
+): boolean {
+  return (
+    usersCache.getById(String(id)) !== null ||
+    dms?.chatSyncState.get(id) != null ||
+    dms?.messagesCache.getOldestMessageId(id) != null
+  )
+}
 
 type CacheDeps = {
   usersCache: UsersCache
   chatsCache: ChatsCache
-  messagesCache?: HistoryLookup
+  dms?: DmLookup
 }
 
 type CachedUserRef = Pick<
@@ -261,17 +301,16 @@ function resolveLegacyChatId(
 /**
  * A bare ID the cache knows. A positive marked ID is a user, so users come
  * first: one with an access hash, then a chats_cache row (a private chat),
- * then a user known without a hash. messages_cache stores a private chat
- * under the user ID, so messages cached under N also make N a user. Telegram
- * may refuse a user peer without an access hash, but the peer is the right
- * one, and cache reads need no hash. Last, a group or channel ID as 0.2.0
- * printed it.
+ * then any other user the cache knows (isKnownUserId): one without a hash,
+ * or a DM with sync state or cached messages. Telegram may refuse a user
+ * peer without an access hash, but the peer is the right one, and cache
+ * reads need no hash. Last, a group or channel ID as 0.2.0 printed it.
  */
 function resolveCachedId(
   identifier: string,
   deps: CacheDeps,
 ): ResolvedPeer | null {
-  const { usersCache, chatsCache, messagesCache } = deps
+  const { usersCache, chatsCache, dms } = deps
   const cachedUser = usersCache.getById(identifier)
   if (cachedUser?.access_hash) {
     verbose(`Found user ID ${identifier} in cache`)
@@ -287,10 +326,7 @@ function resolveCachedId(
   }
 
   const id = Number(identifier)
-  if (
-    cachedUser ||
-    (Number.isSafeInteger(id) && messagesCache?.getOldestMessageId(id) != null)
-  ) {
+  if (Number.isSafeInteger(id) && isKnownUserId(usersCache, dms, id)) {
     verbose(`Found private chat ${identifier} in cache, without an access hash`)
     return buildUserPeerFromCache(
       cachedUser ?? {
@@ -351,10 +387,10 @@ export async function resolvePeer(
   identifier: string,
   usersCache: UsersCache,
   chatsCache: ChatsCache,
-  messagesCache?: HistoryLookup,
+  dms?: DmLookup,
 ): Promise<ResolvedPeer> {
   const normalized = identifier.trim()
-  const deps = { usersCache, chatsCache, messagesCache }
+  const deps = { usersCache, chatsCache, dms }
 
   if (SELF_IDENTIFIERS.has(normalized.toLowerCase())) {
     return { inputPeer: { _: 'inputPeerSelf' }, name: 'Saved Messages' }
@@ -377,9 +413,9 @@ export async function resolvePeer(
     return resolveByMarkedId(normalized, deps)
   }
 
-  // A positive number is an ID when the cache knows it: a user, a private
-  // chat with cached messages, or a group or channel ID as 0.2.0 printed it.
-  // Otherwise 10+ digits are still a phone number.
+  // A positive number is an ID when the cache knows it: a user, a DM with
+  // sync state or cached messages, or a group or channel ID as 0.2.0
+  // printed it. Otherwise 10+ digits are still a phone number.
   const cached = /^\d+$/.test(normalized)
     ? resolveCachedId(normalized, deps)
     : null

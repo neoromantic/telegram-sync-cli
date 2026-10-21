@@ -34,7 +34,10 @@ import {
   type ResolveHistoryChatDeps,
   resolveHistoryChat,
 } from '../commands/messages/history'
-import { InvalidPeerError } from '../commands/send/peer-resolver'
+import {
+  createDmLookup,
+  InvalidPeerError,
+} from '../commands/send/peer-resolver'
 import { ConfigError } from '../config'
 import { type AccountsDbInterface, createTestDatabase } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
@@ -286,7 +289,7 @@ describe('resolveHistoryChat', () => {
     deps = {
       usersCache: createUsersCache(cacheDb),
       chatsCache: createChatsCache(cacheDb),
-      messagesCache: createMessagesCache(cacheDb),
+      dms: createDmLookup(cacheDb),
       accounts,
       accountId: undefined,
     }

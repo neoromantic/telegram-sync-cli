@@ -274,14 +274,18 @@ describe('E2E: chats sync', () => {
     })
   }
 
-  it('takes a positive ID with DM sync state as that DM, not as the basic group', async () => {
-    // User 4001's DM, seen only live: sync state, no chats_cache row
+  /** User 4001's DM, seen only live: sync state, no chats_cache row */
+  function seedDmSyncState() {
     createChatSyncStateService(cacheDb).upsert({
       chat_id: GROUP_ID,
       chat_type: 'private',
       sync_priority: SyncPriority.High,
       sync_enabled: true,
     })
+  }
+
+  it('takes a positive ID with DM sync state as that DM, not as the basic group', async () => {
+    seedDmSyncState()
 
     const result = await sync(String(GROUP_ID), '--off')
 
@@ -293,6 +297,21 @@ describe('E2E: chats sync', () => {
     })
     expect(stateOf(GROUP_ID)).toMatchObject({ sync_mode: 'off' })
     expect(stateOf(GROUP_PEER_ID)).toBeNull()
+  })
+
+  it('names the same DM in tg messages list --chat as in tg chats sync', async () => {
+    seedDmSyncState()
+
+    // Nothing lies below message 1, so the cache answers without Telegram
+    const list = await runCliSuccess(
+      ['messages', 'list', '--chat', String(GROUP_ID), '--before', '1'],
+      options(),
+    )
+
+    expect(list.json).toMatchObject({
+      success: true,
+      data: { chatId: GROUP_ID, items: [], source: 'cache' },
+    })
   })
 
   it('runs the retry command that tg status prints for a failed channel', async () => {

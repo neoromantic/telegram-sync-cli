@@ -5,14 +5,16 @@ import { type TelegramClient, tl } from '@mtcute/bun'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import {
   AmbiguousPeerError,
+  createDmLookup,
   InvalidPeerError,
   resolvePeer,
 } from '../commands/send/peer-resolver'
 import { ConfigError } from '../config'
+import { createChatSyncStateService } from '../db/chat-sync-state'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
 import { createMessagesCache, type MessagesCache } from '../db/messages-cache'
 import { createTestCacheDatabase } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
+import { initSyncSchema, SyncPriority } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
@@ -120,7 +122,7 @@ describe('resolvePeer with numeric IDs', () => {
       identifier,
       usersCache,
       chatsCache,
-      messagesCache,
+      createDmLookup(db),
     )
   }
 
@@ -259,6 +261,26 @@ describe('resolvePeer with numeric IDs', () => {
           accessHash: toLong('1111'),
         },
         name: 'Alice Able',
+      })
+      expect(call).not.toHaveBeenCalled()
+    })
+
+    it('takes a positive ID with DM sync state as that user before a cached group', async () => {
+      // User 4242's DM, seen only live: sync state, no users_cache row
+      cacheChat('-4242', 'group', 'Book Club')
+      createChatSyncStateService(db).upsert({
+        chat_id: 4242,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+      })
+      const { call, client } = throwingClient()
+
+      const peer = await resolve('4242', client)
+
+      expect(peer).toEqual({
+        inputPeer: { _: 'inputPeerUser', userId: 4242, accessHash: toLong(0) },
+        name: 'User 4242',
       })
       expect(call).not.toHaveBeenCalled()
     })
