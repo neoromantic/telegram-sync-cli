@@ -609,6 +609,30 @@ describe('sync-worker real jobs', () => {
         outcome: { state: 'retrying', attempts: 1 },
       })
     })
+
+    it('fails a job at once when its handler throws a permanent RPC error', async () => {
+      const job = queue()
+
+      const result = await processJobWithHandlers(
+        ctx,
+        job,
+        {
+          [SyncJobType.BackwardHistory]: async (): Promise<RealJobResult> => {
+            throw new tl.RpcError(400, 'CHANNEL_PRIVATE')
+          },
+        },
+        () => ({ success: false, messagesFetched: 0 }),
+      )
+
+      expect(result).toMatchObject({
+        permanent: true,
+        outcome: { state: 'failed', attempts: 1, nextRunAt: null },
+      })
+      expect(ctx.jobsService.getById(job.id)).toMatchObject({
+        status: 'failed',
+        attempts: 1,
+      })
+    })
   })
 
   describe('exception handling', () => {
