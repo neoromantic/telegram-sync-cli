@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { runCliFailure, runCliSuccess } from './helpers/cli'
+import { NO_CREDENTIALS, runCliFailure, runCliSuccess } from './helpers/cli'
 
 const E2E_TEST_BASE = join(tmpdir(), 'telegram-sync-cli-e2e-tests')
 
@@ -1182,6 +1182,71 @@ describe('E2E: Chats Commands', () => {
       expect((bare.json as { data: ChatData }).data).toEqual(
         (marked.json as { data: ChatData }).data,
       )
+    })
+
+    it('should take a bare ID the cache knows as a user as that user, not the channel', async () => {
+      // User 12345, with no private chat cached
+      env.seedUsers([{ user_id: '12345', first_name: 'Alice' }])
+
+      const result = await runCliFailure(['chats', 'get', '--id', '12345'], 3, {
+        env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+      })
+
+      expect(result.json).toMatchObject({
+        success: false,
+        error: { code: 'INVALID_ARGS', details: { identifier: '12345' } },
+      })
+    })
+
+    async function getFailure(
+      args: string[],
+      extraEnv: Record<string, string | undefined> = {},
+    ) {
+      const result = await runCliFailure(['chats', 'get', ...args], 3, {
+        env: { ...env.getCliOptions().env, ...extraEnv },
+      })
+      return result.json
+    }
+
+    const NOT_CACHED = {
+      success: false,
+      error: {
+        code: 'INVALID_ARGS',
+        message:
+          'Chat -1009999999999 is not in the cache; fetching by ID is not supported yet',
+        details: { identifier: '-1009999999999' },
+        suggestion:
+          'Start the daemon (its dialog pass caches every chat, archived ones too) or use @username',
+      },
+    }
+
+    it('should report an ID the cache does not hold as a cache miss, without credentials', async () => {
+      expect(await getFailure(['--id=-1009999999999'], NO_CREDENTIALS)).toEqual(
+        NOT_CACHED,
+      )
+    })
+
+    it('should report an ID the cache does not hold as a cache miss, without an account', async () => {
+      const db = new Database(join(env.dataDir, 'data.db'))
+      db.run('DELETE FROM accounts')
+      db.close()
+
+      expect(await getFailure(['--id=-1009999999999'])).toEqual(NOT_CACHED)
+    })
+
+    it('should reject an ID with --fresh before asking Telegram', async () => {
+      expect(
+        await getFailure(['--id=-1000000012345', '--fresh'], NO_CREDENTIALS),
+      ).toEqual({
+        success: false,
+        error: {
+          code: 'INVALID_ARGS',
+          message:
+            'Fetching chat -1000000012345 by ID is not supported yet; --fresh needs @username',
+          details: { identifier: '-1000000012345' },
+          suggestion: 'Use @username, or drop --fresh to read the cache',
+        },
+      })
     })
 
     it('should get chat by username', async () => {
