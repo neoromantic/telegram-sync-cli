@@ -327,7 +327,6 @@ describe('rebuildSyncWorker dialog pass', () => {
     expect(fake.calls).toEqual([{ archived: 'keep' }])
     expect(ctx.runtime.accounts.get(1)?.worker?.client).toBe(fake.client)
     expect(chatSyncState.get(1002)?.top_message_id).toBe(1007)
-    // Marking unlisted chats caught up waits for the next commit
     expect(chatSyncState.get(1003)?.top_message_id).toBe(1000)
     expect(pendingCatchups()).toEqual([1002])
     expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
@@ -360,6 +359,44 @@ describe('rebuildSyncWorker dialog pass', () => {
     }
     expect(pendingCatchups(createSyncJobsService(otherDb))).toEqual([])
     expect(createChatsCache(otherDb).getById('1001')).toBeNull()
+  })
+
+  it("marks the account's unlisted chats caught up after a complete pass", async () => {
+    const channelId = -1_000_000_003_003
+    chatSyncState.upsert({
+      chat_id: channelId,
+      chat_type: 'channel',
+      sync_priority: SyncPriority.Low,
+      sync_enabled: false,
+      forward_cursor: 900,
+      backward_cursor: 1,
+    })
+    chatSyncState.setSyncMode(channelId, 'on')
+    chatSyncState.markHistoryComplete(channelId)
+    // An earlier pass that failed left 1003's newest message unknown, in
+    // both accounts' caches
+    const otherState = createChatSyncStateService(otherDb)
+    chatSyncState.markTopUnknown([1003])
+    otherState.markTopUnknown([1003])
+    const ctx = createRunningContext()
+    addAccountRuntime(ctx, 2, otherDb)
+    const fake = fakeDialogClient([
+      { kind: 'user', id: 1001, topMessage: 1000 },
+      { kind: 'user', id: 1002, topMessage: 1007 },
+    ])
+
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    // Left, deleted or migrated: caught up at its cursor, no checking page
+    expect(chatSyncState.get(1003)).toMatchObject({
+      top_message_id: 1000,
+      forward_cursor: 1000,
+    })
+    // Turned on with tg chats sync: maybe a channel no dialog list shows
+    expect(chatSyncState.get(channelId)?.top_message_id).toBeNull()
+    expect(pendingCatchups()).toEqual([channelId, 1002])
+    // The other account's pass is its own
+    expect(otherState.get(1003)?.top_message_id).toBeNull()
   })
 
   it('checks an opted-in chat that the pass did not list', async () => {

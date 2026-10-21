@@ -183,13 +183,12 @@ no calls. What writes `top_message_id`:
 A full page leaves the top alone and queues the next page. A page that fails or hits a
 FLOOD_WAIT leaves it alone too, and the same job runs again once it is due.
 
-Each account's dialog pass covers its own cache only. On start, if an account's pass listed
-all its dialogs, an enabled chat with a cursor in that account's cache that the pass didn't
-list (left, deleted or migrated) is marked caught up (`top_message_id = forward_cursor`).
-After a pass that fails part-way those chats get `top_message_id = NULL`, so each gets one
-checking page. Another account's failed pass doesn't change that, and an account that didn't
-connect keeps its sync state as it is. After a reconnect, a pass that fails part-way does the
-same for the chats it didn't list; a complete reconnect pass marks none of them caught up.
+Each account's dialog pass covers its own cache only, on start and after every reconnect. If
+the pass listed all the account's dialogs, an enabled chat with a cursor in that account's
+cache that the pass didn't list (left, deleted or migrated) is marked caught up
+(`top_message_id = forward_cursor`). After a pass that fails part-way those chats get
+`top_message_id = NULL`, so each gets one checking page. Another account's failed pass doesn't
+change that, and an account that didn't connect keeps its sync state as it is.
 
 A chat turned on with `tg chats sync` that no pass listed gets `top_message_id = NULL` after
 every pass, complete or not, so it gets one checking page on start and after each reconnect.

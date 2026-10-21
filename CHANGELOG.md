@@ -64,6 +64,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same ID as deleted (the cross-account part of #7).
 - One account's FLOOD_WAIT blocked API calls of every account.
 - `tg chats search`, `messages search` and `chats sync` ignored `--account`.
+- After a reconnect, a complete dialog pass now marks the account's chats it
+  didn't list (left, deleted or migrated) caught up, as the startup pass
+  does. Before, such a chat whose newest message an earlier failed pass had
+  left unknown still cost a `messages.getHistory` call. A chat turned on with
+  `tg chats sync` still gets its checking page.
 
 ## [0.3.0] - 2026-10-22
 
