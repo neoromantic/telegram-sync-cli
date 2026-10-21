@@ -358,6 +358,36 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
           150_000,
           'the dialog bootstrap',
         )
+
+        // Real dialogs land under marked IDs (#18). Read the file directly:
+        // every CLI open re-keys bare rows first, so tg sql would hide them.
+        const cacheFile = new Database(join(env.dataDir, 'cache.db'), {
+          readonly: true,
+        })
+        try {
+          expect(
+            cacheFile
+              .query(
+                "SELECT chat_id, type FROM chats_cache WHERE type <> 'private' AND CAST(chat_id AS INTEGER) > 0",
+              )
+              .all(),
+          ).toEqual([])
+          expect(
+            cacheFile
+              .query(`
+                SELECT s.chat_id, s.chat_type FROM chat_sync_state s
+                WHERE s.chat_type <> 'private'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM chats_cache c
+                    WHERE c.chat_id = CAST(s.chat_id AS TEXT)
+                  )
+              `)
+              .all(),
+          ).toEqual([])
+        } finally {
+          cacheFile.close()
+        }
+
         const chats = await runCliSuccess(
           ['chats', 'list', '--limit', '1'],
           cli(),
