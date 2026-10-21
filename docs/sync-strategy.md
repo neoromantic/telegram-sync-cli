@@ -149,7 +149,13 @@ dialogs, an enabled chat with a cursor that no pass listed (left, deleted or mig
 marked caught up (`top_message_id = forward_cursor`). Otherwise those chats get
 `top_message_id = NULL`, so each gets one checking page. After a reconnect, a pass that fails
 part-way does the same for the chats it didn't list; all accounts share one cache (#17), so
-that is a safe superset. A complete reconnect pass covers one account and marks nothing.
+that is a safe superset. A complete reconnect pass covers one account and marks none of them
+caught up.
+
+A chat turned on with `tg chats sync` that no pass listed gets `top_message_id = NULL` after
+every pass, complete or not, so it gets one checking page on start and after each reconnect.
+It may be a channel you haven't joined: no dialog list shows it and no live update reaches it,
+so those checks are the only way its new messages arrive.
 
 Trade-off: live updates don't move the cursor, so an active chat's cursor trails its live
 messages for the whole run. The first catch-up after a restart or reconnect fetches them again,

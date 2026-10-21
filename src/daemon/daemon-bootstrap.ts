@@ -133,25 +133,39 @@ export async function syncAccountDialogs(
 }
 
 /**
- * Enabled chats with a cursor that no pass listed. A complete pass over
- * every account lists every chat the user is still in, so the others were
- * left, deleted or migrated: there is nothing to catch up. After an
- * incomplete pass their newest message is unknown, so each gets one page.
+ * Enabled chats with a cursor that no pass listed. After an incomplete pass
+ * their newest message is unknown, so each gets one checking page.
+ *
+ * A complete pass over every account lists every chat the user is in, so
+ * the others were left, deleted or migrated: with `markLeftCaughtUp` they
+ * are marked caught up. A chat turned on with `tg chats sync` is the
+ * exception: it may be a public channel the user never joined, which no
+ * dialog list shows and no live update reaches, so it gets one checking
+ * page after every pass.
  */
 function markUnvisitedChats(
   chatSyncState: ChatSyncStateService,
   visited: Set<number>,
   everyPassComplete: boolean,
+  markLeftCaughtUp: boolean,
 ): number {
   const unvisited = chatSyncState
     .getEnabledWithCursor()
-    .map((chat) => chat.chat_id)
-    .filter((chatId) => !visited.has(chatId))
+    .filter((chat) => !visited.has(chat.chat_id))
 
-  if (everyPassComplete) {
-    chatSyncState.markCaughtUp(unvisited)
-  } else {
-    chatSyncState.markTopUnknown(unvisited)
+  if (!everyPassComplete) {
+    chatSyncState.markTopUnknown(unvisited.map((chat) => chat.chat_id))
+    return unvisited.length
+  }
+
+  const optedIn = unvisited.filter((chat) => chat.sync_mode === 'on')
+  chatSyncState.markTopUnknown(optedIn.map((chat) => chat.chat_id))
+  if (markLeftCaughtUp) {
+    chatSyncState.markCaughtUp(
+      unvisited
+        .filter((chat) => chat.sync_mode !== 'on')
+        .map((chat) => chat.chat_id),
+    )
   }
   return unvisited.length
 }
@@ -181,11 +195,12 @@ export async function bootstrapDialogs(ctx: DaemonContext): Promise<void> {
     chatSyncState,
     visited,
     everyPassComplete,
+    true,
   )
   if (unvisited > 0) {
     ctx.logger.debug(
       everyPassComplete
-        ? `${unvisited} synced chat(s) are no longer in any dialog list`
+        ? `${unvisited} synced chat(s) are not in any dialog list`
         : `${unvisited} synced chat(s) were not listed; checking each for new messages`,
     )
   }
@@ -212,14 +227,14 @@ export async function refreshDialogsAfterReconnect(
     )
     // Every account shares one cache (#17), so unvisited chats may belong
     // to another account; checking them all is a safe superset. A complete
-    // pass says nothing about other accounts' chats, so it marks nothing.
-    if (!complete) {
-      markUnvisitedChats(
-        createChatSyncStateService(getCacheDb()),
-        visited,
-        false,
-      )
-    }
+    // pass says nothing about other accounts' chats, so it marks none of
+    // them caught up.
+    markUnvisitedChats(
+      createChatSyncStateService(getCacheDb()),
+      visited,
+      complete,
+      false,
+    )
     ctx.runtime.scheduler?.refreshQueues()
   } catch (err) {
     ctx.logger.warn(

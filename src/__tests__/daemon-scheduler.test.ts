@@ -248,6 +248,32 @@ describe('rebuildSyncWorker dialog pass', () => {
     expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
   })
 
+  it('checks an opted-in chat that the pass did not list', async () => {
+    const channelId = -1_000_000_003_003
+    chatSyncState.upsert({
+      chat_id: channelId,
+      chat_type: 'channel',
+      sync_priority: SyncPriority.Low,
+      sync_enabled: false,
+      forward_cursor: 900,
+      backward_cursor: 1,
+    })
+    chatSyncState.setSyncMode(channelId, 'on')
+    chatSyncState.markHistoryComplete(channelId)
+    chatSyncState.raiseTopMessageId(channelId, 900)
+    const ctx = createRunningContext()
+    const fake = fakeDialogClient([
+      { kind: 'user', id: 1001, topMessage: 1000 },
+      { kind: 'user', id: 1002, topMessage: 1000 },
+    ])
+
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    expect(chatSyncState.get(channelId)?.top_message_id).toBeNull()
+    expect(chatSyncState.get(1003)?.top_message_id).toBe(1000)
+    expect(pendingCatchups()).toEqual([channelId])
+  })
+
   it('checks every unlisted chat after a pass that failed', async () => {
     const ctx = createRunningContext()
     const fake = fakeDialogClient(
