@@ -115,6 +115,7 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `user.e2e.test.ts` — `me`, `user` lookups
 - `commands.e2e.test.ts` — command coverage smoke tests
 - `daemon.e2e.test.ts` — daemon start/stop/status
+- `sql.e2e.test.ts` — `tg sql` queries through the real argument parser
 
 ### E2E Helpers
 
@@ -140,22 +141,34 @@ env.cleanup()
 
 ## Integration Tests (Real API)
 
-Integration tests validate real Telegram API flows using a pre-authenticated
-session. Tests are skipped automatically unless all required environment
-variables are set.
-Integration tests are not run in CI to avoid credentials and rate limits.
+`src/__integration__/` is a live smoke suite: it runs the CLI the way a user would, against the
+real Telegram API. It is skipped unless the variables below are set, and it never runs in CI.
 
-### Required Environment Variables
+| Test | What it proves |
+|------|----------------|
+| auth status and me | the session is valid; `me --fresh` writes the profile and `me` reads it back from the cache |
+| chats and contacts | dialogs and contacts come from the API, then `chats list` serves them from the cache |
+| send to Saved Messages | `send --to me` delivers a message; `tg api messages.getMessages` reads it back |
+| daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs), syncs messages into the cache, shows up in `tg status` and stops cleanly with `tg daemon stop` |
 
-- `TELEGRAM_API_ID`
-- `TELEGRAM_API_HASH`
-- `TELEGRAM_TEST_ACCOUNT` (phone number in international format)
-- `TELEGRAM_TEST_SESSION_PATH` (or `TELEGRAM_TEST_SESSION`)
+Each test copies the session into its own temp data dir. Messages go only to the account's
+Saved Messages and are deleted after each test. A run takes about a minute.
 
-### Optional Environment Variables
+### Environment Variables
 
-- `TELEGRAM_TEST_RECIPIENT` (defaults to your username if available, otherwise
-  `TELEGRAM_TEST_ACCOUNT`)
+- `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`
+- `TELEGRAM_TEST_ACCOUNT`: the account's phone number in international format
+- `TELEGRAM_TEST_SESSION_PATH` (or `TELEGRAM_TEST_SESSION`): path to a `session_<id>.db`
+
+Log in once into a data dir used only for tests, so the suite never shares a session with
+your own daemon:
+
+```bash
+TELEGRAM_SYNC_CLI_DATA_DIR=/path/to/tg-test-data tg auth login --phone=+15550000000
+# then: TELEGRAM_TEST_SESSION_PATH=/path/to/tg-test-data/session_1.db
+```
+
+Bun loads `.env`, so the variables can live there (see `.env.example`).
 
 ### Run Integration Tests
 

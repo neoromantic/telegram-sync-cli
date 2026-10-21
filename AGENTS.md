@@ -140,7 +140,8 @@ src/db/              schema, caches, sync jobs, per-chat sync state, rate limits
 src/daemon/          daemon entry, loop, scheduler, update handlers, sync workers
 src/utils/           output, args, formatting, mappers, peer resolution
 src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integration__/  live API
-~/.telegram-sync-cli/  user data: config.json, daemon.pid, accounts/<id>/{session.db,data.db}
+~/.telegram-sync-cli/  user data: config.json, daemon.pid, data.db (accounts),
+                       cache.db (cache, sync state), session_<id>.db (mtcute)
 ```
 
 New commands use `defineCommand` from citty and report through `success()`/`error()` in
@@ -168,9 +169,12 @@ not direct dependencies (and `@mtcute/tl` no longer exists since mtcute 0.29).
   env.cleanup()
   ```
 
-- Integration tests (`src/__integration__/`) hit the real API and are never part of `test`.
-  They need `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` (or the `TELEGRAM_TEST_` variants),
-  `TELEGRAM_TEST_ACCOUNT` and `TELEGRAM_TEST_SESSION_PATH` (or `TELEGRAM_TEST_SESSION`);
-  `TELEGRAM_TEST_RECIPIENT` is optional. `TELEGRAM_API_RECORD=1` records fixtures,
-  `TELEGRAM_API_REPLAY=1` replays them offline (`TELEGRAM_API_FIXTURES_DIR` overrides the path).
+- Integration tests (`src/__integration__/`) are a live smoke suite against the real API and
+  are never part of `test`. They need `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` (or the
+  `TELEGRAM_TEST_` variants), `TELEGRAM_TEST_ACCOUNT` and `TELEGRAM_TEST_SESSION_PATH` (or
+  `TELEGRAM_TEST_SESSION`), pointing at a session logged in only for tests. Each test copies the
+  session into a temp data dir; messages go only to the account's Saved Messages and are
+  deleted afterwards. Run them after changes to Telegram calls, sync or the daemon.
+  `TELEGRAM_API_RECORD=1` records fixtures, `TELEGRAM_API_REPLAY=1` replays them offline
+  (`TELEGRAM_API_FIXTURES_DIR` overrides the path); the daemon test needs a live connection.
 - Never read or write the real `~/.telegram-sync-cli` from tests.

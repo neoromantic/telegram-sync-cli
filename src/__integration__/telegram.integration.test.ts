@@ -1,5 +1,18 @@
+/**
+ * Live smoke tests against the real Telegram API.
+ *
+ * Each test runs the CLI the way a user would, in an isolated data dir that
+ * holds a copy of a pre-authenticated session. Messages go only to the test
+ * account's own Saved Messages and are deleted afterwards.
+ */
+
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { runCliSuccess } from '../__e2e__/helpers/cli'
+import {
+  type CliOptions,
+  runCli,
+  runCliSuccess,
+  spawnCli,
+} from '../__e2e__/helpers/cli'
 import {
   createIntegrationEnvironment,
   type IntegrationEnvironment,
@@ -15,118 +28,245 @@ const API_HASH = process.env.TELEGRAM_TEST_API_HASH
 const SHOULD_RUN = Boolean(
   TEST_ACCOUNT && TEST_SESSION_PATH && API_ID && API_HASH,
 )
+// The daemon needs a live connection; fixtures can't replay real-time updates
+const CAN_RUN_DAEMON = SHOULD_RUN && process.env.TELEGRAM_API_REPLAY !== '1'
 
-describe.skipIf(!SHOULD_RUN)(
-  'Integration: Telegram Sync CLI (real API)',
-  () => {
-    let env: IntegrationEnvironment
+const API_TIMEOUT_MS = 30_000
+const DAEMON_TEST_TIMEOUT_MS = 300_000
 
-    beforeEach(async () => {
-      env = createIntegrationEnvironment('telegram')
-      await env.initFromSession({
-        phone: TEST_ACCOUNT!,
-        sessionPath: TEST_SESSION_PATH!,
-      })
-    })
+type Envelope<T> = { success: boolean; data: T }
 
-    afterEach(() => {
-      env.cleanup()
-    })
+function uniqueMarker(): string {
+  return `tgsmoke${Date.now()}${Math.random().toString(36).slice(2, 8)}`
+}
 
-    function buildCliOptions() {
-      return {
-        ...env.getCliOptions({
-          TELEGRAM_API_ID: API_ID!,
-          TELEGRAM_API_HASH: API_HASH!,
-        }),
-        timeout: 30000,
-      }
+/** Keep draining a stream so a chatty child never blocks on a full pipe */
+function collectOutput(stream: ReadableStream<Uint8Array>) {
+  let text = ''
+  const decoder = new TextDecoder()
+  void (async () => {
+    for await (const chunk of stream) {
+      text += decoder.decode(chunk, { stream: true })
     }
+  })()
+  return {
+    get text() {
+      return text
+    },
+  }
+}
 
-    it('auth status confirms authentication', async () => {
-      const result = await runCliSuccess(['auth', 'status'], buildCliOptions())
-      const payload = result.json as {
-        success: boolean
-        data: { authenticated: boolean; account?: { phone: string } }
-      }
+async function waitFor<T>(
+  check: () => Promise<T | null>,
+  timeoutMs: number,
+  what: string,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const value = await check()
+    if (value !== null) return value
+    await Bun.sleep(1000)
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms waiting for ${what}`)
+}
 
-      expect(payload.success).toBe(true)
-      expect(payload.data.authenticated).toBe(true)
-      expect(payload.data.account?.phone).toBe(TEST_ACCOUNT)
+describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
+  let env: IntegrationEnvironment
+  const sentMessageIds: number[] = []
+
+  function cli(timeout = API_TIMEOUT_MS): CliOptions {
+    return {
+      ...env.getCliOptions({
+        TELEGRAM_API_ID: API_ID!,
+        TELEGRAM_API_HASH: API_HASH!,
+      }),
+      timeout,
+    }
+  }
+
+  async function sendToSavedMessages(text: string): Promise<number> {
+    const result = await runCliSuccess(
+      ['send', '--to', 'me', '--message', text, '--silent'],
+      cli(),
+    )
+    const payload = result.json as Envelope<{
+      sent: boolean
+      messageId: number
+    }>
+    expect(payload.data.sent).toBe(true)
+    expect(typeof payload.data.messageId).toBe('number')
+    sentMessageIds.push(payload.data.messageId)
+    return payload.data.messageId
+  }
+
+  beforeEach(async () => {
+    env = createIntegrationEnvironment('smoke')
+    await env.initFromSession({
+      phone: TEST_ACCOUNT!,
+      sessionPath: TEST_SESSION_PATH!,
     })
+  })
 
-    it('user me fetches current profile', async () => {
-      const result = await runCliSuccess(
-        ['user', 'me', '--fresh'],
-        buildCliOptions(),
+  afterEach(async () => {
+    if (sentMessageIds.length > 0) {
+      const ids = sentMessageIds.splice(0)
+      await runCli(
+        [
+          'api',
+          'messages.deleteMessages',
+          '--json',
+          JSON.stringify({ id: ids, revoke: true }),
+        ],
+        cli(),
       )
-      const payload = result.json as {
-        success: boolean
-        data: { user: { id: number; username?: string | null } }
-      }
+    }
+    env.cleanup()
+  })
 
-      expect(payload.success).toBe(true)
-      expect(typeof payload.data.user.id).toBe('number')
-    })
+  it(
+    'auth status and me confirm the session and cache the profile',
+    async () => {
+      const status = await runCliSuccess(['auth', 'status'], cli())
+      expect(status.json).toMatchObject({
+        success: true,
+        data: { authenticated: true, account: { phone: TEST_ACCOUNT } },
+      })
 
-    it('contacts list fetches contacts from API', async () => {
-      const result = await runCliSuccess(
+      const fresh = await runCliSuccess(['me', '--fresh'], cli())
+      const freshUser = (fresh.json as Envelope<{ user: { id: number } }>).data
+        .user
+      expect(typeof freshUser.id).toBe('number')
+
+      const cached = await runCliSuccess(['me'], cli())
+      expect(
+        (cached.json as Envelope<{ user: { id: number } }>).data.user.id,
+      ).toBe(freshUser.id)
+    },
+    API_TIMEOUT_MS * 3,
+  )
+
+  it(
+    'chats and contacts are fetched from the API and served from the cache',
+    async () => {
+      const fresh = await runCliSuccess(
+        ['chats', 'list', '--fresh', '--limit', '5'],
+        cli(),
+      )
+      const freshChats = fresh.json as Envelope<{
+        items: unknown[]
+        total: number
+      }>
+      expect(freshChats.data.items.length).toBeGreaterThan(0)
+
+      const cached = await runCliSuccess(
+        ['chats', 'list', '--limit', '5'],
+        cli(),
+      )
+      expect(cached.json).toMatchObject({
+        success: true,
+        data: { source: 'cache' },
+      })
+
+      const contacts = await runCliSuccess(
         ['contacts', 'list', '--fresh', '--limit', '1'],
-        buildCliOptions(),
+        cli(),
       )
-      const payload = result.json as {
-        success: boolean
-        data: { items: unknown[]; total: number }
-      }
+      expect(contacts.json).toMatchObject({
+        success: true,
+        data: { source: 'api' },
+      })
+    },
+    API_TIMEOUT_MS * 3,
+  )
 
-      expect(payload.success).toBe(true)
-      expect(Array.isArray(payload.data.items)).toBe(true)
-      expect(typeof payload.data.total).toBe('number')
-    })
-
-    it('chats list fetches dialogs from API', async () => {
-      const result = await runCliSuccess(
-        ['chats', 'list', '--fresh', '--limit', '1'],
-        buildCliOptions(),
-      )
-      const payload = result.json as {
-        success: boolean
-        data: { items: unknown[]; total: number }
-      }
-
-      expect(payload.success).toBe(true)
-      expect(Array.isArray(payload.data.items)).toBe(true)
-      expect(typeof payload.data.total).toBe('number')
-    })
-
-    it('send delivers a message to the test recipient', async () => {
-      const meResult = await runCliSuccess(
-        ['user', 'me', '--fresh'],
-        buildCliOptions(),
-      )
-      const mePayload = meResult.json as {
-        success: boolean
-        data: { user: { username?: string | null } }
-      }
-
-      const fallbackRecipient = mePayload.data.user.username
-        ? `@${mePayload.data.user.username}`
-        : TEST_ACCOUNT!
-      const recipient = process.env.TELEGRAM_TEST_RECIPIENT ?? fallbackRecipient
-
-      const message = `tgcli integration test ${new Date().toISOString()}`
+  it(
+    'send to Saved Messages round-trips through the raw API',
+    async () => {
+      const marker = uniqueMarker()
+      const messageId = await sendToSavedMessages(`tg smoke test ${marker}`)
 
       const result = await runCliSuccess(
-        ['send', '--to', recipient, '--message', message, '--silent'],
-        buildCliOptions(),
+        [
+          'api',
+          'messages.getMessages',
+          '--json',
+          JSON.stringify({ id: [{ _: 'inputMessageID', id: messageId }] }),
+        ],
+        cli(),
       )
-      const payload = result.json as {
-        success: boolean
-        data: { sent: boolean; messageId: number | null }
-      }
+      const payload = result.json as Envelope<{
+        result: { messages: Array<{ id: number; message?: string }> }
+      }>
+      const message = payload.data.result.messages.find(
+        (m) => m.id === messageId,
+      )
+      expect(message?.message).toContain(marker)
+    },
+    API_TIMEOUT_MS * 3,
+  )
 
-      expect(payload.success).toBe(true)
-      expect(payload.data.sent).toBe(true)
-    })
-  },
-)
+  it.skipIf(!CAN_RUN_DAEMON)(
+    'daemon connects, bootstraps dialogs, syncs history and stops cleanly',
+    async () => {
+      const daemon = spawnCli(['daemon', 'start'], cli())
+      const logs = collectOutput(daemon.stdout)
+      collectOutput(daemon.stderr)
+
+      try {
+        await waitFor(
+          async () =>
+            logs.text.includes('Real-time updates active') ? true : null,
+          60_000,
+          'the daemon to start real-time updates',
+        )
+
+        // Bootstrap waits out FLOOD_WAITs on messages.getDialogs
+        await waitFor(
+          async () =>
+            /Bootstrapped \d+ dialogs/.test(logs.text) ? true : null,
+          150_000,
+          'the dialog bootstrap',
+        )
+        const chats = await runCliSuccess(
+          ['chats', 'list', '--limit', '1'],
+          cli(),
+        )
+        const cachedChats = chats.json as Envelope<{
+          source: string
+          total: number
+        }>
+        expect(cachedChats.data.source).toBe('cache')
+        expect(cachedChats.data.total).toBeGreaterThan(0)
+
+        await waitFor(
+          async () => {
+            const result = await runCli(
+              ['sql', '--query', 'SELECT COUNT(*) AS n FROM messages_cache'],
+              cli(),
+            )
+            const payload = result.json as Envelope<{
+              rows: Array<{ n: number }>
+            }>
+            const count = payload?.data?.rows?.[0]?.n ?? 0
+            return count > 0 ? count : null
+          },
+          60_000,
+          'sync jobs to cache messages',
+        )
+
+        const status = await runCliSuccess(['status'], cli())
+        expect(status.json).toMatchObject({
+          success: true,
+          data: { daemon: { status: 'running' } },
+        })
+
+        const stop = await runCliSuccess(['daemon', 'stop'], cli())
+        expect(stop.json).toMatchObject({ success: true })
+        expect(await daemon.exited).toBe(0)
+      } finally {
+        daemon.kill()
+      }
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  )
+})
