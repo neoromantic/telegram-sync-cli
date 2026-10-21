@@ -311,6 +311,8 @@ Keys: `daemon_status`, `daemon_pid`, `daemon_started_at`, `daemon_version`,
 
 - Daemons from 0.3.0 and older write neither version key.
 - Stopping clears the PID, start time and version keys.
+- Starting and stopping each write their keys in one transaction, and `tg status` reads them in
+  one, so it never sees a daemon half started or half stopped.
 - `tg status` uses `daemon_version` only while `daemon_version_pid` equals `daemon_pid`.
 
 ### Table: rate_limits
