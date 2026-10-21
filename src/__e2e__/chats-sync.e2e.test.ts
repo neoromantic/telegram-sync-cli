@@ -276,7 +276,8 @@ describe('E2E: chats sync', () => {
         code: 'INVALID_ARGS',
         message: 'Chat not found in the cache: @unknownchat',
         details: { chat: '@unknownchat' },
-        suggestion: 'Run tg chats list --fresh or start the daemon, then retry',
+        suggestion:
+          'Start the daemon (its dialog pass lists every chat, archived ones too) or run tg chats get --id @username, then retry',
       },
     })
   })

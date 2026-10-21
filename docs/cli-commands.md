@@ -85,10 +85,12 @@ tg chats sync @examplenews --auto # follow the default policy again
 
 - The choice is stored in `chat_sync_state.sync_mode` and kept across daemon restarts and
   dialog passes.
-- Cache-only: the chat must be in `chats_cache` (`tg chats list --fresh` or a daemon start puts
-  it there) or have sync state from the daemon. No Telegram credentials needed.
-- A chat that isn't found fails with `INVALID_ARGS` (exit 3) and the suggestion to run
-  `tg chats list --fresh` or start the daemon. `--off` with `--auto` is `INVALID_ARGS` too.
+- Cache-only: the chat must be in `chats_cache` or have sync state from the daemon. No Telegram
+  credentials needed. A daemon start caches every chat, archived ones too;
+  `tg chats get --id @username` caches one chat; `tg chats list --fresh` caches only the 200
+  newest dialogs that aren't archived.
+- A chat that isn't found fails with `INVALID_ARGS` (exit 3) and the suggestion to start the
+  daemon or run `tg chats get --id @username`. `--off` with `--auto` is `INVALID_ARGS` too.
 - A running daemon applies the change at its next refresh (30 seconds or less). A chat turned
   on gets its first page ahead of other first pages. A changed mode cancels the chat's pending
   jobs; a job that is running finishes.
