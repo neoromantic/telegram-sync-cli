@@ -239,6 +239,51 @@ describe('sync-worker real helpers/context', () => {
       expect(result.messages.length).toBe(1)
       expect(result.count).toBeUndefined()
     })
+
+    it('returns the senders of the page', async () => {
+      const alice: tl.RawUser = {
+        _: 'user',
+        id: 10,
+        firstName: 'Alice',
+        accessHash: toLong('1111'),
+      }
+      const client = createMockClient({
+        call: mock<MockCall>(async () => ({
+          _: 'messages.messages',
+          messages: [],
+          chats: [],
+          users: [alice],
+          topics: [],
+        })),
+      })
+
+      const result = await fetchMessagesRaw(
+        client,
+        { _: 'inputPeerUser', userId: 10, accessHash: toLong('1111') },
+        { limit: 1 },
+      )
+
+      expect(result.users).toEqual([alice])
+    })
+
+    it('returns no messages or senders when Telegram reports no change', async () => {
+      const client = createMockClient({
+        call: mock<MockCall>(
+          async (): Promise<tl.messages.RawMessagesNotModified> => ({
+            _: 'messages.messagesNotModified',
+            count: 5,
+          }),
+        ),
+      })
+
+      const result = await fetchMessagesRaw(
+        client,
+        { _: 'inputPeerUser', userId: 10, accessHash: toLong('1111') },
+        { limit: 1 },
+      )
+
+      expect(result).toEqual({ messages: [], count: 5, users: [] })
+    })
   })
 
   describe('sync-worker real context helpers', () => {

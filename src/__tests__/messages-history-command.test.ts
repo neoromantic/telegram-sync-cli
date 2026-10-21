@@ -17,6 +17,7 @@ import {
   createLazyClient,
   type HistoryClient,
   MessageNotFoundError,
+  messageRowToItem,
   parseIntegerArg,
   reportHistoryError,
 } from '../commands/messages/helpers'
@@ -155,6 +156,55 @@ function historyClient(ids: number[], users: tl.TypeUser[] = []) {
     call,
     requests: fake.requests,
   }
+}
+
+/** Alice as getHistory returns her with her messages */
+const ALICE: tl.RawUser = {
+  _: 'user',
+  id: ALICE_ID,
+  firstName: 'Alice',
+  lastName: 'Able',
+  username: 'alice',
+  accessHash: toLong('1111'),
+}
+
+/** A client whose pages hold messages from Alice, with Alice in `users` */
+function aliceClient(ids: number[]) {
+  const fake = historyClient(ids, [ALICE])
+  const call = mock(async (request: GetHistoryRequest) => {
+    const result = (await fake.call(request)) as unknown as {
+      messages: Array<Record<string, unknown>>
+    }
+    return {
+      ...result,
+      messages: result.messages.map((message) => ({
+        ...message,
+        fromId: { _: 'peerUser', userId: ALICE_ID },
+      })),
+    }
+  })
+  return { client: { call } as unknown as CallClient }
+}
+
+/** The fetched rows carry Alice's name, and search finds them by it */
+function expectAliceCached(
+  db: Database,
+  rows: Parameters<typeof messageRowToItem>[0][],
+) {
+  expect(rows.length).toBeGreaterThan(0)
+  for (const row of rows) {
+    expect(messageRowToItem(row).sender).toMatchObject({
+      id: ALICE_ID,
+      username: 'alice',
+      firstName: 'Alice',
+    })
+  }
+  expect(
+    createMessagesSearch(db)
+      .search('Alice')
+      .map((hit) => hit.message_id)
+      .sort((a, b) => b - a),
+  ).toEqual(rowIds(rows).sort((a, b) => b - a))
 }
 
 /** A client that returns every message it has, ignoring the window */
@@ -442,6 +492,16 @@ describe('fetchHistoryPage', () => {
       expect(JSON.parse(row.raw_json)).toMatchObject({ id: row.message_id })
       expect(row.fetched_at).toBeGreaterThanOrEqual(before)
     }
+  })
+
+  it('caches the senders of the page, so items carry their names', async () => {
+    const { client } = aliceClient(range(1, 10))
+
+    const rows = await fetchHistoryPage(client, cacheDb, TEAM_CHAT, {
+      limit: 3,
+    })
+
+    expectAliceCached(cacheDb, rows)
   })
 
   it('adds a hint when Telegram cannot find a chat built from a bare ID', async () => {
@@ -830,6 +890,18 @@ describe('fetchMessageAround', () => {
     expect(rowIds(around.newer)).toEqual([6])
     expect(rowIds(around.older)).toEqual([4])
     expect(storedIds(cacheDb)).toEqual([6, 5, 4])
+  })
+
+  it('caches the senders of the page, so items carry their names', async () => {
+    const { client } = aliceClient(range(1, 10))
+
+    const around = await fetchMessageAround(client, cacheDb, TEAM_CHAT, 5, 1)
+
+    expectAliceCached(cacheDb, [
+      ...around.newer,
+      around.message,
+      ...around.older,
+    ])
   })
 
   it('sends limit 1 without context', async () => {
