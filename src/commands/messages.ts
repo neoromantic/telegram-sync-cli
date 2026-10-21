@@ -1,5 +1,6 @@
 import { defineCommand } from 'citty'
 
+import { listMessagesCommand } from './messages/list'
 import { searchMessagesCommand } from './messages/search'
 
 /**
@@ -8,11 +9,12 @@ import { searchMessagesCommand } from './messages/search'
 export const messagesCommand = defineCommand({
   meta: {
     name: 'messages',
-    description: 'Message search and history commands',
+    description: 'Read chat history and search cached messages',
   },
   subCommands: {
+    list: listMessagesCommand,
     search: searchMessagesCommand,
   },
 })
 
-export { searchMessagesCommand }
+export { listMessagesCommand, searchMessagesCommand }

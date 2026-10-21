@@ -134,6 +134,7 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `commands.e2e.test.ts` — command coverage smoke tests
 - `daemon.e2e.test.ts` — daemon start/stop/status
 - `sql.e2e.test.ts` — `tg sql` queries through the real argument parser
+- `messages.e2e.test.ts` — `tg messages search` and `list` on a seeded cache, without credentials
 - `chats-sync.e2e.test.ts` — `tg chats sync` against a seeded cache, without credentials
 
 ### E2E Helpers

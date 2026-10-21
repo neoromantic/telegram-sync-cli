@@ -7,13 +7,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import packageJson from '../../package.json' with { type: 'json' }
-import { runCliFailure, runCliSuccess } from './helpers/cli'
+import { NO_CREDENTIALS, runCliFailure, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
-
-const NO_CREDENTIALS = {
-  TELEGRAM_API_ID: undefined,
-  TELEGRAM_API_HASH: undefined,
-}
 
 describe('E2E: Credentials are only required for Telegram calls', () => {
   let env: TestEnvironment

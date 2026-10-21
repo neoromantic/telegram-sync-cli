@@ -26,6 +26,16 @@ export interface CliResult {
   duration: number
 }
 
+/**
+ * Unset Telegram API credentials. Children otherwise inherit the dummy ones
+ * from test-setup.ts, so a command that needs Telegram fails fast with
+ * INVALID_ARGS instead of trying the network.
+ */
+export const NO_CREDENTIALS = {
+  TELEGRAM_API_ID: undefined,
+  TELEGRAM_API_HASH: undefined,
+}
+
 /** Path to the CLI entry point */
 const CLI_PATH = `${import.meta.dir}/../../index.ts`
 

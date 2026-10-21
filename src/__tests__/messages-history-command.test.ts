@@ -1,0 +1,678 @@
+/**
+ * Tests for the core of `tg messages list` (src/commands/messages/history.ts)
+ */
+import { Database } from 'bun:sqlite'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test'
+import type { TelegramClient, tl } from '@mtcute/bun'
+
+import {
+  createLazyClient,
+  type HistoryClient,
+  parseIntegerArg,
+  reportHistoryError,
+} from '../commands/messages/helpers'
+import {
+  cacheHistoryResponse,
+  fetchHistoryPage,
+  type HistoryChat,
+  type HistoryWindow,
+  historyRequest,
+  listHistory,
+  type ResolveHistoryChatDeps,
+  resolveHistoryChat,
+} from '../commands/messages/history'
+import { ConfigError } from '../config'
+import { type AccountsDbInterface, createTestDatabase } from '../db'
+import { createChatSyncStateService } from '../db/chat-sync-state'
+import { createChatsCache } from '../db/chats-cache'
+import { createMessagesCache } from '../db/messages-cache'
+import { createMessagesSearch } from '../db/messages-search'
+import { initCacheSchema } from '../db/schema'
+import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import type { ChatType } from '../db/types'
+import { createUsersCache } from '../db/users-cache'
+import { toLong } from '../utils/long'
+import { RateLimitError } from '../utils/telegram-rate-limits'
+import {
+  createFakeHistory,
+  type GetHistoryRequest,
+  range,
+  rawMessage,
+} from './helpers/fake-history'
+
+const SELF_ID = 999
+const ALICE_ID = 10
+const BOB_ID = 11
+const TEAM_CHAT_RAW_ID = 1234567890
+const TEAM_CHAT_ID = -1001234567890
+const BOOK_CLUB_ID = -4242
+const DATE = 1_760_000_000
+
+const TEAM_CHAT: HistoryChat = {
+  chatId: TEAM_CHAT_ID,
+  inputPeer: {
+    _: 'inputPeerChannel',
+    channelId: TEAM_CHAT_RAW_ID,
+    accessHash: toLong('2222'),
+  },
+}
+
+type CallClient = Pick<TelegramClient, 'call'>
+
+function createCacheDb(): Database {
+  const db = new Database(':memory:')
+  initCacheSchema(db)
+  initSyncSchema(db)
+  return db
+}
+
+function cacheChat(
+  db: Database,
+  chatId: string,
+  type: ChatType,
+  title: string,
+  username: string | null,
+  accessHash: string | null,
+) {
+  createChatsCache(db).upsert({
+    chat_id: chatId,
+    type,
+    title,
+    username,
+    member_count: null,
+    access_hash: accessHash,
+    is_creator: 0,
+    is_admin: 0,
+    last_message_id: null,
+    last_message_at: null,
+    fetched_at: Date.now(),
+    raw_json: '{}',
+  })
+}
+
+function cacheMessages(db: Database, chatId: number, ids: number[]) {
+  createMessagesCache(db).upsertBatch(
+    ids.map((id) => ({
+      chat_id: chatId,
+      message_id: id,
+      from_id: ALICE_ID,
+      text: `cached ${id}`,
+      message_type: 'text',
+      date: DATE + id,
+      raw_json: '{}',
+    })),
+  )
+}
+
+/** createFakeHistory, plus the senders a real getHistory response carries */
+function historyClient(ids: number[], users: tl.TypeUser[] = []) {
+  const fake = createFakeHistory(ids)
+  const fakeCall = fake.client.call as unknown as (
+    request: GetHistoryRequest,
+  ) => Promise<Record<string, unknown>>
+  const call = mock(async (request: GetHistoryRequest) => ({
+    ...(await fakeCall(request)),
+    users,
+    chats: [],
+  }))
+  return {
+    client: { call } as unknown as CallClient,
+    call,
+    requests: fake.requests,
+  }
+}
+
+/** A client that returns every message it has, ignoring the window */
+function unboundedClient(ids: number[]) {
+  const call = mock(async () => ({
+    _: 'messages.messages',
+    messages: [...ids].sort((a, b) => b - a).map(rawMessage),
+    users: [],
+    chats: [],
+  }))
+  return { client: { call } as unknown as CallClient, call }
+}
+
+function throwingFactory() {
+  return mock((): HistoryClient => {
+    throw new Error('the cache should have answered')
+  })
+}
+
+function messageIds(items: Array<{ messageId: number }>) {
+  return items.map((item) => item.messageId)
+}
+
+function rowIds(rows: Array<{ message_id: number }>) {
+  return rows.map((row) => row.message_id)
+}
+
+/** Every cached message ID, newest first */
+function storedIds(db: Database): number[] {
+  const rows = db
+    .query('SELECT message_id FROM messages_cache ORDER BY message_id DESC')
+    .all() as Array<{ message_id: number }>
+  return rowIds(rows)
+}
+
+describe('resolveHistoryChat', () => {
+  let cacheDb: Database
+  let accounts: AccountsDbInterface
+  let deps: ResolveHistoryChatDeps
+
+  beforeEach(() => {
+    cacheDb = createCacheDb()
+    accounts = createTestDatabase().accountsDb
+    accounts.create({
+      phone: '+15550000000',
+      user_id: SELF_ID,
+      is_active: true,
+    })
+    createUsersCache(cacheDb).upsert({
+      user_id: String(ALICE_ID),
+      username: 'alice',
+      first_name: 'Alice',
+      last_name: 'Able',
+      access_hash: '1111',
+      fetched_at: Date.now(),
+      raw_json: '{}',
+    })
+    cacheChat(cacheDb, '10', 'private', 'Alice Able', 'alice', '1111')
+    cacheChat(
+      cacheDb,
+      String(TEAM_CHAT_RAW_ID),
+      'supergroup',
+      'Team Chat',
+      'teamchat',
+      '2222',
+    )
+    cacheChat(cacheDb, '4242', 'group', 'Book Club', null, null)
+    for (const chatId of [ALICE_ID, TEAM_CHAT_ID, BOOK_CLUB_ID, SELF_ID]) {
+      cacheMessages(cacheDb, chatId, [1, 2])
+    }
+    deps = {
+      usersCache: createUsersCache(cacheDb),
+      chatsCache: createChatsCache(cacheDb),
+      accounts,
+      accountId: undefined,
+    }
+  })
+
+  afterEach(() => {
+    cacheDb.close()
+  })
+
+  it.each([
+    ['@alice', ALICE_ID],
+    ['10', ALICE_ID],
+    ['@teamchat', TEAM_CHAT_ID],
+    ['1234567890', TEAM_CHAT_ID],
+    ['-1001234567890', TEAM_CHAT_ID],
+    ['-4242', BOOK_CLUB_ID],
+    ['me', SELF_ID],
+  ])(
+    'resolves and lists %p from the cache as chat %p',
+    async (identifier, chatId) => {
+      const create = throwingFactory()
+      const client = createLazyClient(create)
+
+      const chat = await resolveHistoryChat(client, identifier, deps)
+      const result = await listHistory({
+        cacheDb,
+        client,
+        chat,
+        window: { limit: 20 },
+        includeDeleted: false,
+        fresh: false,
+      })
+
+      expect(chat.chatId).toBe(chatId)
+      expect(result.chatId).toBe(chatId)
+      expect(result.source).toBe('cache')
+      expect(messageIds(result.items)).toEqual([2, 1])
+      expect(create).not.toHaveBeenCalled()
+    },
+  )
+
+  it('asks Telegram for the own user ID once when the account lacks it', async () => {
+    const account = accounts.create({ phone: '+15550000001' })
+    const getMe = mock(async () => ({ id: 1001 }))
+    const create = mock(
+      () => ({ getMe, call: mock() }) as unknown as HistoryClient,
+    )
+    const client = createLazyClient(create)
+    const withAccount = { ...deps, accountId: account.id }
+
+    const first = await resolveHistoryChat(client, 'me', withAccount)
+    const second = await resolveHistoryChat(client, 'me', withAccount)
+
+    expect(first.chatId).toBe(1001)
+    expect(second.chatId).toBe(1001)
+    expect(getMe).toHaveBeenCalledTimes(1)
+    expect(accounts.getById(account.id)?.user_id).toBe(1001)
+  })
+})
+
+describe('createLazyClient', () => {
+  it('creates the client on first use only', async () => {
+    const call = mock(async () => ({ ok: true }))
+    const create = mock(() => ({ call }) as unknown as HistoryClient)
+    const client = createLazyClient(create)
+
+    expect(create).not.toHaveBeenCalled()
+    await client.call({ _: 'help.getConfig' })
+    await client.call({ _: 'help.getConfig' })
+
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(call).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('historyRequest', () => {
+  it('asks for the newest page by default', () => {
+    expect(historyRequest({ limit: 20 })).toEqual({ offsetId: 0, limit: 20 })
+  })
+
+  it('asks for the page below --before', () => {
+    expect(historyRequest({ limit: 20, before: 50 })).toEqual({
+      offsetId: 50,
+      limit: 20,
+    })
+  })
+
+  it('asks for the page right above --after, like the daemon', () => {
+    expect(historyRequest({ limit: 20, after: 50 })).toEqual({
+      offsetId: 51,
+      addOffset: -20,
+      limit: 20,
+      minId: 50,
+      maxId: 0,
+    })
+    expect(historyRequest({ limit: 5, after: 50, before: 60 })).toEqual({
+      offsetId: 51,
+      addOffset: -5,
+      limit: 5,
+      minId: 50,
+      maxId: 60,
+    })
+  })
+})
+
+describe('fetchHistoryPage', () => {
+  let cacheDb: Database
+
+  beforeEach(() => {
+    cacheDb = createCacheDb()
+  })
+
+  afterEach(() => {
+    cacheDb.close()
+  })
+
+  it.each<[HistoryWindow, number[]]>([
+    [{ limit: 3 }, [10, 9, 8]],
+    [{ limit: 3, before: 8 }, [7, 6, 5]],
+    [{ limit: 3, after: 3 }, [6, 5, 4]],
+    [{ limit: 3, after: 3, before: 6 }, [5, 4]],
+    [{ limit: 3, after: 0 }, [3, 2, 1]],
+    [{ limit: 3, before: 1 }, []],
+  ])('fetches window %p as %p', async (window, expected) => {
+    const { client } = historyClient(range(1, 10))
+
+    const rows = await fetchHistoryPage(client, cacheDb, TEAM_CHAT, window)
+
+    expect(rowIds(rows)).toEqual(expected)
+  })
+
+  it.each<[HistoryWindow, number[]]>([
+    [{ limit: 3 }, [10, 9, 8]],
+    [{ limit: 3, before: 8 }, [7, 6, 5]],
+    [{ limit: 3, after: 3 }, [6, 5, 4]],
+    [{ limit: 10, after: 3, before: 6 }, [5, 4]],
+  ])(
+    'drops messages outside window %p that Telegram returns',
+    async (window, expected) => {
+      const { client } = unboundedClient(range(1, 10))
+
+      const rows = await fetchHistoryPage(client, cacheDb, TEAM_CHAT, window)
+
+      expect(rowIds(rows)).toEqual(expected)
+      expect(storedIds(cacheDb)).toEqual(expected)
+    },
+  )
+
+  it('stores the page under the marked chat ID with raw_json and fetched_at', async () => {
+    const { client } = historyClient(range(1, 10))
+    const before = Date.now()
+
+    await fetchHistoryPage(client, cacheDb, TEAM_CHAT, { limit: 2 })
+
+    const stored = cacheDb
+      .query(
+        'SELECT chat_id, message_id, raw_json, fetched_at FROM messages_cache ORDER BY message_id',
+      )
+      .all() as Array<{
+      chat_id: number
+      message_id: number
+      raw_json: string
+      fetched_at: number
+    }>
+    expect(stored.map((row) => [row.chat_id, row.message_id])).toEqual([
+      [TEAM_CHAT_ID, 9],
+      [TEAM_CHAT_ID, 10],
+    ])
+    for (const row of stored) {
+      expect(JSON.parse(row.raw_json)).toMatchObject({ id: row.message_id })
+      expect(row.fetched_at).toBeGreaterThanOrEqual(before)
+    }
+  })
+
+  it('adds a hint when Telegram cannot find a chat built from a bare ID', async () => {
+    const call = mock(async () => {
+      throw new Error('CHANNEL_INVALID')
+    })
+
+    await expect(
+      fetchHistoryPage({ call } as unknown as CallClient, cacheDb, TEAM_CHAT, {
+        limit: 3,
+      }),
+    ).rejects.toThrow(
+      'CHANNEL_INVALID (run tg chats list --fresh or pass the @username)',
+    )
+  })
+})
+
+describe('cacheHistoryResponse', () => {
+  it('caches full senders before their messages, so search finds them by name', () => {
+    const cacheDb = createCacheDb()
+    const alice: tl.RawUser = {
+      _: 'user',
+      id: ALICE_ID,
+      firstName: 'Alice',
+      lastName: 'Able',
+      username: 'alice',
+      accessHash: toLong('1111'),
+    }
+    const bob: tl.RawUser = {
+      _: 'user',
+      id: BOB_ID,
+      min: true,
+      firstName: 'Bob',
+    }
+    const message = {
+      _: 'message',
+      id: 7,
+      date: DATE,
+      message: 'see you at noon',
+      fromId: { _: 'peerUser', userId: ALICE_ID },
+    }
+
+    const ids = cacheHistoryResponse(
+      cacheDb,
+      TEAM_CHAT_ID,
+      [message, { _: 'messageEmpty', id: 8 }],
+      [alice, bob],
+    )
+
+    expect(ids).toEqual([7])
+    const usersCache = createUsersCache(cacheDb)
+    expect(usersCache.getById(String(ALICE_ID))).toMatchObject({
+      first_name: 'Alice',
+      access_hash: '1111',
+    })
+    expect(usersCache.getById(String(BOB_ID))).toBeNull()
+
+    const [hit] = createMessagesSearch(cacheDb).search('Alice')
+    expect(hit).toMatchObject({
+      chat_id: TEAM_CHAT_ID,
+      message_id: 7,
+      sender_first_name: 'Alice',
+    })
+    cacheDb.close()
+  })
+})
+
+describe('listHistory', () => {
+  let cacheDb: Database
+
+  beforeEach(() => {
+    cacheDb = createCacheDb()
+  })
+
+  afterEach(() => {
+    cacheDb.close()
+  })
+
+  function list(
+    client: CallClient,
+    window: HistoryWindow,
+    options: { fresh?: boolean; includeDeleted?: boolean } = {},
+  ) {
+    return listHistory({
+      cacheDb,
+      client,
+      chat: TEAM_CHAT,
+      window,
+      includeDeleted: options.includeDeleted ?? false,
+      fresh: options.fresh ?? false,
+    })
+  }
+
+  function syncState(historyComplete: boolean) {
+    const state = createChatSyncStateService(cacheDb)
+    state.upsert({
+      chat_id: TEAM_CHAT_ID,
+      chat_type: 'supergroup',
+      sync_priority: SyncPriority.Medium,
+      sync_enabled: true,
+      forward_cursor: 5,
+      backward_cursor: 2,
+    })
+    if (historyComplete) state.markHistoryComplete(TEAM_CHAT_ID)
+    return state
+  }
+
+  it('serves a window the cache holds without a client', async () => {
+    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 5))
+    const create = throwingFactory()
+
+    const result = await list(createLazyClient(create), {
+      limit: 2,
+      before: 5,
+    })
+
+    expect(result).toMatchObject({
+      chatId: TEAM_CHAT_ID,
+      limit: 2,
+      before: 5,
+      after: null,
+      nextBefore: 3,
+      nextAfter: 4,
+      source: 'cache',
+      stale: false,
+    })
+    expect(messageIds(result.items)).toEqual([4, 3])
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('asks Telegram for a window the cache does not hold, then caches it', async () => {
+    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 5))
+    const { client, requests } = historyClient(range(1, 10))
+
+    const fetched = await list(client, { limit: 3, after: 5 })
+    const cached = await list(client, { limit: 3, after: 5 })
+
+    expect(fetched.source).toBe('api')
+    expect(messageIds(fetched.items)).toEqual([8, 7, 6])
+    expect(cached.source).toBe('cache')
+    expect(cached.items).toEqual(fetched.items)
+    expect(requests).toHaveLength(1)
+  })
+
+  it('returns an empty page with null cursors', async () => {
+    const { client } = historyClient([])
+
+    const result = await list(client, { limit: 3 })
+
+    expect(result).toMatchObject({
+      items: [],
+      nextBefore: null,
+      nextAfter: null,
+      source: 'api',
+    })
+  })
+
+  it('always asks Telegram with fresh, and its items match the next cache read', async () => {
+    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 10))
+    const { client, requests } = historyClient(range(1, 10))
+
+    const fresh = await list(client, { limit: 3 }, { fresh: true })
+    const cached = await list(client, { limit: 3 })
+
+    expect(requests).toHaveLength(1)
+    expect(fresh.source).toBe('api')
+    expect(cached.source).toBe('cache')
+    expect(fresh.items).toEqual(cached.items)
+    expect(fresh.items[0]?.text).toBe('msg 10')
+  })
+
+  it('pages a fully synced chat to its start without Telegram', async () => {
+    cacheMessages(cacheDb, TEAM_CHAT_ID, range(3, 5))
+    syncState(true)
+    const { client, requests } = historyClient(range(1, 5))
+
+    const result = await list(client, { limit: 3, before: 3 })
+
+    expect(result.items).toEqual([])
+    expect(result.source).toBe('cache')
+    expect(requests).toHaveLength(0)
+  })
+
+  it('asks Telegram for older messages while history is incomplete', async () => {
+    cacheMessages(cacheDb, TEAM_CHAT_ID, range(3, 5))
+    syncState(false)
+    const { client, requests } = historyClient(range(1, 5))
+
+    const result = await list(client, { limit: 3, before: 3 })
+
+    expect(messageIds(result.items)).toEqual([2, 1])
+    expect(result.source).toBe('api')
+    expect(requests).toHaveLength(1)
+  })
+
+  it('asks Telegram for newer messages even when history is complete', async () => {
+    cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 5))
+    syncState(true)
+    const { client, requests } = historyClient(range(1, 7))
+
+    const result = await list(client, { limit: 3, after: 5 })
+
+    expect(messageIds(result.items)).toEqual([7, 6])
+    expect(requests).toHaveLength(1)
+  })
+
+  it('leaves the sync cursors alone', async () => {
+    const state = syncState(false)
+    const before = state.get(TEAM_CHAT_ID)
+    const { client } = historyClient(range(1, 10))
+
+    await list(client, { limit: 3 }, { fresh: true })
+    await list(client, { limit: 3, after: 0 })
+
+    const after = state.get(TEAM_CHAT_ID)
+    expect(after?.forward_cursor).toBe(before!.forward_cursor)
+    expect(after?.backward_cursor).toBe(before!.backward_cursor)
+    expect(after?.history_complete).toBe(before!.history_complete)
+  })
+})
+
+describe('parseIntegerArg', () => {
+  let errorSpy: ReturnType<typeof spyOn>
+
+  beforeEach(() => {
+    errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    errorSpy.mockRestore()
+  })
+
+  it('parses plain digits in range and falls back to the default', () => {
+    expect(parseIntegerArg('42', 'limit', { min: 1, max: 100 })).toBe(42)
+    expect(parseIntegerArg(' 7 ', 'limit', { min: 1 })).toBe(7)
+    expect(parseIntegerArg('0', 'after', { min: 0 })).toBe(0)
+    expect(parseIntegerArg(undefined, 'limit', { min: 1, default: 20 })).toBe(
+      20,
+    )
+    expect(parseIntegerArg(undefined, 'before', { min: 1 })).toBeUndefined()
+  })
+
+  it.each(['5abc', 'abc', '-1', '1.5', '', '1e3', '0x10'])(
+    'rejects %p',
+    (value) => {
+      expect(() => parseIntegerArg(value, 'limit', { min: 0 })).toThrow(
+        `Invalid --limit: ${value}`,
+      )
+    },
+  )
+
+  it('rejects values out of range with INVALID_ARGS', () => {
+    for (const value of ['0', '101']) {
+      try {
+        parseIntegerArg(value, 'limit', { min: 1, max: 100 })
+        throw new Error('expected a failure')
+      } catch (err) {
+        expect((err as { code?: string }).code).toBe('INVALID_ARGS')
+      }
+    }
+  })
+})
+
+describe('reportHistoryError', () => {
+  let errorSpy: ReturnType<typeof spyOn>
+
+  beforeEach(() => {
+    errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    errorSpy.mockRestore()
+  })
+
+  function codeOf(err: unknown): { code?: string; message: string } {
+    try {
+      reportHistoryError(err, 'list messages')
+    } catch (thrown) {
+      return thrown as { code?: string; message: string }
+    }
+    throw new Error('expected reportHistoryError to throw')
+  }
+
+  it('maps missing credentials to INVALID_ARGS', () => {
+    const reported = codeOf(
+      new ConfigError('TELEGRAM_API_ID environment variable is required', []),
+    )
+    expect(reported.code).toBe('INVALID_ARGS')
+    expect(reported.message).toContain('TELEGRAM_API_ID')
+  })
+
+  it('maps rate limits to RATE_LIMITED', () => {
+    expect(codeOf(new RateLimitError('messages.getHistory', 30)).code).toBe(
+      'RATE_LIMITED',
+    )
+  })
+
+  it('maps everything else to TELEGRAM_ERROR', () => {
+    const reported = codeOf(new Error('CHANNEL_PRIVATE'))
+    expect(reported.code).toBe('TELEGRAM_ERROR')
+    expect(reported.message).toBe('Failed to list messages: CHANNEL_PRIVATE')
+  })
+})

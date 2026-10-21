@@ -61,7 +61,7 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 - Uses Citty for command parsing
 - Each command is a separate module
 - Commands delegate to services and cache layers
-- Implemented: `auth`, `accounts`, `contacts`, `chats`, `send`, `api`, `me`, `user`, `daemon`, `status`, `sql`
+- Implemented: `auth`, `accounts`, `contacts`, `chats`, `messages`, `send`, `api`, `me`, `user`, `daemon`, `status`, `sql`
 
 ### 2. Service Layer (`src/services/`)
 - Telegram client management
@@ -171,6 +171,7 @@ Commands:
   chats get         Get chat by @username
   chats sync        Turn background sync on or off for a chat (cache-only)
 
+  messages list     Chat history, newest first (cache-first, --before/--after paging, --fresh)
   messages search   Search cached messages (FTS5, --chat/--sender/--includeDeleted)
 
   send              Send message to user/chat
