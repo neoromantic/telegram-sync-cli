@@ -69,7 +69,7 @@ Core tables (see `docs/database-schema.md` for full schema):
 Implemented in `SyncJobType`:
 
 - `forward_catchup` — fetch the next page of messages above `forward_cursor`
-- `initial_load` — initial recent message window
+- `initial_load` — the first page of a chat without a forward cursor: its newest 100 messages
 - `backward_history` — backfill older history
 - `full_sync` — full history job (used sparingly)
 
@@ -84,11 +84,22 @@ Job status values:
 - New messages are upserted into `messages_cache`. They don't move `forward_cursor`: messages
   that arrived while the daemon was stopped may sit between the cursor and a live message.
 
+### First page
+
+Every enabled chat without a `forward_cursor` gets an `initial_load` job, even if live updates
+already cached some of its messages. The job fetches the newest page, sets `forward_cursor` to
+its newest message and `backward_cursor` to its oldest (empty messages count for both), and
+marks history complete if the page reached the start of the chat. Only messages that weren't
+cached yet count towards `synced_messages`. An empty chat gets both cursors at `0`, so its first
+message is caught up from the start like any other gap. A chat that already has a forward
+cursor never gets a first page again: moving the cursor to the newest message could skip
+messages below it.
+
 ### Forward catch-up
 
 Each `forward_catchup` job makes one `messages.getHistory` call:
 
-- **With a cursor**, it fetches the oldest 100 messages above it (`offset_id = cursor + 1`,
+- **With a cursor** (`0` included), it fetches the oldest 100 messages above it (`offset_id = cursor + 1`,
   `add_offset = -100`, `min_id = cursor`), caches them and moves the cursor to the newest one.
   A full page means there may be more, so the scheduler queues the next page. One call per job
   keeps paging under the rate limits and the inter-job delay. If a page fails (for example on

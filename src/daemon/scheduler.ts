@@ -106,26 +106,16 @@ class SyncSchedulerImpl implements SyncScheduler {
       return
     }
 
+    // The first page sets both cursors, so it comes before any history.
+    if (state && state.forward_cursor === null) {
+      this.queueInitialLoad(chatId)
+      return
+    }
+
     if (
       this.jobsService.hasActiveJobForChat(chatId, SyncJobType.BackwardHistory)
     ) {
       return
-    }
-
-    if (state?.backward_cursor === null) {
-      const cachedCount = this.messagesCache.countByChatId(chatId)
-      if (cachedCount === 0) {
-        if (
-          !this.jobsService.hasActiveJobForChat(chatId, SyncJobType.InitialLoad)
-        ) {
-          this.jobsService.create({
-            chat_id: chatId,
-            job_type: SyncJobType.InitialLoad,
-            priority: state?.sync_priority ?? SyncPriority.Medium,
-          })
-        }
-        return
-      }
     }
 
     this.jobsService.create({
@@ -161,22 +151,10 @@ class SyncSchedulerImpl implements SyncScheduler {
       this.queueForwardCatchup(chat.chat_id)
     }
 
-    const highPriorityChats = this.chatSyncState.getChatsByPriority(
-      SyncPriority.High,
-    )
-    for (const chat of highPriorityChats) {
-      if (!chat.history_complete && chat.synced_messages === 0) {
-        this.queueInitialLoad(chat.chat_id)
-      }
-    }
-
-    const mediumChats = this.chatSyncState.getChatsByPriority(
-      SyncPriority.Medium,
-    )
-    for (const chat of mediumChats) {
-      if (!chat.history_complete && chat.synced_messages === 0) {
-        this.queueInitialLoad(chat.chat_id)
-      }
+    // Every enabled chat without a forward cursor gets its first page, even
+    // if live updates already cached some of its messages.
+    for (const chat of this.chatSyncState.getInitialLoadDue()) {
+      this.queueInitialLoad(chat.chat_id)
     }
 
     const incompleteChats = this.chatSyncState.getIncompleteHistory()

@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   groups over 100 members, instead of getting a full-history sync. The daemon
   keeps the last known count when a dialog leaves it out.
 
+### Fixed
+
+- A chat whose first message arrived live never got its first page, so it had
+  no cursors and no history. Every enabled chat without a forward cursor now
+  gets one.
+- An empty chat was marked complete without a cursor and never caught up. Its
+  cursors now start at 0, so its first message is caught up like any other.
+- The first page counted messages that live updates had already cached, and a
+  page of only deleted messages set the backward cursor past every message.
+
 ## [0.1.4] - 2026-10-21
 
 ### Fixed
