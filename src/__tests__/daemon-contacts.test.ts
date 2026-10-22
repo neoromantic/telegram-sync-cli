@@ -523,4 +523,21 @@ describe('handleContactRawUpdate', () => {
       expect.stringContaining('[Account 1] Error handling a contact update'),
     )
   })
+
+  it('keeps a hint that arrived while a check ran, for a check of its own', async () => {
+    const ctx = createContext()
+    const { client, calls } = fakeClient()
+    const db = connect(ctx, 1, client)
+
+    const started = maybeSyncContacts(ctx, NOW)
+    handleContactRawUpdate(ctx, 1, db, userUpdate(), NOW)
+    calls[0]?.resolve(notModified)
+    await Promise.all(started)
+
+    // The list the check got may predate the change the hint is about
+    expect(ctx.runtime.contacts.checkAt.get(1)).toBe(
+      NOW + CONTACTS_HINT_DELAY_MS,
+    )
+  })
 })
+

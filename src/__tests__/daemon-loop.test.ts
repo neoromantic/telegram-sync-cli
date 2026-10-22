@@ -432,20 +432,26 @@ describe('mainLoop', () => {
     expect(getMe).not.toHaveBeenCalled()
   })
 
-  it('checks contacts on the first tick and not again before the 30th', async () => {
+  it('looks for due contacts on the first tick and then every 30th', async () => {
     const ctx = createContext()
+    // Every look finds the list due, so each look is one request
+    ctx.runtime.contacts.peersTtlMs = 0
     const requests: string[] = []
-    // The request never settles: the loop doesn't wait for it
     const client = {
       withParams: () => ({
-        call: (request: { _: string }) => {
+        call: async (request: { _: string }) => {
           requests.push(request._)
-          return new Promise(() => {})
+          return {
+            _: 'contacts.contacts',
+            contacts: [],
+            savedCount: 0,
+            users: [],
+          }
         },
       }),
     } as unknown as TelegramClient
     addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      statusService: stopAfterTicks(ctx, 29),
+      statusService: stopAfterTicks(ctx, 30),
     })
     ctx.state.accounts.set(1, {
       accountId: 1,
@@ -456,6 +462,34 @@ describe('mainLoop', () => {
     })
 
     await runWithImmediateTimeouts(() => mainLoop(ctx))
+    // Tick 1 and tick 30; the check of tick 1 ended long before tick 30
+    expect(requests).toEqual(['contacts.getContacts', 'contacts.getContacts'])
+  })
+
+  it('does not hold the loop on a contacts check that never ends', async () => {
+    const ctx = createContext()
+    const requests: string[] = []
+    const client = {
+      withParams: () => ({
+        call: (request: { _: string }) => {
+          requests.push(request._)
+          return new Promise(() => {})
+        },
+      }),
+    } as unknown as TelegramClient
+    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      statusService: stopAfterTicks(ctx, 30),
+    })
+    ctx.state.accounts.set(1, {
+      accountId: 1,
+      phone: '+15550000001',
+      name: null,
+      status: 'connected',
+      client,
+    })
+
+    await runWithImmediateTimeouts(() => mainLoop(ctx))
+    // All 30 ticks ran; the account still had its first check running
     expect(requests).toEqual(['contacts.getContacts'])
   })
 
