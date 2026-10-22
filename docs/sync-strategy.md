@@ -115,7 +115,8 @@ priority at that time (a chat turned on while its first page ran gets the retry 
   counts them and `error_message` holds the last error. The fifth failure marks it `failed`.
   While a lane's jobs are all waiting, its slots go to the other lanes.
 - **FLOOD_WAIT**: a delay, not a failure. The job waits out the FLOOD_WAIT (at least a second,
-  so `FLOOD_WAIT_0` too) and uses no attempt; every lane pauses for the same wait.
+  so `FLOOD_WAIT_0` too) and uses no attempt; every lane of that account pauses for the same
+  wait; other accounts go on.
 - **Permanent errors** fail the job at once: an RPC error 400, 403 or 404, `CHANNEL_PRIVATE`
   with any code, a chat without an InputPeer, or an unknown job type. 401 and 406 are account
   errors that the connection health check handles, so they retry like network errors, timeouts
@@ -257,9 +258,10 @@ is archived), or when `tg chats sync` turns it on.
 
 ## Job lanes
 
-Each account has its own queue and scheduler. The daemon runs one job per tick, taking turns
-between accounts, and each account runs at most one job every 3 seconds, so its jobs share one
-`messages.getHistory` budget. An account's jobs are split into three lanes:
+Each account has its own queue, scheduler and job loop: it runs at most one job at a time,
+starts the next 3 seconds after the last one ended, and doesn't wait for other accounts, so its
+jobs share one `messages.getHistory` budget and one account's FLOOD_WAIT or slow page doesn't
+hold another's. An account's jobs are split into three lanes:
 
 | Lane | Job types |
 |------|-----------|
@@ -291,9 +293,9 @@ Sync jobs use a default batch size of **100 messages** (configurable in worker c
 Rate limits are tracked per API method:
 - `rate_limits` table stores call count + flood wait
 - Workers and CLI calls share the same rate-limit service
-- A FLOOD_WAIT on `messages.getHistory` blocks every lane until it expires; the job that hit it
-  waits it out without using an attempt and runs again from its chat's cursor (see
-  [Retries](#retries)).
+- A FLOOD_WAIT on `messages.getHistory` blocks every lane of that account until it expires;
+  the job that hit it waits it out without using an attempt and runs again from its chat's
+  cursor (see [Retries](#retries)).
 
 ## Notes
 

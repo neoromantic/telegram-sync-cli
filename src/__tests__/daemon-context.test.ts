@@ -16,7 +16,7 @@ describe('daemon-context', () => {
     const runtime = createDaemonRuntime()
 
     expect(runtime.accounts.size).toBe(0)
-    expect(runtime.lastJobAccountId).toBeNull()
+    expect(runtime.jobsInFlight.size).toBe(0)
     expect(runtime.signalHandlersSetup).toBe(false)
     expect(runtime.dialogPassesInFlight.size).toBe(0)
     expect(runtime.shutdown.signal.aborted).toBe(false)

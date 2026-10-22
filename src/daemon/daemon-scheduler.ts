@@ -40,7 +40,7 @@ function createAccountSyncWorker(
   })
 }
 
-/** Accounts in ID order, so turns and logs are stable */
+/** Accounts in ID order, so job starts and logs are stable */
 function runtimesInOrder(ctx: DaemonContext): AccountRuntime[] {
   return [...ctx.runtime.accounts.values()].sort(
     (a, b) => a.accountId - b.accountId,
@@ -131,54 +131,42 @@ export function rebuildSyncWorker(
 }
 
 /**
- * The next job, taking turns between accounts: the walk starts after the
- * account whose job ran last. An account is skipped while it is not
- * connected, while its worker can't call Telegram (a FLOOD_WAIT), or while
- * its own inter-job delay runs. Each account runs only the jobs in its own
- * cache. An account whose cache fails to answer (a corrupt page, a lock
- * held past busy_timeout) is logged and waits out its delay, so it never
- * stops the accounts after it.
+ * The account's next job, or null when it can't run one now: while it is
+ * not connected, while its worker can't call Telegram (a FLOOD_WAIT), or
+ * while its own inter-job delay runs. Each account runs only the jobs in its
+ * own cache. An account whose cache fails to answer (a corrupt page, a lock
+ * held past busy_timeout) is logged and waits out its delay; the other
+ * accounts pick their own jobs.
  */
-function pickNextJob(
+function pickJob(
   ctx: DaemonContext,
+  rt: AccountRuntime,
   now: number,
-): { rt: AccountRuntime; worker: RealSyncWorker; job: SyncJobRow } | null {
-  const runtimes = runtimesInOrder(ctx)
-  const last = ctx.runtime.lastJobAccountId
-  const startIndex =
-    last === null ? 0 : runtimes.findIndex((rt) => rt.accountId > last)
-  const ordered =
-    startIndex <= 0
-      ? runtimes
-      : [...runtimes.slice(startIndex), ...runtimes.slice(0, startIndex)]
+): { worker: RealSyncWorker; job: SyncJobRow } | null {
+  const { scheduler, worker } = rt
+  if (!scheduler || !worker) return null
 
-  for (const rt of ordered) {
-    const { scheduler, worker } = rt
-    if (!scheduler || !worker) continue
-
-    const accountState = ctx.state.accounts.get(rt.accountId)
-    if (accountState?.status !== 'connected' || !accountState.client) continue
-    if (
-      rt.lastJobProcessTime !== 0 &&
-      now - rt.lastJobProcessTime < DEFAULT_JOB_EXECUTOR_CONFIG.interJobDelayMs
-    ) {
-      continue
-    }
-
-    try {
-      // Both read the account's cache: rate_limits, then sync_jobs
-      if (!worker.canMakeApiCall()) continue
-      const job = scheduler.getNextJob()
-      if (job) return { rt, worker, job }
-    } catch (err) {
-      rt.lastJobProcessTime = now
-      ctx.logger.warn(
-        `[Account ${rt.accountId}] Failed to pick a job: ${formatError(err)}`,
-      )
-    }
+  const accountState = ctx.state.accounts.get(rt.accountId)
+  if (accountState?.status !== 'connected' || !accountState.client) return null
+  if (
+    rt.lastJobProcessTime !== 0 &&
+    now - rt.lastJobProcessTime < DEFAULT_JOB_EXECUTOR_CONFIG.interJobDelayMs
+  ) {
+    return null
   }
 
-  return null
+  try {
+    // Both read the account's cache: rate_limits, then sync_jobs
+    if (!worker.canMakeApiCall()) return null
+    const job = scheduler.getNextJob()
+    return job ? { worker, job } : null
+  } catch (err) {
+    rt.lastJobProcessTime = now
+    ctx.logger.warn(
+      `[Account ${rt.accountId}] Failed to pick a job: ${formatError(err)}`,
+    )
+    return null
+  }
 }
 
 /** Log a job that didn't succeed, by what happened to its row */
@@ -238,11 +226,12 @@ function logJobOutcome(
   }
 }
 
-export async function processJobs(ctx: DaemonContext): Promise<void> {
-  const picked = pickNextJob(ctx, Date.now())
-  if (!picked) return
-
-  const { rt, worker, job } = picked
+async function runJob(
+  ctx: DaemonContext,
+  rt: AccountRuntime,
+  worker: RealSyncWorker,
+  job: SyncJobRow,
+): Promise<void> {
   const scheduler = rt.scheduler!
   const tag = `[Account ${rt.accountId}]`
 
@@ -282,11 +271,55 @@ export async function processJobs(ctx: DaemonContext): Promise<void> {
   } catch (err) {
     ctx.logger.error(`${tag} Job ${job.id} error: ${formatError(err)}`)
   } finally {
-    // The job used its lane's slot, whatever the outcome.
+    // The job used its lane's slot, whatever the outcome; the account's
+    // delay counts from its end.
     scheduler.recordJobRun(job)
     rt.lastJobProcessTime = Date.now()
-    ctx.runtime.lastJobAccountId = rt.accountId
   }
+}
+
+/**
+ * Start the next job of every account that has none running and can run
+ * one now (#60). Each account runs one job at a time, 3 s after its last
+ * one ended, and never waits for another account's job: a FLOOD_WAIT or a
+ * slow page holds only its own account. Returns the started jobs, which
+ * never reject; each leaves `jobsInFlight` when it ends.
+ */
+export function startDueJobs(ctx: DaemonContext): Promise<void>[] {
+  if (ctx.state.shutdownRequested) return []
+
+  const now = Date.now()
+  const started: Promise<void>[] = []
+  for (const rt of runtimesInOrder(ctx)) {
+    const id = rt.accountId
+    if (ctx.runtime.jobsInFlight.has(id)) continue
+    const picked = pickJob(ctx, rt, now)
+    if (!picked) continue
+
+    const { worker, job } = picked
+    const p = runJob(ctx, rt, worker, job)
+      .catch((err) => {
+        ctx.logger.error(
+          `[Account ${id}] Job ${job.id} error: ${formatError(err)}`,
+        )
+      })
+      .finally(() => {
+        ctx.runtime.jobsInFlight.delete(id)
+      })
+    ctx.runtime.jobsInFlight.set(id, p)
+    started.push(p)
+  }
+  return started
+}
+
+/** Run every due account's next job and wait for them: tests, one-shot use */
+export async function processJobs(ctx: DaemonContext): Promise<void> {
+  await Promise.all(startDueJobs(ctx))
+}
+
+/** Wait for every account's running sync job to end */
+export async function waitForJobsInFlight(ctx: DaemonContext): Promise<void> {
+  await Promise.allSettled([...ctx.runtime.jobsInFlight.values()])
 }
 
 /** Delete every account's old completed and failed jobs */
@@ -322,7 +355,13 @@ export function refreshAllQueues(ctx: DaemonContext): void {
   }
 }
 
-export function cleanupScheduler(ctx: DaemonContext): void {
+/**
+ * Wait for the running jobs, then drop every account's scheduler and
+ * worker, so a cache or client is never closed under a job. Call it after
+ * `requestShutdown`: the stop ends the request each job waits on.
+ */
+export async function cleanupScheduler(ctx: DaemonContext): Promise<void> {
+  await waitForJobsInFlight(ctx)
   cleanupOldJobs(ctx)
   for (const rt of ctx.runtime.accounts.values()) {
     rt.worker = null

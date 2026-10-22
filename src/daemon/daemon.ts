@@ -190,7 +190,10 @@ async function cleanupWithTimeout(
 
 async function performCleanup(ctx: DaemonContext): Promise<void> {
   const cleanupWork = async () => {
-    cleanupScheduler(ctx)
+    // Ends the requests the sync jobs wait on, also after a mainLoop that
+    // threw, so the jobs end quickly
+    requestShutdown(ctx)
+    await cleanupScheduler(ctx)
     await disconnectAllAccounts(ctx)
 
     for (const rt of ctx.runtime.accounts.values()) {

@@ -16,6 +16,8 @@ import {
   initializeScheduler,
   processJobs,
   rebuildSyncWorker,
+  startDueJobs,
+  waitForJobsInFlight,
 } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import type { RealSyncWorker } from '../daemon/sync-worker'
@@ -691,7 +693,7 @@ describe('processJobs', () => {
     await processJobs(ctx)
 
     expect(rt.lastJobProcessTime).toBeGreaterThan(0)
-    expect(ctx.runtime.lastJobAccountId).toBe(1)
+    expect(ctx.runtime.jobsInFlight.size).toBe(0)
     expect(scheduler.queueForwardCatchup).not.toHaveBeenCalled()
   })
 
@@ -894,7 +896,7 @@ describe('processJobs', () => {
     expect(getNextJob).not.toHaveBeenCalled()
   })
 
-  it('takes turns between accounts, each waiting its own delay', async () => {
+  it("runs each account's jobs on its own 3 s delay", async () => {
     const ctx = createContext()
     const ran: number[] = []
     for (const accountId of [1, 2]) {
@@ -948,7 +950,6 @@ describe('processJobs', () => {
     const clock = useClock()
 
     try {
-      // Account 1 comes first on every tick until a job runs
       await processJobs(ctx)
       clock.advance(1000)
       await processJobs(ctx)
@@ -989,7 +990,7 @@ describe('processJobs', () => {
     await processJobs(ctx)
 
     expect(processJobReal).toHaveBeenCalledTimes(1)
-    expect(ctx.runtime.lastJobAccountId).toBe(2)
+    expect(ctx.runtime.jobsInFlight.size).toBe(0)
   })
 })
 
@@ -1172,6 +1173,68 @@ describe('processJobs with two accounts', () => {
       createRateLimitsService(second.db).isBlocked('messages.getHistory'),
     ).toBe(false)
   })
+
+  it("finishes account 2's jobs while account 1's job sleeps in a FLOOD_WAIT (#60)", async () => {
+    const ctx = createContext()
+    // Account 1: one DM due, whose request waits like mtcute's flood waiter
+    const first = seedAccount(ctx, 1, { withChat: true })
+    const call = mock(
+      (_request: unknown, params?: { abortSignal?: AbortSignal }) =>
+        waitLikeFloodWait(params, { guardMs: 1000 }),
+    )
+    connect(ctx, 1, asTelegramClient({ call } as Partial<TelegramClient>))
+    // Account 2: two DMs due, served by a fake history
+    const BOB = 5002
+    const CAROL = 5003
+    const secondDb = createAccountCacheDb()
+    dbs.push(secondDb)
+    for (const chatId of [BOB, CAROL]) {
+      createChatSyncStateService(secondDb).upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+      })
+    }
+    const history = createFakeHistory(range(1, 5))
+    connect(ctx, 2, history.client)
+    addAccountRuntime(ctx, 2, secondDb)
+    await initializeScheduler(ctx)
+    const firstJobs = createSyncJobsService(first.db)
+    const [queued] = firstJobs.getPendingJobs()
+    expect(queued).toBeDefined()
+    expect(pendingJobs(secondDb)).toHaveLength(2)
+    const clock = useClock()
+
+    try {
+      const firstStarts = startDueJobs(ctx)
+      expect(firstStarts).toHaveLength(2)
+      await firstStarts[1]
+      clock.advance(3000)
+      // Account 1's job still runs: only account 2 starts its next one
+      const nextStarts = startDueJobs(ctx)
+      expect(nextStarts).toHaveLength(1)
+      await nextStarts[0]
+    } finally {
+      clock.restore()
+    }
+
+    expect(history.requests).toHaveLength(2)
+    expect(createSyncJobsService(secondDb).countJobs()).toMatchObject({
+      pending: 0,
+      running: 0,
+    })
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(firstJobs.getById(queued!.id)?.status).toBe('running')
+
+    const started = performance.now()
+    requestShutdown(ctx)
+    await waitForJobsInFlight(ctx)
+
+    expect(performance.now() - started).toBeLessThan(500)
+    expect(firstJobs.getById(queued!.id)).toEqual(queued!)
+    expect(ctx.runtime.jobsInFlight.size).toBe(0)
+  })
 })
 
 describe('a daemon stop during a sync job', () => {
@@ -1280,7 +1343,7 @@ describe('a daemon stop during a sync job', () => {
 })
 
 describe('cleanupScheduler', () => {
-  it("cleans up every account's old jobs and drops its scheduler and worker", () => {
+  it("cleans up every account's old jobs and drops its scheduler and worker", async () => {
     const ctx = createContext()
     const schedulers = [1, 2].map((accountId) => {
       const scheduler = createSchedulerStub({ cleanup: mock(() => 2) })
@@ -1288,7 +1351,7 @@ describe('cleanupScheduler', () => {
       return scheduler
     })
 
-    cleanupScheduler(ctx)
+    await cleanupScheduler(ctx)
 
     for (const scheduler of schedulers) {
       expect(scheduler.cleanup).toHaveBeenCalled()
@@ -1300,5 +1363,42 @@ describe('cleanupScheduler', () => {
       expect(rt.scheduler).toBeNull()
       expect(rt.worker).toBeNull()
     }
+  })
+
+  it("waits for every account's job in flight before it drops the schedulers", async () => {
+    const ctx = createContext()
+    let finish = () => {}
+    const blocked = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const rt = runAccount(ctx, 1, {
+      scheduler: createSchedulerStub({
+        getNextJob: () => jobOf(SyncJobType.ForwardCatchup),
+      }),
+      worker: createWorkerStub({
+        processJobReal: mock(async () => {
+          await blocked
+          return { success: true, messagesFetched: 0 }
+        }),
+      }),
+    })
+    expect(startDueJobs(ctx)).toHaveLength(1)
+
+    let cleaned = false
+    const cleanup = cleanupScheduler(ctx).then(() => {
+      cleaned = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(cleaned).toBe(false)
+    expect(rt.scheduler).not.toBeNull()
+
+    finish()
+    await cleanup
+
+    expect(rt.scheduler).toBeNull()
+    expect(rt.worker).toBeNull()
+    expect(ctx.runtime.jobsInFlight.size).toBe(0)
   })
 })

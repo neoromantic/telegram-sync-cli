@@ -34,8 +34,8 @@ export interface AccountRuntime {
 
 export interface DaemonRuntime {
   accounts: Map<number, AccountRuntime>
-  /** The account whose job ran last; the next turn starts after it */
-  lastJobAccountId: number | null
+  /** Each account's running sync job; one at a time per account */
+  jobsInFlight: Map<number, Promise<void>>
   signalHandlersSetup: boolean
   /** Accounts whose dialog pass after a reconnect is still running */
   dialogPassesInFlight: Set<number>
@@ -62,7 +62,7 @@ export interface DaemonContext {
 export function createDaemonRuntime(): DaemonRuntime {
   return {
     accounts: new Map(),
-    lastJobAccountId: null,
+    jobsInFlight: new Map(),
     signalHandlersSetup: false,
     dialogPassesInFlight: new Set(),
     shutdown: new AbortController(),
