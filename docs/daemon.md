@@ -116,10 +116,13 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
   the work that is due again, such as chats first seen live
 - The job loop takes turns between accounts: each tick it runs the next job of the first
   account after the one that ran last whose client is connected, which isn't waiting out a
-  FLOOD_WAIT, and whose own 3-second delay since its last job has passed. One account's
-  FLOOD_WAIT or lost connection doesn't stop the others; a disconnected account's jobs stay
-  pending until it reconnects. Jobs still run one at a time, so with three or more busy
-  accounts each one syncs more slowly
+  FLOOD_WAIT, and whose own 3-second delay since its last job has passed. One account's lost
+  connection doesn't stop the others; a disconnected account's jobs stay pending until it
+  reconnects. A FLOOD_WAIT longer than 5 minutes, recorded in that account's `rate_limits`,
+  pauses only that account; a shorter one, which mtcute sleeps through inside the job, still
+  holds the job loop and so every account
+  ([#60](https://github.com/neoromantic/telegram-sync-cli/issues/60)). Jobs run one at a time, so with three or more busy accounts each
+  one syncs more slowly
 
 See [sync-strategy.md](sync-strategy.md) for the rules.
 

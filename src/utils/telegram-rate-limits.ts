@@ -26,7 +26,8 @@ const services = new Map<number, { db: Database; service: RateLimitsService }>()
 
 /**
  * The account's rate limits, kept in its own cache: the CLI and the daemon
- * coordinate per account, and one account's FLOOD_WAIT never blocks another
+ * coordinate per account, and a FLOOD_WAIT one account recorded never
+ * blocks another
  */
 export function getRateLimitsService(accountId: number): RateLimitsService {
   const db = getAccountCacheDb(accountId)

@@ -6,8 +6,9 @@
 
 telegram-sync-cli coordinates rate limits across the CLI and daemon per account, in the
 account's own cache database (`accounts/<id>/cache.db`). All API calls are recorded and
-FLOOD_WAITs are enforced before subsequent calls are made. One account's FLOOD_WAIT never
-blocks another account.
+FLOOD_WAITs are enforced before subsequent calls are made. A recorded FLOOD_WAIT blocks only
+its own account; in the daemon, a shorter wait that mtcute sleeps through still holds the job
+loop of every account (see [Notes](#notes)).
 
 Key behaviors:
 - Track per-method call counts in rolling windows
@@ -84,4 +85,5 @@ left it. Other errors retry with backoff (see
 - Rate-limit tracking is per-method (e.g., `messages.getHistory`).
 - CLI and daemon share each account's `cache.db`, so limits are coordinated per account.
 - mtcute's flood waiter sleeps inside the call, and the daemon runs one job at a time, so a
-  wait of up to 5 minutes inside one account's job still holds up the other accounts' jobs.
+  wait of up to 5 minutes inside one account's job still holds up the other accounts' jobs
+  ([#60](https://github.com/neoromantic/telegram-sync-cli/issues/60)).
