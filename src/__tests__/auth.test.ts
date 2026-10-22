@@ -1,16 +1,28 @@
 /**
  * Authentication commands tests
  */
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { TelegramClient } from '@mtcute/bun'
 import {
   type AuthDependencies,
   getAuthStatus,
+  getDefaultDependencies,
   loginWithPhone,
   loginWithQr,
   logout,
   type QrCodeGenerator,
 } from '../commands/auth'
+import { syncActiveAccountFromConfig } from '../config'
 import { type AccountsDbInterface, createTestDatabase } from '../db'
 import type { Account } from '../types'
 
@@ -128,6 +140,7 @@ describe('Authentication Commands', () => {
       isAuthorized: mock(() => Promise.resolve(true)),
       prompt: mock(() => Promise.resolve('123456')),
       promptPassword: mock(() => Promise.resolve('password123')),
+      keepActiveAccountInConfig: mock(() => Promise.resolve()),
     }
   })
 
@@ -423,21 +436,34 @@ describe('Authentication Commands', () => {
   })
 
   /**
-   * The command after a login has to use the account it logged in (#62).
-   * Account 1 is active at the start of each test; the phone login signs in
-   * user 123 and the QR login user 456, so both add account 2.
+   * The command after a login has to use the account it logged in (#62):
+   * in data.db, and in config.json when activeAccount is set there, as every
+   * start applies it. Account 1 is active at the start of each test; the
+   * phone login signs in user 123 and the QR login user 456, so both add
+   * account 2. The tests use tg's own hook on a data dir of their own.
    */
   describe('the account a login makes active', () => {
+    const isRoot = process.getuid?.() === 0
     const logins = [
       ['tg auth login', (d: AuthDependencies) => loginWithPhone(PHONE, d)],
       ['tg auth login-qr', (d: AuthDependencies) => loginWithQr('Second', d)],
     ] as const
+
+    let dataDir: string
+    let savedDataDir: string | undefined
+
+    const configPath = () => join(dataDir, 'config.json')
+    const writeConfig = (text: string) => writeFileSync(configPath(), text)
+    const readConfig = () => readFileSync(configPath(), 'utf8')
 
     const activeIds = () =>
       accountsDb
         .getAll()
         .filter((account) => account.is_active === 1)
         .map((account) => account.id)
+
+    /** What the next command's start does: apply activeAccount, if set */
+    const nextCommandStart = () => syncActiveAccountFromConfig(accountsDb)
 
     const failLogins = () => {
       deps.createClient = mock(() =>
@@ -449,6 +475,11 @@ describe('Authentication Commands', () => {
     }
 
     beforeEach(() => {
+      savedDataDir = process.env.TELEGRAM_SYNC_CLI_DATA_DIR
+      dataDir = mkdtempSync(join(tmpdir(), 'telegram-sync-cli-auth-test-'))
+      process.env.TELEGRAM_SYNC_CLI_DATA_DIR = dataDir
+      deps.keepActiveAccountInConfig =
+        getDefaultDependencies().keepActiveAccountInConfig
       deps.qrGenerator = { generate: mock(() => {}) }
       accountsDb.create({
         phone: '+15550000001',
@@ -457,23 +488,91 @@ describe('Authentication Commands', () => {
       })
     })
 
+    afterEach(() => {
+      process.env.TELEGRAM_SYNC_CLI_DATA_DIR = savedDataDir
+      rmSync(dataDir, { recursive: true, force: true })
+    })
+
     for (const [name, login] of logins) {
-      it(`${name} makes a new account the only active one`, async () => {
+      it(`${name} makes a new account the only active one and creates no config.json`, async () => {
         const result = await login(deps)
+        await nextCommandStart()
 
         expect(result.account?.id).toBe(2)
         expect(activeIds()).toEqual([2])
         expect(accountsDb.getActive()?.id).toBe(2)
+        expect(existsSync(configPath())).toBe(false)
       })
 
-      it(`${name} leaves the active account alone when it fails`, async () => {
+      it(`${name} writes the account to activeAccount and keeps the other keys`, async () => {
+        writeConfig(
+          JSON.stringify({
+            activeAccount: 1,
+            cache: { staleness: { peers: '3d' } },
+            note: 'kept',
+          }),
+        )
+
+        const result = await login(deps)
+        await nextCommandStart()
+
+        expect(result.account?.id).toBe(2)
+        expect(JSON.parse(readConfig())).toEqual({
+          activeAccount: 2,
+          cache: { staleness: { peers: '3d' } },
+          note: 'kept',
+        })
+        expect(activeIds()).toEqual([2])
+      })
+
+      it(`${name} leaves a config.json without activeAccount byte for byte`, async () => {
+        const text = '{"cache":{"staleness":{"peers":"3d"}}}'
+        writeConfig(text)
+
+        await login(deps)
+        await nextCommandStart()
+
+        expect(readConfig()).toBe(text)
+        expect(activeIds()).toEqual([2])
+      })
+
+      it(`${name} leaves the active account and config.json alone when it fails`, async () => {
+        const text = JSON.stringify({ activeAccount: 1 })
+        writeConfig(text)
         failLogins()
 
         const result = await login(deps)
 
         expect(result.success).toBe(false)
         expect(activeIds()).toEqual([1])
+        expect(readConfig()).toBe(text)
       })
+
+      it.skipIf(isRoot)(
+        `${name} fails with GENERAL_ERROR when activeAccount can't be written`,
+        async () => {
+          const text = JSON.stringify({ activeAccount: 1 })
+          writeConfig(text)
+          chmodSync(configPath(), 0o444)
+
+          const failure = await login(deps).then(
+            () => undefined,
+            (err: Error & { code?: string; details?: unknown }) => err,
+          )
+
+          expect(failure?.code).toBe('GENERAL_ERROR')
+          expect(failure?.message).toStartWith(
+            'Logged in as account 2, but could not write activeAccount to',
+          )
+          expect(failure?.details).toEqual({
+            path: configPath(),
+            account_id: 2,
+          })
+          // config.json first: data.db keeps account 1 active as well
+          expect(readConfig()).toBe(text)
+          expect(activeIds()).toEqual([1])
+        },
+      )
     }
 
     it('a failed re-login leaves the active account alone', async () => {
@@ -484,6 +583,31 @@ describe('Authentication Commands', () => {
 
       expect(result.success).toBe(false)
       expect(activeIds()).toEqual([1])
+    })
+
+    it('leaves config.json alone when activeAccount already names the account', async () => {
+      accountsDb.create({ phone: PHONE })
+      const text = JSON.stringify({ activeAccount: 2 })
+      writeConfig(text)
+
+      await loginWithPhone(PHONE, deps)
+      await nextCommandStart()
+
+      expect(readConfig()).toBe(text)
+      expect(activeIds()).toEqual([2])
+    })
+
+    it('writes the account a QR login merges into, not the one it created', async () => {
+      accountsDb.create({ phone: '+15550000003', user_id: 456 })
+      writeConfig(JSON.stringify({ activeAccount: 1 }))
+
+      const result = await loginWithQr('Again', deps)
+      await nextCommandStart()
+
+      expect(result.account?.id).toBe(2)
+      expect(accountsDb.count()).toBe(2)
+      expect(JSON.parse(readConfig())).toEqual({ activeAccount: 2 })
+      expect(activeIds()).toEqual([2])
     })
   })
 
