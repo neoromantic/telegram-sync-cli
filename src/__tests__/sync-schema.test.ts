@@ -155,6 +155,27 @@ describe('sync schema', () => {
         .all()
       expect(indexes).toHaveLength(1)
     })
+
+    it('indexes message_id for deletes without chat context', () => {
+      expect(
+        db
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_cache_message_id'",
+          )
+          .get(),
+      ).toEqual({ name: 'idx_messages_cache_message_id' })
+
+      const plan = db
+        .query(
+          'EXPLAIN QUERY PLAN SELECT chat_id FROM messages_cache WHERE message_id = ? AND is_deleted = 0',
+        )
+        .all(7) as Array<{ detail: string }>
+      expect(
+        plan.some((step) =>
+          step.detail.includes('USING INDEX idx_messages_cache_message_id'),
+        ),
+      ).toBe(true)
+    })
   })
 
   describe('message_search table', () => {
@@ -622,5 +643,64 @@ describe('migration from 0.1.4', () => {
     expect(rowOf(daemon)).toHaveProperty('top_message_id', null)
     cli.close()
     daemon.close()
+  })
+})
+
+describe('message_id index on an existing cache', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'tg-sync-schema-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  const schemaOf = (db: Database) =>
+    db.query('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()
+  const messagesOf = (db: Database) =>
+    db
+      .prepare(
+        'SELECT chat_id, message_id, text, is_deleted FROM messages_cache ORDER BY chat_id, message_id',
+      )
+      .all()
+  const hasIndex = (db: Database) =>
+    db
+      .query(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_cache_message_id'",
+      )
+      .get() !== null
+
+  it('adds the message_id index to an existing cache and keeps its messages', () => {
+    const path = join(dir, 'cache.db')
+
+    // A cache from before the index
+    const old = new Database(path)
+    initCacheSchema(old)
+    initSyncSchema(old)
+    old.run('DROP INDEX idx_messages_cache_message_id')
+    old.run(
+      `INSERT INTO messages_cache (chat_id, message_id, text, date, fetched_at, raw_json)
+       VALUES (4242, 7, 'see you at noon', 1700000000, 1700000000000, '{}'),
+              (-1001234567890, 7, 'weekly digest', 1700000100, 1700000100000, '{}')`,
+    )
+    const before = messagesOf(old)
+    expect(hasIndex(old)).toBe(false)
+    old.close()
+
+    const db = new Database(path)
+    initCacheSchema(db)
+    initSyncSchema(db)
+
+    expect(hasIndex(db)).toBe(true)
+    expect(messagesOf(db)).toEqual(before)
+    expect(before).toHaveLength(2)
+
+    const schema = schemaOf(db)
+    initSyncSchema(db)
+    expect(schemaOf(db)).toEqual(schema)
+    expect(messagesOf(db)).toEqual(before)
+    db.close()
   })
 })

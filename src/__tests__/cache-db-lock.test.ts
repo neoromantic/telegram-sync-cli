@@ -501,6 +501,7 @@ describe('cache database lock', () => {
     // Turn the database back into what 0.1.4 left
     const db = new Database(path)
     db.run('DROP INDEX idx_sync_jobs_lane')
+    db.run('DROP INDEX idx_messages_cache_message_id')
     db.run('ALTER TABLE chat_sync_state DROP COLUMN top_message_id')
     db.run('ALTER TABLE chat_sync_state DROP COLUMN sync_mode')
     db.run('ALTER TABLE sync_jobs DROP COLUMN attempts')
@@ -538,6 +539,13 @@ describe('cache database lock', () => {
     expect(columnsOf('chat_sync_state')).toContain('sync_mode')
     expect(columnsOf('sync_jobs')).toContain('attempts')
     expect(columnsOf('sync_jobs')).toContain('next_run_at')
+    expect(
+      migrated
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_cache_message_id'",
+        )
+        .get(),
+    ).toEqual({ name: 'idx_messages_cache_message_id' })
     migrated.close()
   }, 30_000)
 })

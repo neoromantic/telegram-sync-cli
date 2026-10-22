@@ -288,6 +288,11 @@ export function initSyncSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_cache_fetched
     ON messages_cache(fetched_at)
   `)
+  // A delete without chat context names only message IDs (#7)
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_messages_cache_message_id
+    ON messages_cache(message_id)
+  `)
 
   createMessageSearchSchema(db)
 
