@@ -393,6 +393,20 @@ async function chatTitles(env: TestEnvironment) {
 }
 
 /**
+ * The active accounts in data.db, read without the CLI: every CLI start
+ * applies activeAccount from config.json first and would hide what an
+ * earlier command wrote
+ */
+function activeIds(env: TestEnvironment) {
+  const db = new Database(join(env.dataDir, 'data.db'), { readonly: true })
+  try {
+    return db.query('SELECT id FROM accounts WHERE is_active = 1').all()
+  } finally {
+    db.close()
+  }
+}
+
+/**
  * Every start applies activeAccount from config.json, so a switch has to
  * last across later commands with and without the key (#61). Account 1 is
  * active in data.db at the start of each test.
@@ -502,14 +516,7 @@ describe('E2E: switching accounts', () => {
 
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toBe('')
-      const db = new Database(join(env.dataDir, 'data.db'), { readonly: true })
-      try {
-        expect(
-          db.query('SELECT id FROM accounts WHERE is_active = 1').all(),
-        ).toEqual([{ id: 2 }])
-      } finally {
-        db.close()
-      }
+      expect(activeIds(env)).toEqual([{ id: 2 }])
     } finally {
       expectNoRootCache(env)
       env.cleanup()
@@ -532,6 +539,8 @@ describe('E2E: switching accounts', () => {
         expect(result.error.details).toEqual(
           expect.objectContaining({ path: configPath(env) }),
         )
+        // Before any other command: its start would apply activeAccount: 1
+        expect(activeIds(env)).toEqual([{ id: 1 }])
         expect(await chatTitles(env)).toEqual(['Alice Able'])
         expect(readConfig(env)).toBe(text)
       } finally {
