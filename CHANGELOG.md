@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `tg api` no longer passes its own options to Telegram: the one-letter copies
+  `j`, `a` and `r` of `--json`, `--account` and `--raw`, and `--verbose`,
+  `--quiet`, `--format` and their one-letter forms. A method argument that
+  shares a name with one of them (`q` in `contacts.search` and
+  `messages.search`, `format` in `account.getThemes`) now goes in `--json`;
+  `--q=…` no longer reaches Telegram. API fixtures recorded for `tg api` calls
+  need recording again (#68).
+
+### Fixed
+
+- `tg auth login` and `tg auth login-qr` didn't make the account they logged
+  in to the one the next command uses. With `activeAccount` in `config.json`,
+  the next command went back to the configured account. Without it, a new
+  account was marked active next to the old one, and the old one won. A failed
+  re-login also switched the active account. A successful login now makes its
+  account the only active one and writes its ID to `activeAccount` when
+  `config.json` sets that key to another account, as `tg accounts switch`
+  does, without ever creating the file. A failed login leaves the active
+  account as it was. If that write fails, the login fails with
+  `GENERAL_ERROR`, names the account it logged in to (`details.account_id`)
+  and keeps the previous active account in both files; make `config.json`
+  writable or remove `activeAccount` from it, then run `tg accounts switch
+  --id <id>` (#62).
+- `tg daemon stop` failed with `DAEMON_SHUTDOWN_TIMEOUT` after its 10-second
+  timeout when the daemon was waiting out a FLOOD_WAIT (up to 5 minutes) in
+  its dialog pass or a sync job, and the daemon kept running until the wait
+  ended. A stop now ends that wait at once: the dialog pass stops as it does
+  between dialogs, the sync job goes back to pending with its attempts
+  unchanged and is picked up again on the next start, and nothing is logged as
+  an error for the request that was cut short (#64).
+- `tg api <method> --name value` sent `true` for `name` and dropped `value`,
+  so `tg api account.checkUsername --username myuser` failed with
+  `TELEGRAM_ERROR` and only `--name=value` worked. Both forms now build the
+  same call, a negative number included (`--addOffset -10`, `--geoPoint.lat
+  -1.5`). A flag with nothing after it is still `true`, and any other value
+  that starts with `-` still needs `--name=value` (#68).
+- `tg api <method> --raw` printed the result and then kept running until it
+  was killed, so scripts that used `--raw` never finished. It now exits 0
+  after printing the result (#69).
+
 ## [0.4.0] - 2026-10-22
 
 ### Added
