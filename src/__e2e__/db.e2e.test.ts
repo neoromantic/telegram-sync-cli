@@ -112,7 +112,9 @@ describe('E2E: db vacuum', () => {
     expect(result.exitCode).toBe(1)
     expect(output.error.code).toBe('DAEMON_ALREADY_RUNNING')
     expect(output.error.details).toEqual({ account_id: 1, auto_vacuum: 'none' })
-    expect(output.error.suggestion).toContain('tg daemon stop')
+    expect(output.error.suggestion).toBe(
+      'tg daemon stop && tg db vacuum --account 1 && tg daemon start',
+    )
     const autoVacuum = db.query('PRAGMA auto_vacuum').get() as {
       auto_vacuum: number
     }

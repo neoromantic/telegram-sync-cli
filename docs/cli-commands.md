@@ -403,7 +403,7 @@ without a daemon too, then gives the cache's free pages back to the disk:
 - A cache of an older version, without auto_vacuum, needs one full vacuum: while the daemon
   runs the command fails with `DAEMON_ALREADY_RUNNING` (exit 1), `details`
   `{ account_id, auto_vacuum: "none" }` and the suggestion
-  `tg daemon stop && tg db vacuum && tg daemon start`, and changes nothing.
+  `tg daemon stop && tg db vacuum --account <id> && tg daemon start`, and changes nothing.
 - **`skipped`**: the account has no cache file yet; none is created.
 
 Both modes end with a checkpoint that empties the WAL (`checkpointed: false` when another
