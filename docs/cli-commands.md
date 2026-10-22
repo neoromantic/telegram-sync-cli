@@ -19,6 +19,7 @@
 | `user` | user lookup |
 | `status` | system status |
 | `daemon` | start/stop/status |
+| `db` | vacuum: prune an account's cache and give its free space back to the disk |
 | `sql` | read-only cache queries |
 
 ## Global Flags
@@ -377,6 +378,55 @@ when it needs a restart after an upgrade:
   "cli_version": "0.3.2"
 }
 ```
+
+### Cache maintenance
+
+```bash
+tg db vacuum                    # the active account's cache
+tg db vacuum --account 2
+```
+
+`tg db vacuum` works on one account's cache (`--account`, else the active account, else the
+only one) and needs no Telegram credentials. It first prunes the bookkeeping tables by
+`cache.retention.*`, as the daemon does ([daemon.md](daemon.md#cache-pruning)), so it prunes
+without a daemon too, then gives the cache's free pages back to the disk:
+
+- **`full`**, while the daemon is stopped: a `VACUUM` rewrites the file without its free pages
+  and switches it to incremental auto_vacuum. It waits up to a minute for another process's
+  write lock. A VACUUM may renumber the rows of `messages_cache`; if it did, the search index is
+  rebuilt. Don't start the daemon while it runs: the daemon would wait for the rewrite.
+- **`incremental`**, while the daemon runs, on a cache with incremental auto_vacuum (every cache
+  this version creates, and every one that had a full vacuum): the free pages are released in
+  steps of 1,024 pages, each a short write, so the daemon keeps writing in between.
+- A cache of an older version, without auto_vacuum, needs one full vacuum: while the daemon
+  runs the command fails with `DAEMON_ALREADY_RUNNING` (exit 1), `details`
+  `{ account_id, auto_vacuum: "none" }` and the suggestion
+  `tg daemon stop && tg db vacuum && tg daemon start`, and changes nothing.
+- **`skipped`**: the account has no cache file yet; none is created.
+
+Both modes end with a checkpoint that empties the WAL (`checkpointed: false` when another
+process was reading it; the next checkpoint empties it). A full vacuum needs free disk space of
+about twice the cache: a copy of it in the temporary directory and a WAL as big as the cache.
+Output:
+
+```json
+{
+  "account_id": 1,
+  "mode": "full",
+  "bytes_before": 52428800,
+  "bytes_after": 31457280,
+  "freed_bytes": 20971520,
+  "free_pages_after": 0,
+  "auto_vacuum": "incremental",
+  "pruned": { "api_activity": 1200, "rate_limits": 40, "completed_jobs": 12, "failed_jobs": 0 },
+  "checkpointed": true
+}
+```
+
+`bytes_before` and `bytes_after` count the file and its WAL. Errors: `GENERAL_ERROR` with
+`details.reason` `cache_busy` when another process held the write lock past the wait (try again),
+or `disk_full` when the disk filled up during the VACUUM (the cache is unchanged; free space
+first).
 
 ## Output Shape
 

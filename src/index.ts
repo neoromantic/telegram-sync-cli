@@ -12,6 +12,7 @@ import { chatsCommand } from './commands/chats'
 import { configCommand } from './commands/config'
 import { contactsCommand } from './commands/contacts'
 import { daemonCommand } from './commands/daemon'
+import { dbCommand } from './commands/db'
 import { messagesCommand } from './commands/messages'
 import { sendCommand } from './commands/send'
 import { skillCommand } from './commands/skill'
@@ -78,9 +79,9 @@ const main = defineCommand({
         rawArgs[i - 1] !== '-f' &&
         rawArgs[i - 1] !== '--format',
     )
-    // tg config has to repair an invalid file. tg skill and tg daemon read
-    // neither activeAccount nor the TTLs, and a supervised daemon must not
-    // stop over a typo there, silently under its own -q (which sets ours)
+    // tg config has to repair an invalid file. tg skill reads no key and
+    // tg daemon only cache.retention.*, leniently: a supervised daemon must
+    // not stop over a typo there, silently under its own -q (which sets ours)
     if (
       subCommand === 'config' ||
       subCommand === 'skill' ||
@@ -114,6 +115,7 @@ const main = defineCommand({
     chats: chatsCommand,
     send: sendCommand,
     daemon: daemonCommand,
+    db: dbCommand,
     messages: messagesCommand,
     api: apiCommand,
     me: meCommand,

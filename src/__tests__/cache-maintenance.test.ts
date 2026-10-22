@@ -8,8 +8,16 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { pruneCache, readCacheSize } from '../db/cache-maintenance'
+import {
+  pruneCache,
+  readCacheSize,
+  rebuildSearchIfRowidsMoved,
+  snapshotMessageRowids,
+  VacuumNeedsStoppedDaemonError,
+  vacuumCache,
+} from '../db/cache-maintenance'
 import { createMessagesCache } from '../db/messages-cache'
+import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
@@ -200,5 +208,126 @@ describe('readCacheSize', () => {
 
     expect('tables' in size).toBe(false)
     expect(size.wal_bytes).toBeGreaterThanOrEqual(0)
+  })
+})
+
+const pragma = (cache: Database, name: string) =>
+  Object.values(cache.query(`PRAGMA ${name}`).get() as object)[0]
+
+/** Turn the test's cache into one of an older version: auto_vacuum off */
+function makeLegacyCache() {
+  db.run('PRAGMA auto_vacuum = NONE')
+  db.run('VACUUM')
+  expect(pragma(db, 'auto_vacuum')).toBe(0)
+}
+
+/** Seed made-up messages, then delete a third of them (test only) */
+function seedAndDeleteAThird() {
+  seedMessages(3000)
+  db.run('DELETE FROM messages_cache WHERE message_id % 3 = 0')
+  db.run('PRAGMA wal_checkpoint(TRUNCATE)')
+  expect(pragma(db, 'freelist_count')).toBeGreaterThan(0)
+}
+
+describe('auto_vacuum and journal_size_limit', () => {
+  it('gives a new cache file incremental auto_vacuum', () => {
+    expect(pragma(db, 'auto_vacuum')).toBe(2)
+    expect(pragma(db, 'journal_mode')).toBe('wal')
+    expect(pragma(db, 'journal_size_limit')).toBe(67108864)
+  })
+
+  it('leaves an existing file without auto_vacuum as it is', () => {
+    const path = join(dir, 'older.db')
+    const older = new Database(path)
+    older.run('CREATE TABLE older_table (id INTEGER PRIMARY KEY)')
+    older.close()
+
+    const reopened = new Database(path)
+    initCacheSchema(reopened)
+    expect(pragma(reopened, 'auto_vacuum')).toBe(0)
+    reopened.close()
+  })
+})
+
+describe('vacuumCache', () => {
+  const path = () => join(dir, 'cache.db')
+  const search = (query: string) =>
+    createMessagesSearch(db).search(query, { limit: 5000 })
+
+  it('rewrites a cache without auto_vacuum when the daemon is stopped', () => {
+    makeLegacyCache()
+    seedAndDeleteAThird()
+    const before = search('weekly')
+
+    const result = vacuumCache(db, path(), { daemonRunning: false })
+
+    expect(result.mode).toBe('full')
+    expect(result.bytes_after).toBeLessThan(result.bytes_before)
+    expect(result.freed_bytes).toBe(result.bytes_before - result.bytes_after)
+    expect(result.free_pages_after).toBe(0)
+    expect(result.auto_vacuum).toBe('incremental')
+    expect(pragma(db, 'auto_vacuum')).toBe(2)
+    expect(result.checkpointed).toBe(true)
+    expect(search('weekly')).toEqual(before)
+    expect(before).toHaveLength(2000)
+  })
+
+  it('refuses a cache without auto_vacuum while the daemon runs, writing nothing', () => {
+    makeLegacyCache()
+    seedAndDeleteAThird()
+    const pages = pragma(db, 'page_count')
+
+    expect(() => vacuumCache(db, path(), { daemonRunning: true })).toThrow(
+      VacuumNeedsStoppedDaemonError,
+    )
+    expect(pragma(db, 'page_count')).toBe(pages)
+    expect(pragma(db, 'auto_vacuum')).toBe(0)
+  })
+
+  it('releases free pages in steps on an incremental cache while the daemon runs', () => {
+    seedAndDeleteAThird()
+
+    const result = vacuumCache(db, path(), { daemonRunning: true })
+
+    expect(result.mode).toBe('incremental')
+    expect(result.free_pages_after).toBe(0)
+    expect(pragma(db, 'freelist_count')).toBe(0)
+    expect(result.bytes_after).toBeLessThan(result.bytes_before)
+  })
+})
+
+describe('rebuildSearchIfRowidsMoved', () => {
+  const searchUpdatedAt = () =>
+    (
+      db
+        .query(
+          "SELECT updated_at FROM search_meta WHERE key = 'search_index_version'",
+        )
+        .get() as { updated_at: number }
+    ).updated_at
+
+  it('rebuilds the search index when the rowids changed', () => {
+    seedMessages(10)
+    const before = snapshotMessageRowids(db)
+    db.run('UPDATE search_meta SET updated_at = 0')
+
+    const rebuilt = rebuildSearchIfRowidsMoved(db, {
+      ...before,
+      max: (before.max ?? 0) + 1,
+    })
+
+    expect(rebuilt).toBe(true)
+    expect(searchUpdatedAt()).toBeGreaterThan(0)
+    expect(createMessagesSearch(db).search('weekly')).toHaveLength(10)
+  })
+
+  it('leaves the index alone when they did not', () => {
+    seedMessages(10)
+    db.run('UPDATE search_meta SET updated_at = 0')
+
+    expect(rebuildSearchIfRowidsMoved(db, snapshotMessageRowids(db))).toBe(
+      false,
+    )
+    expect(searchUpdatedAt()).toBe(0)
   })
 })

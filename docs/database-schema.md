@@ -413,9 +413,19 @@ to another user) is stamped for the account that opens it.
 At startup the CLI/daemon ensures:
 
 ```sql
+PRAGMA busy_timeout = 5000;          -- data.db and every accounts/<id>/cache.db
+PRAGMA auto_vacuum = INCREMENTAL;    -- accounts/<id>/cache.db; takes effect on a new file only
 PRAGMA journal_mode = WAL;
-PRAGMA busy_timeout = 5000;  -- data.db and every accounts/<id>/cache.db
+PRAGMA journal_size_limit = 67108864; -- 64 MB, data.db and every cache.db
 ```
+
+A cache file this version creates has incremental auto_vacuum, so `tg db vacuum` can release
+its free pages in short steps while the daemon runs. `auto_vacuum` must be set before a file
+gets its first table, so an older cache keeps `none` until a full `tg db vacuum` (daemon
+stopped) rewrites it. `journal_size_limit` makes a checkpoint shrink the WAL back to 64 MB at
+most; without it a WAL that grew during a VACUUM or behind a long reader stays that size.
+`tg status` reports each cache's `auto_vacuum` mode and free pages
+([cli-commands.md](cli-commands.md#daemon--status--sql)).
 
 The CLI and the daemon write the same account's `cache.db` at the same time, so a write waits
 up to 5 seconds for the other process's write lock instead of failing with "database is

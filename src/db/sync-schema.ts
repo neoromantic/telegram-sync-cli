@@ -233,7 +233,24 @@ function ensureColumn(
 }
 
 /** How long an index build waits for the write lock, as the peer ID migration does */
-const INDEX_BUILD_BUSY_TIMEOUT_MS = 60_000
+export const INDEX_BUILD_BUSY_TIMEOUT_MS = 60_000
+
+/** Run `work` with busy_timeout raised to `timeoutMs`, then restore it */
+export function withBusyTimeout<T>(
+  db: Database,
+  timeoutMs: number,
+  work: () => T,
+): T {
+  const { timeout } = db.query('PRAGMA busy_timeout').get() as {
+    timeout: number
+  }
+  db.run(`PRAGMA busy_timeout = ${timeoutMs}`)
+  try {
+    return work()
+  } finally {
+    db.run(`PRAGMA busy_timeout = ${timeout}`)
+  }
+}
 
 /**
  * Create an index an older cache lacks. Building it reads the whole table,
@@ -250,15 +267,9 @@ function ensureIndex(db: Database, name: string, definition: string): void {
     .get(name)
   if (exists) return
 
-  const { timeout } = db.query('PRAGMA busy_timeout').get() as {
-    timeout: number
-  }
-  db.run(`PRAGMA busy_timeout = ${INDEX_BUILD_BUSY_TIMEOUT_MS}`)
-  try {
+  withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
     db.run(`CREATE INDEX IF NOT EXISTS ${name} ON ${definition}`)
-  } finally {
-    db.run(`PRAGMA busy_timeout = ${timeout}`)
-  }
+  })
 }
 
 /**
