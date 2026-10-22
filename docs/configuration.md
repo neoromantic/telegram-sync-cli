@@ -73,8 +73,11 @@ none active they fail with `NO_ACTIVE_ACCOUNT` (exit 1); `error.details.accounts
 ### Upgrading to per-account caches
 
 Up to 0.3 every account shared one `cache.db` at the root of the data directory. Stop the
-daemon of the older version (`tg daemon stop`) before upgrading, then run any command; the
-first one that needs a cache moves the old file:
+daemon of the older version (`tg daemon stop`) before upgrading. The first command that needs a
+cache moves the old file. The move decides by how many accounts there are, so `tg auth login`,
+`tg auth login-qr`, `tg auth logout` and `tg accounts remove` also move it first, before they
+change the accounts; `tg accounts list`, `tg config`, `tg daemon stop`, `--help` and
+`--version` leave it alone:
 
 - **One account**: the file becomes `accounts/<id>/cache.db`. Every message, cursor, job and
   rate limit carries over, and nothing is synced again.
@@ -85,8 +88,9 @@ first one that needs a cache moves the old file:
   deleted instead.
 
 While an older tg still has the old file open, the move waits. With one account, cache
-commands fail with `CACHE_UNAVAILABLE` (`details.reason`: `shared_cache_in_use`) until it
-exits; with several, commands go on and a later run moves the file. A file that can't be moved
+commands and `tg auth login` fail with `CACHE_UNAVAILABLE` (`details.reason`:
+`shared_cache_in_use`) until it exits, so a second account can't be added before the first
+one's cache moves to it; with several, commands go on and a later run moves the file. A file that can't be moved
 yet, such as a read-only one or one on a full disk, waits the same way with `move_failed`;
 only a file that is not a database is set aside even for one account. `tg status` shows a
 waiting move under `storage.migration`.

@@ -2,10 +2,14 @@ import type { Database } from 'bun:sqlite'
 import {
   type AccountsDbInterface,
   accountsDb as defaultAccountsDb,
+  ensureCacheLayout,
   getAccountCacheDb,
   isCacheUnavailableError,
 } from '../db'
-import type { CacheUnavailableReason } from '../db/cache-layout'
+import type {
+  CacheLayoutMode,
+  CacheUnavailableReason,
+} from '../db/cache-layout'
 import { type Account, ErrorCodes } from '../types'
 import { resolveAccount } from './account-selector'
 import { error } from './output'
@@ -61,5 +65,22 @@ export function openAccountCache(
     return { account, db: getAccountCacheDb(account.id) }
   } catch (err) {
     reportCacheError(err, account.id)
+  }
+}
+
+/**
+ * Move the shared cache of 0.3 and older before a command adds or removes
+ * an account: the move decides by the account count, so with one account
+ * the file is that account's cache, and a second account added first would
+ * force it aside. `strict` (adding an account) fails the command while the
+ * only account's cache can't move yet; `report` goes on.
+ */
+export function settleCacheLayoutBeforeAccountChange(
+  mode: CacheLayoutMode,
+): void {
+  try {
+    ensureCacheLayout({ mode })
+  } catch (err) {
+    reportCacheError(err)
   }
 }

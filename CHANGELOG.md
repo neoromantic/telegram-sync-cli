@@ -37,14 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cached chats, users and messages, sync state, jobs, rate limits and
   `api_activity`. `data.db` keeps only the accounts. Stop the daemon before
   upgrading. The first command that needs a cache moves the shared
-  `cache.db` of 0.3 and older: with one account it becomes that account's
-  cache and everything carries over; with several (or none) its rows can't
-  be split by account, so it is kept as `shared-cache.db` and each account
-  syncs again from an empty cache; an empty one is deleted. While an older
-  tg still has the file open, a single account's commands fail with
-  `CACHE_UNAVAILABLE` until it exits, and while the file can't be moved
-  (`move_failed`: a read-only file, a full disk) until that is fixed; only a
-  file that is not a database is set aside for a single account. Going back to 0.3 after the move is not
+  `cache.db` of 0.3 and older, and so do `tg auth login`, `login-qr`,
+  `logout` and `tg accounts remove` before they change the accounts: with
+  one account it becomes that account's cache and everything carries over;
+  with several (or none) its rows can't be split by account, so it is kept
+  as `shared-cache.db` and each account syncs again from an empty cache; an
+  empty one is deleted. While an older tg still has the file open, a single
+  account's commands fail with `CACHE_UNAVAILABLE` until it exits, and so
+  does `tg auth login`, so a second account can't force the first one's
+  cache aside. A file that can't be moved yet (`move_failed`: a read-only
+  file, a full disk) waits the same way; only a file that is not a database
+  is set aside for a single account. Going back to 0.3 after the move is not
   supported. Scripts that open `cache.db` directly must open
   `accounts/<id>/cache.db` or use `tg sql --account`. See "Upgrading to
   per-account caches" in `docs/configuration.md`.

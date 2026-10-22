@@ -68,6 +68,11 @@ Authentication data lives in the data directory (default `~/.telegram-sync-cli`,
 - `session_<id>.db` — mtcute session storage per account
 - `accounts/<id>/cache.db` — the account's cache and sync database (not required for login).
   `tg auth logout` keeps it; delete `accounts/<id>/` to drop it.
+- Before it changes the accounts, `tg auth login` (and `login-qr`, `logout`) moves a shared
+  `cache.db` of 0.3 or older to the per-account layout. With one account and an older tg still
+  holding that file, login fails with `CACHE_UNAVAILABLE` (`shared_cache_in_use`) until it
+  exits, so the existing account keeps its cache (see
+  [configuration.md](configuration.md#upgrading-to-per-account-caches)).
 
 ## Notes
 

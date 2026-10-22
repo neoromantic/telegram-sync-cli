@@ -456,7 +456,11 @@ find groups and channels in `chats_cache`.
 
 Up to 0.3 every account shared one `<dataDir>/cache.db`. Its rows have no account column, so
 they can't be split by account. The first command that needs a cache (and `tg status`,
-`tg daemon status`, `tg daemon start`) moves it, once per process (`src/db/cache-layout.ts`):
+`tg daemon status`, `tg daemon start`) moves it, once per process (`src/db/cache-layout.ts`).
+So do `tg auth login`, `login-qr`, `logout` and `tg accounts remove`, before they change the
+accounts: a login that would add a second account fails with `CACHE_UNAVAILABLE` while the
+only account's file can't move yet, and a removal can't hand the rows of two accounts to the
+one that is left.
 
 1. Without a root `cache.db` nothing happens: one `stat`, no lock, no write.
 2. The process takes `data.db`'s write lock (`BEGIN IMMEDIATE`, waiting up to 60 seconds), so
