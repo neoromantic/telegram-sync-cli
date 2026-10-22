@@ -181,10 +181,11 @@ tg config set activeAccount 2
   format, `-q` included), the CLI checks `config.json` and makes the account `activeAccount`
   names active, if it exists. While `activeAccount` is set it wins:
   `tg accounts switch --id <id>` writes `<id>` to it so the switch lasts, `tg auth login` and
-  `tg auth login-qr` write the ID of the account they logged in, and a hand edit or
+  `tg auth login-qr` write the ID of the account they logged in to, and a hand edit or
   `tg config set activeAccount <id>` takes effect from the next command. Without
   `activeAccount` the active account lives only in `data.db`, and neither the switch nor a
-  login creates `config.json`. A failed login changes neither file.
+  login creates `config.json`. A failed login leaves `activeAccount` and the active account in
+  `data.db` as they were.
 - If `activeAccount` has to change and `config.json` can't be written, `tg accounts switch`
   fails with `GENERAL_ERROR` (`details.path`) and changes neither file. A login has already
   succeeded by then: it fails the same way, its message starts with `Logged in as account <id>`

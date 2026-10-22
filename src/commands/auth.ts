@@ -147,8 +147,9 @@ export function getDefaultDependencies(): AuthDependencies {
  * Make a login's account the one the next command uses (#62): in
  * config.json when it sets activeAccount, as every start applies that key,
  * then as the only active account in data.db. Only after the login
- * succeeded, so a failed one changes neither, and config.json first, so a
- * config.json that can't be written leaves data.db's active account alone
+ * succeeded, so a failed one changes the active account in neither, and
+ * config.json first, so a config.json that can't be written leaves
+ * data.db's active account alone
  */
 async function activateLoggedInAccount(
   accountId: number,

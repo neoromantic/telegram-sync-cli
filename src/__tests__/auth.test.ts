@@ -444,7 +444,7 @@ describe('Authentication Commands', () => {
   })
 
   /**
-   * The command after a login has to use the account it logged in (#62):
+   * The command after a login has to use the account it logged in to (#62):
    * in data.db, and in config.json when activeAccount is set there, as every
    * start applies it. Account 1 is active at the start of each test; the
    * phone login signs in user 123 and the QR login user 456, so both add
