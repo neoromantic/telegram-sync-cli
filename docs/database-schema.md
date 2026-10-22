@@ -332,8 +332,8 @@ The daemon writes each account's own rows, every second in one transaction per a
 | `last_update` | When the daemon last wrote these rows |
 
 `tg status` and `tg daemon status` count only rows whose `daemon_pid` is the PID in
-`daemon.pid` of a live daemon. The `connected_accounts` and `total_accounts` rows that 0.3
-wrote are ignored.
+`daemon.pid` of a live daemon; without one, `tg status` still reports the newest
+`last_update`. The `connected_accounts` and `total_accounts` rows that 0.3 wrote are ignored.
 
 - Daemons from 0.3.0 and older write neither version key, and none to `accounts/<id>/cache.db`.
 - Stopping clears the PID, start time and version keys.

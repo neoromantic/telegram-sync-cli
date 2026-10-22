@@ -368,6 +368,34 @@ describe('E2E: status', () => {
     expect(data.sync.failed_jobs).toBe(0)
   })
 
+  it('says when a stopped daemon last wrote its status', async () => {
+    const lastUpdate = Date.now() - 2 * HOUR
+    // What setDaemonStopped leaves: no daemon_pid, the last tick's time
+    cacheDb.run(
+      `INSERT INTO daemon_status (key, value) VALUES
+         ('daemon_status', 'stopped'),
+         ('connection_status', 'disconnected'),
+         ('messages_synced', '12'),
+         ('last_update', ?)`,
+      [String(lastUpdate)],
+    )
+
+    const result = await runCliSuccess(['status'], options())
+    const daemon = (
+      result.json as { data: { daemon: Record<string, unknown> } }
+    ).data.daemon
+
+    expect(daemon).toMatchObject({
+      status: 'stopped',
+      pid: null,
+      last_update: new Date(lastUpdate).toISOString(),
+      connected_accounts: 0,
+      total_accounts: 0,
+      messages_synced: 0,
+    })
+    expect(await prettyStatus()).toMatch(/Last Update\s+2h ago/)
+  })
+
   it('shows an empty queue in pretty output', async () => {
     const result = await runCliSuccess(
       ['status', '--format', 'pretty'],

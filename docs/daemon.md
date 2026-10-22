@@ -162,7 +162,9 @@ Key files:
 The daemon writes each account's figures to that account's `daemon_status` rows every second,
 in one transaction per account (keys: [database-schema.md](database-schema.md#table-daemon_status)),
 and marks every account stopped on shutdown. Only rows whose `daemon_pid` is the PID of the
-live daemon in `daemon.pid` count, so a stopped daemon's leftovers never do.
+live daemon in `daemon.pid` count, so a stopped daemon's leftovers never do. The one exception
+is `tg status`'s `daemon.last_update`: without a live daemon it is the newest `last_update` any
+account's rows have, so a stopped daemon still says when it last ran.
 
 ### Upgrading
 

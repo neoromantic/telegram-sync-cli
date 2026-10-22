@@ -358,14 +358,28 @@ describe('summarizeDaemonStatus', () => {
     })
   })
 
-  it('counts nothing without a live daemon', () => {
-    expect(summarizeDaemonStatus([info({})], null)).toEqual({
+  it('counts nothing without a live daemon, but keeps its last update', () => {
+    const stopped = (lastUpdate: number | null) =>
+      info({
+        status: 'stopped',
+        pid: null,
+        startedAt: null,
+        connectionStatus: 'disconnected',
+        lastUpdate,
+      })
+
+    expect(
+      summarizeDaemonStatus(
+        [stopped(7_000), stopped(9_500), stopped(null)],
+        null,
+      ),
+    ).toEqual({
       connectedAccounts: 0,
       totalAccounts: 0,
       version: null,
       messagesSynced: 0,
       startedAt: null,
-      lastUpdate: null,
+      lastUpdate: 9_500,
     })
   })
 })
