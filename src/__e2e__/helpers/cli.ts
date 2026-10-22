@@ -11,6 +11,8 @@ export interface CliOptions {
   timeout?: number
   /** Working directory */
   cwd?: string
+  /** Script to run instead of src/index.ts, such as a wrapper that mocks a module */
+  entry?: string
 }
 
 export interface CliResult {
@@ -47,10 +49,10 @@ export function spawnCli(
   args: string[],
   options: Omit<CliOptions, 'timeout'> = {},
 ) {
-  const { env = {}, cwd } = options
+  const { env = {}, cwd, entry = CLI_PATH } = options
 
   // --no-env-file: never pick up a developer's .env from the working directory
-  return Bun.spawn(['bun', '--no-env-file', 'run', CLI_PATH, ...args], {
+  return Bun.spawn(['bun', '--no-env-file', 'run', entry, ...args], {
     env: {
       ...process.env,
       // Don't throw on errors - let the CLI handle them and exit with codes
