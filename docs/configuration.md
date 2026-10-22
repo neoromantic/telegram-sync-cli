@@ -70,7 +70,9 @@ stamped for another Telegram user is refused with `CACHE_UNAVAILABLE` (`owner_mi
 Every command that reads or writes a cache works on one account:
 
 1. the account `--account` selects (ID, `@username` or label);
-2. otherwise the active account (`tg accounts switch`, or `activeAccount` in `config.json`);
+2. otherwise the active account, set with `tg accounts switch --id <id>`. When `config.json`
+   sets `activeAccount`, that value wins at the start of every command and `tg accounts switch`
+   updates it; see [Runtime Behavior](#runtime-behavior);
 3. otherwise the only account, if there is exactly one.
 
 With no account, cache commands fail with `AUTH_REQUIRED` (exit 2). With several accounts and
@@ -125,7 +127,7 @@ shared cache. Scripts that opened `cache.db` directly should open
 
 Supported keys:
 
-- `activeAccount` (number)
+- `activeAccount` (number): made active at every start; `tg accounts switch` updates it
 - `cache.staleness.peers` (duration)
 - `cache.staleness.dialogs` (duration)
 - `cache.staleness.fullInfo` (duration)
@@ -173,8 +175,16 @@ tg config set activeAccount 2
 
 ## Runtime Behavior
 
-- On startup (except for `tg config`), the CLI reads `activeAccount` and switches
-  the active account if it exists.
+- At the start of every command except `tg config` and `tg skill` (any output format, `-q`
+  included), the CLI makes the account `activeAccount` names active, if it exists. While
+  `activeAccount` is set it wins: `tg accounts switch --id <id>` writes `<id>` to it so the
+  switch lasts, and a hand edit or `tg config set activeAccount <id>` takes effect from the next
+  command. If `config.json` can't be read or written, `tg accounts switch` fails
+  (`INVALID_ARGS` or `GENERAL_ERROR`) and changes nothing. `tg auth login` and
+  `tg auth login-qr` don't write `activeAccount`, so with the key set the command after a login
+  uses the configured account again; run `tg accounts switch --id <id>` to keep the new one.
+  Without `activeAccount` the active account lives only in `data.db`, and `tg accounts switch`
+  doesn't create `config.json`.
 - Cache-related commands resolve TTLs via `config.json` overrides.
 - Config errors are surfaced as `INVALID_ARGS` with issue details.
 

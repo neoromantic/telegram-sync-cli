@@ -59,7 +59,6 @@ const main = defineCommand({
 
     if (args.quiet) {
       setOutputFormat('quiet')
-      return
     }
 
     // Set verbose flag
