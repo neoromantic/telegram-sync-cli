@@ -64,7 +64,8 @@ export interface Daemon {
  */
 export { calculateReconnectDelay } from './daemon-utils'
 
-function createContext(
+/** Exported for tests: the context createDaemon starts from */
+export function createContext(
   config: Partial<DaemonConfig>,
   accountsDb: AccountsDbInterface,
   logger: DaemonLogger,
