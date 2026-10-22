@@ -462,7 +462,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: false,
         },
         forward_cursor: {
-          description: 'Cursor for fetching newer data',
+          description:
+            "Cursor for fetching newer data; for contacts: Telegram's saved_count from the last full list",
           nullable: true,
         },
         backward_cursor: {
