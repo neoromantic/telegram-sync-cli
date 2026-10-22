@@ -167,7 +167,9 @@ The daemon keeps each connected account's contact list in its own cache (`users_
   every 30 ticks (~30 seconds). A check is due when the account has no recorded list, when the
   list is older than the peer TTL (`cache.staleness.peers`, one week by default), after each
   start and reconnect of the account, or when an update hinted at a change without the user's
-  full record (a minute after the first hint; later hints in that minute share the check). The
+  full record (a minute after the first hint; later hints in that minute share the check). A
+  hint, or a contact change written from a full record, that arrives while a check runs gets a
+  check of its own a minute later, because that check's reply may predate the change. The
   start and reconnect checks are there because the daemon's clients don't replay updates
   missed while they were down (mtcute's `catchUp` is off), so a contact deleted on your phone
   meanwhile reaches the cache only through a check; an unchanged list costs one tiny reply.

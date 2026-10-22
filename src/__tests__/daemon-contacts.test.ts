@@ -528,16 +528,38 @@ describe('handleContactRawUpdate', () => {
   })
 
   it('keeps a hint that arrived while a check ran, for a check of its own', async () => {
+    // With no earlier request, and while the start check serves its own
+    for (const startCheck of [false, true]) {
+      const ctx = createContext()
+      const { client, calls } = fakeClient()
+      const db = connect(ctx, 1, client)
+      if (startCheck) requestContactsCheckNow(ctx, 1, NOW)
+
+      const started = maybeSyncContacts(ctx, NOW)
+      handleContactRawUpdate(ctx, 1, db, userUpdate(), NOW)
+      calls[0]?.resolve(notModified)
+      await Promise.all(started)
+
+      // The list the check got may predate the change the hint is about
+      expect(ctx.runtime.contacts.checkAt.get(1)).toBe(
+        NOW + CONTACTS_HINT_DELAY_MS,
+      )
+    }
+  })
+
+  it('checks again after a running check that may overwrite a full record', async () => {
     const ctx = createContext()
     const { client, calls } = fakeClient()
     const db = connect(ctx, 1, client)
 
     const started = maybeSyncContacts(ctx, NOW)
-    handleContactRawUpdate(ctx, 1, db, userUpdate(), NOW)
-    calls[0]?.resolve(notModified)
+    handleContactRawUpdate(ctx, 1, db, peerSettings([fullUser(true)]), NOW)
+    expect(cachedRow(db)?.is_contact).toBe(1)
+    // The reply predates the change and leaves the new contact out
+    calls[0]?.resolve(contactsList([]))
     await Promise.all(started)
 
-    // The list the check got may predate the change the hint is about
+    expect(cachedRow(db)?.is_contact).toBe(0)
     expect(ctx.runtime.contacts.checkAt.get(1)).toBe(
       NOW + CONTACTS_HINT_DELAY_MS,
     )

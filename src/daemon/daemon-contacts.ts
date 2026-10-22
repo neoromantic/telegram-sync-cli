@@ -137,7 +137,7 @@ export async function syncAccountContacts(
         `[Account ${accountId}] Contacts synced: ${applied.contacts} (${applied.unmarked} no longer contacts)`,
       )
     }
-    // A hint that arrived while the request ran still gets its own check
+    // A hint that arrived while the request ran was moved past `now`
     if ((state.checkAt.get(accountId) ?? Number.POSITIVE_INFINITY) <= now) {
       state.checkAt.delete(accountId)
     }
@@ -190,14 +190,17 @@ function handleContactsError(
 /**
  * Ask for a hash check of the account's contacts in a minute. A request
  * that is already pending keeps its time, so a burst of hints costs one check.
+ * A request that a running check is serving doesn't count: that check's
+ * reply may predate the change, so the hint gets a check of its own.
  */
 export function requestContactsCheck(
   ctx: DaemonContext,
   accountId: number,
   now: number,
 ): void {
-  const { checkAt } = ctx.runtime.contacts
-  if (!checkAt.has(accountId)) {
+  const { checkAt, inFlight } = ctx.runtime.contacts
+  const at = checkAt.get(accountId)
+  if (at === undefined || (inFlight.has(accountId) && at <= now)) {
     checkAt.set(accountId, now + CONTACTS_HINT_DELAY_MS)
   }
 }
@@ -276,6 +279,10 @@ export function handleContactRawUpdate(
     const input = apiUserToCacheInput(user)
     input.fetched_at = now
     createUsersCache(db).upsert(input)
+    // A running check's older list would overwrite this row and set the hash
+    if (ctx.runtime.contacts.inFlight.has(accountId)) {
+      requestContactsCheck(ctx, accountId, now)
+    }
     ctx.logger.debug(
       `[Account ${accountId}] User ${userId} ${isContact ? 'is now a contact' : 'is no longer a contact'}`,
     )
