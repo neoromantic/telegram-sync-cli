@@ -6,9 +6,7 @@ The list is in priority order.
 
 ## Reliability
 
-- [Run each account's sync jobs independently in the daemon](https://github.com/neoromantic/telegram-sync-cli/issues/60)
-- [Daemon doesn't sync contacts](https://github.com/neoromantic/telegram-sync-cli/issues/8)
-- [Database size management](https://github.com/neoromantic/telegram-sync-cli/issues/1)
+- [Storage north star: bounded size, big caches, offloading, SQLite alternatives](https://github.com/neoromantic/telegram-sync-cli/issues/80)
 
 ## Features
 
@@ -17,9 +15,11 @@ The list is in priority order.
 - [Send and download media](https://github.com/neoromantic/telegram-sync-cli/issues/22)
 - [Edit, delete, forward and pin messages](https://github.com/neoromantic/telegram-sync-cli/issues/23)
 - [Read-only mode and a chat allowlist for agents](https://github.com/neoromantic/telegram-sync-cli/issues/26)
+- [Semantic search over messages](https://github.com/neoromantic/telegram-sync-cli/issues/82)
 - [AI integration (skills)](https://github.com/neoromantic/telegram-sync-cli/issues/3)
 
 ## Polish
 
+- [Snippets and text from the search index in `tg sql`](https://github.com/neoromantic/telegram-sync-cli/issues/81)
 - [Pretty output for every command](https://github.com/neoromantic/telegram-sync-cli/issues/2)
 - [Replace qrcode-terminal](https://github.com/neoromantic/telegram-sync-cli/issues/10)
