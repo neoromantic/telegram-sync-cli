@@ -898,7 +898,8 @@ describe('processJobs', () => {
 
   it("runs each account's jobs on its own 3 s delay", async () => {
     const ctx = createContext()
-    const ran: number[] = []
+    const ran: Array<[number, number]> = []
+    let tick = 0
     for (const accountId of [1, 2]) {
       runAccount(ctx, accountId, {
         scheduler: createSchedulerStub({
@@ -906,7 +907,7 @@ describe('processJobs', () => {
         }),
         worker: createWorkerStub({
           processJobReal: mock(async () => {
-            ran.push(accountId)
+            ran.push([accountId, tick])
             return { success: true, messagesFetched: 1 }
           }),
         }),
@@ -915,7 +916,7 @@ describe('processJobs', () => {
     const clock = useClock()
 
     try {
-      for (let tick = 0; tick < 5; tick++) {
+      for (tick = 0; tick < 5; tick++) {
         await processJobs(ctx)
         clock.advance(1000)
       }
@@ -923,8 +924,13 @@ describe('processJobs', () => {
       clock.restore()
     }
 
-    // 1 and 2 at 0 s and 1 s; both wait 3 s from their own last job
-    expect(ran).toEqual([1, 2, 1, 2])
+    // Both at 0 s, both again 3 s after their own last job
+    expect(ran).toEqual([
+      [1, 0],
+      [2, 0],
+      [1, 3],
+      [2, 3],
+    ])
   })
 
   it("runs account 2's jobs while account 1's cache fails to pick one", async () => {
