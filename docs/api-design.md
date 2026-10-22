@@ -285,18 +285,41 @@ export const apiCommand = defineCommand({
     raw: { type: 'boolean', default: false },
   },
   async run({ args }) {
-    const client = wrapClientCallWithRateLimits(getClientForAccount(args.account))
-    const params = mergeArgs(args, args.json)
-    const result = await client.call({ _: args.method, ...params })
+    const { account } = openAccountCache(args.account)
+    let client: TelegramClient | undefined
+    try {
+      client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+        context: 'cli:api',
+        accountId: account.id,
+      })
+      const params = mergeArgs(args, args.json)
+      const result = await client.call({ _: args.method, ...params })
+      await closeClient(client)
 
-    if (args.raw) {
-      console.log(JSON.stringify(result, replacer, 2))
-    } else {
-      success({ method: args.method, result })
+      if (args.raw) {
+        raw(JSON.stringify(result, replacer, 2))
+      } else {
+        success({ method: args.method, result })
+      }
+    } catch (err) {
+      await closeClient(client)
+      error(ErrorCodes.TELEGRAM_ERROR, `API call failed: ${err.message}`, {
+        method: args.method,
+      })
     }
   },
 })
+
+// destroy() closes the connection, which would keep the process alive, and
+// saves the session. A failure to close doesn't change the result.
+async function closeClient(client: TelegramClient | undefined) {
+  await client?.destroy().catch(() => {})
+}
 ```
+
+Every path closes the client before it prints, and `raw()`, `success()` and `error()` exit the
+process after printing. A new command that connects to Telegram should do the same: a path that
+prints with `console.log` and returns leaves the command running.
 
 ### Caching Pattern
 
