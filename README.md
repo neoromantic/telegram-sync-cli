@@ -115,6 +115,7 @@ tg api account.checkUsername --username=myuser
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg daemon start
 tg status
+tg db vacuum                         # give an account cache's free space back to the disk
 tg config path
 ```
 
@@ -155,6 +156,9 @@ Reference: [CLI commands](docs/cli-commands.md), [authentication](docs/auth.md),
 - `tg skill manifest` prints a skill manifest, `tg skill validate` checks the environment and
   `tg skill install` writes the manifest to the default location.
 - The daemon never sends or edits anything, so it is safe to leave running.
+- `tg status` reports each account's cache size (`--sizes` adds each table's); `tg db vacuum`
+  prunes old bookkeeping rows and gives free space back to the disk, and works while the
+  daemon runs on a cache this version created.
 
 ## Contributing
 

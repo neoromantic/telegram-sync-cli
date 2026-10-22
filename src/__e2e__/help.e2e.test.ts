@@ -56,6 +56,12 @@ describe('E2E: Help Commands', () => {
       expect(result.stdout).toContain('info')
     })
 
+    it('should show db help', async () => {
+      const result = await runCliSuccess(['db', '--help'])
+
+      expect(result.stdout).toContain('vacuum')
+    })
+
     it('should show contacts help', async () => {
       const result = await runCliSuccess(['contacts', '--help'])
 

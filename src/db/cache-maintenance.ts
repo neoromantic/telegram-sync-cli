@@ -1,6 +1,6 @@
 /**
- * Keeping an account's cache small: measuring it and pruning the
- * bookkeeping tables.
+ * Keeping an account's cache small: measuring it, pruning the bookkeeping
+ * tables and giving free pages back to the disk.
  *
  * Messages, chats and users are never pruned here (messages are eternal);
  * only the rows that record how the cache was filled: API activity, rate
@@ -8,7 +8,12 @@
  */
 import type { Database } from 'bun:sqlite'
 import { RATE_WINDOW_SECONDS } from './rate-limits'
-import { SyncJobStatus } from './sync-schema'
+import {
+  INDEX_BUILD_BUSY_TIMEOUT_MS,
+  rebuildMessageSearchIndex,
+  SyncJobStatus,
+  withBusyTimeout,
+} from './sync-schema'
 import type { CacheRetentionConfig } from './types'
 
 /** Rows a prune pass deleted, by what they were */
@@ -207,4 +212,152 @@ export function readCacheSize(
   }
   if (options.tables) size.tables = readTableSizes(db)
   return size
+}
+
+/**
+ * A full VACUUM rewrites the file, which the daemon can't share: it would
+ * wait for the write lock for the whole rewrite. On a cache without
+ * auto_vacuum that is the only way, so it needs the daemon stopped.
+ */
+export class VacuumNeedsStoppedDaemonError extends Error {
+  readonly autoVacuum: AutoVacuumMode = 'none'
+
+  constructor() {
+    super(
+      'This cache has no incremental auto_vacuum yet, so only a full VACUUM can compact it, and that needs the daemon stopped',
+    )
+    this.name = 'VacuumNeedsStoppedDaemonError'
+  }
+}
+
+export interface VacuumResult {
+  /** `full` rewrote the file; `incremental` released free pages in steps */
+  mode: 'full' | 'incremental'
+  /** The file plus its WAL, before and after */
+  bytes_before: number
+  bytes_after: number
+  freed_bytes: number
+  free_pages_after: number
+  auto_vacuum: AutoVacuumMode
+  /** Whether the closing checkpoint emptied the WAL; false when a reader held it */
+  checkpointed: boolean
+  /** Whether the VACUUM moved message rowids, so the search index was rebuilt */
+  rebuilt_search: boolean
+}
+
+/** Pages released per incremental_vacuum step, each its own short write */
+const INCREMENTAL_VACUUM_STEP_PAGES = 1024
+/** Enough steps for a 4 TB file of 4 KB pages; stops a loop that never ends */
+const INCREMENTAL_VACUUM_MAX_STEPS = 1_000_000
+
+/** What tells whether a VACUUM moved the rows of messages_cache */
+export interface MessageRowidSnapshot {
+  count: number
+  min: number | null
+  max: number | null
+}
+
+export function snapshotMessageRowids(db: Database): MessageRowidSnapshot {
+  return db
+    .query(
+      'SELECT COUNT(*) AS count, MIN(rowid) AS min, MAX(rowid) AS max FROM messages_cache',
+    )
+    .get() as MessageRowidSnapshot
+}
+
+/**
+ * Rebuild the search index if messages_cache's rowids changed. Its primary
+ * key is (chat_id, message_id), so SQLite doesn't promise that a VACUUM
+ * keeps its rowids, and message_search is keyed on them. Returns whether
+ * it rebuilt.
+ */
+export function rebuildSearchIfRowidsMoved(
+  db: Database,
+  before: MessageRowidSnapshot,
+): boolean {
+  const after = snapshotMessageRowids(db)
+  if (
+    after.count === before.count &&
+    after.min === before.min &&
+    after.max === before.max
+  ) {
+    return false
+  }
+  rebuildMessageSearchIndex(db)
+  return true
+}
+
+function totalBytes(path: string): number {
+  return fileSize(path) + fileSize(`${path}-wal`)
+}
+
+/** Empty the WAL into the file; false when a reader or writer held it */
+function checkpoint(db: Database): boolean {
+  try {
+    const row = db.query('PRAGMA wal_checkpoint(TRUNCATE)').get() as {
+      busy: number
+    } | null
+    return (row?.busy ?? 0) === 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Give the cache's free pages back to the disk.
+ *
+ * - With the daemon running, a cache with auto_vacuum releases them in
+ *   steps of 1,024 pages, each its own short write transaction, so the
+ *   daemon's writes fit in between. A cache without it throws
+ *   VacuumNeedsStoppedDaemonError and nothing is written.
+ * - With the daemon stopped, a full VACUUM rewrites the file and switches
+ *   it to incremental auto_vacuum. It waits up to a minute for the write
+ *   lock, and rebuilds the search index if the rewrite moved rowids.
+ *
+ * Both end with a checkpoint that empties the WAL.
+ */
+export function vacuumCache(
+  db: Database,
+  path: string,
+  options: { daemonRunning: boolean },
+): VacuumResult {
+  const autoVacuum = readAutoVacuum(db)
+  if (options.daemonRunning && autoVacuum === 'none') {
+    throw new VacuumNeedsStoppedDaemonError()
+  }
+
+  const bytes_before = totalBytes(path)
+  let mode: VacuumResult['mode']
+  let rebuilt_search = false
+
+  if (options.daemonRunning) {
+    mode = 'incremental'
+    for (
+      let step = 0;
+      step < INCREMENTAL_VACUUM_MAX_STEPS &&
+      pragmaNumber(db, 'freelist_count') > 0;
+      step++
+    ) {
+      db.run(`PRAGMA incremental_vacuum(${INCREMENTAL_VACUUM_STEP_PAGES})`)
+    }
+  } else {
+    mode = 'full'
+    const before = snapshotMessageRowids(db)
+    db.run('PRAGMA auto_vacuum = INCREMENTAL')
+    withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => db.run('VACUUM'))
+    rebuilt_search = rebuildSearchIfRowidsMoved(db, before)
+  }
+
+  const checkpointed = checkpoint(db)
+  const bytes_after = totalBytes(path)
+  return {
+    mode,
+    bytes_before,
+    bytes_after,
+    freed_bytes: Math.max(0, bytes_before - bytes_after),
+    free_pages_after: pragmaNumber(db, 'freelist_count'),
+    auto_vacuum: readAutoVacuum(db),
+    checkpointed,
+    rebuilt_search,
+  }
 }

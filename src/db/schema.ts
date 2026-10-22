@@ -12,6 +12,12 @@
  */
 import { Database } from 'bun:sqlite'
 
+/**
+ * The most a WAL keeps on disk after a checkpoint, 64 MB. Without a limit a
+ * WAL that grew (during a VACUUM, or behind a long reader) stays that size.
+ */
+const JOURNAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024
+
 /** How long opening a database waits for another process's switch to WAL */
 const WAL_SWITCH_TIMEOUT_MS = 5000
 const WAL_SWITCH_RETRY_MS = 10
@@ -33,6 +39,7 @@ export function enableWal(db: Database): void {
   for (;;) {
     try {
       db.run('PRAGMA journal_mode = WAL')
+      db.run(`PRAGMA journal_size_limit = ${JOURNAL_SIZE_LIMIT_BYTES}`)
       return
     } catch (err) {
       if (!isBusy(err) || Date.now() >= deadline) throw err
@@ -50,6 +57,16 @@ export function initCacheSchema(db: Database): void {
   // 5 s for the other one's write lock instead of failing at once (SQLite's
   // default is not to wait).
   db.run('PRAGMA busy_timeout = 5000')
+
+  // A new file gets incremental auto_vacuum, so `tg db vacuum` can give its
+  // free pages back while the daemon runs. It has to come before the switch
+  // to WAL. Only an empty file is touched: on one with tables the pragma
+  // changes nothing until a VACUUM but still waits for the write lock, and
+  // opening a cache must never wait for it.
+  const { page_count } = db.query('PRAGMA page_count').get() as {
+    page_count: number
+  }
+  if (page_count === 0) db.run('PRAGMA auto_vacuum = INCREMENTAL')
 
   // Enable WAL mode for better concurrent access
   enableWal(db)

@@ -223,6 +223,11 @@ Exit codes:
 - 5: Telegram API error / rate limited
 - 6: Account not found
 
+`DAEMON_ALREADY_RUNNING` (exit 1) is returned by `tg db vacuum` for a cache that only a full
+VACUUM can compact while the daemon runs, with `details: { account_id, auto_vacuum: "none" }`
+and the commands to stop and restart the daemon as `suggestion`
+([cli-commands.md](cli-commands.md#cache-maintenance)).
+
 ## Account Context
 
 Every command runs in the context of one account, and each account has its own cache
