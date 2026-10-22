@@ -2,10 +2,10 @@
  * E2E tests for config commands
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { runCliFailure, runCliSuccess } from './helpers/cli'
+import { runCli, runCliFailure, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
 describe('E2E: Config Commands', () => {
@@ -84,6 +84,38 @@ describe('E2E: Config Commands', () => {
       })
     }
   })
+
+  it.skipIf(process.getuid?.() === 0)(
+    'fails at start with GENERAL_ERROR when config.json is unreadable',
+    async () => {
+      const path = join(env.dataDir, 'config.json')
+      writeFileSync(path, '{"activeAccount":1}')
+      chmodSync(path, 0o000)
+      try {
+        const result = await runCliFailure(
+          ['accounts', 'list'],
+          1,
+          env.getCliOptions(),
+        )
+        expect(JSON.parse(result.stderr).error).toEqual(
+          expect.objectContaining({
+            code: 'GENERAL_ERROR',
+            details: { path },
+          }),
+        )
+
+        // -q prints nothing, not a stack trace
+        const quiet = await runCli(
+          ['-q', 'accounts', 'list'],
+          env.getCliOptions(),
+        )
+        expect(quiet.exitCode).toBe(1)
+        expect(quiet.stderr).toBe('')
+      } finally {
+        chmodSync(path, 0o644)
+      }
+    },
+  )
 
   it('runs tg skill with an invalid config.json under -f json', async () => {
     writeFileSync(join(env.dataDir, 'config.json'), '{"activeAccount":"one"}')

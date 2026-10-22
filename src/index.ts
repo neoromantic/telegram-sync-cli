@@ -18,7 +18,11 @@ import { skillCommand } from './commands/skill'
 import { sqlCommand } from './commands/sql'
 import { statusCommand } from './commands/status'
 import { meCommand, userCommand } from './commands/user'
-import { ConfigError, syncActiveAccountFromConfig } from './config'
+import {
+  ConfigError,
+  ConfigReadError,
+  syncActiveAccountFromConfig,
+} from './config'
 import { ErrorCodes, type OutputFormat } from './types'
 import { error, setOutputFormat } from './utils/output'
 import { VERSION } from './version'
@@ -81,6 +85,14 @@ const main = defineCommand({
     } catch (err) {
       if (err instanceof ConfigError) {
         error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+      }
+      if (err instanceof ConfigReadError) {
+        error(
+          ErrorCodes.GENERAL_ERROR,
+          err.message,
+          { path: err.path },
+          'Make config.json readable or remove it',
+        )
       }
       throw err
     }

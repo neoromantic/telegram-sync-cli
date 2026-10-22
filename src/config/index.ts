@@ -57,6 +57,18 @@ export class ConfigError extends Error {
   }
 }
 
+/** config.json exists but can't be read, for example for lack of permission */
+export class ConfigReadError extends Error {
+  path: string
+
+  constructor(path: string, cause: Error) {
+    const reason = (cause as NodeJS.ErrnoException).code ?? cause.message
+    super(`Could not read ${path}: ${reason}`)
+    this.name = 'ConfigReadError'
+    this.path = path
+  }
+}
+
 function resolveDataDir(dataDir?: string): string {
   return (
     dataDir ??
@@ -173,7 +185,12 @@ async function readConfigJson(dataDir?: string): Promise<{
     return { raw: {}, exists: false }
   }
 
-  const text = await file.text()
+  let text: string
+  try {
+    text = await file.text()
+  } catch (err) {
+    throw new ConfigReadError(path, err as Error)
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
