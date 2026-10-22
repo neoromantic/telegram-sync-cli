@@ -80,14 +80,17 @@ export interface DaemonSummary {
   messagesSynced: number
   /** The earliest start among the live rows */
   startedAt: number | null
-  /** The newest update among the live rows */
+  /**
+   * The newest update among the live rows; without a live daemon, the
+   * newest any daemon wrote, so a stopped daemon still says when it last ran
+   */
   lastUpdate: number | null
 }
 
 /**
  * Sum the accounts' rows. Only rows whose daemon_pid is the live daemon's
  * PID (from daemon.pid) count: a stopped daemon's or an older version's rows
- * say nothing about now.
+ * say nothing about now. Only lastUpdate of a stopped daemon reads them.
  */
 export function summarizeDaemonStatus(
   infos: DaemonInfo[],
@@ -102,7 +105,7 @@ export function summarizeDaemonStatus(
   const startTimes = live.flatMap((info) =>
     info.startedAt === null ? [] : [info.startedAt],
   )
-  const updates = live.flatMap((info) =>
+  const updates = (livePid === null ? infos : live).flatMap((info) =>
     info.lastUpdate === null ? [] : [info.lastUpdate],
   )
   return {
