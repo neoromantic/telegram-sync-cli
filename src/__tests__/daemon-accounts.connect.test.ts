@@ -664,6 +664,20 @@ describe('daemon-accounts: connection + event wiring', () => {
       expect(ctx.logger.warn).not.toHaveBeenCalled()
     })
 
+    it('leaves a channel post when no private chat or basic group caches the ID', async () => {
+      const { ctx, accountState, messagesCache } = await wireWithMessages([
+        -1001234567890,
+      ])
+
+      accountState.eventHandlers?.onDeleteMessage(
+        asDeleteUpdate({ channelId: null, messageIds: [7] }),
+      )
+      await Bun.sleep(0)
+
+      expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(0)
+      expect(ctx.logger.warn).not.toHaveBeenCalled()
+    })
+
     it('marks only the channel message on a channel delete', async () => {
       const { accountState, messagesCache } = await wireWithMessages([
         4242, -1001234567890,
