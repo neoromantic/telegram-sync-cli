@@ -218,24 +218,47 @@ function count(db: Database, sql: string): number {
   return (db.query(sql).get() as { count: number } | null)?.count ?? 0
 }
 
+/** An account whose cache can't be read: zeroed figures and the error */
+function failedAccountSnapshot(
+  accountId: number,
+  err: unknown,
+): AccountStatusSnapshot {
+  return {
+    ...emptyAccountSnapshot(accountId),
+    cache: {
+      status: 'error',
+      error: err instanceof Error ? err.message : String(err),
+    },
+  }
+}
+
 /**
  * Read one account's cache. An account without a cache file reads as
- * empty, and none is created.
+ * empty, and none is created. A cache that fails to open or to answer a
+ * query (a corrupt page, say) reads as `error` with zeroed figures, so the
+ * other accounts and the daemon section still report.
  */
 export function readAccountStatus(accountId: number): AccountStatusSnapshot {
-  const snapshot = emptyAccountSnapshot(accountId)
-
   let cacheDb: Database | null
   try {
     cacheDb = openExistingAccountCacheDb(accountId)
   } catch (err) {
-    snapshot.cache = {
-      status: 'error',
-      error: err instanceof Error ? err.message : String(err),
-    }
-    return snapshot
+    return failedAccountSnapshot(accountId, err)
   }
-  if (!cacheDb) return snapshot
+  if (!cacheDb) return emptyAccountSnapshot(accountId)
+
+  try {
+    return readOpenAccountStatus(accountId, cacheDb)
+  } catch (err) {
+    return failedAccountSnapshot(accountId, err)
+  }
+}
+
+function readOpenAccountStatus(
+  accountId: number,
+  cacheDb: Database,
+): AccountStatusSnapshot {
+  const snapshot = emptyAccountSnapshot(accountId)
   snapshot.cache = { status: 'ok' }
 
   snapshot.daemon = createDaemonStatusService(cacheDb).getDaemonInfo()
