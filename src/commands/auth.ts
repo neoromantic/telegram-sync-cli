@@ -493,7 +493,7 @@ export const loginCommand = defineCommand({
     const phone = args.phone
     const label = args.label
 
-    settleCacheLayoutBeforeAccountChange('strict')
+    settleCacheLayoutBeforeAccountChange()
     ensureCredentials()
     info(`Logging in with phone: ${phone}`)
     const result = await loginWithPhone(phone, getDefaultDependencies(), {
@@ -528,7 +528,7 @@ export const loginQrCommand = defineCommand({
     },
   },
   async run({ args }) {
-    settleCacheLayoutBeforeAccountChange('strict')
+    settleCacheLayoutBeforeAccountChange()
     ensureCredentials()
     console.log('\n=== QR Code Login ===\n')
     console.log('Scan this QR code with your Telegram mobile app:')
@@ -563,7 +563,7 @@ export const logoutCommand = defineCommand({
   },
   async run({ args }) {
     const accountId = resolveAccountSelector(args.account)
-    settleCacheLayoutBeforeAccountChange('report')
+    settleCacheLayoutBeforeAccountChange()
 
     let result: Awaited<ReturnType<typeof logout>>
     try {

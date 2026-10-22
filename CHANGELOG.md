@@ -43,11 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with several (or none) its rows can't be split by account, so it is kept
   as `shared-cache.db` and each account syncs again from an empty cache; an
   empty one is deleted. While an older tg still has the file open, a single
-  account's commands fail with `CACHE_UNAVAILABLE` until it exits, and so
-  does `tg auth login`, so a second account can't force the first one's
-  cache aside. A file that can't be moved yet (`move_failed`: a read-only
-  file, a full disk) waits the same way; only a file that is not a database
-  is set aside for a single account. A login after `tg auth logout` gives
+  account's commands fail with `CACHE_UNAVAILABLE` until it exits. `tg auth
+  login`, `login-qr`, `logout` and `tg accounts remove` fail the same way
+  with any number of accounts and change none, so a second account can't
+  force the first one's cache aside, and the account left after a removal
+  (or the first one added) is never handed rows that other accounts wrote.
+  A file that can't be moved yet (`move_failed`: a read-only file, a full
+  disk) waits the same way; only a file that is not a database is set aside
+  for a single account. A login after `tg auth logout` gives
   the same Telegram user a new account ID and an empty cache; the old
   `accounts/<id>/` stays, and renamed to the new ID it is taken back, as the
   owner stamp matches the user. Going back to 0.3 after the move is not

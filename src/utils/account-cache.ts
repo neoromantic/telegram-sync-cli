@@ -1,15 +1,15 @@
 import type { Database } from 'bun:sqlite'
 import {
   type AccountsDbInterface,
+  type CacheLayoutResult,
+  CacheUnavailableError,
   accountsDb as defaultAccountsDb,
   ensureCacheLayout,
   getAccountCacheDb,
+  getLegacyCachePath,
   isCacheUnavailableError,
 } from '../db'
-import type {
-  CacheLayoutMode,
-  CacheUnavailableReason,
-} from '../db/cache-layout'
+import type { CacheUnavailableReason } from '../db/cache-layout'
 import { type Account, ErrorCodes } from '../types'
 import { resolveAccount } from './account-selector'
 import { error } from './output'
@@ -70,17 +70,27 @@ export function openAccountCache(
 
 /**
  * Move the shared cache of 0.3 and older before a command adds or removes
- * an account: the move decides by the account count, so with one account
- * the file is that account's cache, and a second account added first would
- * force it aside. `strict` (adding an account) fails the command while the
- * only account's cache can't move yet; `report` goes on.
+ * an account, and fail with CACHE_UNAVAILABLE while it can't move yet. The
+ * move decides by the account count when it runs, so an account change
+ * while the file waits would decide for it later: a second account added
+ * to one would force the first one's cache aside, and removing one of two
+ * (or adding the first account to none) would hand the one that is left a
+ * file that other accounts wrote. So no account changes while an older tg
+ * holds the file or the move fails, whatever the count.
  */
-export function settleCacheLayoutBeforeAccountChange(
-  mode: CacheLayoutMode,
-): void {
+export function settleCacheLayoutBeforeAccountChange(): void {
+  let result: CacheLayoutResult
   try {
-    ensureCacheLayout({ mode })
+    result = ensureCacheLayout({ mode: 'report' })
   } catch (err) {
     reportCacheError(err)
+  }
+  if (result.state === 'deferred' || result.state === 'blocked') {
+    reportCacheError(
+      new CacheUnavailableError(
+        result.reason ?? 'shared_cache_in_use',
+        result.path ?? getLegacyCachePath(),
+      ),
+    )
   }
 }

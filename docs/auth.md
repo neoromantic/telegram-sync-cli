@@ -72,9 +72,10 @@ Authentication data lives in the data directory (default `~/.telegram-sync-cli`,
   `accounts/<old-id>/` to `accounts/<new-id>/` (see
   [configuration.md](configuration.md#storage-layout)).
 - Before it changes the accounts, `tg auth login` (and `login-qr`, `logout`) moves a shared
-  `cache.db` of 0.3 or older to the per-account layout. With one account and an older tg still
-  holding that file, login fails with `CACHE_UNAVAILABLE` (`shared_cache_in_use`) until it
-  exits, so the existing account keeps its cache (see
+  `cache.db` of 0.3 or older to the per-account layout. While an older tg still holds that
+  file, or it can't be moved, they fail with `CACHE_UNAVAILABLE` (`shared_cache_in_use`,
+  `move_failed`) and change no account until it moves, so the existing account keeps its cache
+  and no account is handed rows that others wrote (see
   [configuration.md](configuration.md#upgrading-to-per-account-caches)).
 
 ## Notes

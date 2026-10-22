@@ -318,6 +318,43 @@ describe('E2E: upgrading from the shared cache', () => {
     expect(rowCounts(env.cachePath(3)).messages_cache).toBe(40)
   })
 
+  it('adds no first account while an older tg holds a cache of removed accounts', async () => {
+    seedInChild(shared, 'legacySharedCache')
+    const before = rowCounts(shared)
+    const holder = holdOpen(shared)
+    await holder.ready()
+
+    try {
+      const login = await runCli(
+        ['auth', 'login', '--phone', '+15550000003'],
+        options(),
+      )
+
+      expect(login.exitCode).toBe(1)
+      expect(JSON.parse(login.stderr)).toMatchObject({
+        error: {
+          code: 'CACHE_UNAVAILABLE',
+          details: { reason: 'shared_cache_in_use', path: shared },
+        },
+      })
+      const accounts = await runCliSuccess(['accounts', 'list'], options())
+      expect(
+        (accounts.json as { data: { accounts: unknown[] } }).data.accounts,
+      ).toHaveLength(0)
+    } finally {
+      await holder.release()
+    }
+
+    // With no account the next run sets the file aside, so the account a
+    // later login adds starts empty
+    await runCliSuccess(['status'], options())
+    const parked = join(env.dataDir, 'shared-cache.db')
+    expect(existsSync(shared)).toBe(false)
+    expect(rowCounts(parked)).toEqual(before)
+    env.seedAccounts([{ phone: '+15550000003', is_active: true }])
+    expect((await sqlCount()).count).toBe(0)
+  }, 30_000)
+
   describe('with two accounts', () => {
     beforeEach(() => {
       env.seedAccounts([
@@ -382,6 +419,45 @@ describe('E2E: upgrading from the shared cache', () => {
       expect(rowCounts(parked)).toEqual(before)
       expect((await sqlCount()).count).toBe(0)
     })
+
+    it('removes no account while an older tg holds the cache, and sets it aside after', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      const before = rowCounts(shared)
+      const holder = holdOpen(shared)
+      await holder.ready()
+
+      try {
+        // Neither needs credentials: the move runs before the network
+        for (const args of [
+          ['accounts', 'remove', '--id', '2'],
+          ['auth', 'logout', '--account', '2'],
+        ]) {
+          const result = await runCli(args, options())
+          expect(result.exitCode).toBe(1)
+          expect(JSON.parse(result.stderr)).toMatchObject({
+            error: {
+              code: 'CACHE_UNAVAILABLE',
+              details: { reason: 'shared_cache_in_use', path: shared },
+            },
+          })
+        }
+        const accounts = await runCliSuccess(['accounts', 'list'], options())
+        expect(
+          (accounts.json as { data: { accounts: unknown[] } }).data.accounts,
+        ).toHaveLength(2)
+        expect(existsSync(shared)).toBe(true)
+      } finally {
+        await holder.release()
+      }
+
+      await runCliSuccess(['accounts', 'remove', '--id', '2'], options())
+
+      // Account 1 never gets the rows both accounts wrote
+      const parked = join(env.dataDir, 'shared-cache.db')
+      expect(existsSync(shared)).toBe(false)
+      expect(rowCounts(parked)).toEqual(before)
+      expect((await sqlCount()).count).toBe(0)
+    }, 30_000)
 
     it('deletes a shared cache that holds nothing', async () => {
       seedInChild(shared, 'emptyCache')

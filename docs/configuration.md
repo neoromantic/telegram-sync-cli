@@ -95,12 +95,15 @@ change the accounts; `tg accounts list`, `tg config`, `tg daemon stop`, `--help`
   deleted instead.
 
 While an older tg still has the old file open, the move waits. With one account, cache
-commands and `tg auth login` fail with `CACHE_UNAVAILABLE` (`details.reason`:
-`shared_cache_in_use`) until it exits, so a second account can't be added before the first
-one's cache moves to it; with several, commands go on and a later run moves the file. A file that can't be moved
-yet, such as a read-only one or one on a full disk, waits the same way with `move_failed`;
-only a file that is not a database is set aside even for one account. `tg status` shows a
-waiting move under `storage.migration`.
+commands fail with `CACHE_UNAVAILABLE` (`details.reason`: `shared_cache_in_use`) until it
+exits; with several (or none), they go on and a later run moves the file. `tg auth login`,
+`login-qr`, `logout` and `tg accounts remove` fail the same way whatever the count, and change
+no account: the move decides by the count when it runs, so a second account would force the
+first one's cache aside, and removing one of two (or adding the first one) would hand the
+account that is left rows that other accounts wrote. A file that can't be moved yet, such as a
+read-only one or one on a full disk, waits the same way with `move_failed`; only a file that is
+not a database is set aside even for one account. `tg status` shows a waiting move under
+`storage.migration`.
 
 To hand a set-aside file to one account yourself: stop the daemon, move that account's
 `accounts/<id>/cache.db` (and its `-wal` and `-shm`, if any) away, then move

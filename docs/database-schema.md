@@ -461,9 +461,10 @@ Up to 0.3 every account shared one `<dataDir>/cache.db`. Its rows have no accoun
 they can't be split by account. The first command that needs a cache (and `tg status`,
 `tg daemon status`, `tg daemon start`) moves it, once per process (`src/db/cache-layout.ts`).
 So do `tg auth login`, `login-qr`, `logout` and `tg accounts remove`, before they change the
-accounts: a login that would add a second account fails with `CACHE_UNAVAILABLE` while the
-only account's file can't move yet, and a removal can't hand the rows of two accounts to the
-one that is left.
+accounts, and they fail with `CACHE_UNAVAILABLE` and change nothing while the file can't move
+yet, whatever the count: a login that adds a second account would force the first one's file
+aside, and a removal that leaves one account (or a login that adds the first) would hand it
+rows that other accounts wrote.
 
 1. Without a root `cache.db` nothing happens: one `stat`, no lock, no write.
 2. The process takes `data.db`'s write lock (`BEGIN IMMEDIATE`, waiting up to 60 seconds), so
@@ -493,7 +494,8 @@ wrote it after the move) is set aside or deleted the same way, never merged.
 When another process still has the shared file open, adopting fails the command with
 `CACHE_UNAVAILABLE` (`details.reason`: `shared_cache_in_use`) and changes nothing: creating an
 empty per-account cache first would force the shared file aside later. Setting aside waits
-instead: the command goes on and a later run moves the file. Any other error is `move_failed`
+instead: a cache command goes on and a later run moves the file, while a command that changes
+the accounts fails as above. Any other error is `move_failed`
 and is handled the same way, with nothing changed: a fold that fails (a read-only file, a full
 disk, an I/O error) or a failed `mkdir`, rename or delete (`EXDEV`, `EACCES`). So a single
 account never starts an empty cache because of an error that a retry may not have. `tg status`
