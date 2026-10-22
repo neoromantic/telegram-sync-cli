@@ -18,6 +18,8 @@ export interface DialogPassResult {
   visited: Set<number>
   /** The pass listed every dialog without an error */
   complete: boolean
+  /** A daemon stop ended the pass early */
+  stopped: boolean
 }
 
 function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
@@ -35,6 +37,9 @@ function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
  * without one. Such a chat starts syncing when a message arrives in it live,
  * which creates its state like in any other chat, or when `tg chats sync`
  * turns it on.
+ *
+ * A daemon stop ends the pass at the next dialog, so the shutdown doesn't
+ * wait for the rest of the list (#56).
  */
 export async function syncAccountDialogs(
   ctx: DaemonContext,
@@ -56,6 +61,7 @@ export async function syncAccountDialogs(
   let archivedCount = 0
   let usersCount = 0
   let complete = false
+  let stopped = false
 
   const flushChats = () => {
     if (chatsBatch.length > 0) {
@@ -113,13 +119,26 @@ export async function syncAccountDialogs(
 
   try {
     for await (const dialog of client.iterDialogs({ archived: 'keep' })) {
+      // Leaving the loop fetches no further page
+      if (ctx.state.shutdownRequested) {
+        stopped = true
+        break
+      }
       onDialog(dialog)
     }
-    complete = true
+    complete = !stopped
   } catch (err) {
-    ctx.logger.warn(
-      `[Account ${accountId}] Failed to bootstrap dialogs after ${dialogsCount}: ${formatError(err)}`,
-    )
+    if (ctx.state.shutdownRequested) {
+      // A page that fails while the daemon stops is no fault of the account
+      stopped = true
+      ctx.logger.debug(
+        `[Account ${accountId}] Dialog page failed during the stop: ${formatError(err)}`,
+      )
+    } else {
+      ctx.logger.warn(
+        `[Account ${accountId}] Failed to bootstrap dialogs after ${dialogsCount}: ${formatError(err)}`,
+      )
+    }
   }
 
   // Keep what the pass listed before an error, too.
@@ -131,9 +150,13 @@ export async function syncAccountDialogs(
     ctx.logger.info(
       `[Account ${accountId}] Bootstrapped ${dialogsCount} dialogs (${archivedCount} archived), ${usersCount} users in ${Math.round(elapsedMs / 1000)}s`,
     )
+  } else if (stopped) {
+    ctx.logger.debug(
+      `[Account ${accountId}] Dialog pass stopped after ${dialogsCount} dialogs: the daemon is stopping`,
+    )
   }
 
-  return { visited, complete }
+  return { visited, complete, stopped }
 }
 
 /**
@@ -180,21 +203,25 @@ export function markUnvisitedChats(
  * cache. It seeds `chats_cache` and `chat_sync_state` and tells the
  * scheduler which chats are behind. An account that didn't connect keeps
  * its sync state as it is, and one account's failed pass doesn't change
- * what another's complete pass marks.
+ * what another's complete pass marks. A daemon stop skips the accounts left,
+ * and a pass it ended marks nothing: the chats it didn't reach keep their
+ * sync state.
  */
 export async function bootstrapDialogs(ctx: DaemonContext): Promise<void> {
   for (const [accountId, accountState] of ctx.state.accounts) {
+    if (ctx.state.shutdownRequested) return
     const rt = ctx.runtime.accounts.get(accountId)
     if (!rt || accountState.status !== 'connected' || !accountState.client) {
       continue
     }
 
     try {
-      const { visited, complete } = await syncAccountDialogs(
+      const { visited, complete, stopped } = await syncAccountDialogs(
         ctx,
         accountId,
         accountState.client,
       )
+      if (stopped) return
       const unvisited = markUnvisitedChats(
         createChatSyncStateService(rt.db),
         visited,
@@ -219,23 +246,26 @@ export async function bootstrapDialogs(ctx: DaemonContext): Promise<void> {
 /**
  * After a reconnect, list the account's dialogs on the new client, so the
  * scheduler catches up the chats that got messages while the connection was
- * down. Runs in the background, one pass per account at a time.
+ * down. Runs in the background, one pass per account at a time. A pass a
+ * daemon stop ended marks nothing and refreshes no queues.
  */
 export async function refreshDialogsAfterReconnect(
   ctx: DaemonContext,
   accountId: number,
   client: TelegramClient,
 ): Promise<void> {
+  if (ctx.state.shutdownRequested) return
   if (ctx.runtime.dialogPassesInFlight.has(accountId)) return
   ctx.runtime.dialogPassesInFlight.add(accountId)
 
   try {
     const rt = requireRuntime(ctx, accountId)
-    const { visited, complete } = await syncAccountDialogs(
+    const { visited, complete, stopped } = await syncAccountDialogs(
       ctx,
       accountId,
       client,
     )
+    if (stopped) return
     // The pass covers this account's own cache, so a complete one marks the
     // chats it didn't list caught up, as on start
     markUnvisitedChats(
@@ -246,9 +276,9 @@ export async function refreshDialogsAfterReconnect(
     )
     rt.scheduler?.refreshQueues()
   } catch (err) {
-    ctx.logger.warn(
-      `[Account ${accountId}] Dialog pass after reconnect failed: ${formatError(err)}`,
-    )
+    const message = `[Account ${accountId}] Dialog pass after reconnect failed: ${formatError(err)}`
+    if (ctx.state.shutdownRequested) ctx.logger.debug(message)
+    else ctx.logger.warn(message)
   } finally {
     ctx.runtime.dialogPassesInFlight.delete(accountId)
   }

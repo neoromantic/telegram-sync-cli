@@ -416,6 +416,77 @@ describe('bootstrapDialogs', () => {
     otherDb.close()
   })
 
+  it('a stop during the startup pass ends it at the next dialog and skips the other accounts', async () => {
+    const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
+    // A synced chat the pass doesn't reach before the stop
+    seedSynced(1005, 1000, 1200)
+    const first = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 10 },
+        { kind: 'user', id: 1002, topMessage: 10 },
+        { kind: 'user', id: 1003, topMessage: 10 },
+      ],
+      {
+        onListed: (count) => {
+          if (count === 1) ctx.state.shutdownRequested = true
+        },
+      },
+    )
+    connect(ctx, 1, first.client)
+    addAccountRuntime(ctx, 1, testCacheDb)
+    const otherDb = createAccountCacheDb()
+    const second = fakeDialogClient([{ kind: 'user', id: 2001 }])
+    connect(ctx, 2, second.client)
+    addAccountRuntime(ctx, 2, otherDb)
+
+    await bootstrapDialogs(ctx)
+
+    const cachedIds = testCacheDb
+      .query('SELECT chat_id FROM chats_cache')
+      .all()
+      .map((row) => (row as { chat_id: string }).chat_id)
+    expect(cachedIds).toEqual(['1001'])
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      '[Account 1] Dialog pass stopped after 1 dialogs: the daemon is stopping',
+    )
+    expect(second.calls).toEqual([])
+    // Neither caught up nor unknown: the stop tells nothing about it
+    expect(chatSyncState.get(1005)).toMatchObject({
+      forward_cursor: 1000,
+      top_message_id: 1200,
+    })
+    otherDb.close()
+  })
+
+  it('a stop right after a complete pass still marks unvisited chats', async () => {
+    const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
+    // Left: no longer in the dialog list
+    seedSynced(1001, 1000, 1200)
+    const dialogs: FakeDialogInput[] = [
+      { kind: 'user', id: 1002, topMessage: 10 },
+      { kind: 'user', id: 1003, topMessage: 10 },
+    ]
+    const first = fakeDialogClient(dialogs, {
+      onListed: (count) => {
+        if (count === dialogs.length) ctx.state.shutdownRequested = true
+      },
+    })
+    connect(ctx, 1, first.client)
+    addAccountRuntime(ctx, 1, testCacheDb)
+    const otherDb = createAccountCacheDb()
+    const second = fakeDialogClient([{ kind: 'user', id: 2001 }])
+    connect(ctx, 2, second.client)
+    addAccountRuntime(ctx, 2, otherDb)
+
+    await bootstrapDialogs(ctx)
+
+    expect(chatSyncState.get(1001)?.top_message_id).toBe(1000)
+    expect(createChatsCache(testCacheDb).getById('1003')).not.toBeNull()
+    expect(second.calls).toEqual([])
+    otherDb.close()
+  })
+
   it('leaves a supergroup without a member count off', async () => {
     await runPass([{ kind: 'supergroup', id: 2001, topMessage: 50 }])
 

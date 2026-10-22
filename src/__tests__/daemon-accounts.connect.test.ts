@@ -655,6 +655,27 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(createdClients[0]?.options).not.toHaveProperty('transport')
   })
 
+  it('daemon clients use the daemon platform', async () => {
+    const ctx = createContext(
+      createAccountsDb([{ id: 1, phone: '+15550000001', user_id: 555 }]),
+    )
+    const { attemptReconnect, connectAccount } = await import(
+      '../daemon/daemon-accounts'
+    )
+    const { daemonPlatform } = await import('../daemon/daemon-platform')
+
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
+    const accountState = ctx.state.accounts.get(1)!
+    accountState.status = 'error'
+    expect(await attemptReconnect(ctx, accountState)).toBe(true)
+
+    // Session files stay open until the daemon closes the client (#56)
+    expect(createdClients).toHaveLength(2)
+    for (const client of createdClients) {
+      expect(client.options.platform).toBe(daemonPlatform)
+    }
+  })
+
   it('uses the proxy transport when connecting an account', async () => {
     process.env.TELEGRAM_PROXY = 'socks5://127.0.0.1:1080'
     const ctx = createContext(
@@ -767,6 +788,45 @@ describe('daemon-accounts: connection + event wiring', () => {
     }
   })
 
+  it('releaseClient keeps the update handlers until destroy() returns', async () => {
+    const ctx = createContext(
+      createAccountsDb([{ id: 1, phone: '+15550000001', user_id: null }]),
+    )
+    const { connectAccount, disconnectAllAccounts } = await import(
+      '../daemon/daemon-accounts'
+    )
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
+
+    // The updates loop dispatches the batch it was handling when destroy()
+    // stopped it
+    const client = createdClients[0]!
+    let handlersDuringDestroy = -1
+    client.destroy.mockImplementation(async () => {
+      handlersDuringDestroy = client.onNewMessage.handlers.length
+      client.onNewMessage.emit(
+        asMessage({
+          id: 9,
+          chat: { id: 5550002, type: 'user' },
+          sender: { id: 5550002 },
+          text: 'sent as the daemon stopped',
+          date: new Date('2026-01-02T12:00:00Z'),
+          isOutgoing: false,
+        }),
+      )
+    })
+
+    await disconnectAllAccounts(ctx)
+
+    expect(handlersDuringDestroy).toBe(1)
+    expect(createMessagesCache(testCacheDb).get(5550002, 9)?.text).toBe(
+      'sent as the daemon stopped',
+    )
+    expect(client.onNewMessage.handlers).toHaveLength(0)
+    expect(client.onEditMessage.handlers).toHaveLength(0)
+    expect(client.onDeleteMessage.handlers).toHaveLength(0)
+    expect(ctx.state.accounts.get(1)?.eventHandlers).toBeUndefined()
+  })
+
   it('disconnectAllAccounts closes the other clients when one fails to close', async () => {
     const ctx = createContext(
       createAccountsDb([
@@ -791,38 +851,11 @@ describe('daemon-accounts: connection + event wiring', () => {
 
     expect(createdClients[0]!.destroy).toHaveBeenCalledTimes(1)
     expect(createdClients[1]!.destroy).toHaveBeenCalledTimes(1)
-    expect(ctx.logger.warn).toHaveBeenCalled()
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to close client (shutdown)'),
+    )
     expect(ctx.state.accounts.get(1)?.status).toBe('disconnected')
     expect(ctx.state.accounts.get(2)?.status).toBe('disconnected')
-  })
-
-  it('disconnectAllAccounts logs a session file mtcute already closed at debug, not warn', async () => {
-    const ctx = createContext(
-      createAccountsDb([{ id: 1, phone: '+15550000001', user_id: null }]),
-    )
-    const { connectAccount, disconnectAllAccounts } = await import(
-      '../daemon/daemon-accounts'
-    )
-
-    nextGetMe = { id: 5550001, firstName: 'Alex', lastName: 'Example' }
-    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
-
-    // mtcute's exit hook closes the session DB when the signal arrives, so
-    // destroy() can't save what was queued after it
-    createdClients[0]!.destroy.mockImplementation(async () => {
-      throw new Error('Database has closed')
-    })
-
-    await disconnectAllAccounts(ctx)
-
-    expect(createdClients[0]!.destroy).toHaveBeenCalledTimes(1)
-    expect(ctx.logger.warn).not.toHaveBeenCalled()
-    expect(ctx.logger.debug).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'Session file already closed by mtcute (shutdown)',
-      ),
-    )
-    expect(ctx.state.accounts.get(1)?.status).toBe('disconnected')
   })
 
   it('attemptReconnect resets attempts on success', async () => {

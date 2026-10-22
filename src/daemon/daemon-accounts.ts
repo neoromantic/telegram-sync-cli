@@ -15,6 +15,7 @@ import {
 } from '../utils/message-parser'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
 import type { DaemonContext } from './daemon-context'
+import { daemonPlatform } from './daemon-platform'
 import { rebuildSyncWorker } from './daemon-scheduler'
 import {
   calculateReconnectDelay,
@@ -114,17 +115,6 @@ function resolveForwardFromId(message: {
   return extractForwardFromId(message.raw.fwdFrom)
 }
 
-/**
- * On SIGTERM, SIGINT or exit, mtcute's own exit hook saves and closes every
- * session file before the daemon's shutdown runs. destroy() then fails to save
- * whatever was queued after the signal. That's expected on a stop, not a fault.
- */
-function isClosedSessionError(err: unknown): boolean {
-  return /Database has closed|Cannot use a closed database/.test(
-    getErrorMessage(err),
-  )
-}
-
 export async function closeClientSafe(
   ctx: DaemonContext,
   client: TelegramClient,
@@ -134,13 +124,7 @@ export async function closeClientSafe(
     await client.destroy()
     ctx.logger.debug(`Closed client (${reason})`)
   } catch (err) {
-    if (isClosedSessionError(err)) {
-      ctx.logger.debug(
-        `Session file already closed by mtcute (${reason}): ${getErrorMessage(err)}`,
-      )
-    } else {
-      ctx.logger.warn(`Failed to close client (${reason}): ${formatError(err)}`)
-    }
+    ctx.logger.warn(`Failed to close client (${reason}): ${formatError(err)}`)
   }
 }
 
@@ -309,8 +293,9 @@ export function setupEventHandlers(
 export function removeEventHandlers(
   ctx: DaemonContext,
   accountState: AccountConnectionState,
+  client = accountState.client,
 ): void {
-  const { client, eventHandlers, accountId } = accountState
+  const { eventHandlers, accountId } = accountState
 
   if (!client || !eventHandlers) {
     return
@@ -345,6 +330,8 @@ function createDaemonClient(
     apiId: telegramConfig.apiId,
     apiHash: telegramConfig.apiHash,
     storage: sessionPath,
+    // Session files stay open until the daemon closes the client (#56)
+    platform: daemonPlatform,
     logLevel: ctx.verbosity === 'verbose' ? 5 : 2,
     ...(telegramConfig.transport && { transport: telegramConfig.transport }),
     network: {
@@ -505,9 +492,13 @@ export function scheduleReconnect(
 }
 
 /**
- * Detach the account's client: remove its handlers, drop the sync worker
- * bound to it and close it. The client leaves the account state before it is
+ * Detach the account's client: drop the sync worker bound to it, close it,
+ * then remove its handlers. The client leaves the account state before it is
  * closed, so each client is closed once.
+ *
+ * The handlers stay on until destroy() returns: the updates loop can still
+ * dispatch the batch it was handling when destroy() stopped it, and save its
+ * state, so a message in that batch must still reach the cache.
  */
 async function releaseClient(
   ctx: DaemonContext,
@@ -517,17 +508,18 @@ async function releaseClient(
   const { client, accountId } = accountState
   if (!client) return
 
+  accountState.client = undefined
+  const rt = ctx.runtime.accounts.get(accountId)
+  if (rt) rt.worker = null
+  await closeClientSafe(ctx, client, reason)
+
   try {
-    removeEventHandlers(ctx, accountState)
+    removeEventHandlers(ctx, accountState, client)
   } catch (err) {
     ctx.logger.warn(
       `Error removing event handlers for ${accountState.phone}: ${formatError(err)}`,
     )
   }
-  accountState.client = undefined
-  const rt = ctx.runtime.accounts.get(accountId)
-  if (rt) rt.worker = null
-  await closeClientSafe(ctx, client, reason)
 }
 
 export async function attemptReconnect(
@@ -606,10 +598,11 @@ export async function attemptReconnect(
 }
 
 /**
- * Close every account's client once on shutdown, which stops its updates loop
- * and closes its Telegram connections. mtcute itself saves and closes the
- * session files when the signal arrives. The clients close in parallel: one
- * slow close doesn't use up the shutdown timeout for the rest.
+ * Close every account's client once on shutdown. destroy() stops the updates
+ * loop, saves the update state and peers, and closes the session file and the
+ * Telegram connections; the update handlers stay on until it returns. The
+ * clients close in parallel: one slow close doesn't use up the shutdown
+ * timeout for the rest.
  */
 export async function disconnectAllAccounts(ctx: DaemonContext): Promise<void> {
   ctx.logger.debug('Disconnecting all accounts...')

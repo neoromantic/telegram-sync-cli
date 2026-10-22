@@ -107,6 +107,8 @@ export function communityDialog({
 export interface FakeDialogClientOptions {
   /** Throw after listing this many dialogs */
   failAfter?: number
+  /** Called when the pass asks for the dialog after the `count`th one */
+  onListed?: (count: number) => void
 }
 
 /** A client whose `iterDialogs` lists the given dialogs */
@@ -125,6 +127,7 @@ export function fakeDialogClient(
       }
       yield fakeDialog(input)
       listed++
+      options.onListed?.(listed)
     }
   }
 

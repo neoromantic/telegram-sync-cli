@@ -215,10 +215,15 @@ account's scheduler → its sync_jobs → its worker and client → its messages
   session file, registers the update handlers on the new client, starts its
   updates loop and rebuilds the account's sync worker; a failed attempt closes
   the new client and schedules the next retry
-- On shutdown (`tg daemon stop`, SIGTERM or SIGINT) the daemon closes every
-  account's client once, which stops its updates loop and closes its Telegram
-  connections. mtcute itself saves and closes the session files when the
-  signal arrives
+- On shutdown (`tg daemon stop`, SIGTERM or SIGINT) the daemon finishes the
+  running sync job, then closes every account's client once. The session files
+  stay open until then: closing a client stops its updates loop, saves its
+  update state and peers, and closes its session file and Telegram
+  connections, and the update handlers stay on until it's done, so updates and
+  peers that arrive after the signal are saved. If the shutdown times out, the
+  session writes still queued are saved on exit. A stop during a dialog pass
+  ends the pass at the next dialog, but a FLOOD_WAIT the pass or a sync job is
+  waiting out still holds the stop until it ends
 - After a reconnect, a dialog pass runs on the new client in the background
   (one per account at a time), then the scheduler catches up the chats that got
   messages while the connection was down. If the pass fails part-way, every

@@ -467,6 +467,56 @@ describe('rebuildSyncWorker dialog pass', () => {
     expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
   })
 
+  it('a reconnect pass stopped by a shutdown marks no unvisited chats and refreshes no queues', async () => {
+    const ctx = createContext()
+    const refreshQueues = mock(() => {})
+    addAccountRuntime(ctx, 1, cacheDb, {
+      scheduler: createSchedulerStub({ refreshQueues }),
+    })
+    const fake = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 1000 },
+        { kind: 'user', id: 1002, topMessage: 1007 },
+      ],
+      {
+        onListed: () => {
+          ctx.state.shutdownRequested = true
+        },
+      },
+    )
+
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    // Neither caught up nor unknown: their sync state stays as it was
+    for (const userId of [1002, 1003]) {
+      expect(chatSyncState.get(userId)?.top_message_id).toBe(1000)
+    }
+    expect(refreshQueues).not.toHaveBeenCalled()
+    // Nothing above debug after the pass starts
+    expect((ctx.logger.info as ReturnType<typeof mock>).mock.calls).toEqual([
+      ['[Account 1] Bootstrapping dialogs...'],
+    ])
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.error).not.toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      '[Account 1] Dialog pass stopped after 1 dialogs: the daemon is stopping',
+    )
+    expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
+  })
+
+  it('starts no reconnect pass once the daemon is stopping', async () => {
+    const ctx = createRunningContext()
+    ctx.state.shutdownRequested = true
+    const fake = fakeDialogClient([
+      { kind: 'user', id: 1002, topMessage: 1007 },
+    ])
+
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    expect(fake.calls).toEqual([])
+    expect(chatSyncState.get(1002)?.top_message_id).toBe(1000)
+  })
+
   it('runs one pass for two quick reconnects of an account', async () => {
     const ctx = createRunningContext()
     const first = fakeDialogClient([
