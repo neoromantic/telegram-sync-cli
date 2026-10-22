@@ -110,7 +110,7 @@ tg messages list --chat @username --limit 20
 tg messages get --chat @username --id 42 --context 3
 tg messages search --query "hello"
 tg send --to @username --message "Hi there"
-tg api account.checkUsername --username myuser
+tg api account.checkUsername --username=myuser
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg daemon start
 tg status
