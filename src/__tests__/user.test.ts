@@ -9,7 +9,7 @@
  */
 
 import type { Database } from 'bun:sqlite'
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import type { tl } from '@mtcute/bun'
 
 import { createTestCacheDatabase } from '../db/schema'
@@ -21,7 +21,11 @@ import {
   type UsersCache,
 } from '../db/users-cache'
 import { toLong } from '../utils/long'
-import { mockDbModule } from './helpers/db-mock'
+import {
+  createFakeAccountsDb,
+  mockDbModule,
+  testAccount,
+} from './helpers/db-mock'
 
 function expectLongEqual(actual: tl.Long, expected: string | number | bigint) {
   expect(actual.toString()).toBe(toLong(expected).toString())
@@ -63,15 +67,31 @@ function requireCachedUser(
 // =============================================================================
 
 let mockClient = createMockClient()
+// Account 2's client and cache, for the cases that select it with --account
+let secondClient: unknown = null
+let secondCacheDb: Database | null = null
 
-mock.module('../services/telegram', () => ({
-  getClientForAccount: mock(() => mockClient),
-}))
+const getClientForAccount = mock((accountId: number) =>
+  accountId === 2 ? secondClient : mockClient,
+)
+mock.module('../services/telegram', () => ({ getClientForAccount }))
 
-// Each account reads the test cache
+// Account 1 (active) reads the test cache, account 2 its own
 let testCacheDb: Database
 
-mock.module('../db', () => mockDbModule({ cacheFor: () => testCacheDb }))
+mock.module('../db', () =>
+  mockDbModule({
+    cacheFor: (accountId) => {
+      if (accountId !== 2) return testCacheDb
+      if (!secondCacheDb) throw new Error('No cache for account 2')
+      return secondCacheDb
+    },
+    accountsDb: createFakeAccountsDb([
+      testAccount({ id: 1 }),
+      testAccount({ id: 2, phone: '+15550000002', is_active: 0 }),
+    ]),
+  }),
+)
 
 // =============================================================================
 // Test Helpers
@@ -1976,5 +1996,67 @@ describe('Staleness checking', () => {
 
     // With 1 second TTL, should be stale
     expect(isCacheStale(timestamp, 1000)).toBe(true)
+  })
+})
+
+// =============================================================================
+// Which account a lookup uses
+// =============================================================================
+
+describe('userCommand with two accounts', () => {
+  const BOB = makeRawUser({
+    id: 202,
+    firstName: 'Bob',
+    lastName: 'Baker',
+    username: 'bob_example',
+    phone: '15550000202',
+    accessHash: toLong('222'),
+  })
+
+  beforeEach(() => {
+    testCacheDb = createTestCacheDatabase().db
+    secondCacheDb = createTestCacheDatabase().db
+    getClientForAccount.mockClear()
+    mockClient = createMockClient()
+  })
+
+  it("fetches with --fresh on the selected account's client and caches the user there", async () => {
+    // Account 2 cached Bob under an old name; --fresh skips that
+    createUsersCache(secondCacheDb!).upsert(
+      createTestUser({ user_id: '202', first_name: 'Old', username: null }),
+    )
+    const call = mock(async (request: { _: string }) => {
+      if (request._ !== 'users.getUsers') {
+        throw new Error(`Unexpected API call ${request._}`)
+      }
+      return [BOB]
+    })
+    secondClient = { call }
+    const { userCommand } = await import('../commands/user/lookup')
+    const run = userCommand.run as (input: {
+      args: Record<string, unknown>
+    }) => Promise<void>
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+
+    try {
+      await run({
+        args: { identifier: '202', account: '2', fresh: true, _: [] },
+      })
+    } finally {
+      logSpy.mockRestore()
+    }
+
+    expect(getClientForAccount.mock.calls).toEqual([[2]])
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(mockClient.call).not.toHaveBeenCalled()
+    expect(createUsersCache(secondCacheDb!).getById('202')).toMatchObject({
+      first_name: 'Bob',
+      access_hash: '222',
+    })
+    expect(createUsersCache(testCacheDb).getById('202')).toBeNull()
+    const activity = (db: Database) =>
+      db.query('SELECT method FROM api_activity').all()
+    expect(activity(secondCacheDb!)).toEqual([{ method: 'users.getUsers' }])
+    expect(activity(testCacheDb)).toEqual([])
   })
 })
