@@ -423,7 +423,10 @@ The schema is created with `CREATE TABLE IF NOT EXISTS` on startup, indexes with
 `chat_sync_state.sync_mode`, `sync_jobs.attempts`, `sync_jobs.next_run_at`) are added with
 `ALTER TABLE … ADD COLUMN` when missing; a "duplicate column name" error is ignored, because
 the CLI and the daemon can both run the migration on the first start. Older binaries ignore
-the new columns.
+the new columns. `idx_messages_cache_message_id` is built on the first open of a cache
+that lacks it. The build reads the whole table under the write lock, so that open, and any
+other process opening the cache meanwhile, waits up to 60 seconds for the lock instead of 5;
+the process that waited finds the index built. Opens of a cache that has it only read.
 
 `PRAGMA user_version` records the one-time data migrations of each account's `cache.db`
 (`src/db/peer-id-migration.ts`); they run on every account's file on its first open:
