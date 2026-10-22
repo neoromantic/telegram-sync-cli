@@ -294,6 +294,24 @@ describe('vacuumCache', () => {
     expect(pragma(db, 'freelist_count')).toBe(0)
     expect(result.bytes_after).toBeLessThan(result.bytes_before)
   })
+
+  it("doesn't wait for a reader on an older snapshot while the daemon runs", () => {
+    seedAndDeleteAThird()
+    db.run('PRAGMA busy_timeout = 5000')
+    const reader = new Database(path())
+    reader.run('BEGIN')
+    reader.query('SELECT COUNT(*) FROM messages_cache').get()
+
+    const started = performance.now()
+    const result = vacuumCache(db, path(), { daemonRunning: true })
+    const elapsed = performance.now() - started
+    reader.run('COMMIT')
+    reader.close()
+
+    expect(result.checkpointed).toBe(false)
+    expect(elapsed).toBeLessThan(2000)
+    expect(pragma(db, 'busy_timeout')).toBe(5000)
+  })
 })
 
 describe('rebuildSearchIfRowidsMoved', () => {
