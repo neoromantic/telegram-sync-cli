@@ -371,6 +371,53 @@ function accountSummary(acc: StatusAccount): string {
   return parts.join(c.dim(' · '))
 }
 
+/** Free pages above this share of the file earn a `tg db vacuum` hint */
+const VACUUM_HINT_FREE_SHARE = 0.1
+
+/**
+ * Each account's cache size: the file, its WAL and the free pages inside
+ * it, and with --sizes its three largest tables
+ */
+function printCacheSizeSection(status: StatusSnapshot): void {
+  const sized = status.accounts.accounts.filter((acc) => acc.cache.size)
+  if (sized.length === 0) return
+
+  printHeader('Cache Size')
+  const vacuumHints: string[] = []
+  for (const acc of sized) {
+    const size = acc.cache.size!
+    const parts = [
+      c.value(formatBytes(size.file_bytes + size.wal_bytes)),
+      c.dim(`WAL ${formatBytes(size.wal_bytes)}`),
+      c.dim(`free ${formatBytes(size.free_bytes)}`),
+    ]
+    if (size.tables) {
+      const top = Object.entries(size.tables)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([table, bytes]) => `${table} ${formatBytes(bytes)}`)
+      if (top.length > 0) parts.push(c.dim(top.join(', ')))
+    }
+    printRow(`Account #${acc.id}`, parts.join(c.dim(' · ')))
+
+    if (
+      size.file_bytes > 0 &&
+      size.free_bytes > size.file_bytes * VACUUM_HINT_FREE_SHARE
+    ) {
+      vacuumHints.push(`tg db vacuum --account ${acc.id}`)
+    }
+  }
+  if (vacuumHints.length > 0) {
+    console.log()
+    console.log(
+      c.dim(
+        '  Over 10% of the cache is free pages; to give them back to the disk:',
+      ),
+    )
+    for (const command of vacuumHints) console.log(`    ${c.value(command)}`)
+  }
+}
+
 /**
  * Shared caches of an older version that were set aside, and a move that
  * waits; shown only when there is one
@@ -429,6 +476,7 @@ export function printPrettyStatus(status: StatusSnapshot): void {
   printSyncProgressSection(status)
   printRateLimitsSection(status)
   printAccountsSection(status)
+  printCacheSizeSection(status)
   printStorageSection(status)
 
   console.log()

@@ -720,7 +720,7 @@ describe('E2E: status per account', () => {
     expect(accounts).toEqual([
       expect.objectContaining({
         id: 1,
-        cache: { status: 'ok' },
+        cache: expect.objectContaining({ status: 'ok' }),
         connection: { status: 'connected', last_error: null },
         sync: {
           pending_jobs: 0,

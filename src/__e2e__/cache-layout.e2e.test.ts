@@ -173,6 +173,7 @@ describe('E2E: upgrading from the shared cache', () => {
         expect(
           (status.json as { data: { storage: unknown } }).data.storage,
         ).toEqual({
+          cache_bytes: 0,
           legacy_caches: [],
           migration: {
             reason: 'shared_cache_in_use',
@@ -385,6 +386,7 @@ describe('E2E: upgrading from the shared cache', () => {
       expect(
         (status.json as { data: { storage: unknown } }).data.storage,
       ).toEqual({
+        cache_bytes: expect.any(Number),
         legacy_caches: [{ path: parked, size_bytes: statSync(parked).size }],
         migration: null,
       })

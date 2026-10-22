@@ -251,6 +251,7 @@ tg daemon status
 
 tg status
 tg status --account work        # only this account's figures
+tg status --sizes               # add each table's size (reads the whole cache)
 
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg sql --query "SELECT COUNT(*) AS n FROM messages_cache" --account 2
@@ -285,17 +286,30 @@ part counts the daemon's sync jobs and lists some of them:
   (`chats_enabled`, `chats_history_complete`, `chats_history_pending`, `messages_cached`) and
   `rate_limits` (`api_calls_last_minute`, `active_flood_waits`, a count). With several
   accounts, pretty output prints a line with these under each account.
+- `accounts.accounts[].cache.size` is the cache's size, or `null` for a missing cache or one
+  that failed: `file_bytes` (the database file), `wal_bytes` (its `-wal` file, 0 when there is
+  none), `page_size`, `page_count`, `free_pages` and `free_bytes` (pages inside the file that
+  hold no data, which `tg db vacuum` gives back to the disk) and `auto_vacuum` (`none`, `full`
+  or `incremental`). With `--sizes` it adds `tables`: bytes per table, its indexes and FTS5
+  shadow tables counted with it (`message_search` holds the search index), or `null` when
+  SQLite has no `dbstat`. `--sizes` reads every page of the cache, which on a large cache
+  read cold from disk takes a while, so plain `tg status` leaves it out. Pretty output shows a
+  Cache Size section with a line per account (the total, the WAL, the free space and, with
+  `--sizes`, the three largest tables) and the `tg db vacuum --account <id>` command for each
+  account whose free pages are over 10% of its file.
 - `--account <selector>` scopes the totals, the lists and `accounts.accounts` to one account;
   `account_id` says which (`null` without the flag). The `daemon` section always covers the
   whole daemon, and `accounts.total` and the `active_*` fields stay those of every account.
   Pretty output says which account the figures cover in a line under the title, and still
   prints that account's line.
-- `storage` reports the shared cache of 0.3 and older: `legacy_caches` lists the files set
+- `storage.cache_bytes` is the sum of `file_bytes` and `wal_bytes` over the accounts in scope
+  (only `--account`'s with the flag).
+- `storage` also reports the shared cache of 0.3 and older: `legacy_caches` lists the files set
   aside as `shared-cache*.db` (`path`, `size_bytes`), and `migration` is `null` or
   `{ reason, path, suggestion }` while the move waits (see
   [configuration.md](configuration.md#upgrading-to-per-account-caches)). Pretty output shows a
   Storage section only when there is something in it. `tg daemon status` of a running daemon
-  returns the same `storage` (see [daemon.md](daemon.md#status-output)).
+  returns the same `storage`, without `cache_bytes` (see [daemon.md](daemon.md#status-output)).
 
 ```json
 {

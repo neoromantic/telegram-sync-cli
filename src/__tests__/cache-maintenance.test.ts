@@ -8,7 +8,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { pruneCache } from '../db/cache-maintenance'
+import { pruneCache, readCacheSize } from '../db/cache-maintenance'
+import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
@@ -60,6 +61,21 @@ function addJob(status: string, completedAt: number | null): number {
     )
     .get(status, completedAt) as { id: number }
   return row.id
+}
+
+/** Made-up messages in two chats */
+function seedMessages(n: number, startId = 1) {
+  createMessagesCache(db).upsertBatch(
+    Array.from({ length: n }, (_, i) => ({
+      chat_id: i % 2 === 0 ? 101 : -1001234567890,
+      message_id: startId + i,
+      from_id: 5550001 + (i % 3),
+      text: `made-up note ${startId + i} about the weekly plan`,
+      message_type: 'text',
+      date: NOW_SEC - i,
+      raw_json: JSON.stringify({ _: 'message', id: startId + i }),
+    })),
+  )
 }
 
 const count = (table: string) =>
@@ -156,5 +172,33 @@ describe('pruneCache', () => {
 
     expect(result.api_activity).toBe(5)
     expect(count('api_activity')).toBe(1)
+  })
+})
+
+describe('readCacheSize', () => {
+  it("reports the file, free pages and each table's bytes", () => {
+    seedMessages(200)
+    db.run('PRAGMA wal_checkpoint(TRUNCATE)')
+
+    const size = readCacheSize(db, join(dir, 'cache.db'), { tables: true })
+
+    expect(size.file_bytes).toBeGreaterThan(0)
+    expect(size.page_size).toBeGreaterThan(0)
+    expect(size.free_bytes).toBe(size.free_pages * size.page_size)
+    expect(['none', 'full', 'incremental']).toContain(size.auto_vacuum)
+    expect(size.tables?.messages_cache).toBeGreaterThan(0)
+    expect(size.tables?.message_search).toBeGreaterThan(0)
+    const names = Object.keys(size.tables ?? {})
+    expect(names.filter((name) => name.startsWith('message_search_'))).toEqual(
+      [],
+    )
+    expect(names.filter((name) => name.startsWith('idx_'))).toEqual([])
+  })
+
+  it('reads no table sizes unless asked', () => {
+    const size = readCacheSize(db, join(dir, 'cache.db'), { tables: false })
+
+    expect('tables' in size).toBe(false)
+    expect(size.wal_bytes).toBeGreaterThanOrEqual(0)
   })
 })
