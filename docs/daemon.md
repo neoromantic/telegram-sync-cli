@@ -96,12 +96,16 @@ runs only on that account's client, with that account's access hashes and rate l
 
 ### Update Handling
 
-Real-time handlers update `messages_cache` and `chat_sync_state` in the receiving account's
-cache:
+Real-time handlers update `messages_cache`, `chat_sync_state` and, for contacts,
+`users_cache` in the receiving account's cache:
 - New message → insert/update message row
 - Edit message → update text/edit_date
 - Delete message → mark `is_deleted = 1` (without a chat: the one private chat or basic group
   with that ID; see [real-time.md](real-time.md#deletes))
+- Contact signals (`updatePeerSettings`, `updateUser` with the user's full record) → set
+  `users_cache.is_contact` when the flag changed; without the full record, a hash check of the
+  contact list a minute later; `updateContactsReset` → unmark every contact and check the list
+  (see [real-time.md](real-time.md#contacts))
 
 Handlers live in:
 - `src/daemon/handlers.ts`
@@ -162,7 +166,8 @@ The daemon keeps each connected account's contact list in its own cache (`users_
 - **When:** the main loop looks on its first tick, right after the startup dialog pass, and then
   every 30 ticks (~30 seconds). A check is due when the account has no recorded list, when the
   list is older than the peer TTL (`cache.staleness.peers`, one week by default), or when an
-  update hinted at a change. The TTL is read when the daemon starts, so a change to it needs a
+  update hinted at a change without the user's full record (a minute after the first hint;
+  later hints in that minute share the check). The TTL is read when the daemon starts, so a change to it needs a
   restart. Most looks read one row of `sync_state` and do nothing.
 - **Hash:** the request carries Telegram's hash of the cached list: the `saved_count` of the last
   full list and the IDs of the cached contacts. An unchanged list gets `contactsNotModified`

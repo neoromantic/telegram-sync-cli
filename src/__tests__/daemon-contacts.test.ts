@@ -5,8 +5,19 @@
  */
 import type { Database } from 'bun:sqlite'
 import { describe, expect, it, mock } from 'bun:test'
-import { type RpcCallOptions, type TelegramClient, tl } from '@mtcute/bun'
-import { CONTACTS_RETRY_MS, maybeSyncContacts } from '../daemon/daemon-contacts'
+import {
+  PeersIndex,
+  RawUpdateInfo,
+  type RpcCallOptions,
+  type TelegramClient,
+  tl,
+} from '@mtcute/bun'
+import {
+  CONTACTS_HINT_DELAY_MS,
+  CONTACTS_RETRY_MS,
+  handleContactRawUpdate,
+  maybeSyncContacts,
+} from '../daemon/daemon-contacts'
 import {
   createDaemonRuntime,
   type DaemonContext,
@@ -316,5 +327,182 @@ describe('maybeSyncContacts', () => {
       )
       expect(maybeSyncContacts(ctx, NOW + WEEK)).toHaveLength(0)
     }
+  })
+})
+
+describe('handleContactRawUpdate', () => {
+  const USER = 4242
+
+  function fullUser(contact: boolean, extra: Partial<tl.RawUser> = {}) {
+    return {
+      _: 'user',
+      id: USER,
+      firstName: 'Robin',
+      contact,
+      ...extra,
+    } as tl.RawUser
+  }
+
+  function peerSettings(users: tl.TypeUser[] = []): RawUpdateInfo {
+    return new RawUpdateInfo(
+      {
+        _: 'updatePeerSettings',
+        peer: { _: 'peerUser', userId: USER },
+        settings: { _: 'peerSettings' },
+      },
+      PeersIndex.from({ users }),
+    )
+  }
+
+  function userUpdate(users: tl.TypeUser[] = []): RawUpdateInfo {
+    return new RawUpdateInfo(
+      { _: 'updateUser', userId: USER },
+      PeersIndex.from({ users }),
+    )
+  }
+
+  function cachedRow(db: Database) {
+    return db
+      .query('SELECT is_contact, updated_at FROM users_cache WHERE user_id = ?')
+      .get(String(USER)) as { is_contact: number; updated_at: number } | null
+  }
+
+  function setup() {
+    const ctx = createContext()
+    const db = addAccountRuntime(ctx, 1).db
+    return { ctx, db }
+  }
+
+  function seed(db: Database, isContact: boolean) {
+    createUsersCache(db).upsert({
+      user_id: String(USER),
+      first_name: 'Robin',
+      is_contact: isContact ? 1 : 0,
+      fetched_at: 1000,
+      raw_json: '{}',
+    })
+  }
+
+  it('marks a user who became a contact, creating the row', () => {
+    const { ctx, db } = setup()
+    handleContactRawUpdate(ctx, 1, db, peerSettings([fullUser(true)]), NOW)
+    expect(cachedRow(db)?.is_contact).toBe(1)
+
+    // An existing non-contact row is marked too
+    const other = setup()
+    seed(other.db, false)
+    handleContactRawUpdate(
+      other.ctx,
+      1,
+      other.db,
+      peerSettings([fullUser(true)]),
+      NOW,
+    )
+    expect(cachedRow(other.db)?.is_contact).toBe(1)
+  })
+
+  it('unmarks a cached contact that updateUser says is no longer one', () => {
+    const { ctx, db } = setup()
+    seed(db, true)
+    handleContactRawUpdate(ctx, 1, db, userUpdate([fullUser(false)]), NOW)
+    expect(cachedRow(db)?.is_contact).toBe(0)
+  })
+
+  it('adds no row for a non-contact the cache does not have', () => {
+    const { ctx, db } = setup()
+    handleContactRawUpdate(ctx, 1, db, userUpdate([fullUser(false)]), NOW)
+    expect(cachedRow(db)).toBeNull()
+    expect(ctx.runtime.contacts.checkAt.size).toBe(0)
+  })
+
+  it('writes nothing when the flag is unchanged', () => {
+    const { ctx, db } = setup()
+    seed(db, true)
+    const before = cachedRow(db)
+    handleContactRawUpdate(ctx, 1, db, peerSettings([fullUser(true)]), NOW)
+    expect(cachedRow(db)).toEqual(before)
+  })
+
+  it('asks for one hash check when the update has no full user', () => {
+    const { ctx, db } = setup()
+    seed(db, true)
+    const before = cachedRow(db)
+
+    handleContactRawUpdate(ctx, 1, db, userUpdate(), NOW)
+    expect(ctx.runtime.contacts.checkAt.get(1)).toBe(
+      NOW + CONTACTS_HINT_DELAY_MS,
+    )
+
+    // A min user is no better; a second hint keeps the first time
+    handleContactRawUpdate(
+      ctx,
+      1,
+      db,
+      peerSettings([fullUser(false, { min: true })]),
+      NOW + 5000,
+    )
+    expect(ctx.runtime.contacts.checkAt.get(1)).toBe(
+      NOW + CONTACTS_HINT_DELAY_MS,
+    )
+    expect(cachedRow(db)).toEqual(before)
+  })
+
+  it('unmarks every contact on updateContactsReset and checks at once', () => {
+    const { ctx, db } = setup()
+    seed(db, true)
+    handleContactRawUpdate(
+      ctx,
+      1,
+      db,
+      new RawUpdateInfo({ _: 'updateContactsReset' }, new PeersIndex()),
+      NOW,
+    )
+    expect(cachedRow(db)?.is_contact).toBe(0)
+    expect(ctx.runtime.contacts.checkAt.get(1)).toBe(NOW)
+  })
+
+  it('ignores updateUserName and unrelated updates', () => {
+    const { ctx, db } = setup()
+    seed(db, true)
+    const before = cachedRow(db)
+    for (const update of [
+      {
+        _: 'updateUserName',
+        userId: USER,
+        firstName: 'Changed',
+        lastName: '',
+        usernames: [],
+      },
+      {
+        _: 'updatePeerSettings',
+        peer: { _: 'peerChat', chatId: 77 },
+        settings: { _: 'peerSettings' },
+      },
+      { _: 'updateDialogPinned', peer: { _: 'dialogPeerFolder', folderId: 1 } },
+    ] as tl.TypeUpdate[]) {
+      handleContactRawUpdate(
+        ctx,
+        1,
+        db,
+        new RawUpdateInfo(
+          update,
+          PeersIndex.from({ users: [fullUser(false)] }),
+        ),
+        NOW,
+      )
+    }
+    expect(cachedRow(db)).toEqual(before)
+    expect(ctx.runtime.contacts.checkAt.size).toBe(0)
+  })
+
+  it('logs a database failure instead of throwing', () => {
+    const { ctx, db } = setup()
+    db.close()
+    expect(() =>
+      handleContactRawUpdate(ctx, 1, db, peerSettings([fullUser(true)]), NOW),
+    ).not.toThrow()
+    expect(ctx.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('[Account 1] Error handling a contact update'),
+    )
   })
 })

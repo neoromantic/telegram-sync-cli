@@ -9,15 +9,18 @@
  * holds the job loop.
  */
 import type { Database } from 'bun:sqlite'
-import type { TelegramClient } from '@mtcute/bun'
+import type { RawUpdateInfo, TelegramClient } from '@mtcute/bun'
 import { tl } from '@mtcute/bun'
 import {
   applyContactsSnapshot,
   contactsHash,
   getContactsSyncedAt,
   markContactsNotModified,
+  unmarkAllContacts,
 } from '../db/contacts-sync'
 import { createRateLimitsService } from '../db/rate-limits'
+import { createUsersCache } from '../db/users-cache'
+import { apiUserToCacheInput } from '../utils/telegram-mappers'
 import type { DaemonContext } from './daemon-context'
 import { formatError, isDaemonStopError } from './daemon-utils'
 
@@ -25,6 +28,12 @@ export const CONTACTS_METHOD = 'contacts.getContacts'
 
 /** How long a check that failed (not a FLOOD_WAIT) waits before the next */
 export const CONTACTS_RETRY_MS = 15 * 60 * 1000
+
+/**
+ * How soon an update that hints at a contact change, without the user's
+ * full record, gets a hash check. Hints in that window share one check.
+ */
+export const CONTACTS_HINT_DELAY_MS = 60_000
 
 /**
  * Start a contacts check for every connected account that is due. Returns
@@ -156,4 +165,89 @@ function handleContactsError(
   ctx.logger.warn(
     `[Account ${accountId}] Contacts check failed, retrying in 15 min: ${formatError(err)}`,
   )
+}
+
+/**
+ * Ask for a hash check of the account's contacts in a minute. A request
+ * that is already pending keeps its time, so a burst of hints costs one check.
+ */
+export function requestContactsCheck(
+  ctx: DaemonContext,
+  accountId: number,
+  now: number,
+): void {
+  const { checkAt } = ctx.runtime.contacts
+  if (!checkAt.has(accountId)) {
+    checkAt.set(accountId, now + CONTACTS_HINT_DELAY_MS)
+  }
+}
+
+/**
+ * Apply a contact change from a real-time update to the account's own
+ * cache. Telegram has no "contact added" update: a change on another device
+ * comes as updatePeerSettings or updateUser, with the user's record in the
+ * update's peers when Telegram includes it. A full record whose contact
+ * flag differs from the cache is written; a hint without one asks for a
+ * hash check. updateContactsReset unmarks every contact and checks at once.
+ * Never throws.
+ */
+export function handleContactRawUpdate(
+  ctx: DaemonContext,
+  accountId: number,
+  db: Database,
+  info: RawUpdateInfo,
+  now: number,
+): void {
+  const update = info.update
+  let userId: number
+  switch (update._) {
+    case 'updatePeerSettings':
+      if (update.peer._ !== 'peerUser') return
+      userId = update.peer.userId
+      break
+    case 'updateUser':
+      userId = update.userId
+      break
+    case 'updateContactsReset':
+      try {
+        const unmarked = unmarkAllContacts(db, now)
+        ctx.runtime.contacts.checkAt.set(accountId, now)
+        ctx.logger.info(
+          `[Account ${accountId}] Contacts reset by Telegram: ${unmarked} unmarked, checking the list`,
+        )
+      } catch (err) {
+        ctx.logger.error(
+          `[Account ${accountId}] Error handling a contacts reset: ${formatError(err)}`,
+        )
+      }
+      return
+    default:
+      return
+  }
+
+  try {
+    const user = info.peers.users.get(userId)
+    if (user?._ !== 'user' || user.min) {
+      requestContactsCheck(ctx, accountId, now)
+      return
+    }
+
+    const isContact = user.contact ? 1 : 0
+    const cached = db
+      .query('SELECT is_contact FROM users_cache WHERE user_id = ?')
+      .get(String(userId)) as { is_contact: number } | null
+    // A non-contact we don't cache stays out; an unchanged flag costs no write
+    if (cached ? cached.is_contact === isContact : !isContact) return
+
+    const input = apiUserToCacheInput(user)
+    input.fetched_at = now
+    createUsersCache(db).upsert(input)
+    ctx.logger.debug(
+      `[Account ${accountId}] User ${userId} ${isContact ? 'is now a contact' : 'is no longer a contact'}`,
+    )
+  } catch (err) {
+    ctx.logger.error(
+      `[Account ${accountId}] Error handling a contact update: ${formatError(err)}`,
+    )
+  }
 }

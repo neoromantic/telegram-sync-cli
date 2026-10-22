@@ -1,7 +1,12 @@
 /**
  * Daemon types and interfaces
  */
-import type { DeleteMessageUpdate, Message, TelegramClient } from '@mtcute/bun'
+import type {
+  DeleteMessageUpdate,
+  Message,
+  RawUpdateInfo,
+  TelegramClient,
+} from '@mtcute/bun'
 import type { UpdateHandlers } from './handlers'
 
 /**
@@ -15,6 +20,8 @@ export interface AccountEventHandlers {
   onEditMessage: (msg: Message) => void
   /** Handler for deleted messages */
   onDeleteMessage: (update: DeleteMessageUpdate) => void
+  /** Handler for raw updates: contact changes (#8) */
+  onRawUpdate: (info: RawUpdateInfo) => void
 }
 
 /**

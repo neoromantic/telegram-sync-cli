@@ -3,13 +3,15 @@
  */
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import type {
-  DeleteMessageUpdate,
-  Message,
-  TelegramClient,
-  tl,
-} from '@mtcute/bun'
 import * as mtcute from '@mtcute/bun'
+import {
+  type DeleteMessageUpdate,
+  type Message,
+  PeersIndex,
+  RawUpdateInfo,
+  type TelegramClient,
+  type tl,
+} from '@mtcute/bun'
 import {
   createDaemonRuntime,
   type DaemonContext,
@@ -100,6 +102,7 @@ class MockTelegramClient {
   onNewMessage = new MockEvent<[Message]>()
   onEditMessage = new MockEvent<[Message]>()
   onDeleteMessage = new MockEvent<[DeleteMessageUpdate]>()
+  onRawUpdate = new MockEvent<[RawUpdateInfo]>()
 
   start = mock(async (_opts?: Parameters<TelegramClient['start']>[0]) => {
     lifecycle.push(`start:${this.index}`)
@@ -920,6 +923,7 @@ describe('daemon-accounts: connection + event wiring', () => {
       expect(client.onNewMessage.handlers).toHaveLength(0)
       expect(client.onEditMessage.handlers).toHaveLength(0)
       expect(client.onDeleteMessage.handlers).toHaveLength(0)
+      expect(client.onRawUpdate.handlers).toHaveLength(0)
     }
     for (const accountState of ctx.state.accounts.values()) {
       expect(accountState.status).toBe('disconnected')
@@ -1082,6 +1086,7 @@ describe('daemon-accounts: connection + event wiring', () => {
     const oldClient = createdClients[0]!
     const oldWorker = ctx.runtime.accounts.get(1)?.worker
     expect(oldClient.onNewMessage.handlers).toHaveLength(1)
+    expect(oldClient.onRawUpdate.handlers).toHaveLength(1)
     expect(oldWorker?.client).toBe(oldClient as unknown as TelegramClient)
 
     // What a failed health check leaves behind
@@ -1100,6 +1105,7 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(oldClient.onNewMessage.handlers).toHaveLength(0)
     expect(oldClient.onEditMessage.handlers).toHaveLength(0)
     expect(oldClient.onDeleteMessage.handlers).toHaveLength(0)
+    expect(oldClient.onRawUpdate.handlers).toHaveLength(0)
     expect(oldClient.destroy).toHaveBeenCalledTimes(1)
     expect(lifecycle).toEqual(['start:0', 'destroy:0', 'start:1'])
 
@@ -1107,6 +1113,7 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(newClient.onNewMessage.handlers).toHaveLength(1)
     expect(newClient.onEditMessage.handlers).toHaveLength(1)
     expect(newClient.onDeleteMessage.handlers).toHaveLength(1)
+    expect(newClient.onRawUpdate.handlers).toHaveLength(1)
     expect(newClient.startUpdatesLoop).toHaveBeenCalledTimes(1)
     expect(newClient.destroy).not.toHaveBeenCalled()
 
@@ -1135,6 +1142,7 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(oldClient.destroy).toHaveBeenCalledTimes(1)
     expect(newClient.destroy).toHaveBeenCalledTimes(1)
     expect(newClient.onNewMessage.handlers).toHaveLength(0)
+    expect(newClient.onRawUpdate.handlers).toHaveLength(0)
   })
 
   it('attemptReconnect cleans up the new client when updates fail to start', async () => {
@@ -1248,6 +1256,38 @@ describe('daemon-accounts: connection + event wiring', () => {
 
       expect(createMessagesCache(testCacheDb).get(4242, 7)?.is_deleted).toBe(1)
       expect(createMessagesCache(otherDb).get(4242, 7)?.is_deleted).toBe(0)
+    })
+
+    it("applies a contact update only to the receiving account's cache", async () => {
+      const { second } = await wireBoth()
+      const user = {
+        _: 'user',
+        id: 4242,
+        firstName: 'Robin',
+        contact: true,
+      } as tl.RawUser
+      const client = second.client as unknown as MockTelegramClient
+      expect(client.onRawUpdate.handlers).toHaveLength(1)
+
+      client.onRawUpdate.emit(
+        new RawUpdateInfo(
+          {
+            _: 'updatePeerSettings',
+            peer: { _: 'peerUser', userId: 4242 },
+            settings: { _: 'peerSettings' },
+          },
+          PeersIndex.from({ users: [user] }),
+        ),
+      )
+
+      const isContact = (db: Database) =>
+        (
+          db
+            .query("SELECT is_contact FROM users_cache WHERE user_id = '4242'")
+            .get() as { is_contact: number } | null
+        )?.is_contact
+      expect(isContact(otherDb)).toBe(1)
+      expect(isContact(testCacheDb)).toBeUndefined()
     })
   })
 })
