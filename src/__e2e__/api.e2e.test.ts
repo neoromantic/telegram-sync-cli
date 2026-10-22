@@ -1,9 +1,11 @@
 /**
  * E2E tests for tg api with a fake Telegram client
  *
- * mtcute's open connection keeps the process alive until the client is
- * closed, and so does the fake one: every path of tg api has to close it,
- * or the command prints its output and never exits.
+ * The fake client keeps the process alive even after it is closed, as a
+ * connected mtcute client might. Every path of tg api has to close the
+ * client and then exit the process itself: a path that only closes it
+ * prints its output and never exits, and one that doesn't await the close
+ * exits without closing it.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
