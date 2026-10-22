@@ -39,8 +39,10 @@ peer TTL (`cache.staleness.peers`, one week by default), and then every TTL, it 
 with Telegram's hash in the background. An unchanged list costs one tiny reply and no cache
 writes; a changed one is applied as above. Details: [daemon.md](daemon.md#contacts-sync).
 
-A contact you add or delete with `tg api contacts.*` reaches the cache at the daemon's next
-check at the latest, within the peer TTL: the hash comes from the cache, so it differs, and
+Contacts added or removed on another device reach the cache when Telegram sends the update
+for them ([real-time.md](real-time.md#contacts)). A contact you add or delete with
+`tg api contacts.*` reaches the cache the same way, or at the daemon's next check at the latest,
+within the peer TTL: the hash comes from the cache, so it differs, and
 Telegram sends the full list. `tg contacts list --fresh` applies it at once.
 
 ## Current Storage

@@ -14,6 +14,7 @@ import {
   type RawMessageFwdHeader,
 } from '../utils/message-parser'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
+import { handleContactRawUpdate } from './daemon-contacts'
 import { type DaemonContext, requestShutdown } from './daemon-context'
 import { daemonPlatform } from './daemon-platform'
 import { rebuildSyncWorker } from './daemon-scheduler'
@@ -289,11 +290,16 @@ export function setupEventHandlers(
         `[Account ${accountId}] Messages deleted in chat ${chatId}`,
       )
     },
+
+    onRawUpdate: (info) => {
+      handleContactRawUpdate(ctx, accountId, cacheDb, info, Date.now())
+    },
   }
 
   client.onNewMessage.add(eventHandlers.onNewMessage)
   client.onEditMessage.add(eventHandlers.onEditMessage)
   client.onDeleteMessage.add(eventHandlers.onDeleteMessage)
+  client.onRawUpdate.add(eventHandlers.onRawUpdate)
 
   accountState.updateHandlers = updateHandlers
   accountState.eventHandlers = eventHandlers
@@ -315,6 +321,7 @@ export function removeEventHandlers(
   client.onNewMessage.remove(eventHandlers.onNewMessage)
   client.onEditMessage.remove(eventHandlers.onEditMessage)
   client.onDeleteMessage.remove(eventHandlers.onDeleteMessage)
+  client.onRawUpdate.remove(eventHandlers.onRawUpdate)
 
   accountState.eventHandlers = undefined
   accountState.updateHandlers = undefined

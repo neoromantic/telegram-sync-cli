@@ -9,6 +9,7 @@ mtcute provides event-based update handling, which the daemon wires per account:
 - `onNewMessage`
 - `onEditMessage`
 - `onDeleteMessage`
+- `onRawUpdate`, for contact changes (see [Contacts](#contacts))
 
 Handlers live in:
 - `src/daemon/daemon-accounts.ts`
@@ -51,6 +52,27 @@ ID. An ID that is not cached is skipped. If two or more of those chats still hav
 (for example a cache adopted from 0.3 that holds a removed account's chats), the daemon marks
 neither and logs a warning. The lookup uses `idx_messages_cache_message_id`.
 
+### Contacts
+
+Telegram has no "contact added" or "contact deleted" update. A contact added or removed on
+another device arrives as one of these, which the daemon reads from mtcute's raw updates and
+applies to the receiving account's `users_cache`:
+
+- `updatePeerSettings` for a user, and `updateUser`: when the update carries the user's full
+  record, its `contact` flag is compared with the cached `is_contact`. A changed flag rewrites
+  the user's row; a user who just became a contact gets a row. An unchanged flag writes
+  nothing, and a non-contact the cache doesn't have gets no row.
+- The same updates without the full record, or with a "min" user, write nothing and ask for a
+  hash check of the contact list a minute later. Hints within that minute share one check,
+  which costs one tiny reply when nothing changed (see
+  [daemon.md](daemon.md#contacts-sync)).
+- `updateContactsReset`: every cached contact is unmarked and the list is checked at the next
+  look (within about 30 seconds).
+
+Ignored: `updateUserName` and `updateUserPhone` carry the user's own name and phone, not the
+name you saved the contact under, and every other update. Updates mtcute recovers after a gap
+reach the handler too; anything missed is caught by the next hash check.
+
 ## Gaps / Too Long Updates
 
 Gaps are closed by forward catch-up, not by `getDifference`. On start and after each reconnect
@@ -62,5 +84,6 @@ realtime gaps.
 
 - `src/daemon/daemon-accounts.ts`
 - `src/daemon/handlers.ts`
+- `src/daemon/daemon-contacts.ts` (contact updates)
 - `src/utils/message-parser.ts`
 - `src/db/messages-cache.ts`

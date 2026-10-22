@@ -5,6 +5,7 @@ import { describe, expect, it, mock } from 'bun:test'
 import type {
   DeleteMessageUpdate,
   Message,
+  RawUpdateInfo,
   RpcCallMiddleware,
   RpcCallMiddlewareContext,
   TelegramClient,
@@ -62,6 +63,7 @@ const createClientWithEvents = (): TelegramClient => {
     onNewMessage: new MockEmitter<Message>(),
     onEditMessage: new MockEmitter<Message>(),
     onDeleteMessage: new MockEmitter<DeleteMessageUpdate>(),
+    onRawUpdate: new MockEmitter<RawUpdateInfo>(),
   }
 
   return client as unknown as TelegramClient
@@ -141,11 +143,17 @@ describe('removeEventHandlers', () => {
         onNewMessage: () => {},
         onEditMessage: () => {},
         onDeleteMessage: () => {},
+        onRawUpdate: () => {},
       },
     }
+    const raw = (
+      client as unknown as { onRawUpdate: MockEmitter<RawUpdateInfo> }
+    ).onRawUpdate
+    raw.add(accountState.eventHandlers!.onRawUpdate)
 
     removeEventHandlers(ctx, accountState)
 
+    expect(raw.handlers).toHaveLength(0)
     expect(accountState.eventHandlers).toBeUndefined()
     expect(accountState.updateHandlers).toBeUndefined()
   })
