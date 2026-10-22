@@ -50,7 +50,10 @@ export interface DaemonStatusService {
   clear(): void
 
   // Convenience methods
-  /** Mark daemon as running with given PID and version */
+  /**
+   * Mark daemon as running with given PID and version: the account is
+   * `connecting`, and the previous run's error and job counts are gone
+   */
   setDaemonRunning(pid: number, version: string): void
   /** Mark daemon as stopped */
   setDaemonStopped(): void
@@ -203,7 +206,13 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         service.set('daemon_started_at', now.toString())
         service.set('daemon_status', 'running')
         service.set('messages_synced', '0')
+        // The previous run's connection and queue say nothing about this
+        // one: the account is connecting until the daemon's first tick
+        service.set('connection_status', 'connecting')
         service.delete('last_error')
+        service.delete('pending_jobs')
+        service.delete('running_jobs')
+        service.set('last_update', now.toString())
       }).immediate()
     },
 

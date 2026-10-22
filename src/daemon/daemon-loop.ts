@@ -32,8 +32,13 @@ function jobCounts(rt: AccountRuntime): { pending: number; running: number } {
   return { pending: row?.pending ?? 0, running: row?.running ?? 0 }
 }
 
-/** Write each account's figures to its own cache, one transaction each */
-async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
+/**
+ * Write each account's figures to its own cache, one transaction each. The
+ * main loop does it every tick; the start does it after the connections and
+ * after the schedulers start, so tg status is current during a long dialog
+ * pass.
+ */
+export async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
   for (const rt of ctx.runtime.accounts.values()) {
     const accountState = ctx.state.accounts.get(rt.accountId)
     try {

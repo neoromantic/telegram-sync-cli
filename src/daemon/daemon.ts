@@ -28,7 +28,7 @@ import {
   totalMessagesSynced,
 } from './daemon-context'
 import { createLogger } from './daemon-logger'
-import { mainLoop } from './daemon-loop'
+import { mainLoop, updateDaemonStatus } from './daemon-loop'
 import { cleanupScheduler, initializeScheduler } from './daemon-scheduler'
 import { formatError } from './daemon-utils'
 import { createPidFile } from './pid-file'
@@ -274,6 +274,10 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
     return DaemonExitCode.AllAccountsFailed
   }
 
+  // The dialog pass can take minutes on a large account: show each
+  // account's connection meanwhile. updateDaemonStatus logs its own errors.
+  await updateDaemonStatus(ctx)
+
   try {
     await bootstrapDialogs(ctx)
   } catch (err) {
@@ -285,6 +289,7 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
   } catch (err) {
     ctx.logger.error(`Failed to initialize scheduler: ${formatError(err)}`)
   }
+  await updateDaemonStatus(ctx)
 
   try {
     await mainLoop(ctx)
