@@ -115,7 +115,9 @@ tg chats sync @examplenews --auto # follow the default policy again
 - Turning on a community (no flag) is `INVALID_ARGS` (exit 3) with
   `details: { chat, id, type: 'community', account_id }` and a suggestion that points at its
   linked supergroups and channels. The command writes nothing and queues no jobs. `--off` and
-  `--auto` still work: they match the default policy, which leaves a community off.
+  `--auto` still work: they match the default policy, which leaves a community off. If an
+  earlier version turned the community on, the suggestion also says that `--auto` turns it off
+  and clears its failed jobs.
 - A running daemon applies the change at its next refresh (30 seconds or less). A chat turned
   on gets its first page ahead of other first pages. A changed mode cancels the chat's pending
   jobs; a job that is running finishes.
