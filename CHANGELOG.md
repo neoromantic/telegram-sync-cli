@@ -88,6 +88,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   account. A shorter one that mtcute sleeps through inside a daemon job
   still holds the job loop for every account (#60).
 - `tg chats search`, `messages search` and `chats sync` ignored `--account`.
+- Processes that opened a new cache or `data.db` at the same moment, such as
+  the daemon and a command right after the first login, could fail with
+  "database is locked": SQLite fails all but one switch to WAL at once,
+  without waiting. They now try again for up to 5 seconds. The cache moved
+  from a shared one is also in this state on its first open.
 - After a reconnect, a complete dialog pass now marks the account's chats it
   didn't list (left, deleted or migrated) caught up, as the startup pass
   does. Before, such a chat whose newest message an earlier failed pass had
