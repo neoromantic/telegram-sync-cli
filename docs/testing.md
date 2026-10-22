@@ -180,6 +180,8 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `exit-codes.e2e.test.ts` — exit codes for common failure modes
 - `format.e2e.test.ts` — `--format` json/pretty/quiet behavior
 - `accounts.e2e.test.ts` — `list`, `switch`, `remove`, `info`
+- `config.e2e.test.ts` — `tg config path`, `get` and `set`; `tg config` repairs an invalid
+  `config.json` and `tg skill` runs with one after any format flag (`-q`, `-f <format>`)
 - `user.e2e.test.ts` — `me`, `user` lookups
 - `commands.e2e.test.ts` — command coverage smoke tests
 - `daemon.e2e.test.ts` — daemon start/stop/status

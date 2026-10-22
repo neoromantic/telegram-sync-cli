@@ -66,7 +66,14 @@ const main = defineCommand({
       process.env.VERBOSE = '1'
     }
 
-    const subCommand = rawArgs.find((arg) => !arg.startsWith('-'))
+    // As citty does, skip the value of -f/--format: in `tg -f json skill`
+    // the subcommand is skill, not json
+    const subCommand = rawArgs.find(
+      (arg, i) =>
+        !arg.startsWith('-') &&
+        rawArgs[i - 1] !== '-f' &&
+        rawArgs[i - 1] !== '--format',
+    )
     if (subCommand === 'config' || subCommand === 'skill') return
 
     try {
