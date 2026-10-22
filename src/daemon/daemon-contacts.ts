@@ -12,6 +12,7 @@
 import type { Database } from 'bun:sqlite'
 import type { RawUpdateInfo, TelegramClient } from '@mtcute/bun'
 import { tl } from '@mtcute/bun'
+import { ConfigError, getResolvedCacheConfig } from '../config'
 import {
   applyContactsSnapshot,
   contactsHash,
@@ -35,6 +36,24 @@ export const CONTACTS_RETRY_MS = 15 * 60 * 1000
  * full record, gets a hash check. Hints in that window share one check.
  */
 export const CONTACTS_HINT_DELAY_MS = 60_000
+
+/**
+ * The contacts sync waits `cache.staleness.peers` between checks. It is
+ * read once here; a config change takes effect at the next start. A config
+ * that can't be read keeps the default and says so.
+ */
+export async function loadContactsTtl(ctx: DaemonContext): Promise<void> {
+  try {
+    const config = await getResolvedCacheConfig({ dataDir: ctx.dataDir })
+    ctx.runtime.contacts.peersTtlMs = config.staleness.peers
+  } catch (err) {
+    // Not worth stopping a daemon whose accounts already connected
+    const why = err instanceof ConfigError ? err.message : formatError(err)
+    ctx.logger.warn(
+      `Failed to read the cache config, contacts sync uses the default peer TTL: ${why}`,
+    )
+  }
+}
 
 /**
  * Start a contacts check for every connected account that is due. Returns

@@ -5,6 +5,7 @@
  */
 import type { Database } from 'bun:sqlite'
 import { describe, expect, it, mock } from 'bun:test'
+import { join } from 'node:path'
 import {
   PeersIndex,
   RawUpdateInfo,
@@ -16,6 +17,7 @@ import {
   CONTACTS_HINT_DELAY_MS,
   CONTACTS_RETRY_MS,
   handleContactRawUpdate,
+  loadContactsTtl,
   maybeSyncContacts,
   requestContactsCheckNow,
 } from '../daemon/daemon-contacts'
@@ -32,6 +34,7 @@ import {
   getContactsSyncedAt,
 } from '../db/contacts-sync'
 import { createRateLimitsService } from '../db/rate-limits'
+import { getDefaultCacheConfig } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { addAccountRuntime } from './helpers/daemon-runtime'
 
@@ -540,4 +543,36 @@ describe('handleContactRawUpdate', () => {
     )
   })
 })
+describe('loadContactsTtl', () => {
+  let dirs = 0
+  // A fresh data dir under the test data dir, with this config.json
+  async function withConfig(config: string): Promise<
+    DaemonContext & {
+      logger: ReturnType<typeof createLogger>
+    }
+  > {
+    const ctx = createContext()
+    ctx.dataDir = join(
+      process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? '.tmp',
+      `contacts-ttl-${process.pid}-${++dirs}`,
+    )
+    await Bun.write(join(ctx.dataDir, 'config.json'), config)
+    return ctx
+  }
 
+  it('reads the peer TTL from cache.staleness.peers', async () => {
+    const ctx = await withConfig('{"cache":{"staleness":{"peers":"1h"}}}')
+    await loadContactsTtl(ctx)
+    expect(ctx.runtime.contacts.peersTtlMs).toBe(HOUR)
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+  })
+
+  it('keeps the default and warns when the config is invalid', async () => {
+    const ctx = await withConfig('{"cache":{"staleness":{"peers":"soon"}}}')
+    await loadContactsTtl(ctx)
+    expect(ctx.runtime.contacts.peersTtlMs).toBe(
+      getDefaultCacheConfig().staleness.peers,
+    )
+    expect(ctx.logger.warn).toHaveBeenCalledTimes(1)
+  })
+})

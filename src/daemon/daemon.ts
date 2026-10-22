@@ -4,7 +4,6 @@
  */
 
 import { join } from 'node:path'
-import { ConfigError, getResolvedCacheConfig } from '../config'
 import {
   type AccountsDbInterface,
   closeAccountCacheDbs,
@@ -23,6 +22,7 @@ import {
   setupSignalHandlers,
 } from './daemon-accounts'
 import { bootstrapDialogs } from './daemon-bootstrap'
+import { loadContactsTtl } from './daemon-contacts'
 import {
   createDaemonRuntime,
   type DaemonContext,
@@ -213,24 +213,6 @@ async function performCleanup(ctx: DaemonContext): Promise<void> {
   }
 
   await cleanupWithTimeout(ctx, cleanupWork)
-}
-
-/**
- * The contacts sync waits `cache.staleness.peers` between checks. It is
- * read once here; a config change takes effect at the next start. A config
- * that can't be read keeps the default and says so.
- */
-async function loadContactsTtl(ctx: DaemonContext): Promise<void> {
-  try {
-    const config = await getResolvedCacheConfig({ dataDir: ctx.dataDir })
-    ctx.runtime.contacts.peersTtlMs = config.staleness.peers
-  } catch (err) {
-    // Not worth stopping a daemon whose accounts already connected
-    const why = err instanceof ConfigError ? err.message : formatError(err)
-    ctx.logger.warn(
-      `Failed to read the cache config, contacts sync uses the default peer TTL: ${why}`,
-    )
-  }
 }
 
 async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
