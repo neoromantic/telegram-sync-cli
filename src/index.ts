@@ -78,7 +78,16 @@ const main = defineCommand({
         rawArgs[i - 1] !== '-f' &&
         rawArgs[i - 1] !== '--format',
     )
-    if (subCommand === 'config' || subCommand === 'skill') return
+    // tg config has to repair an invalid file. tg skill and tg daemon read
+    // neither activeAccount nor the TTLs, and a supervised daemon must not
+    // stop over a typo there, silently under its own -q (which sets ours)
+    if (
+      subCommand === 'config' ||
+      subCommand === 'skill' ||
+      subCommand === 'daemon'
+    ) {
+      return
+    }
 
     try {
       await syncActiveAccountFromConfig()

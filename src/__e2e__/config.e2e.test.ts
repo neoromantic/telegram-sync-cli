@@ -117,6 +117,34 @@ describe('E2E: Config Commands', () => {
     },
   )
 
+  // The daemon's own -q also sets the root one, so a startup check would
+  // stop a supervised daemon over a key it never reads, with no output
+  it('starts tg daemon with an invalid config.json, -q included', async () => {
+    writeFileSync(
+      join(env.dataDir, 'config.json'),
+      '{"cache":{"staleness":{"peers":"3 days"}}}',
+    )
+
+    for (const args of [
+      ['daemon', 'start', '--quiet'],
+      ['daemon', 'start', '-q'],
+      ['daemon', 'start'],
+    ]) {
+      // With no account the daemon stops right after the check would have
+      // run, and logs why even under -q
+      const result = await runCli(args, env.getCliOptions())
+      expect(result.stderr).toContain('No accounts configured')
+      expect(result.stderr).not.toContain('INVALID_ARGS')
+      expect(result.exitCode).toBe(3)
+    }
+
+    const status = await runCliSuccess(
+      ['daemon', 'status'],
+      env.getCliOptions(),
+    )
+    expect(status.json).toMatchObject({ data: { status: 'stopped' } })
+  })
+
   it('runs tg skill with an invalid config.json under -f json', async () => {
     writeFileSync(join(env.dataDir, 'config.json'), '{"activeAccount":"one"}')
 
