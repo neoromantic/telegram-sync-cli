@@ -83,12 +83,6 @@ const vacuumCommand = defineCommand({
       type: 'string',
       description: ACCOUNT_SELECTOR_DESCRIPTION,
     },
-    json: {
-      type: 'boolean',
-      description: 'Force JSON output',
-      alias: 'j',
-      default: false,
-    },
   },
   async run({ args }) {
     const account = resolveAccount(args.account)

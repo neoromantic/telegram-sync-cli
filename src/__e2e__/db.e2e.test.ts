@@ -67,7 +67,7 @@ describe('E2E: db vacuum', () => {
     seedCache()
 
     const result = await runCliSuccess(
-      ['db', 'vacuum', '--account', '1', '--json'],
+      ['db', 'vacuum', '--account', '1'],
       options(),
     )
     const { data } = result.json as VacuumOutput
@@ -95,7 +95,7 @@ describe('E2E: db vacuum', () => {
     writeFileSync(join(env.dataDir, 'daemon.pid'), String(process.pid))
 
     const result = await runCli(
-      ['db', 'vacuum', '--account', '1', '--json'],
+      ['db', 'vacuum', '--account', '1'],
       options(),
     )
     const output = result.json as {
@@ -121,7 +121,7 @@ describe('E2E: db vacuum', () => {
     writeFileSync(join(env.dataDir, 'daemon.pid'), String(process.pid))
 
     const result = await runCliSuccess(
-      ['db', 'vacuum', '--account', '1', '--json'],
+      ['db', 'vacuum', '--account', '1'],
       options(),
     )
 
@@ -134,7 +134,7 @@ describe('E2E: db vacuum', () => {
 
   it('skips an account without a cache file and creates none', async () => {
     const result = await runCliSuccess(
-      ['db', 'vacuum', '--account', '2', '--json'],
+      ['db', 'vacuum', '--account', '2'],
       options(),
     )
 
