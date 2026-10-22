@@ -190,6 +190,7 @@ CREATE INDEX idx_messages_cache_reply ON messages_cache(chat_id, reply_to_id) WH
 CREATE INDEX idx_messages_cache_type ON messages_cache(chat_id, message_type) WHERE has_media = 1;
 CREATE INDEX idx_messages_cache_pinned ON messages_cache(chat_id) WHERE is_pinned = 1;
 CREATE INDEX idx_messages_cache_fetched ON messages_cache(fetched_at);
+CREATE INDEX idx_messages_cache_message_id ON messages_cache(message_id);
 ```
 
 ### Table: message_search
