@@ -46,9 +46,15 @@ describe('E2E: db vacuum', () => {
     env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
   })
 
-  /** Account 1's cache with made-up messages, a third of them deleted */
+  /**
+   * Account 1's cache with made-up messages, a third of them deleted, and
+   * one API activity row far past its retention
+   */
   function seedCache() {
     const db = env.openCacheDb(1)
+    db.run(
+      "INSERT INTO api_activity (timestamp, method, success) VALUES (0, 'messages.getHistory', 1)",
+    )
     createMessagesCache(db).upsertBatch(
       Array.from({ length: 600 }, (_, i) => ({
         chat_id: 101,
@@ -81,7 +87,7 @@ describe('E2E: db vacuum', () => {
     expect(typeof data.bytes_before).toBe('number')
     expect(typeof data.bytes_after).toBe('number')
     expect(data.pruned).toEqual({
-      api_activity: 0,
+      api_activity: 1,
       rate_limits: 0,
       completed_jobs: 0,
       failed_jobs: 0,
@@ -94,10 +100,7 @@ describe('E2E: db vacuum', () => {
     db.run('VACUUM')
     writeFileSync(join(env.dataDir, 'daemon.pid'), String(process.pid))
 
-    const result = await runCli(
-      ['db', 'vacuum', '--account', '1'],
-      options(),
-    )
+    const result = await runCli(['db', 'vacuum', '--account', '1'], options())
     const output = result.json as {
       error: {
         code: string
@@ -114,6 +117,10 @@ describe('E2E: db vacuum', () => {
       auto_vacuum: number
     }
     expect(autoVacuum.auto_vacuum).toBe(0)
+    const activity = db
+      .query('SELECT COUNT(*) AS n FROM api_activity')
+      .get() as { n: number }
+    expect(activity.n).toBe(1)
   })
 
   it('releases free pages in steps while the daemon runs', async () => {
