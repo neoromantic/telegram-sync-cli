@@ -3,8 +3,8 @@ import { attemptReconnect, scheduleReconnect } from './daemon-accounts'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
 import {
   cleanupOldJobs,
-  processJobs,
   refreshAllQueues,
+  startDueJobs,
 } from './daemon-scheduler'
 import { formatError, getErrorMessage } from './daemon-utils'
 
@@ -58,8 +58,29 @@ export async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
   }
 }
 
+/**
+ * Sleep `ms`, or less if the daemon stops meanwhile. The timer is set last:
+ * a test's setTimeout may call `done` at once.
+ */
+function sleepUnlessStopped(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const done = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+    signal.addEventListener('abort', done, { once: true })
+    timer = setTimeout(done, ms)
+  })
+}
+
 async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
   for (const accountState of ctx.state.accounts.values()) {
+    // A running job uses the connection; a reconnect would close its client
+    if (ctx.runtime.jobsInFlight.has(accountState.accountId)) continue
+
     if (accountState.status === 'connected' && accountState.client) {
       const lastActivity = accountState.lastActivity ?? 0
       if (now - lastActivity < HEALTH_CHECK_COOLDOWN_MS) {
@@ -103,13 +124,14 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     const now = Date.now()
 
     try {
-      await processJobs(ctx)
+      // Each account's job runs on its own; the loop doesn't wait for it
+      startDueJobs(ctx)
     } catch (err) {
       ctx.logger.warn(`Error processing jobs: ${formatError(err)}`)
     }
 
-    // A stop during the job: no health check, refresh, tick or wait. The
-    // shutdown marks every account stopped.
+    // A stop as a job starts: no health check, refresh, tick or wait. The
+    // shutdown waits for the jobs and marks every account stopped.
     if (ctx.state.shutdownRequested) break
 
     if (loopIteration % HEALTH_CHECK_INTERVAL_TICKS === 0) {
@@ -130,7 +152,7 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
       cleanupOldJobs(ctx)
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await sleepUnlessStopped(1000, ctx.runtime.shutdown.signal)
   }
 
   ctx.logger.debug('Main loop exiting...')

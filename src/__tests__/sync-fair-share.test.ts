@@ -522,12 +522,12 @@ describe('job budget with two accounts', () => {
     await first.scheduler.initializeForStartup()
     await second.scheduler.initializeForStartup()
 
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 20; i++) {
       for (const rt of ctx.runtime.accounts.values()) rt.lastJobProcessTime = 0
       await processJobs(ctx)
     }
 
-    // The accounts take turns
+    // Both accounts run every tick
     expect(ran.slice(0, 6).map((job) => job.accountId)).toEqual([
       1, 2, 1, 2, 1, 2,
     ])

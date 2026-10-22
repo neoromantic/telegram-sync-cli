@@ -63,8 +63,8 @@ PID file location:
 ┌──────────────────────────────────────────────┐
 │                tg daemon                     │
 ├──────────────────────────────────────────────┤
-│  Job loop: one job per tick, accounts take   │
-│  turns, 3 s between one account's jobs       │
+│  Job loop per account: one job at a time,    │
+│  3 s between its jobs                        │
 ├──────────────────────────────────────────────┤
 │  Account runtime (one per account)           │
 │    - mtcute client, session_<id>.db          │
@@ -119,17 +119,15 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
   next to catch-up; inside a lane, small chats go first
 - A refresh every ~30 seconds (daemon loop) and after each reconnect's dialog pass queues
   the work that is due again, such as chats first seen live
-- The job loop takes turns between accounts: each tick it runs the next job of the first
-  account after the one that ran last whose client is connected, which isn't waiting out a
-  FLOOD_WAIT, and whose own 3-second delay since its last job has passed. One account's lost
-  connection doesn't stop the others; a disconnected account's jobs stay pending until it
-  reconnects. An account whose cache fails while its next job is picked (a corrupt page, a
-  lock held past the 5-second `busy_timeout`) is logged, waits out its delay and is tried
-  again; the other accounts take their turns. A FLOOD_WAIT longer than 5 minutes, recorded in that account's `rate_limits`,
-  pauses only that account; a shorter one, which mtcute sleeps through inside the job, still
-  holds the job loop and so every account
-  ([#60](https://github.com/neoromantic/telegram-sync-cli/issues/60)). Jobs run one at a time, so with three or more busy accounts each
-  one syncs more slowly
+- Each account runs its own jobs: one at a time, the next one 3 seconds after its last one
+  ended. On the 1-second tick the daemon starts an account's next job when it has none
+  running, its client is connected, it isn't waiting out a FLOOD_WAIT recorded in its
+  `rate_limits` and its delay has passed. A FLOOD_WAIT that mtcute sleeps through inside a
+  job (up to 5 minutes), a recorded one (over 5 minutes) or a slow page holds only that
+  account; the others keep syncing. One account's lost connection doesn't stop the others; a
+  disconnected account's jobs stay pending until it reconnects. An account whose cache fails
+  while its next job is picked (a corrupt page, a lock held past the 5-second
+  `busy_timeout`) is logged, waits out its delay and is tried again; the other accounts go on
 
 See [sync-strategy.md](sync-strategy.md) for the rules.
 
@@ -221,13 +219,13 @@ account's scheduler → its sync_jobs → its worker and client → its messages
   updates loop and rebuilds the account's sync worker; a failed attempt closes
   the new client and schedules the next retry
 - On shutdown (`tg daemon stop`, SIGTERM or SIGINT) the daemon ends the
-  request the running sync job is waiting on; the job stays pending. It then
-  closes every account's client once. The session files stay open until then:
-  closing a client stops its updates loop, saves its update state and peers,
-  and closes its session file and Telegram connections, and the update
-  handlers stay on until it's done, so updates and peers that arrive after the
-  signal are saved. If closing the clients takes longer than 30 seconds, the
-  daemon exits with code 1 and still saves the queued session writes. A stop
+  request each account's running sync job is waiting on and waits for those
+  jobs; they stay pending. It then closes every account's client once. The
+  session files stay open until then: closing a client stops its updates loop,
+  saves its update state and peers, and closes its session file and Telegram
+  connections, and the update handlers stay on until it's done, so updates and
+  peers that arrive after the signal are saved. If closing the clients takes
+  longer than 30 seconds, the daemon exits with code 1 and still saves the queued session writes. A stop
   ends the dialog pass at the next dialog, and a request that the pass or a
   sync job is waiting on ends at once, a FLOOD_WAIT of up to 5 minutes
   included: the pass counts as stopped and marks nothing, and the job is
@@ -253,6 +251,7 @@ account's scheduler → its sync_jobs → its worker and client → its messages
   with the chat's current mode (`--auto` unless it was turned on; `tg status` prints the
   command). Each failure is logged as a warning (see [sync-strategy.md](sync-strategy.md#retries))
 - Tracks last activity to avoid noisy health checks
+- Skips an account's health check and reconnect while its sync job runs
 - Validates sync job state transitions
 - Uses rate limit service with flood wait tracking
 
