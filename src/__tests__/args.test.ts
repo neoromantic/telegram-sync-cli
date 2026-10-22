@@ -68,8 +68,16 @@ describe('spacedFlagValues', () => {
   })
 
   it('stops at --', () => {
+    // citty reads the --username before -- as true, so only the break stops
+    // the pairing with the value after --
     expect(
-      spaced('account.checkUsername', '--', '--username', 'myuser'),
+      spaced(
+        'account.checkUsername',
+        '--username',
+        '--',
+        '--username',
+        'myuser',
+      ),
     ).toEqual({})
   })
 })
