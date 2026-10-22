@@ -104,7 +104,11 @@ waiting move under `storage.migration`.
 
 To hand a set-aside file to one account yourself: stop the daemon, move that account's
 `accounts/<id>/cache.db` (and its `-wal` and `-shm`, if any) away, then move
-`shared-cache.db` to `accounts/<id>/cache.db`.
+`shared-cache.db` to `accounts/<id>/cache.db`. The file holds every row from before the
+upgrade, of every account that synced into it, and tg then serves all of them, access hashes
+included, as that account's. Hand it over only when one account synced into it (for example,
+the others were added after the older version last ran); otherwise keep it as an archive and
+query it directly with `sqlite3`.
 
 Going back to 0.3 or older after the move is not supported: it would start a new, empty
 shared cache. Scripts that opened `cache.db` directly should open
