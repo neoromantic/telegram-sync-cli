@@ -181,6 +181,57 @@ describe('E2E: upgrading from the shared cache', () => {
       expect(existsSync(shared)).toBe(false)
     }, 30_000)
 
+    it('moves the cache to the only account before tg auth login adds another', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      const before = rowCounts(shared)
+
+      // No credentials: the login stops after the move, before any prompt
+      const login = await runCli(
+        ['auth', 'login', '--phone', '+15550000002'],
+        options(),
+      )
+
+      expect(login.exitCode).not.toBe(0)
+      expect(existsSync(shared)).toBe(false)
+      expect(rowCounts(env.cachePath(1))).toEqual(before)
+      // The second account a finished login adds starts its own cache
+      env.seedAccounts([{ phone: '+15550000002' }])
+      expect((await sqlCount('--account', '1')).count).toBe(
+        before.messages_cache,
+      )
+      expect((await sqlCount('--account', '2')).count).toBe(0)
+      expect(existsSync(join(env.dataDir, 'shared-cache.db'))).toBe(false)
+    })
+
+    it('fails tg auth login while an older tg holds the cache, and adds no account', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      const bytes = readFileSync(shared)
+      const holder = holdOpen(shared)
+      await holder.ready()
+
+      try {
+        const login = await runCli(
+          ['auth', 'login', '--phone', '+15550000002'],
+          options(),
+        )
+
+        expect(login.exitCode).toBe(1)
+        expect(JSON.parse(login.stderr)).toMatchObject({
+          error: {
+            code: 'CACHE_UNAVAILABLE',
+            details: { reason: 'shared_cache_in_use', path: shared },
+          },
+        })
+        const accounts = await runCliSuccess(['accounts', 'list'], options())
+        expect(
+          (accounts.json as { data: { accounts: unknown[] } }).data.accounts,
+        ).toHaveLength(1)
+        expect(readFileSync(shared).equals(bytes)).toBe(true)
+      } finally {
+        await holder.release()
+      }
+    }, 30_000)
+
     it('leaves the held cache alone in commands that need no cache', async () => {
       seedInChild(shared, 'legacySharedCache')
       const bytes = readFileSync(shared)
@@ -303,6 +354,19 @@ describe('E2E: upgrading from the shared cache', () => {
 
       expect(result.stderr).not.toContain(NOTICE)
       expect(existsSync(join(env.dataDir, 'shared-cache.db'))).toBe(true)
+    })
+
+    it('sets the cache aside before tg accounts remove leaves one account', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      const before = rowCounts(shared)
+
+      await runCliSuccess(['accounts', 'remove', '--id', '2'], options())
+
+      // Account 1 never gets the rows both accounts wrote
+      const parked = join(env.dataDir, 'shared-cache.db')
+      expect(existsSync(shared)).toBe(false)
+      expect(rowCounts(parked)).toEqual(before)
+      expect((await sqlCount()).count).toBe(0)
     })
 
     it('deletes a shared cache that holds nothing', async () => {

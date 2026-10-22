@@ -5,6 +5,7 @@ import { defineCommand } from 'citty'
 
 import { accountsDb } from '../db'
 import { ErrorCodes } from '../types'
+import { settleCacheLayoutBeforeAccountChange } from '../utils/account-cache'
 import { error, success } from '../utils/output'
 
 /**
@@ -108,6 +109,7 @@ export const removeAccountCommand = defineCommand({
       )
     }
 
+    settleCacheLayoutBeforeAccountChange('report')
     accountsDb.delete(accountId)
 
     success({

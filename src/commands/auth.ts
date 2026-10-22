@@ -20,6 +20,7 @@ import {
   requireDefaultConfig,
 } from '../services/telegram'
 import { ErrorCodes } from '../types'
+import { settleCacheLayoutBeforeAccountChange } from '../utils/account-cache'
 import {
   ACCOUNT_SELECTOR_DESCRIPTION,
   resolveAccountSelector,
@@ -492,6 +493,7 @@ export const loginCommand = defineCommand({
     const phone = args.phone
     const label = args.label
 
+    settleCacheLayoutBeforeAccountChange('strict')
     ensureCredentials()
     info(`Logging in with phone: ${phone}`)
     const result = await loginWithPhone(phone, getDefaultDependencies(), {
@@ -526,6 +528,7 @@ export const loginQrCommand = defineCommand({
     },
   },
   async run({ args }) {
+    settleCacheLayoutBeforeAccountChange('strict')
     ensureCredentials()
     console.log('\n=== QR Code Login ===\n')
     console.log('Scan this QR code with your Telegram mobile app:')
@@ -560,6 +563,7 @@ export const logoutCommand = defineCommand({
   },
   async run({ args }) {
     const accountId = resolveAccountSelector(args.account)
+    settleCacheLayoutBeforeAccountChange('report')
 
     let result: Awaited<ReturnType<typeof logout>>
     try {
