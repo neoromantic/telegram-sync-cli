@@ -17,6 +17,7 @@ import { join } from 'node:path'
 
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
+import { UPGRADE_DOCS_URL } from '../db/cache-layout'
 import { readCacheMeta } from '../db/cache-meta'
 import { createMessagesCache } from '../db/messages-cache'
 import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
@@ -337,6 +338,7 @@ describe('E2E: upgrading from the shared cache', () => {
       expect(second.count).toBe(0)
       expect(first.stderr.split(NOTICE)).toHaveLength(2)
       expect(first.stderr).toContain(parked)
+      expect(first.stderr).toContain(UPGRADE_DOCS_URL)
       expect(second.stderr).not.toContain(NOTICE)
       expect(existsSync(shared)).toBe(false)
       expect(rowCounts(parked)).toEqual(before)
@@ -349,6 +351,11 @@ describe('E2E: upgrading from the shared cache', () => {
         legacy_caches: [{ path: parked, size_bytes: statSync(parked).size }],
         migration: null,
       })
+      const pretty = await runCliSuccess(
+        ['status', '--format', 'pretty'],
+        options(),
+      )
+      expect(pretty.stdout).toContain(UPGRADE_DOCS_URL)
     })
 
     it('prints no notice with --format quiet', async () => {

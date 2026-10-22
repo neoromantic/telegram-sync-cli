@@ -98,6 +98,13 @@ export interface CacheLayoutDeps {
   notice?: (message: string) => void
 }
 
+/**
+ * Where the upgrade is explained. A full URL: the Homebrew binary and the
+ * npm package ship no docs/ directory.
+ */
+export const UPGRADE_DOCS_URL =
+  'https://github.com/neoromantic/telegram-sync-cli/blob/main/docs/configuration.md#upgrading-to-per-account-caches'
+
 export const ACCOUNTS_DIR = 'accounts'
 export const CACHE_FILE = 'cache.db'
 const SHARED_CACHE_BASENAME = 'shared-cache'
@@ -413,7 +420,7 @@ export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
     db.run('COMMIT')
     inTransaction = false
     deps.notice?.(
-      `tg: each account now has its own cache; the shared cache of an older version can't be split by account and was kept as ${parked} (see "Upgrading to per-account caches" in docs/configuration.md)`,
+      `tg: each account now has its own cache; the shared cache of an older version can't be split by account and was kept as ${parked} (see ${UPGRADE_DOCS_URL})`,
     )
     return { state: 'parked', path: parked }
   } finally {
