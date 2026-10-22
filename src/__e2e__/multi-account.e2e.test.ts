@@ -3,9 +3,15 @@
  * message with ID 7 and different text; every cache command reads only the
  * account that --account selects, or the active one. Made-up data only.
  */
-import type { Database } from 'bun:sqlite'
+import { Database } from 'bun:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
-import { existsSync, readdirSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
@@ -369,24 +375,172 @@ describe('E2E: two accounts, each with its own cache', () => {
   })
 })
 
+function configPath(env: TestEnvironment) {
+  return join(env.dataDir, 'config.json')
+}
+
+function writeConfig(env: TestEnvironment, text: string) {
+  writeFileSync(configPath(env), text)
+}
+
+function readConfig(env: TestEnvironment) {
+  return readFileSync(configPath(env), 'utf8')
+}
+
+async function chatTitles(env: TestEnvironment) {
+  const data = await run(env, ['chats', 'list'])
+  return (data.items as Array<{ title: string }>).map((chat) => chat.title)
+}
+
+/**
+ * Every start applies activeAccount from config.json, so a switch has to
+ * last across later commands with and without the key (#61). Account 1 is
+ * active in data.db at the start of each test.
+ */
 describe('E2E: switching accounts', () => {
-  let env: TestEnvironment
+  const isRoot = process.getuid?.() === 0
 
-  beforeAll(() => {
-    env = createTwoAccounts('multi-account-switch')
+  it('keeps the switch without activeAccount and creates no config.json', async () => {
+    const env = createTwoAccounts('multi-account-switch')
+    try {
+      await run(env, ['accounts', 'switch', '--id', '2'])
+
+      expect(await chatTitles(env)).toEqual(['Book Club'])
+      expect(await snapshot(env, [])).toEqual(BETA_VIEW)
+      expect(await messageText(env, BOOK_CLUB_ID, [])).toBe('lunch at one')
+      expect(existsSync(configPath(env))).toBe(false)
+    } finally {
+      expectNoRootCache(env)
+      env.cleanup()
+    }
+  }, 30_000)
+
+  it('writes the new account to activeAccount and keeps the other keys', async () => {
+    const env = createTwoAccounts('multi-account-switch-config')
+    try {
+      writeConfig(
+        env,
+        JSON.stringify({
+          activeAccount: 1,
+          cache: { staleness: { peers: '3d' } },
+          note: 'kept',
+        }),
+      )
+
+      await run(env, ['accounts', 'switch', '--id', '2'])
+
+      expect(await chatTitles(env)).toEqual(['Book Club'])
+      expect(await snapshot(env, [])).toEqual(BETA_VIEW)
+      expect(await messageText(env, BOOK_CLUB_ID, [])).toBe('lunch at one')
+      expect(JSON.parse(readConfig(env))).toEqual({
+        activeAccount: 2,
+        cache: { staleness: { peers: '3d' } },
+        note: 'kept',
+      })
+      const value = await run(env, ['config', 'get', 'activeAccount'])
+      expect(value.value).toBe(2)
+    } finally {
+      expectNoRootCache(env)
+      env.cleanup()
+    }
+  }, 30_000)
+
+  it('leaves a config.json without activeAccount byte for byte', async () => {
+    const env = createTwoAccounts('multi-account-switch-no-key')
+    const text = '{"cache":{"staleness":{"peers":"3d"}}}'
+    try {
+      writeConfig(env, text)
+
+      await run(env, ['accounts', 'switch', '--id', '2'])
+
+      expect(await chatTitles(env)).toEqual(['Book Club'])
+      expect(await messageText(env, BOOK_CLUB_ID, [])).toBe('lunch at one')
+      expect(readConfig(env)).toBe(text)
+    } finally {
+      expectNoRootCache(env)
+      env.cleanup()
+    }
   })
 
-  afterAll(() => {
-    expectNoRootCache(env)
-    env.cleanup()
+  it('leaves config.json alone when activeAccount already names the account', async () => {
+    const env = createTwoAccounts('multi-account-switch-same')
+    const text = '{"activeAccount":2}'
+    try {
+      writeConfig(env, text)
+
+      await run(env, ['accounts', 'switch', '--id', '2'])
+
+      expect(await chatTitles(env)).toEqual(['Book Club'])
+      expect(readConfig(env)).toBe(text)
+    } finally {
+      expectNoRootCache(env)
+      env.cleanup()
+    }
   })
 
-  it('reads the account tg accounts switch made active', async () => {
-    await run(env, ['accounts', 'switch', '--id', '2'])
+  it('applies tg config set activeAccount from the next command', async () => {
+    const env = createTwoAccounts('multi-account-switch-config-set')
+    try {
+      writeConfig(env, JSON.stringify({ activeAccount: 1 }))
 
-    expect(await snapshot(env, [])).toEqual(BETA_VIEW)
-    expect(await messageText(env, BOOK_CLUB_ID, [])).toBe('lunch at one')
+      await run(env, ['accounts', 'switch', '--id', '2'])
+      await run(env, ['config', 'set', 'activeAccount', '1'])
+
+      expect(await chatTitles(env)).toEqual(['Alice Able'])
+    } finally {
+      expectNoRootCache(env)
+      env.cleanup()
+    }
   })
+
+  it('applies activeAccount under -q too', async () => {
+    const env = createTwoAccounts('multi-account-switch-quiet')
+    try {
+      writeConfig(env, JSON.stringify({ activeAccount: 2 }))
+
+      const result = await runCli(['-q', 'chats', 'list'], cliOptions(env))
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe('')
+      const db = new Database(join(env.dataDir, 'data.db'), { readonly: true })
+      try {
+        expect(
+          db.query('SELECT id FROM accounts WHERE is_active = 1').all(),
+        ).toEqual([{ id: 2 }])
+      } finally {
+        db.close()
+      }
+    } finally {
+      expectNoRootCache(env)
+      env.cleanup()
+    }
+  })
+
+  it.skipIf(isRoot)(
+    'changes nothing when config.json is read-only',
+    async () => {
+      const env = createTwoAccounts('multi-account-switch-read-only')
+      const text = JSON.stringify({ activeAccount: 1 })
+      try {
+        writeConfig(env, text)
+        chmodSync(configPath(env), 0o444)
+
+        const result = await failure(env, ['accounts', 'switch', '--id', '2'])
+
+        expect(result.exitCode).toBe(1)
+        expect(result.error.code).toBe('GENERAL_ERROR')
+        expect(result.error.details).toEqual(
+          expect.objectContaining({ path: configPath(env) }),
+        )
+        expect(await chatTitles(env)).toEqual(['Alice Able'])
+        expect(readConfig(env)).toBe(text)
+      } finally {
+        chmodSync(configPath(env), 0o644)
+        expectNoRootCache(env)
+        env.cleanup()
+      }
+    },
+  )
 })
 
 describe('E2E: tg chats sync with two accounts', () => {
