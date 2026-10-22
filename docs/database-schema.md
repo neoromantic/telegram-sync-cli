@@ -141,8 +141,8 @@ it is off for sync by default. Telegram lists a joined community apart from the 
 dialogs, so the daemon's dialog pass (on start and after a reconnect) and
 `tg chats list --fresh` cache every joined community with one more request,
 `communities.getJoinedCommunities`, access hash included. A community has no messages of its
-own: it gets no `chat_sync_state` row, and its `last_message_id` and `last_message_at` stay
-NULL.
+own: the dialog pass gives it no `chat_sync_state` row (only `tg chats sync --off` or `--auto`
+writes one, with sync off), and its `last_message_id` and `last_message_at` stay NULL.
 
 ### Table: sync_state
 
