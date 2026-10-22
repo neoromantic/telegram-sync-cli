@@ -35,7 +35,11 @@ if (import.meta.main) {
       if (request._ === 'help.getConfig') return FAKE_CONFIG
       throw Object.assign(new Error('METHOD_INVALID'), { code: 400 })
     },
+    // Real destroy() closes the connection and saves the session
+    // asynchronously, so the marker comes only after an await: a caller that
+    // exits without awaiting destroy() never prints it
     async destroy() {
+      await Bun.sleep(20)
       clearInterval(connection)
       console.error(FAKE_CLIENT_DESTROYED)
     },
