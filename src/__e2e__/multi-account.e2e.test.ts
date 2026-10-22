@@ -47,12 +47,18 @@ const BOB_ID = 202
 const BOOK_CLUB_ID = -4242
 const MESSAGE_ID = 7
 
-function seedUser(db: Database, id: number, first: string, last: string) {
+function seedUser(
+  db: Database,
+  id: number,
+  first: string,
+  last: string,
+  options: { contact: boolean } = { contact: true },
+) {
   createUsersCache(db).upsert({
     user_id: String(id),
     first_name: first,
     last_name: last,
-    is_contact: 1,
+    is_contact: options.contact ? 1 : 0,
     access_hash: String(id * 11),
     fetched_at: Date.now(),
     raw_json: '{}',
@@ -73,8 +79,12 @@ function seedMessage(db: Database, chatId: number, text: string) {
   createHistoryRanges(db).add(chatId, { low: 1, high: MESSAGE_ID })
 }
 
-/** Account 1's cache: Alice, their chat, "lunch at noon" and a failed job */
+/**
+ * Account 1's cache: the account's own user, Alice, their chat, "lunch at
+ * noon" and a failed job
+ */
 function seedAlpha(db: Database) {
+  seedUser(db, ALPHA.user_id, 'Alpha', 'Test', { contact: false })
   seedUser(db, ALICE_ID, 'Alice', 'Able')
   createChatsCache(db).upsertMany(
     [fakeDialog({ kind: 'user', id: ALICE_ID, title: 'Alice Able' })].map(
@@ -89,8 +99,9 @@ function seedAlpha(db: Database) {
   )
 }
 
-/** Account 2's cache: Bob, Book Club and "lunch at one" */
+/** Account 2's cache: the account's own user, Bob, Book Club and "lunch at one" */
 function seedBeta(db: Database) {
+  seedUser(db, BETA.user_id, 'Beta', 'Test', { contact: false })
   seedUser(db, BOB_ID, 'Bob', 'Baker')
   createChatsCache(db).upsertMany(
     [
@@ -129,6 +140,17 @@ async function run(env: TestEnvironment, args: string[]) {
   return (result.json as { data: Record<string, unknown> }).data
 }
 
+/**
+ * A lookup that the other account's cache can't answer: its data, or null
+ * when it fails (a cache miss goes to Telegram, and there are no
+ * credentials)
+ */
+async function lookup(env: TestEnvironment, args: string[]) {
+  const result = await runCli(args, cliOptions(env))
+  if (result.exitCode !== 0) return null
+  return (JSON.parse(result.stdout) as { data: Record<string, unknown> }).data
+}
+
 /** What each cache command returns, reduced to what tells the accounts apart */
 async function snapshot(env: TestEnvironment, selector: string[]) {
   const chats = await run(env, ['chats', 'list', ...selector])
@@ -159,8 +181,33 @@ async function snapshot(env: TestEnvironment, selector: string[]) {
     'SELECT chat_id, message_id, text FROM messages_cache ORDER BY chat_id',
     ...selector,
   ])
+  // Account 2's chat and contact, by ID: only its cache has them
+  const club2 = await lookup(env, [
+    'chats',
+    'get',
+    '--id',
+    String(BOOK_CLUB_ID),
+    ...selector,
+  ])
+  const bob = await lookup(env, [
+    'contacts',
+    'get',
+    '--id',
+    String(BOB_ID),
+    ...selector,
+  ])
+  const bobSearch = await lookup(env, [
+    'contacts',
+    'search',
+    '--query',
+    'Bob',
+    ...selector,
+  ])
+  const bobUser = await lookup(env, ['user', String(BOB_ID), ...selector])
+  const me = await run(env, ['me', ...selector])
 
   type Items = Array<Record<string, unknown>>
+  type Person = { firstName?: string }
   return {
     chats: (chats.items as Items).map((chat) => chat.title),
     chatSearch: [
@@ -170,6 +217,13 @@ async function snapshot(env: TestEnvironment, selector: string[]) {
     contacts: (contacts.items as Items).map((contact) => contact.firstName),
     messageSearch: (search.results as Items).map((hit) => hit.text),
     sql: sql.rows,
+    chatGet: club2?.title ?? null,
+    contactGet: bob?.firstName ?? null,
+    contactSearch:
+      (bobSearch?.results as Items | undefined)?.map((c) => c.firstName) ??
+      null,
+    user: (bobUser?.user as Person | undefined)?.firstName ?? null,
+    me: (me.user as Person).firstName,
   }
 }
 
@@ -179,6 +233,11 @@ const ALPHA_VIEW = {
   contacts: ['Alice'],
   messageSearch: ['lunch at noon'],
   sql: [{ chat_id: ALICE_ID, message_id: MESSAGE_ID, text: 'lunch at noon' }],
+  chatGet: null,
+  contactGet: null,
+  contactSearch: null,
+  user: null,
+  me: 'Alpha',
 }
 
 const BETA_VIEW = {
@@ -189,6 +248,11 @@ const BETA_VIEW = {
   sql: [
     { chat_id: BOOK_CLUB_ID, message_id: MESSAGE_ID, text: 'lunch at one' },
   ],
+  chatGet: 'Book Club',
+  contactGet: 'Bob',
+  contactSearch: ['Bob'],
+  user: 'Bob',
+  me: 'Beta',
 }
 
 async function messageText(

@@ -181,6 +181,32 @@ describe('E2E: upgrading from the shared cache', () => {
       expect(existsSync(shared)).toBe(false)
     }, 30_000)
 
+    it('leaves the held cache alone in commands that need no cache', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      const bytes = readFileSync(shared)
+      const holder = holdOpen(shared)
+      await holder.ready()
+
+      try {
+        for (const args of [
+          ['--version'],
+          ['--help'],
+          ['accounts', 'list'],
+          ['config', 'path'],
+        ]) {
+          const result = await runCli(args, options())
+          expect({ args, exitCode: result.exitCode }).toEqual({
+            args,
+            exitCode: 0,
+          })
+        }
+        expect(readFileSync(shared).equals(bytes)).toBe(true)
+        expect(existsSync(join(env.dataDir, 'accounts'))).toBe(false)
+      } finally {
+        await holder.release()
+      }
+    }, 30_000)
+
     it('says in tg daemon status that an older daemon still holds the shared cache', async () => {
       seedInChild(shared, 'legacySharedCache')
       // The 0.3 daemon left running after the upgrade: its PID is live
