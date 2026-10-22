@@ -31,20 +31,40 @@ import { initSyncSchema } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
-import { mockDbModule } from './helpers/db-mock'
+import {
+  createFakeAccountsDb,
+  mockDbModule,
+  testAccount,
+} from './helpers/db-mock'
 import { fakeDialog } from './helpers/fake-dialogs'
 
-// The send command reads the cache and the client through these modules
+// The send command reads the cache and the client through these modules.
+// Account 1 is active; account 2 has its own cache and client, so a test
+// can tell which account a command used.
 let commandCacheDb: Database
+let secondCacheDb: Database
 const commandCall = mock(async (_request: unknown): Promise<unknown> => {
   throw new Error('Unexpected API call')
 })
-// The command wraps call() in place, so each test gets a fresh client
+const secondCall = mock(async (_request: unknown): Promise<unknown> => {
+  throw new Error('Unexpected API call')
+})
+// The command wraps call() in place, so each test gets fresh clients
 let commandClient = { call: commandCall }
-mock.module('../db', () => mockDbModule({ cacheFor: () => commandCacheDb }))
-mock.module('../services/telegram', () => ({
-  getClientForAccount: () => commandClient,
-}))
+let secondClient = { call: secondCall }
+const getClientForAccount = mock((accountId: number) =>
+  accountId === 2 ? secondClient : commandClient,
+)
+mock.module('../db', () =>
+  mockDbModule({
+    cacheFor: (accountId) => (accountId === 2 ? secondCacheDb : commandCacheDb),
+    accountsDb: createFakeAccountsDb([
+      testAccount({ id: 1 }),
+      testAccount({ id: 2, phone: '+15550000002', is_active: 0 }),
+    ]),
+  }),
+)
+mock.module('../services/telegram', () => ({ getClientForAccount }))
 
 function expectLongEqual(actual: tl.Long, expected: string | number | bigint) {
   expect(actual.toString()).toBe(toLong(expected).toString())
@@ -1603,8 +1623,108 @@ describe('send command', () => {
   beforeEach(() => {
     commandCacheDb = createTestCacheDatabase().db
     initSyncSchema(commandCacheDb)
-    commandCall.mockClear()
+    secondCacheDb = createTestCacheDatabase().db
+    initSyncSchema(secondCacheDb)
+    commandCall.mockReset()
+    commandCall.mockImplementation(async () => {
+      throw new Error('Unexpected API call')
+    })
+    secondCall.mockReset()
+    secondCall.mockImplementation(async () => {
+      throw new Error('Unexpected API call')
+    })
+    getClientForAccount.mockClear()
     commandClient = { call: commandCall }
+    secondClient = { call: secondCall }
+  })
+
+  const sentUpdates = async () => ({
+    _: 'updates',
+    updates: [],
+    users: [],
+    chats: [],
+    date: 1_760_000_000,
+    seq: 0,
+  })
+
+  const apiActivity = (db: Database) =>
+    db.query('SELECT method, success FROM api_activity').all()
+
+  it("sends from the account --account selects, with that account's access hash", async () => {
+    // The same user, cached by each account with its own access hash
+    createUsersCache(commandCacheDb).upsert(
+      createTestUser({ access_hash: '111' }),
+    )
+    createUsersCache(secondCacheDb).upsert(
+      createTestUser({ access_hash: '222' }),
+    )
+    secondCall.mockImplementationOnce(sentUpdates)
+    const { sendCommand } = await import('../commands/send')
+    const run = sendCommand.run as (input: {
+      args: Record<string, unknown>
+    }) => Promise<void>
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+
+    try {
+      await run({
+        args: {
+          to: '123456',
+          message: 'hi',
+          account: '2',
+          silent: false,
+          _: [],
+        },
+      })
+    } finally {
+      logSpy.mockRestore()
+    }
+
+    expect(getClientForAccount.mock.calls).toEqual([[2]])
+    expect(commandCall).not.toHaveBeenCalled()
+    expect(secondCall).toHaveBeenCalledTimes(1)
+    const request = secondCall.mock.calls[0]?.[0] as {
+      _: string
+      peer: tl.TypeInputPeer
+    }
+    expect(request._).toBe('messages.sendMessage')
+    assertInputPeerUser(request.peer)
+    expect(request.peer.userId).toBe(123456)
+    expectLongEqual(request.peer.accessHash, '222')
+    // The call counts against account 2's rate limits only
+    expect(apiActivity(secondCacheDb)).toEqual([
+      { method: 'messages.sendMessage', success: 1 },
+    ])
+    expect(apiActivity(commandCacheDb)).toEqual([])
+  })
+
+  it('sends from the active account without --account', async () => {
+    createUsersCache(commandCacheDb).upsert(
+      createTestUser({ access_hash: '111' }),
+    )
+    createUsersCache(secondCacheDb).upsert(
+      createTestUser({ access_hash: '222' }),
+    )
+    commandCall.mockImplementationOnce(sentUpdates)
+    const { sendCommand } = await import('../commands/send')
+    const run = sendCommand.run as (input: {
+      args: Record<string, unknown>
+    }) => Promise<void>
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+
+    try {
+      await run({ args: { to: '123456', message: 'hi', silent: false, _: [] } })
+    } finally {
+      logSpy.mockRestore()
+    }
+
+    expect(getClientForAccount.mock.calls).toEqual([[1]])
+    expect(secondCall).not.toHaveBeenCalled()
+    const request = commandCall.mock.calls[0]?.[0] as {
+      peer: tl.TypeInputPeer
+    }
+    assertInputPeerUser(request.peer)
+    expectLongEqual(request.peer.accessHash, '111')
+    expect(apiActivity(secondCacheDb)).toEqual([])
   })
 
   it('rejects a bare ID that names a cached group and a cached channel with INVALID_ARGS', async () => {
