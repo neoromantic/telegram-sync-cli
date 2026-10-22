@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-22
+
+Stop the daemon before you upgrade and start it again after: the first open
+of a cache moves its search index to the new format (#1). Then run
+`tg db vacuum` once with the daemon stopped, to give the old index's space
+back to the disk.
+
+### Added
+
+- The cache no longer only grows. `tg status` shows each account's cache
+  size, its WAL and the free space inside it, and `tg status --sizes` adds the
+  size of each table. The daemon now deletes old API activity, expired
+  rate-limit windows and old finished and failed sync jobs on a schedule;
+  until now nothing pruned the first two, so they grew forever. How long it
+  keeps each is set in `config.json` under `cache.retention`, and it never
+  forgets a FLOOD_WAIT that is still running. The new
+  `tg db vacuum [--account]` gives free space back to the disk and reports the
+  bytes before and after. It works while the daemon runs on caches created by
+  this version, and older caches need one run with the daemon stopped. Where
+  SQLite is 3.43 or newer, the search index no longer keeps its own copy of
+  every message's text, sender and chat, which makes a cache about 11–18%
+  smaller; `tg messages search` results stay the same (#1).
+- The daemon now keeps each account's contact list current. On each start
+  and reconnect, and then every peer TTL (`cache.staleness.peers`, one week by
+  default), it checks the list in the background with a hash, so an unchanged
+  list costs one tiny reply and no contact writes. The first start after the
+  upgrade fetches the full list once. Contacts added or removed on another
+  device while it runs are applied when Telegram sends the update. The check
+  covers who is a contact; names, usernames and phones still refresh with a
+  changed list or `tg contacts list --fresh` (#8).
+
+### Changed
+
+- `tg sql` queries that read the search index's own columns
+  (`message_search.text`, `sender`, `chat`, `files`) now get `NULL`, and
+  `snippet()` and `highlight()` over it no longer work, because the index
+  keeps no copy of the text (#1). Join `messages_cache` by rowid for the text,
+  as `tg messages search` does. Getting snippets back is #81.
+
+### Fixed
+
+- With several accounts, the daemon ran one sync job at a time over all of
+  them, so while one account's job waited out a FLOOD_WAIT (up to 5 minutes),
+  every other account's sync stopped too, and with three or more busy
+  accounts each one synced more slowly than alone. Each account now runs its
+  own jobs, one at a time and 3 seconds apart as before, so one account's
+  FLOOD_WAIT or slow page no longer holds the others, and `tg daemon stop`
+  still ends every account's wait at once (#60).
+- `tg chats list --type community` found no communities: Telegram lists a
+  joined community apart from the other dialogs, and the daemon's dialog pass
+  and `tg chats list --fresh` skipped it. Both now also cache every community
+  the account joined, with its access hash, at the cost of one extra request.
+  If that request fails, a FLOOD_WAIT included (it is not waited out), the
+  dialogs are still cached and the next pass retries. A community has no
+  messages of its own, so `tg chats sync <community>` no longer turns sync on
+  for jobs that would fail: it exits with `INVALID_ARGS` and points at the
+  community's linked chats, which sync as ordinary supergroups and channels.
+  If an earlier version turned the community on, the error says that `--auto`
+  turns it off and clears its failed jobs (#58).
+- A contact removed on Telegram stayed marked as a contact for good, even
+  after `tg contacts list --fresh`. The daemon and `--fresh` now unmark it and
+  keep the user row (#8).
+
 ## [0.4.1] - 2026-10-22
 
 ### Changed
@@ -473,7 +536,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.2.0...v0.3.0
