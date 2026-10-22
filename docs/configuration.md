@@ -189,7 +189,8 @@ tg config set activeAccount 2
   fails with `GENERAL_ERROR` (`details.path`) and changes neither file. A login has already
   succeeded by then: it fails the same way, its message starts with `Logged in as account <id>`
   and `details.account_id` names the account, and `data.db` keeps the active account it had.
-  Make `config.json` writable and run `tg accounts switch --id <id>` to use the new account.
+  Make `config.json` writable or remove `activeAccount` from it, then run
+  `tg accounts switch --id <id>` to use the new account.
 - An invalid `config.json` (not a JSON object, or a supported key with a wrong value) fails
   every command except `tg config`, `tg skill` and `tg daemon` with `INVALID_ARGS` and issue
   details before it runs; `tg config set` can still fix a wrong value. A `config.json` that

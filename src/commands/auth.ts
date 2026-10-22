@@ -138,7 +138,7 @@ export function getDefaultDependencies(): AuthDependencies {
       keepActiveAccountInConfig(accountId, {
         context: `Logged in as account ${accountId}`,
         details: { account_id: accountId },
-        suggestion: `Make config.json writable and run tg accounts switch --id ${accountId}, or remove activeAccount from it`,
+        suggestion: `Make config.json writable or remove activeAccount from it, then run tg accounts switch --id ${accountId}`,
       }),
   }
 }
