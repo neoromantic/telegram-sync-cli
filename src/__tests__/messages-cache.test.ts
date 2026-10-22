@@ -229,12 +229,14 @@ describe('MessagesCache', () => {
   describe('findChatIdsByMessageIds', () => {
     it('returns empty map for empty input', () => {
       const result = cache.findChatIdsByMessageIds([])
-      expect(result.size).toBe(0)
+      expect(result.chatIds.size).toBe(0)
+      expect(result.ambiguous).toEqual([])
     })
 
     it('returns empty map when no messages found', () => {
       const result = cache.findChatIdsByMessageIds([1, 2, 3])
-      expect(result.size).toBe(0)
+      expect(result.chatIds.size).toBe(0)
+      expect(result.ambiguous).toEqual([])
     })
 
     it('finds chat IDs for existing messages', () => {
@@ -264,13 +266,13 @@ describe('MessagesCache', () => {
         raw_json: '{}',
       })
 
-      const result = cache.findChatIdsByMessageIds([1, 2, 3, 999])
+      const { chatIds } = cache.findChatIdsByMessageIds([1, 2, 3, 999])
 
-      expect(result.size).toBe(3) // 999 not found
-      expect(result.get(1)).toBe(100)
-      expect(result.get(2)).toBe(200)
-      expect(result.get(3)).toBe(100)
-      expect(result.has(999)).toBe(false)
+      expect(chatIds.size).toBe(3) // 999 not found
+      expect(chatIds.get(1)).toBe(100)
+      expect(chatIds.get(2)).toBe(200)
+      expect(chatIds.get(3)).toBe(100)
+      expect(chatIds.has(999)).toBe(false)
     })
 
     it('skips message IDs that exist in multiple chats', () => {
@@ -293,19 +295,24 @@ describe('MessagesCache', () => {
 
       const result = cache.findChatIdsByMessageIds([42])
 
-      expect(result.has(42)).toBe(false)
+      expect(result.chatIds.has(42)).toBe(false)
+      expect(result.ambiguous).toEqual([{ messageId: 42, chatIds: [100, 200] }])
     })
   })
 
   describe('markDeletedByMessageIds', () => {
     it('returns 0 for empty input', () => {
-      const count = cache.markDeletedByMessageIds([])
-      expect(count).toBe(0)
+      expect(cache.markDeletedByMessageIds([])).toEqual({
+        deleted: 0,
+        ambiguous: [],
+      })
     })
 
     it('returns 0 when no messages found', () => {
-      const count = cache.markDeletedByMessageIds([1, 2, 3])
-      expect(count).toBe(0)
+      expect(cache.markDeletedByMessageIds([1, 2, 3])).toEqual({
+        deleted: 0,
+        ambiguous: [],
+      })
     })
 
     it('marks messages as deleted across multiple chats', () => {
@@ -344,9 +351,9 @@ describe('MessagesCache', () => {
       })
 
       // Delete messages 1, 2, and 3 (without knowing their chat IDs)
-      const deletedCount = cache.markDeletedByMessageIds([1, 2, 3])
+      const { deleted } = cache.markDeletedByMessageIds([1, 2, 3])
 
-      expect(deletedCount).toBe(3)
+      expect(deleted).toBe(3)
       expect(cache.get(100, 1)?.is_deleted).toBe(1)
       expect(cache.get(200, 2)?.is_deleted).toBe(1)
       expect(cache.get(100, 3)?.is_deleted).toBe(1)
@@ -364,9 +371,9 @@ describe('MessagesCache', () => {
       })
 
       // Try to delete messages where only one exists
-      const deletedCount = cache.markDeletedByMessageIds([5, 999, 1000])
+      const { deleted } = cache.markDeletedByMessageIds([5, 999, 1000])
 
-      expect(deletedCount).toBe(1)
+      expect(deleted).toBe(1)
       expect(cache.get(100, 5)?.is_deleted).toBe(1)
     })
 
@@ -388,9 +395,9 @@ describe('MessagesCache', () => {
         raw_json: '{}',
       })
 
-      const deletedCount = cache.markDeletedByMessageIds([42])
+      const { deleted } = cache.markDeletedByMessageIds([42])
 
-      expect(deletedCount).toBe(0)
+      expect(deleted).toBe(0)
       expect(cache.get(100, 42)?.is_deleted).toBe(0)
       expect(cache.get(200, 42)?.is_deleted).toBe(0)
     })
@@ -415,11 +422,79 @@ describe('MessagesCache', () => {
 
       cache.markDeleted(100, [42])
 
-      const deletedCount = cache.markDeletedByMessageIds([42])
+      const { deleted } = cache.markDeletedByMessageIds([42])
 
-      expect(deletedCount).toBe(1)
+      expect(deleted).toBe(1)
       expect(cache.get(100, 42)?.is_deleted).toBe(1)
       expect(cache.get(200, 42)?.is_deleted).toBe(1)
+    })
+
+    /** Caches message 7 in each of the given chats */
+    function cacheMessageSeven(chatIds: number[]): void {
+      for (const chatId of chatIds) {
+        cache.upsert({
+          chat_id: chatId,
+          message_id: 7,
+          text: `made-up message in ${chatId}`,
+          message_type: 'text',
+          date: 1_760_000_000,
+          raw_json: '{}',
+        })
+      }
+    }
+
+    it("marks the private chat's message when a channel has the same ID", () => {
+      cacheMessageSeven([4242, -1001234567890])
+
+      expect(cache.markDeletedByMessageIds([7])).toEqual({
+        deleted: 1,
+        ambiguous: [],
+      })
+      expect(cache.get(4242, 7)?.is_deleted).toBe(1)
+      expect(cache.get(-1001234567890, 7)?.is_deleted).toBe(0)
+    })
+
+    it("marks the basic group's message when a supergroup has the same ID", () => {
+      cacheMessageSeven([-5151, -1009876543210])
+
+      expect(cache.markDeletedByMessageIds([7])).toEqual({
+        deleted: 1,
+        ambiguous: [],
+      })
+      expect(cache.get(-5151, 7)?.is_deleted).toBe(1)
+      expect(cache.get(-1009876543210, 7)?.is_deleted).toBe(0)
+    })
+
+    it('leaves an ID that only channels have', () => {
+      cacheMessageSeven([-1001234567890, -1009876543210])
+
+      expect(cache.markDeletedByMessageIds([7])).toEqual({
+        deleted: 0,
+        ambiguous: [],
+      })
+      expect(cache.get(-1001234567890, 7)?.is_deleted).toBe(0)
+      expect(cache.get(-1009876543210, 7)?.is_deleted).toBe(0)
+    })
+
+    it('keeps and reports an ID that a private chat and a basic group both have', () => {
+      cacheMessageSeven([4242, -5151])
+
+      expect(cache.markDeletedByMessageIds([7])).toEqual({
+        deleted: 0,
+        ambiguous: [{ messageId: 7, chatIds: [-5151, 4242] }],
+      })
+      expect(cache.get(4242, 7)?.is_deleted).toBe(0)
+      expect(cache.get(-5151, 7)?.is_deleted).toBe(0)
+    })
+
+    it('counts a repeated ID in one update once', () => {
+      cacheMessageSeven([4242])
+
+      expect(cache.markDeletedByMessageIds([7, 7])).toEqual({
+        deleted: 1,
+        ambiguous: [],
+      })
+      expect(cache.get(4242, 7)?.is_deleted).toBe(1)
     })
   })
 

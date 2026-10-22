@@ -43,6 +43,14 @@ Delete updates mark rows as deleted instead of removing them:
 
 - `messages_cache.is_deleted = 1`
 
+A delete in a channel or supergroup names the chat, and the daemon marks those rows. A delete
+in a private chat or basic group names only message IDs. Those IDs come from one sequence per
+account, so the daemon marks the one private chat or basic group in the receiving account's
+cache that has a live row with that ID, and never a channel or supergroup post with the same
+ID. An ID that is not cached is skipped. If two or more of those chats still have the ID live
+(for example a cache adopted from 0.3 that holds a removed account's chats), the daemon marks
+neither and logs a warning. The lookup uses `idx_messages_cache_message_id`.
+
 ## Gaps / Too Long Updates
 
 Gaps are closed by forward catch-up, not by `getDifference`. On start and after each reconnect

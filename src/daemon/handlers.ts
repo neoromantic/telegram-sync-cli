@@ -7,7 +7,11 @@ import type { tl } from '@mtcute/bun'
 import { rawPeerToCacheInput } from '../commands/chats/helpers'
 import type { ChatSyncStateService } from '../db/chat-sync-state'
 import type { ChatsCache } from '../db/chats-cache'
-import type { MessageInput, MessagesCache } from '../db/messages-cache'
+import type {
+  DeleteWithoutChatResult,
+  MessageInput,
+  MessagesCache,
+} from '../db/messages-cache'
 import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
 import { bigIntReplacer, formatError } from './daemon-utils'
 import type { DaemonLogger } from './types'
@@ -66,9 +70,10 @@ export interface DeleteMessagesData {
 }
 
 /**
- * Delete messages update data (without chat ID, e.g., DMs and basic groups)
- * For non-channel chats, mtcute only provides message IDs without the chat context.
- * The handler must look up the chat ID from the messages cache.
+ * Delete messages update data without a chat ID. Telegram sends a delete in
+ * a private chat or basic group (updateDeleteMessages) with message IDs only.
+ * Those IDs come from one sequence per account, so the handler matches them
+ * among the account's private chats and basic groups.
  */
 export interface DeleteMessagesWithoutChatData {
   messageIds: number[]
@@ -91,7 +96,7 @@ export interface UpdateHandlers {
   handleDeleteMessagesWithoutChat(
     _ctx: UpdateContext,
     data: DeleteMessagesWithoutChatData,
-  ): Promise<number>
+  ): Promise<DeleteWithoutChatResult>
   /** Handle a batch of messages (for history sync) */
   handleBatchMessages(
     _ctx: UpdateContext,

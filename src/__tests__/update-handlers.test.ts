@@ -638,11 +638,11 @@ describe('UpdateHandlers', () => {
       }
 
       // Delete messages without providing chat IDs (as mtcute does for non-channel chats)
-      const deletedCount = await handlers.handleDeleteMessagesWithoutChat(ctx, {
+      const { deleted } = await handlers.handleDeleteMessagesWithoutChat(ctx, {
         messageIds: [1, 2],
       })
 
-      expect(deletedCount).toBe(2)
+      expect(deleted).toBe(2)
       expect(messagesCache.get(100, 1)?.is_deleted).toBe(1)
       expect(messagesCache.get(200, 2)?.is_deleted).toBe(1)
     })
@@ -654,11 +654,11 @@ describe('UpdateHandlers', () => {
       }
 
       // Try to delete messages that don't exist in cache
-      const deletedCount = await handlers.handleDeleteMessagesWithoutChat(ctx, {
+      const { deleted } = await handlers.handleDeleteMessagesWithoutChat(ctx, {
         messageIds: [999, 1000],
       })
 
-      expect(deletedCount).toBe(0)
+      expect(deleted).toBe(0)
     })
 
     it('handles empty message IDs array', async () => {
@@ -667,11 +667,40 @@ describe('UpdateHandlers', () => {
         receivedAt: Date.now(),
       }
 
-      const deletedCount = await handlers.handleDeleteMessagesWithoutChat(ctx, {
+      const { deleted } = await handlers.handleDeleteMessagesWithoutChat(ctx, {
         messageIds: [],
       })
 
-      expect(deletedCount).toBe(0)
+      expect(deleted).toBe(0)
+    })
+
+    it('reports an ID two private chats have', async () => {
+      for (const chatId of [100, 200]) {
+        messagesCache.upsert({
+          chat_id: chatId,
+          message_id: 42,
+          text: `Message in chat ${chatId}`,
+          message_type: 'text',
+          date: Date.now(),
+          raw_json: '{}',
+        })
+      }
+
+      const ctx: UpdateContext = {
+        accountId: 1,
+        receivedAt: Date.now(),
+      }
+
+      const result = await handlers.handleDeleteMessagesWithoutChat(ctx, {
+        messageIds: [42],
+      })
+
+      expect(result).toEqual({
+        deleted: 0,
+        ambiguous: [{ messageId: 42, chatIds: [100, 200] }],
+      })
+      expect(messagesCache.get(100, 42)?.is_deleted).toBe(0)
+      expect(messagesCache.get(200, 42)?.is_deleted).toBe(0)
     })
   })
 

@@ -94,7 +94,8 @@ Real-time handlers update `messages_cache` and `chat_sync_state` in the receivin
 cache:
 - New message → insert/update message row
 - Edit message → update text/edit_date
-- Delete message → mark `is_deleted = 1`
+- Delete message → mark `is_deleted = 1` (without a chat: the one private chat or basic group
+  with that ID; see [real-time.md](real-time.md#deletes))
 
 Handlers live in:
 - `src/daemon/handlers.ts`
