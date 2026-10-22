@@ -12,6 +12,35 @@
  */
 import { Database } from 'bun:sqlite'
 
+/** How long opening a database waits for another process's switch to WAL */
+const WAL_SWITCH_TIMEOUT_MS = 5000
+const WAL_SWITCH_RETRY_MS = 10
+
+function isBusy(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code
+  return typeof code === 'string' && code.startsWith('SQLITE_BUSY')
+}
+
+/**
+ * Switch the file to WAL. Processes that open a file in another journal
+ * mode at once (a new file, or the cache the shared-cache move just folded
+ * to DELETE) can't all switch it: SQLite fails all but one with SQLITE_BUSY
+ * at once, without the busy handler, as waiting could deadlock. Those try
+ * again until the file is in WAL, for up to 5 s.
+ */
+export function enableWal(db: Database): void {
+  const deadline = Date.now() + WAL_SWITCH_TIMEOUT_MS
+  for (;;) {
+    try {
+      db.run('PRAGMA journal_mode = WAL')
+      return
+    } catch (err) {
+      if (!isBusy(err) || Date.now() >= deadline) throw err
+      Bun.sleepSync(WAL_SWITCH_RETRY_MS)
+    }
+  }
+}
+
 /**
  * Initialize the cache schema
  * Creates all tables and indexes for caching
@@ -23,7 +52,7 @@ export function initCacheSchema(db: Database): void {
   db.run('PRAGMA busy_timeout = 5000')
 
   // Enable WAL mode for better concurrent access
-  db.run('PRAGMA journal_mode = WAL')
+  enableWal(db)
 
   // Users cache table
   db.run(`

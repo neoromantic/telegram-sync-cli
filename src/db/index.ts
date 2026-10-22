@@ -18,7 +18,7 @@ import {
   legacyCachePath,
 } from './cache-layout'
 import { checkCacheOwner } from './cache-meta'
-import { initCacheSchema } from './schema'
+import { enableWal, initCacheSchema } from './schema'
 import { initSyncSchema } from './sync-schema'
 
 /**
@@ -43,7 +43,7 @@ function initSchema(db: Database): void {
   // Several tg processes write data.db, and the move of a shared cache holds
   // its write lock (cache-layout.ts): wait for it instead of failing at once
   db.run('PRAGMA busy_timeout = 5000')
-  db.run('PRAGMA journal_mode = WAL')
+  enableWal(db)
 
   db.run(`
     CREATE TABLE IF NOT EXISTS accounts (

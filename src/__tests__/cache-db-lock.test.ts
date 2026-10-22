@@ -259,6 +259,46 @@ describe('cache database lock', () => {
     expect(await holder.exited).toBe(0)
   }, 20_000)
 
+  it('lets several processes switch a new or folded cache to WAL at once', async () => {
+    // A new file, and one in DELETE mode as the shared-cache move leaves
+    // it. SQLite fails all but one switch to WAL at once, without waiting
+    // for busy_timeout, so the others must try again
+    for (const kind of ['new', 'folded'] as const) {
+      for (let round = 0; round < 3; round++) {
+        const file = join(dir, `${kind}-${round}.db`)
+        if (kind === 'folded') {
+          const db = new Database(file)
+          db.run('PRAGMA journal_mode = DELETE')
+          db.run('CREATE TABLE filler (n INTEGER)')
+          db.transaction(() => {
+            for (let n = 0; n < 100; n++) {
+              db.run('INSERT INTO filler (n) VALUES (?)', [n])
+            }
+          })()
+          db.close()
+        }
+
+        const env = { LOCK_DB_PATH: file, SCHEMA_MODULE, SYNC_SCHEMA_MODULE }
+        const children = Array.from({ length: 6 }, () =>
+          spawnBun(INIT_SCHEMA, env),
+        )
+        const results = await Promise.all(
+          children.map(async (child) => ({
+            code: await child.exited,
+            stderr: await new Response(child.stderr).text(),
+          })),
+        )
+
+        expect(results).toEqual(results.map(() => ({ code: 0, stderr: '' })))
+        const db = new Database(file)
+        expect(db.query('PRAGMA journal_mode').get()).toEqual({
+          journal_mode: 'wal',
+        })
+        db.close()
+      }
+    }
+  }, 60_000)
+
   it('lets several processes move a 0.2.0 cache to marked IDs at once', async () => {
     const legacy = new Database(path)
     seedLegacyCache(legacy)

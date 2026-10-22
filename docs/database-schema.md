@@ -410,7 +410,10 @@ PRAGMA busy_timeout = 5000;  -- data.db and every accounts/<id>/cache.db
 The CLI and the daemon write the same account's `cache.db` at the same time, so a write waits
 up to 5 seconds for the other process's write lock instead of failing with "database is
 locked". `data.db` sets its timeout before any write, because the move of a shared cache (see
-below) holds its write lock.
+below) holds its write lock. The switch to WAL itself doesn't wait: when several processes open
+a file that is not in WAL yet (a new file, or the cache the move just folded to `DELETE`),
+SQLite fails all but one switch with `SQLITE_BUSY` at once, so the others try again every
+10 ms for up to 5 seconds (`enableWal` in `src/db/schema.ts`).
 
 ## Migrations
 
