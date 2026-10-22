@@ -1,7 +1,15 @@
 /**
  * Authentication commands tests
  */
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test'
 import {
   chmodSync,
   existsSync,
@@ -554,11 +562,18 @@ describe('Authentication Commands', () => {
           const text = JSON.stringify({ activeAccount: 1 })
           writeConfig(text)
           chmodSync(configPath(), 0o444)
+          const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
 
-          const failure = await login(deps).then(
-            () => undefined,
-            (err: Error & { code?: string; details?: unknown }) => err,
-          )
+          let printed: string | undefined
+          const failure = await login(deps)
+            .then(
+              () => undefined,
+              (err: Error & { code?: string; details?: unknown }) => err,
+            )
+            .finally(() => {
+              printed = String(errorSpy.mock.calls.at(-1)?.[0])
+              errorSpy.mockRestore()
+            })
 
           expect(failure?.code).toBe('GENERAL_ERROR')
           expect(failure?.message).toStartWith(
@@ -568,6 +583,11 @@ describe('Authentication Commands', () => {
             path: configPath(),
             account_id: 2,
           })
+          // Removing the key alone would leave account 1 active, so the
+          // switch follows either step
+          expect(JSON.parse(printed ?? '').error.suggestion).toBe(
+            'Make config.json writable or remove activeAccount from it, then run tg accounts switch --id 2',
+          )
           // config.json first: data.db keeps account 1 active as well
           expect(readConfig()).toBe(text)
           expect(activeIds()).toEqual([1])
