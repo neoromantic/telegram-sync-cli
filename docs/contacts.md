@@ -34,16 +34,23 @@ tg sql "SELECT entity_type, last_sync_at FROM sync_state"
 
 ### Daemon refresh
 
-A running daemon keeps the list current by itself: on each start and reconnect, and then every
-peer TTL (`cache.staleness.peers`, one week by default), it checks the list with Telegram's hash
-in the background. An unchanged list costs one tiny reply and no cache
-writes; a changed one is applied as above. Details: [daemon.md](daemon.md#contacts-sync).
+A running daemon keeps who is a contact current by itself: on each start and reconnect (so also
+the first start after an upgrade, with no recorded list), and then every peer TTL
+(`cache.staleness.peers`, one week by default), it checks the list with Telegram's hash in the
+background. An unchanged list costs one tiny reply and writes no contact rows (only the check
+time in `sync_state` moves); a changed one is applied as above. Details:
+[daemon.md](daemon.md#contacts-sync).
+
+The hash covers only who is in the list, not the contacts' names, usernames or phones. Those
+refresh when the list changed and Telegram sent it in full, or with `--fresh`. So `stale` in
+`tg contacts list` still follows the rows' `fetched_at`, and can be `true` while a daemon runs
+and has just confirmed the list.
 
 Contacts added or removed on another device reach the cache when Telegram sends the update
 for them ([real-time.md](real-time.md#contacts)). A contact you add or delete with
-`tg api contacts.*` reaches the cache the same way, or at the daemon's next check at the latest,
-within the peer TTL: the hash comes from the cache, so it differs, and
-Telegram sends the full list. `tg contacts list --fresh` applies it at once.
+`tg api contacts.*` reaches the cache at the daemon's next check, within the peer TTL (the hash
+comes from the cache, so it differs and Telegram sends the full list), or at once with
+`tg contacts list --fresh`.
 
 ## Current Storage
 
