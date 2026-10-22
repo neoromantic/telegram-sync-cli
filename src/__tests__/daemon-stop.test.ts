@@ -146,7 +146,7 @@ describe('daemon stop during a FLOOD_WAIT', () => {
 
     expect(exitCode).toBe(DaemonExitCode.Success)
     expect(stoppedAt).toBeGreaterThan(0)
-    expect(elapsed).toBeLessThan(2000)
+    expect(elapsed).toBeLessThan(1000)
     expect(fake.pass.params).toHaveLength(1)
     expect(fake.call).not.toHaveBeenCalled()
     expect(warn).not.toHaveBeenCalled()
@@ -200,7 +200,7 @@ describe('daemon stop during a FLOOD_WAIT', () => {
 
     expect(exitCode).toBe(DaemonExitCode.Success)
     expect(stoppedAt).toBeGreaterThan(0)
-    expect(elapsed).toBeLessThan(2000)
+    expect(elapsed).toBeLessThan(1000)
     expect(fake.call).toHaveBeenCalledTimes(1)
     expect(warn).not.toHaveBeenCalled()
     expect(error).not.toHaveBeenCalled()
