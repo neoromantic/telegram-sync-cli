@@ -37,7 +37,7 @@ export type CacheUnavailableReason =
 
 const REASON_MESSAGES: Record<CacheUnavailableReason, string> = {
   shared_cache_in_use:
-    'The shared cache of an older tg version is still open in another process, so it cannot be moved to its account yet',
+    'The shared cache of an older tg version is still open in another process, so it cannot be moved yet',
   move_failed: 'The shared cache of an older tg version could not be moved',
   owner_mismatch: 'The cache file belongs to another account',
 }

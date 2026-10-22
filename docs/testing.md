@@ -195,7 +195,8 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
   several accounts, and no root `cache.db` is ever created
 - `cache-layout.e2e.test.ts` — the first run after an upgrade from 0.3 or older: a shared cache
   adopted (a 0.2.0 one migrated too), set aside with one notice, deleted when empty,
-  `CACHE_UNAVAILABLE` while an older tg holds it, and the owner check
+  `CACHE_UNAVAILABLE` while an older tg holds it (and no account added or removed), and the
+  owner check
 
 ### E2E Helpers
 

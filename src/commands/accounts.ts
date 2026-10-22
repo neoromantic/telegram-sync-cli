@@ -109,7 +109,7 @@ export const removeAccountCommand = defineCommand({
       )
     }
 
-    settleCacheLayoutBeforeAccountChange('report')
+    settleCacheLayoutBeforeAccountChange()
     accountsDb.delete(accountId)
 
     success({
