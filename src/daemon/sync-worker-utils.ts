@@ -13,8 +13,10 @@ import {
  *   try doesn't count as an attempt
  * - retrying: it failed and is pending until its backoff ends
  * - failed: it failed for good (a permanent error or the last attempt)
+ * - stopped: a daemon stop cut its request short, so it is pending again as
+ *   it was before it started: same attempts, last error and due time
  * - cancelled: its chat was turned off while it ran, so it was deleted
- *   instead of being retried, deferred or failed
+ *   instead of being retried, deferred, stopped or failed
  * - not_running: it wasn't pending when it should start or running when it
  *   ended, so nothing changed
  */
@@ -23,6 +25,7 @@ export interface JobOutcome {
     | 'completed'
     | 'deferred'
     | 'retrying'
+    | 'stopped'
     | 'failed'
     | 'cancelled'
     | 'not_running'
@@ -40,6 +43,8 @@ export interface JobResultLike {
   waitSeconds?: number
   /** The error won't go away on a retry */
   permanent?: boolean
+  /** A daemon stop cut the job's request short */
+  stopped?: boolean
   /** Set by processJobWithHandlers once the job row is updated */
   outcome?: JobOutcome
 }
@@ -96,6 +101,19 @@ export function finalizeJobResult(
       return { state: 'not_running', attempts: job.attempts, nextRunAt: null }
     }
     return { state: 'completed', attempts: job.attempts, nextRunAt: null }
+  }
+
+  // A stop is no failure and no delay: the job is pending as it was, so the
+  // next start runs it again
+  if (result.stopped) {
+    const retried = jobsService.retryLater(job.id, {
+      error: job.error_message,
+      runAt: job.next_run_at,
+      countAttempt: false,
+    })
+    return retried === 'retrying'
+      ? { state: 'stopped', attempts: job.attempts, nextRunAt: job.next_run_at }
+      : droppedOutcome(retried, job)
   }
 
   const now = Date.now()

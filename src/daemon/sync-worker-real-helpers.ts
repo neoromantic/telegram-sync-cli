@@ -147,6 +147,10 @@ export function forwardPageRequest(cursor: number | null, limit: number) {
   return { offsetId: cursor + 1, addOffset: -limit, limit, minId: cursor }
 }
 
+/**
+ * One `messages.getHistory` page. A `signal` (the daemon's stop) ends the
+ * request at once, a FLOOD_WAIT it waits out included.
+ */
 export async function fetchMessagesRaw(
   client: Pick<TelegramClient, 'call'>,
   inputPeer: tl.TypeInputPeer,
@@ -157,7 +161,11 @@ export async function fetchMessagesRaw(
     minId?: number
     maxId?: number
   },
+  signal?: AbortSignal,
 ): Promise<{ messages: unknown[]; count?: number; users: tl.TypeUser[] }> {
+  // mtcute's flood waiter never wakes on a signal that is already aborted,
+  // so a stored FLOOD_WAIT would sleep in full
+  signal?.throwIfAborted()
   const request: tl.messages.RawGetHistoryRequest = {
     _: 'messages.getHistory',
     peer: inputPeer,
@@ -169,7 +177,9 @@ export async function fetchMessagesRaw(
     minId: options.minId ?? 0,
     hash: toLong(0),
   }
-  const result = await client.call(request)
+  const result = signal
+    ? await client.call(request, { abortSignal: signal })
+    : await client.call(request)
   const messages = 'messages' in result ? result.messages : []
   const count = 'count' in result ? result.count : undefined
   // The senders of the page, for callers that cache them

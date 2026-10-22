@@ -2,9 +2,17 @@
  * Unit tests for daemon account helpers (no getCacheDb dependency)
  */
 import { describe, expect, it, mock } from 'bun:test'
-import type { DeleteMessageUpdate, Message, TelegramClient } from '@mtcute/bun'
+import type {
+  DeleteMessageUpdate,
+  Message,
+  RpcCallMiddleware,
+  RpcCallMiddlewareContext,
+  TelegramClient,
+  tl,
+} from '@mtcute/bun'
 import {
   closeClientSafe,
+  daemonNetworkMiddlewares,
   removeEventHandlers,
   resolveRealtimeMessageType,
   resolveSyncChatType,
@@ -14,7 +22,9 @@ import {
 import {
   createDaemonRuntime,
   type DaemonContext,
+  requestShutdown,
 } from '../daemon/daemon-context'
+import { isDaemonStopError } from '../daemon/daemon-utils'
 import type { AccountConnectionState } from '../daemon/types'
 
 class MockEmitter<T> {
@@ -328,6 +338,31 @@ describe('signal/cleanup helpers', () => {
     expect(calls.filter((signal) => signal === 'SIGTERM').length).toBe(1)
   })
 
+  it('SIGTERM sets the stop flag and aborts the stop signal', () => {
+    const ctx = createContext()
+    const handlers = new Map<string, () => void>()
+    const originalOn = process.on
+    // Capture the handlers without installing a real listener
+    process.on = ((signal: string, handler: () => void) => {
+      handlers.set(signal, handler)
+      return process
+    }) as typeof process.on
+
+    try {
+      setupSignalHandlers(ctx)
+    } finally {
+      process.on = originalOn
+    }
+    handlers.get('SIGTERM')?.()
+
+    expect(ctx.logger.info).toHaveBeenCalledWith(
+      'Received SIGTERM, initiating graceful shutdown...',
+    )
+    expect(ctx.state.shutdownRequested).toBe(true)
+    expect(ctx.runtime.shutdown.signal.aborted).toBe(true)
+    expect(isDaemonStopError(ctx.runtime.shutdown.signal.reason)).toBe(true)
+  })
+
   it('closeClientSafe destroys the client', async () => {
     const ctx = createContext()
     const client = { destroy: mock(async () => {}) }
@@ -348,5 +383,50 @@ describe('signal/cleanup helpers', () => {
 
     await closeClientSafe(ctx, asTelegramClient(errorClient), 'error')
     expect(ctx.logger.warn).toHaveBeenCalled()
+  })
+})
+
+describe('daemonNetworkMiddlewares', () => {
+  /** Run the middlewares over a final step, as mtcute's network manager does */
+  function compose(
+    middlewares: RpcCallMiddleware[],
+    final: (ctx: RpcCallMiddlewareContext) => Promise<unknown>,
+  ) {
+    return middlewares.reduceRight<
+      (ctx: RpcCallMiddlewareContext) => Promise<unknown>
+    >((next, middleware) => (ctx) => middleware(ctx, next), final)
+  }
+
+  it("ends a FLOOD_WAIT the daemon's flood waiter sleeps out when the daemon stops", async () => {
+    const ctx = createContext()
+    const sent: string[] = []
+    const call = compose(daemonNetworkMiddlewares(ctx, 1), async (rpc) => {
+      sent.push(rpc.request._)
+      return {
+        _: 'mt_rpc_error',
+        errorCode: 420,
+        errorMessage: 'FLOOD_WAIT_300',
+      }
+    })
+    const manager = {
+      teardownSignal: new AbortController().signal,
+      _log: { warn: () => {} },
+    } as unknown as RpcCallMiddlewareContext['manager']
+    setTimeout(() => requestShutdown(ctx), 20)
+
+    const started = performance.now()
+    const error = await call({
+      request: { _: 'messages.getHistory' } as unknown as tl.RpcMethod,
+      manager,
+      params: { abortSignal: ctx.runtime.shutdown.signal },
+    }).catch((err: unknown) => err)
+
+    expect(performance.now() - started).toBeLessThan(200)
+    expect(isDaemonStopError(error)).toBe(true)
+    expect(ctx.logger.info).toHaveBeenCalledWith(
+      '[Account 1] messages.getHistory: FLOOD_WAIT, waiting 300s',
+    )
+    // The wait ended without a retry
+    expect(sent).toEqual(['messages.getHistory'])
   })
 })

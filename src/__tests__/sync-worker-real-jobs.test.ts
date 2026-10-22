@@ -3,7 +3,9 @@
  */
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import { type TelegramClient, tl } from '@mtcute/bun'
+import { type RpcCallOptions, type TelegramClient, tl } from '@mtcute/bun'
+import { DaemonStopError } from '../daemon/daemon-utils'
+import { createRealSyncWorker } from '../daemon/sync-worker-real'
 import {
   processBackwardHistoryReal,
   processForwardCatchupReal,
@@ -24,6 +26,7 @@ import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { createFakeHistory, range, rawMessage } from './helpers/fake-history'
+import { waitLikeFloodWait } from './helpers/flood-wait'
 
 describe('sync-worker real jobs', () => {
   let db: Database
@@ -582,6 +585,147 @@ describe('sync-worker real jobs', () => {
         expect(failedRows()).toEqual([])
       })
     }
+
+    describe('a daemon stop', () => {
+      /** A chat due for its first page */
+      const NEW_CHAT = 302
+
+      beforeEach(() => {
+        ctx.chatSyncState.upsert({
+          chat_id: NEW_CHAT,
+          chat_type: 'private',
+          sync_priority: SyncPriority.High,
+          sync_enabled: true,
+        })
+      })
+
+      /**
+       * A worker on the daemon's stop signal whose request waits out a
+       * FLOOD_WAIT; `call` replaces the request
+       */
+      function stoppingWorker(
+        call?: (stop: () => void) => (...args: unknown[]) => Promise<unknown>,
+      ) {
+        const shutdown = new AbortController()
+        const stop = () => shutdown.abort(new DaemonStopError())
+        const request = mock(
+          call?.(stop) ??
+            ((_request: unknown, params?: RpcCallOptions) =>
+              waitLikeFloodWait(params, { onWait: stop })),
+        )
+        const worker = createRealSyncWorker({
+          client: { call: request } as unknown as TelegramClient,
+          messagesCache: ctx.messagesCache,
+          historyRanges: ctx.historyRanges,
+          chatSyncState: ctx.chatSyncState,
+          jobsService: ctx.jobsService,
+          rateLimits: ctx.rateLimits,
+          chatsCache: ctx.chatsCache,
+          config: ctx.config,
+          signal: shutdown.signal,
+        })
+        return { worker, request, signal: shutdown.signal }
+      }
+
+      /** What a job may change in its chat */
+      const chatData = (chatId: number) => ({
+        state: ctx.chatSyncState.get(chatId),
+        ranges: storedRanges(chatId),
+        messages: ctx.messagesCache.countByChatId(chatId),
+      })
+
+      for (const [jobType, chatId] of [
+        [SyncJobType.ForwardCatchup, CHAT],
+        [SyncJobType.BackwardHistory, CHAT],
+        [SyncJobType.InitialLoad, NEW_CHAT],
+      ] as const) {
+        it(`leaves a ${jobType} job pending as it was when the stop cuts its FLOOD_WAIT short`, async () => {
+          const { worker, request, signal } = stoppingWorker()
+          const job = queue(jobType, chatId)
+          const before = chatData(chatId)
+
+          const result = await worker.processJobReal(job)
+
+          expect(result).toMatchObject({ success: false, stopped: true })
+          expect(result.outcome).toEqual({
+            state: 'stopped',
+            attempts: job.attempts,
+            nextRunAt: job.next_run_at,
+          })
+          expect(ctx.jobsService.getById(job.id)).toEqual(job)
+          expect(request).toHaveBeenCalledTimes(1)
+          expect(request.mock.calls[0]?.[1]).toEqual({ abortSignal: signal })
+          expect(ctx.rateLimits.isBlocked(ctx.config.apiMethod)).toBe(false)
+          expect(chatData(chatId)).toEqual(before)
+          expect(failedRows()).toEqual([])
+        })
+      }
+
+      it('keeps the attempts and the last error of earlier tries', async () => {
+        const { worker } = stoppingWorker()
+        const queued = queue()
+        db.run(
+          `UPDATE sync_jobs SET attempts = 2, error_message = 'connection reset',
+             next_run_at = 0 WHERE id = ?`,
+          [queued.id],
+        )
+        const job = ctx.jobsService.getById(queued.id)!
+        const retryingBefore = ctx.jobsService.countJobs().retrying
+
+        const result = await worker.processJobReal(job)
+
+        expect(result.outcome).toEqual({
+          state: 'stopped',
+          attempts: 2,
+          nextRunAt: 0,
+        })
+        expect(ctx.jobsService.getById(job.id)).toEqual(job)
+        expect(ctx.jobsService.getById(job.id)).toMatchObject({
+          status: 'pending',
+          attempts: 2,
+          error_message: 'connection reset',
+          started_at: null,
+        })
+        expect(ctx.jobsService.countJobs().retrying).toBe(retryingBefore)
+      })
+
+      it('counts only the stop itself: another error during a stop still fails the try', async () => {
+        const { worker } = stoppingWorker((stop) => async () => {
+          stop()
+          throw new Error('connection reset')
+        })
+        const job = queue()
+
+        const result = await worker.processJobReal(job)
+
+        expect(result.outcome).toEqual({
+          state: 'retrying',
+          attempts: 1,
+          nextRunAt: NOW + 60_000,
+        })
+        expect(ctx.jobsService.getById(job.id)).toMatchObject({
+          status: 'pending',
+          attempts: 1,
+          error_message: 'connection reset',
+        })
+      })
+
+      it('defers a job whose FLOOD_WAIT is too long to wait out during a stop', async () => {
+        const { worker } = stoppingWorker((stop) => async () => {
+          stop()
+          throw new Error('FLOOD_WAIT_600')
+        })
+        const job = queue()
+
+        const result = await worker.processJobReal(job)
+
+        expect(result.outcome).toEqual({
+          state: 'deferred',
+          attempts: 0,
+          nextRunAt: NOW + 600_000,
+        })
+      })
+    })
 
     it('never leaves a job running when a handler returns no error', async () => {
       const job = queue()

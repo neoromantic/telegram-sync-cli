@@ -4,12 +4,13 @@
 import { describe, expect, it, mock } from 'bun:test'
 import type { TelegramClient } from '@mtcute/bun'
 import type { DaemonContext } from '../daemon/daemon-context'
-import { createDaemonRuntime } from '../daemon/daemon-context'
+import { createDaemonRuntime, requestShutdown } from '../daemon/daemon-context'
 import { mainLoop } from '../daemon/daemon-loop'
 import type { SyncScheduler } from '../daemon/scheduler'
+import type { RealSyncWorker } from '../daemon/sync-worker'
 import type { AccountConnectionState } from '../daemon/types'
 import type { DaemonStatusService, DaemonTick } from '../db/daemon-status'
-import { SyncJobType, SyncPriority } from '../db/sync-schema'
+import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
 import {
   addAccountRuntime,
   createAccountCacheDb,
@@ -131,9 +132,13 @@ function createContext(): DaemonContext {
   }
 }
 
-async function runWithImmediateTimeouts(run: () => Promise<void>) {
+async function runWithImmediateTimeouts(
+  run: () => Promise<void>,
+  onTimeout: () => void = () => {},
+) {
   const originalSetTimeout = globalThis.setTimeout
   globalThis.setTimeout = ((callback: (...args: unknown[]) => void) => {
+    onTimeout()
     callback()
     return 0 as unknown as NodeJS.Timeout
   }) as typeof setTimeout
@@ -309,6 +314,84 @@ describe('mainLoop', () => {
         '[Account 1] Failed to refresh sync queues: Error: disk I/O error',
       ),
     )
+  })
+
+  it('ends right after a job that a daemon stop cut short, even on a 60th tick', async () => {
+    const ctx = createContext()
+    let ticks = 0
+    let timeouts = 0
+    const job: SyncJobRow = {
+      id: 7,
+      chat_id: 55,
+      job_type: SyncJobType.BackwardHistory,
+      priority: SyncPriority.High,
+      status: 'pending',
+      cursor_start: null,
+      cursor_end: null,
+      messages_fetched: 0,
+      error_message: null,
+      created_at: 0,
+      started_at: null,
+      completed_at: null,
+      attempts: 0,
+      next_run_at: 0,
+    }
+    // A job is due on the 60th tick, when the health check is due too; the
+    // stop arrives while it runs
+    let picks = 0
+    const worker = {
+      client: {} as TelegramClient,
+      canMakeApiCall: () => true,
+      processJobReal: mock(async () => {
+        requestShutdown(ctx)
+        return {
+          success: false,
+          messagesFetched: 0,
+          stopped: true,
+          outcome: { state: 'stopped' as const, attempts: 0, nextRunAt: 0 },
+        }
+      }),
+    } as unknown as RealSyncWorker
+    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      statusService: createMockStatusService({
+        writeTick: () => {
+          ticks += 1
+        },
+      }),
+      scheduler: createMockScheduler({
+        getNextJob: () => (++picks === 60 ? job : null),
+      }),
+      worker,
+    })
+    const getMe = mock(async () => ({}))
+    ctx.state.accounts.set(1, {
+      accountId: 1,
+      phone: '+15550000001',
+      name: null,
+      status: 'connected',
+      client: { getMe } as unknown as TelegramClient,
+      lastActivity: 0,
+    })
+
+    const originalNow = Date.now
+    Date.now = () => 120000
+    try {
+      await runWithImmediateTimeouts(
+        () => mainLoop(ctx),
+        () => {
+          timeouts += 1
+        },
+      )
+    } finally {
+      Date.now = originalNow
+    }
+
+    expect(worker.processJobReal).toHaveBeenCalledTimes(1)
+    // Ticks 1 to 59 wrote their status and waited; the 60th did neither
+    expect(picks).toBe(60)
+    expect(ticks).toBe(59)
+    expect(timeouts).toBe(59)
+    expect(getMe).not.toHaveBeenCalled()
   })
 
   it('cleans up old jobs on cleanup interval', async () => {

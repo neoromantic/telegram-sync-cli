@@ -220,22 +220,20 @@ account's scheduler → its sync_jobs → its worker and client → its messages
   session file, registers the update handlers on the new client, starts its
   updates loop and rebuilds the account's sync worker; a failed attempt closes
   the new client and schedules the next retry
-- On shutdown (`tg daemon stop`, SIGTERM or SIGINT) the daemon finishes the
-  running sync job, then closes every account's client once. The session files
-  stay open until then: closing a client stops its updates loop, saves its
-  update state and peers, and closes its session file and Telegram
-  connections, and the update handlers stay on until it's done, so updates and
-  peers that arrive after the signal are saved. If closing the clients takes
-  longer than 30 seconds, the daemon exits with code 1 and still saves the
-  queued session writes. A stop during a dialog pass ends the pass at the next
-  dialog, but a FLOOD_WAIT (up to 5 minutes) that the pass or a sync job is
-  waiting out holds the stop until it ends
-  ([#64](https://github.com/neoromantic/telegram-sync-cli/issues/64)).
-  `tg daemon stop` then reports `DAEMON_SHUTDOWN_TIMEOUT` after its
-  `--timeout` (10 seconds by default) while the daemon keeps running and stops
-  on its own once the wait ends; a longer `--timeout` waits for it, and
-  `--force` kills it without saving the session writes made since the last
-  save
+- On shutdown (`tg daemon stop`, SIGTERM or SIGINT) the daemon ends the
+  request the running sync job is waiting on; the job stays pending. It then
+  closes every account's client once. The session files stay open until then:
+  closing a client stops its updates loop, saves its update state and peers,
+  and closes its session file and Telegram connections, and the update
+  handlers stay on until it's done, so updates and peers that arrive after the
+  signal are saved. If closing the clients takes longer than 30 seconds, the
+  daemon exits with code 1 and still saves the queued session writes. A stop
+  ends the dialog pass at the next dialog, and a request that the pass or a
+  sync job is waiting on ends at once, a FLOOD_WAIT of up to 5 minutes
+  included: the pass counts as stopped and marks nothing, and the job is
+  pending as it was, with no attempt used, so the next start runs it again.
+  `tg daemon stop --force` kills the daemon without saving the session writes
+  made since the last save
 - After a reconnect, a dialog pass runs on the new client in the background
   (one per account at a time), then the scheduler catches up the chats that got
   messages while the connection was down. If the pass fails part-way, every

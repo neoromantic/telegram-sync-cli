@@ -34,8 +34,8 @@ export interface SyncJobProgress {
  * A job to run again later, from `retryLater`
  */
 export interface SyncJobRetry {
-  /** The error, kept as the job's last error */
-  error: string
+  /** The error, kept as the job's last error; null for none */
+  error: string | null
   /** When the job may run again, in ms since the epoch */
   runAt: number
   /** Whether the try counts towards the attempts; a FLOOD_WAIT doesn't */

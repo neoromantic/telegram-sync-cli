@@ -2,9 +2,16 @@
  * Fake mtcute dialogs and a client that lists them, for dialog pass tests.
  * Only the fields the daemon reads are filled in.
  */
-import { Dialog, PeersIndex, type TelegramClient, type tl } from '@mtcute/bun'
+import {
+  Dialog,
+  PeersIndex,
+  type RpcCallOptions,
+  type TelegramClient,
+  type tl,
+} from '@mtcute/bun'
 
 import { toLong } from '../../utils/long'
+import { waitLikeFloodWait } from './flood-wait'
 
 export interface FakeDialogInput {
   kind: 'user' | 'group' | 'supergroup' | 'channel'
@@ -111,31 +118,61 @@ export interface FakeDialogClientOptions {
   error?: Error
   /** Called when the pass asks for the dialog after the `count`th one */
   onListed?: (count: number) => void
+  /**
+   * After listing this many dialogs, the next page waits like a FLOOD_WAIT
+   * until the `abortSignal` given to `withParams` aborts
+   */
+  waitAfter?: number
+  /** Called on a timer once that wait has started */
+  onWait?: () => void
 }
 
-/** A client whose `iterDialogs` lists the given dialogs */
+/**
+ * A client whose `iterDialogs` lists the given dialogs. `withParams` returns
+ * one whose `iterDialogs` makes its requests with those params, as mtcute's
+ * does.
+ */
 export function fakeDialogClient(
   dialogs: FakeDialogInput[],
   options: FakeDialogClientOptions = {},
 ) {
   const calls: unknown[] = []
+  const params: RpcCallOptions[] = []
 
-  async function* iterDialogs(params?: unknown) {
-    calls.push(params)
-    let listed = 0
-    for (const input of dialogs) {
-      if (options.failAfter !== undefined && listed >= options.failAfter) {
-        throw options.error ?? new Error('FLOOD_WAIT_600')
+  const nextPage = (callParams: RpcCallOptions | undefined) =>
+    waitLikeFloodWait(callParams, { onWait: options.onWait })
+
+  function iterDialogsWith(callParams?: RpcCallOptions) {
+    return async function* iterDialogs(iterParams?: unknown) {
+      calls.push(iterParams)
+      let listed = 0
+      for (const input of dialogs) {
+        if (listed === options.waitAfter) await nextPage(callParams)
+        if (options.failAfter !== undefined && listed >= options.failAfter) {
+          throw options.error ?? new Error('FLOOD_WAIT_600')
+        }
+        yield fakeDialog(input)
+        listed++
+        options.onListed?.(listed)
       }
-      yield fakeDialog(input)
-      listed++
-      options.onListed?.(listed)
+      // The page after the last dialog
+      if (listed === options.waitAfter) await nextPage(callParams)
     }
   }
 
+  const client = {
+    iterDialogs: iterDialogsWith(),
+    withParams(callParams: RpcCallOptions) {
+      params.push(callParams)
+      return { ...client, iterDialogs: iterDialogsWith(callParams) }
+    },
+  }
+
   return {
-    client: { iterDialogs } as unknown as TelegramClient,
+    client: client as unknown as TelegramClient,
     /** Params of every `iterDialogs` call */
     calls,
+    /** Params of every `withParams` call */
+    params,
   }
 }

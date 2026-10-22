@@ -1,12 +1,11 @@
 import type { MessageInput } from '../db/messages-cache'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
-import { isPermanentSyncError } from './sync-retry'
 import {
   canMakeApiCall,
   getInputPeer,
   getWaitTime,
   recordApiCall,
-  resolveFloodWaitResult,
+  resolveJobError,
 } from './sync-worker-real-context'
 import {
   createMessageInputs,
@@ -86,6 +85,7 @@ export async function processForwardCatchupReal(
       ctx.client,
       inputPeer,
       forwardPageRequest(cursor, ctx.config.batchSize),
+      ctx.signal,
     )
 
     // Guard against a server that returns messages at or below the cursor.
@@ -145,17 +145,7 @@ export async function processForwardCatchupReal(
       newCursor: top,
     }
   } catch (err) {
-    const floodResult = resolveFloodWaitResult(ctx, err)
-    if (floodResult) {
-      return floodResult
-    }
-    const error = err instanceof Error ? err : new Error(String(err))
-    result = {
-      success: false,
-      messagesFetched: 0,
-      error: error.message,
-      permanent: isPermanentSyncError(err),
-    }
+    return resolveJobError(ctx, err)
   }
 
   return result
@@ -216,10 +206,12 @@ export async function processBackwardHistoryReal(
   try {
     recordApiCall(ctx)
 
-    const { messages } = await fetchMessagesRaw(ctx.client, inputPeer, {
-      offsetId: backwardCursor,
-      limit: ctx.config.batchSize,
-    })
+    const { messages } = await fetchMessagesRaw(
+      ctx.client,
+      inputPeer,
+      { offsetId: backwardCursor, limit: ctx.config.batchSize },
+      ctx.signal,
+    )
 
     // The newest messages below the cursor, or the newest page without one
     const bounds = {
@@ -272,17 +264,7 @@ export async function processBackwardHistoryReal(
       }
     }
   } catch (err) {
-    const floodResult = resolveFloodWaitResult(ctx, err)
-    if (floodResult) {
-      return floodResult
-    }
-    const error = err instanceof Error ? err : new Error(String(err))
-    result = {
-      success: false,
-      messagesFetched: 0,
-      error: error.message,
-      permanent: isPermanentSyncError(err),
-    }
+    return resolveJobError(ctx, err)
   }
 
   return result
@@ -332,9 +314,12 @@ export async function processInitialLoadReal(
   try {
     recordApiCall(ctx)
 
-    const { messages } = await fetchMessagesRaw(ctx.client, inputPeer, {
-      limit: ctx.config.batchSize,
-    })
+    const { messages } = await fetchMessagesRaw(
+      ctx.client,
+      inputPeer,
+      { limit: ctx.config.batchSize },
+      ctx.signal,
+    )
 
     // Empty messages hold no data, but they still count for the cursors.
     const ids = messages.map(rawMessageId).filter((id) => id > 0)
@@ -391,17 +376,7 @@ export async function processInitialLoadReal(
       historyComplete,
     }
   } catch (err) {
-    const floodResult = resolveFloodWaitResult(ctx, err)
-    if (floodResult) {
-      return floodResult
-    }
-    const error = err instanceof Error ? err : new Error(String(err))
-    result = {
-      success: false,
-      messagesFetched: 0,
-      error: error.message,
-      permanent: isPermanentSyncError(err),
-    }
+    return resolveJobError(ctx, err)
   }
 
   return result

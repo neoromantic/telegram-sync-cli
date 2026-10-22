@@ -113,6 +113,10 @@ request's peer).
   `daemon-start-caches.test.ts` — the daemon with two accounts: each job runs on its own
   account's client, accounts take turns, dialogs, live messages and deletes land in the
   receiving account's cache, and an account whose cache doesn't open is left out
+- `daemon-stop.test.ts` — the daemon's start and stop with fake clients: a stop during a
+  FLOOD_WAIT in the startup dialog pass or a sync job ends the wait at once, and the job stays
+  pending (`helpers/flood-wait.ts` waits like mtcute's flood waiter until the request's
+  `abortSignal` aborts)
 - `daemon-platform.test.ts` — the daemon's mtcute platform, on a real client and a temp
   session file in a child process (`helpers/session-exit-child.ts`, no network): mtcute adds
   no signal listeners, a session write after SIGTERM is saved when the client closes, and an
@@ -254,7 +258,7 @@ real Telegram API. It is skipped unless the variables below are set, and it neve
 | send to Saved Messages | `send --to me` delivers a message; `tg api messages.getMessages` reads it back |
 | send caches for search | with no daemon running, `messages search` finds a message right after `send --to me`, under the own user ID |
 | messages list and get | after two sends whose cache rows are dropped, `messages list --chat me --fresh` returns them newest first from the API under the own user ID; the next read comes from the cache with equal items, `messages search` finds them, `--after` pages forward, and `messages get --context 1` reads one in context from the API, then from the cache; a cache-first `get --context 2` returns it with the newer message and up to two older ones |
-| daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs) into `accounts/<id>/cache.db` (no root `cache.db`), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` while sync jobs are queued: exit code 0, one "Received SIGTERM", no updates-loop error, closed-database error or failed close |
+| daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs) into `accounts/<id>/cache.db` (no root `cache.db`), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` while sync jobs are queued: exit code 0, one "Received SIGTERM", no updates-loop error, closed-database error or failed close, no job left running and no `DaemonStopError` or `AbortError` in the output |
 
 Each test copies the session into its own temp data dir. Messages go only to the account's
 Saved Messages and are deleted after each test. A run takes about a minute.

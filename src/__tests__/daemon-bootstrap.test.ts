@@ -4,10 +4,11 @@
  */
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { TelegramClient } from '@mtcute/bun'
+import { TelegramClient } from '@mtcute/bun'
 import {
   createDaemonRuntime,
   type DaemonContext,
+  requestShutdown,
 } from '../daemon/daemon-context'
 import { createSyncScheduler } from '../daemon/scheduler'
 import type { AccountsDbInterface } from '../db'
@@ -457,6 +458,99 @@ describe('bootstrapDialogs', () => {
       top_message_id: 1200,
     })
     otherDb.close()
+  })
+
+  it('a stop during a FLOOD_WAIT in the startup pass ends the wait at once', async () => {
+    const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
+    // A synced chat the pass doesn't reach before the stop
+    seedSynced(1005, 1000, 1200)
+    const first = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 10 },
+        { kind: 'user', id: 1002, topMessage: 10 },
+      ],
+      { waitAfter: 1, onWait: () => requestShutdown(ctx) },
+    )
+    connect(ctx, 1, first.client)
+    addAccountRuntime(ctx, 1, testCacheDb)
+    const otherDb = createAccountCacheDb()
+    const second = fakeDialogClient([{ kind: 'user', id: 2001 }])
+    connect(ctx, 2, second.client)
+    addAccountRuntime(ctx, 2, otherDb)
+
+    const started = performance.now()
+    await bootstrapDialogs(ctx)
+
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(first.params).toEqual([{ abortSignal: ctx.runtime.shutdown.signal }])
+    expect(first.params[0]?.abortSignal).toBe(ctx.runtime.shutdown.signal)
+    expect(
+      testCacheDb
+        .query('SELECT chat_id FROM chats_cache')
+        .all()
+        .map((row) => (row as { chat_id: string }).chat_id),
+    ).toEqual(['1001'])
+    // Neither caught up nor unknown: the stop tells nothing about it
+    expect(chatSyncState.get(1005)).toMatchObject({
+      forward_cursor: 1000,
+      top_message_id: 1200,
+    })
+    expect(second.calls).toEqual([])
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.error).not.toHaveBeenCalled()
+    const debugLines = (
+      ctx.logger.debug as ReturnType<typeof mock>
+    ).mock.calls.map(([line]) => String(line))
+    expect(debugLines).toContain(
+      '[Account 1] Dialog pass stopped after 1 dialogs: the daemon is stopping',
+    )
+    expect(
+      debugLines.some((line) =>
+        line.includes('Dialog page failed during the stop'),
+      ),
+    ).toBe(false)
+    otherDb.close()
+  })
+
+  it("passes the stop signal to every page request of mtcute's iterDialogs", async () => {
+    // A real client that never connects: only its RPC call is replaced
+    const client = new TelegramClient({
+      apiId: 1,
+      apiHash: 'test-api-hash',
+      storage: ':memory:',
+    })
+    const signals: unknown[] = []
+    const call = mock(
+      async (request: { _: string }, params?: { abortSignal?: unknown }) => {
+        expect(request._).toBe('messages.getDialogs')
+        signals.push(params?.abortSignal)
+        return {
+          _: 'messages.dialogs',
+          dialogs: [],
+          messages: [],
+          chats: [],
+          users: [],
+        }
+      },
+    )
+    client._client.call = call as unknown as typeof client._client.call
+
+    try {
+      const { signal } = ctx.runtime.shutdown
+      const listed = []
+      for await (const dialog of client
+        .withParams({ abortSignal: signal })
+        .iterDialogs({ archived: 'keep' })) {
+        listed.push(dialog)
+      }
+
+      expect(listed).toEqual([])
+      expect(call).toHaveBeenCalledTimes(1)
+      expect(signals).toHaveLength(1)
+      expect(signals[0]).toBe(signal)
+    } finally {
+      await client.destroy()
+    }
   })
 
   it('a stop right after a complete pass still marks unvisited chats', async () => {

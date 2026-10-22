@@ -16,6 +16,8 @@ export interface RealSyncWorkerDeps {
   rateLimits: RateLimitsService
   chatsCache: ChatsCache
   config?: Partial<SyncWorkerConfig>
+  /** The daemon's stop signal: it ends the request a job waits on */
+  signal?: AbortSignal
 }
 
 export interface RealJobResult extends JobResult {
@@ -33,4 +35,6 @@ export interface RealSyncWorkerContext {
   rateLimits: RateLimitsService
   chatsCache: ChatsCache
   config: SyncWorkerConfig
+  /** The daemon's stop signal: it ends the request a job waits on */
+  signal?: AbortSignal
 }

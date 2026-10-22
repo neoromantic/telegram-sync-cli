@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import type { AccountsDbInterface } from '../db'
 import type { DaemonStatusService } from '../db/daemon-status'
+import { DaemonStopError } from './daemon-utils'
 import type { PidFile } from './pid-file'
 import type { SyncScheduler } from './scheduler'
 import type { RealSyncWorker } from './sync-worker'
@@ -38,6 +39,11 @@ export interface DaemonRuntime {
   signalHandlersSetup: boolean
   /** Accounts whose dialog pass after a reconnect is still running */
   dialogPassesInFlight: Set<number>
+  /**
+   * Aborted by a daemon stop: the dialog passes and sync jobs pass its
+   * signal to their requests, so a FLOOD_WAIT they wait out ends at once
+   */
+  shutdown: AbortController
 }
 
 export interface DaemonContext {
@@ -59,6 +65,18 @@ export function createDaemonRuntime(): DaemonRuntime {
     lastJobAccountId: null,
     signalHandlersSetup: false,
     dialogPassesInFlight: new Set(),
+    shutdown: new AbortController(),
+  }
+}
+
+/**
+ * Ask the daemon to stop: the loops end at their next check, and the
+ * requests the dialog passes and sync jobs wait on end at once (#64)
+ */
+export function requestShutdown(ctx: DaemonContext): void {
+  ctx.state.shutdownRequested = true
+  if (!ctx.runtime.shutdown.signal.aborted) {
+    ctx.runtime.shutdown.abort(new DaemonStopError())
   }
 }
 

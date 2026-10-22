@@ -64,7 +64,8 @@ instead of failing it:
 
 - CLI commands wait up to 60 seconds.
 - The daemon waits up to 5 minutes (for example during the dialog bootstrap on accounts
-  with thousands of chats) and logs each wait.
+  with thousands of chats) and logs each wait; a daemon stop ends such a wait in the dialog
+  pass or a sync job at once.
 
 Longer waits fail the request and are recorded as described above. CLI commands report them
 as `RATE_LIMITED` with `details: { method, wait_seconds }`, both on the failed request and on

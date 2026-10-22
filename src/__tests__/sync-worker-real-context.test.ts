@@ -3,17 +3,19 @@
  */
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { TelegramClient, tl } from '@mtcute/bun'
+import { type TelegramClient, tl } from '@mtcute/bun'
 import {
   dialogToCacheInput,
   rawChatToCacheInput,
 } from '../commands/chats/helpers'
+import { DaemonStopError } from '../daemon/daemon-utils'
 import {
   canMakeApiCall,
   getInputPeer,
   getWaitTime,
   recordApiCall,
   resolveFloodWaitResult,
+  resolveJobError,
 } from '../daemon/sync-worker-real-context'
 import {
   buildInputPeer,
@@ -310,6 +312,69 @@ describe('sync-worker real helpers/context', () => {
 
       expect(result).toEqual({ messages: [], count: 5, users: [] })
     })
+
+    const peer: tl.TypeInputPeer = {
+      _: 'inputPeerUser',
+      userId: 10,
+      accessHash: toLong('1111'),
+    }
+    const emptyPage = async (
+      _request: tl.RpcMethod,
+      _params?: { abortSignal?: AbortSignal },
+    ): Promise<tl.messages.RawMessages> => ({
+      _: 'messages.messages',
+      messages: [],
+      chats: [],
+      users: [],
+      topics: [],
+    })
+
+    it('passes the stop signal to the request', async () => {
+      const call = mock(emptyPage)
+      const { signal } = new AbortController()
+
+      await fetchMessagesRaw(
+        createMockClient({ call: call as unknown as MockCall }),
+        peer,
+        { limit: 1 },
+        signal,
+      )
+
+      expect(call).toHaveBeenCalledTimes(1)
+      expect(call.mock.calls[0]).toEqual([
+        expect.objectContaining({ _: 'messages.getHistory' }),
+        { abortSignal: signal },
+      ])
+    })
+
+    it('makes no request once the daemon is stopping', async () => {
+      // mtcute's flood waiter would sleep out a stored wait on an aborted signal
+      const call = mock(emptyPage)
+      const shutdown = new AbortController()
+      shutdown.abort(new DaemonStopError())
+
+      const error = await fetchMessagesRaw(
+        createMockClient({ call: call as unknown as MockCall }),
+        peer,
+        { limit: 1 },
+        shutdown.signal,
+      ).catch((err: unknown) => err)
+
+      expect(error).toBe(shutdown.signal.reason)
+      expect(call).not.toHaveBeenCalled()
+    })
+
+    it('calls without options when there is no signal', async () => {
+      const call = mock(emptyPage)
+
+      await fetchMessagesRaw(
+        createMockClient({ call: call as unknown as MockCall }),
+        peer,
+        { limit: 1 },
+      )
+
+      expect(call.mock.calls[0]).toHaveLength(1)
+    })
   })
 
   describe('sync-worker real context helpers', () => {
@@ -390,6 +455,50 @@ describe('sync-worker real helpers/context', () => {
         waitSeconds: 1,
       })
       expect(rateLimits.isBlocked('messages.getHistory')).toBe(true)
+    })
+
+    it('resolves a request the daemon stop cut short as stopped', () => {
+      const rateLimits = createRateLimitsService(db)
+      const ctx: RealSyncWorkerContext = {
+        client: createMockClient(),
+        messagesCache: createMessagesCache(db),
+        historyRanges: createHistoryRanges(db),
+        chatSyncState: createChatSyncStateService(db),
+        jobsService: createSyncJobsService(db),
+        rateLimits,
+        chatsCache: createChatsCache(db),
+        config: { apiMethod: 'messages.getHistory', batchSize: 1 },
+      }
+
+      expect(resolveJobError(ctx, new DaemonStopError())).toEqual({
+        success: false,
+        messagesFetched: 0,
+        stopped: true,
+      })
+      expect(rateLimits.isBlocked('messages.getHistory')).toBe(false)
+
+      // Any other abort is an error like the rest
+      const aborted = new DOMException(
+        'The operation was aborted',
+        'AbortError',
+      )
+      expect(resolveJobError(ctx, aborted)).toEqual({
+        success: false,
+        messagesFetched: 0,
+        error: 'The operation was aborted',
+        permanent: false,
+      })
+      expect(resolveJobError(ctx, new Error('FLOOD_WAIT_30'))).toMatchObject({
+        rateLimited: true,
+        waitSeconds: 30,
+      })
+      expect(rateLimits.isBlocked('messages.getHistory')).toBe(true)
+      expect(
+        resolveJobError(ctx, new tl.RpcError(400, 'CHANNEL_PRIVATE')),
+      ).toMatchObject({
+        error: expect.stringContaining('CHANNEL_PRIVATE'),
+        permanent: true,
+      })
     })
 
     it('delegates getInputPeer to buildInputPeer', () => {

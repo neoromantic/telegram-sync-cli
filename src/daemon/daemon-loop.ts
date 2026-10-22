@@ -108,6 +108,10 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
       ctx.logger.warn(`Error processing jobs: ${formatError(err)}`)
     }
 
+    // A stop during the job: no health check, refresh, tick or wait. The
+    // shutdown marks every account stopped.
+    if (ctx.state.shutdownRequested) break
+
     if (loopIteration % HEALTH_CHECK_INTERVAL_TICKS === 0) {
       await runHealthChecks(ctx, now)
     }
