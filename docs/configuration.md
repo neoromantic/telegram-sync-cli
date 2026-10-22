@@ -175,20 +175,23 @@ tg config set activeAccount 2
 
 ## Runtime Behavior
 
-- At the start of every command except `tg config` and `tg skill` (any output format, `-q`
-  included), the CLI checks `config.json` and makes the account `activeAccount` names active, if
-  it exists. While `activeAccount` is set it wins: `tg accounts switch --id <id>` writes `<id>`
-  to it so the switch lasts, and a hand edit or `tg config set activeAccount <id>` takes effect
-  from the next command. `tg auth login` and `tg auth login-qr` don't write `activeAccount`, so
-  with the key set the command after a login uses the configured account again; run
-  `tg accounts switch --id <id>` to keep the new one. Without `activeAccount` the active account
-  lives only in `data.db`, and `tg accounts switch` doesn't create `config.json`.
+- At the start of every command except `tg config`, `tg skill` and `tg daemon` (any output
+  format, `-q` included), the CLI checks `config.json` and makes the account `activeAccount`
+  names active, if it exists. While `activeAccount` is set it wins:
+  `tg accounts switch --id <id>` writes `<id>` to it so the switch lasts, and a hand edit or
+  `tg config set activeAccount <id>` takes effect from the next command. `tg auth login` and
+  `tg auth login-qr` don't write `activeAccount`, so with the key set the command after a login
+  uses the configured account again; run `tg accounts switch --id <id>` to keep the new one.
+  Without `activeAccount` the active account lives only in `data.db`, and `tg accounts switch`
+  doesn't create `config.json`.
 - If `activeAccount` has to change and `config.json` can't be written, `tg accounts switch`
   fails with `GENERAL_ERROR` (`details.path`) and changes neither file.
 - An invalid `config.json` (not a JSON object, or a supported key with a wrong value) fails
-  every command except `tg config` and `tg skill` with `INVALID_ARGS` and issue details before
-  it runs; `tg config set` can still fix a wrong value. A `config.json` that can't be read fails
-  them with `GENERAL_ERROR` (`details.path`).
+  every command except `tg config`, `tg skill` and `tg daemon` with `INVALID_ARGS` and issue
+  details before it runs; `tg config set` can still fix a wrong value. A `config.json` that
+  can't be read fails them with `GENERAL_ERROR` (`details.path`). `tg daemon` reads no key of
+  `config.json`, so such a file doesn't stop `tg daemon start`, with `--quiet` or without; the
+  next other command reports it.
 - Cache-related commands resolve TTLs via `config.json` overrides.
 
 ## Validation

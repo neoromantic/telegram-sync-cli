@@ -43,6 +43,10 @@ tg daemon stop --force
 tg daemon status
 ```
 
+`tg daemon` reads no key of `config.json` and skips the start-up check of that file that other
+commands run, so an invalid or unreadable one doesn't stop `tg daemon start`, `--quiet` included
+(see [configuration.md](configuration.md#runtime-behavior)).
+
 ### Daemon PID
 
 PID file location:
