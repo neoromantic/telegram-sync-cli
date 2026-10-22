@@ -374,9 +374,8 @@ CREATE INDEX idx_api_activity_timestamp ON api_activity(timestamp DESC);
 CREATE INDEX idx_api_activity_method ON api_activity(method);
 ```
 
-`rate_limits` and `api_activity` are per account, like every table here: a FLOOD_WAIT that one
-account recorded doesn't block another (one that mtcute sleeps through still holds the
-daemon's job loop, [#60](https://github.com/neoromantic/telegram-sync-cli/issues/60)).
+`rate_limits` and `api_activity` are per account, like every table here: a FLOOD_WAIT on one
+account, recorded or slept through inside a sync job, doesn't block another.
 
 ### Table: cache_meta
 
