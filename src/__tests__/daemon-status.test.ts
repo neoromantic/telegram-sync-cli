@@ -106,6 +106,39 @@ describe('DaemonStatusService', () => {
         expect(service.get('daemon_status')).toBe('running')
       })
 
+      it("drops the previous run's connection and queue until the first tick", () => {
+        // What a daemon that crashed left behind
+        service.setDaemonRunning(1111, '0.4.0')
+        service.writeTick({
+          connectionStatus: 'connected',
+          lastError: 'connection reset',
+          messagesSynced: 40,
+          pendingJobs: 7,
+          runningJobs: 1,
+        })
+        db.run(
+          "UPDATE daemon_status SET value = '1000' WHERE key = 'last_update'",
+        )
+        const before = Date.now()
+
+        service.setDaemonRunning(2222, '0.4.0')
+
+        expect(service.getDaemonInfo()).toMatchObject({
+          status: 'running',
+          pid: 2222,
+          connectionStatus: 'connecting',
+          lastError: null,
+          messagesSynced: 0,
+          pendingJobs: 0,
+          runningJobs: 0,
+        })
+        expect(service.getDaemonInfo().lastUpdate).toBeGreaterThanOrEqual(
+          before,
+        )
+        expect(service.get('pending_jobs')).toBeNull()
+        expect(service.get('running_jobs')).toBeNull()
+      })
+
       it('records the version, tied to the PID', () => {
         service.setDaemonRunning(111, '0.3.1')
 

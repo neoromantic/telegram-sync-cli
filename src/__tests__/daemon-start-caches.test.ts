@@ -7,7 +7,9 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import type { TelegramClient } from '@mtcute/bun'
 
+import type { DaemonContext } from '../daemon/daemon-context'
 import { CacheUnavailableError } from '../db/cache-layout'
 import { createDaemonStatusService } from '../db/daemon-status'
 import { createAccountCacheDb } from './helpers/daemon-runtime'
@@ -49,16 +51,38 @@ mock.module('../db', () => ({
 }))
 
 const connected: number[] = []
+/** Accounts that connect; by default none does, so the start ends there */
+const connecting = new Set<number>()
 mock.module('../daemon/daemon-accounts', () => ({
-  // No account connects, so the start ends right after it
-  connectAccount: async (_ctx: unknown, accountId: number) => {
+  connectAccount: async (
+    ctx: DaemonContext,
+    accountId: number,
+    phone: string,
+    name: string | null,
+  ) => {
     connected.push(accountId)
-    return false
+    // As the real one: a failed connect leaves the account in error
+    const ok = connecting.has(accountId)
+    ctx.state.accounts.set(accountId, {
+      accountId,
+      phone,
+      name,
+      status: ok ? 'connected' : 'error',
+      ...(ok ? { client: {} as TelegramClient } : { lastError: 'timeout' }),
+    })
+    return ok
   },
   disconnectAllAccounts: async () => {},
   setupSignalHandlers: () => {},
   attemptReconnect: async () => {},
   scheduleReconnect: () => {},
+}))
+
+/** Runs as the dialog pass, after the connections */
+let onDialogPass: (() => void) | null = null
+mock.module('../daemon/daemon-bootstrap', () => ({
+  bootstrapDialogs: async () => onDialogPass?.(),
+  refreshDialogsAfterReconnect: async () => {},
 }))
 
 const { createDaemon } = await import('../daemon/daemon')
@@ -85,6 +109,8 @@ afterEach(() => {
   for (const cache of caches.values()) cache.close()
   caches.clear()
   brokenCaches.clear()
+  connecting.clear()
+  onDialogPass = null
   layoutError = null
   rmSync(tempDir, { recursive: true, force: true })
 })
@@ -130,6 +156,43 @@ describe('daemon start with a cache per account', () => {
 
     expect(await daemon.start()).toBe(DaemonExitCode.AllAccountsFailed)
     expect(connected).toEqual([])
+  })
+
+  it("writes each account's connection before the dialog pass", async () => {
+    // Account 1's rows from a run that crashed: connected, a full queue
+    const previous = createDaemonStatusService(caches.get(1)!)
+    previous.setDaemonRunning(1111, '0.3.9')
+    previous.writeTick({
+      connectionStatus: 'connected',
+      lastError: null,
+      messagesSynced: 40,
+      pendingJobs: 7,
+      runningJobs: 1,
+    })
+    connecting.add(2)
+    const daemon = createDaemon({ pidPath }, accounts())
+    const seen: Record<number, Record<string, string>> = {}
+    onDialogPass = () => {
+      seen[1] = statusOf(1)
+      seen[2] = statusOf(2)
+      daemon.stop()
+    }
+
+    expect(await daemon.start()).toBe(DaemonExitCode.Success)
+
+    const pid = String(process.pid)
+    expect(seen[1]).toMatchObject({
+      daemon_pid: pid,
+      connection_status: 'error',
+      pending_jobs: '0',
+      running_jobs: '0',
+    })
+    expect(seen[2]).toMatchObject({
+      daemon_pid: pid,
+      connection_status: 'connected',
+      pending_jobs: '0',
+    })
+    expect(statusOf(2)).toMatchObject({ daemon_status: 'stopped' })
   })
 
   it('stops when the shared cache of an older version is still open', async () => {

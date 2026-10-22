@@ -326,9 +326,9 @@ The daemon writes each account's own rows, every second in one transaction per a
 |-----|-------|
 | `daemon_pid`, `daemon_started_at`, `daemon_status` | The daemon that runs the account: its PID, start time, `running` or `stopped` |
 | `daemon_version`, `daemon_version_pid` | The version of the daemon that started, and the PID that wrote it |
-| `connection_status`, `last_error` | The account's connection (`connected`, `reconnecting`, `error`, `disconnected`) and its last error |
+| `connection_status`, `last_error` | The account's connection (`connecting` from the start until the daemon's first write, then `connected`, `reconnecting`, `error`, `disconnected`) and its last error |
 | `messages_synced` | Messages the daemon cached for this account since it started |
-| `pending_jobs`, `running_jobs` | The account's queue |
+| `pending_jobs`, `running_jobs` | The account's queue; a start deletes the previous run's counts |
 | `last_update` | When the daemon last wrote these rows |
 
 `tg status` and `tg daemon status` count only rows whose `daemon_pid` is the PID in
