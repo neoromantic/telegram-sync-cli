@@ -383,6 +383,7 @@ function printCacheSizeSection(status: StatusSnapshot): void {
   if (sized.length === 0) return
 
   printHeader('Cache Size')
+  const daemonRunning = status.daemon.status === 'running'
   const vacuumHints: string[] = []
   for (const acc of sized) {
     const size = acc.cache.size!
@@ -404,7 +405,13 @@ function printCacheSizeSection(status: StatusSnapshot): void {
       size.file_bytes > 0 &&
       size.free_bytes > size.file_bytes * VACUUM_HINT_FREE_SHARE
     ) {
-      vacuumHints.push(`tg db vacuum --account ${acc.id}`)
+      const vacuum = `tg db vacuum --account ${acc.id}`
+      // A cache without auto_vacuum needs a full vacuum, with the daemon stopped
+      vacuumHints.push(
+        daemonRunning && size.auto_vacuum === 'none'
+          ? `tg daemon stop && ${vacuum} && tg daemon start`
+          : vacuum,
+      )
     }
   }
   if (vacuumHints.length > 0) {
