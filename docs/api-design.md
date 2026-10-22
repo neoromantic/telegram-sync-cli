@@ -45,9 +45,10 @@ option, or last, is `true` (`--silent`), and `--no-name` is `false`. Any other v
 with `-` needs `=` (`--message=-hi`). Both forms type values the same way: `true`/`false`,
 numbers and `{…}`/`[…]` JSON; a string that looks like one of these goes in `--json`.
 
-tg reads its own options wherever they appear: `--json`/`-j`, `--account`/`-a`, `--raw`/`-r`,
-and the global `--format`/`-f`, `--verbose`/`-v`, `--quiet`/`-q` (also `--q`, `--f`, `--v`) and
-`--help`/`-h`. A method argument with one of those names goes in `--json`, for example
+tg reads its own options wherever they appear and keeps them out of the request: `--json`/`-j`,
+`--account`/`-a`, `--raw`/`-r`, and the global `--format`/`-f`, `--verbose`/`-v`,
+`--quiet`/`-q` (also `--q`, `--f`, `--v`) and `--help`/`-h`. A method argument with one of those
+names goes in `--json`, for example
 `tg api contacts.search --json '{"q":"alice","limit":5}'`.
 
 ```bash

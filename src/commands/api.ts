@@ -79,7 +79,8 @@ export const apiCommand = defineCommand({
       })
 
       // Build request parameters
-      // Remove known CLI args, keep the rest as API params
+      // Remove tg's own options (this command's and the global ones, which
+      // citty passes here undeclared), keep the rest as API params
       const cliOnlyArgs = [
         'method',
         'json',
@@ -88,6 +89,12 @@ export const apiCommand = defineCommand({
         'a',
         'raw',
         'r',
+        'format',
+        'f',
+        'verbose',
+        'v',
+        'quiet',
+        'q',
         '_',
         '--',
       ]
