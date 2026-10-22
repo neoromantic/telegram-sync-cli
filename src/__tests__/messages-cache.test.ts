@@ -465,6 +465,28 @@ describe('MessagesCache', () => {
       expect(cache.get(-1009876543210, 7)?.is_deleted).toBe(0)
     })
 
+    it('leaves a channel post that is the only cached message with the ID', () => {
+      cacheMessageSeven([-1001234567890])
+
+      expect(cache.markDeletedByMessageIds([7])).toEqual({
+        deleted: 0,
+        ambiguous: [],
+      })
+      expect(cache.get(-1001234567890, 7)?.is_deleted).toBe(0)
+    })
+
+    it('leaves a channel post when the private message with the ID is already marked', () => {
+      cacheMessageSeven([4242, -1001234567890])
+      cache.markDeleted(4242, [7])
+
+      expect(cache.markDeletedByMessageIds([7])).toEqual({
+        deleted: 0,
+        ambiguous: [],
+      })
+      expect(cache.get(4242, 7)?.is_deleted).toBe(1)
+      expect(cache.get(-1001234567890, 7)?.is_deleted).toBe(0)
+    })
+
     it('leaves an ID that only channels have', () => {
       cacheMessageSeven([-1001234567890, -1009876543210])
 
