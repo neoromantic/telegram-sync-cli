@@ -137,10 +137,12 @@ CREATE INDEX idx_chats_cache_last_message_at ON chats_cache(last_message_at DESC
 
 A `community` is a Telegram community, a collection of linked chats (mtcute's `community` and
 `communityForbidden`). It is stored with its channel ID and access hash like a channel, and
-it is off for sync by default. tg doesn't cache joined communities yet: the daemon's dialog
-pass and `tg chats list --fresh` skip them
-([#58](https://github.com/neoromantic/telegram-sync-cli/issues/58)), so
-`tg chats list --type community` finds none so far.
+it is off for sync by default. Telegram lists a joined community apart from the other
+dialogs, so the daemon's dialog pass (on start and after a reconnect) and
+`tg chats list --fresh` cache every joined community with one more request,
+`communities.getJoinedCommunities`, access hash included. A community has no messages of its
+own: it gets no `chat_sync_state` row, and its `last_message_id` and `last_message_at` stay
+NULL.
 
 ### Table: sync_state
 

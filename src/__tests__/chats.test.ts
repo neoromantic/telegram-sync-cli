@@ -9,7 +9,7 @@
 
 import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { tl } from '@mtcute/bun'
+import { Chat, type TelegramClient, type tl } from '@mtcute/bun'
 
 import {
   chatRowToItem,
@@ -20,6 +20,7 @@ import {
   rawPeerToCacheInput,
   userToPrivateChatCacheInput,
 } from '../commands/chats/helpers'
+import { fetchChatsFromApi } from '../commands/chats/list'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import {
   type CachedChatInput,
@@ -31,7 +32,11 @@ import { initSyncSchema, SyncPriority } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { getDefaultCacheConfig, isCacheStale } from '../db/types'
 import { toLong } from '../utils/long'
-import { communityDialog, fakeDialog } from './helpers/fake-dialogs'
+import {
+  communityDialog,
+  fakeDialog,
+  fakeRawCommunity,
+} from './helpers/fake-dialogs'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 // =============================================================================
@@ -566,6 +571,46 @@ describe('listChatsCommand', () => {
       const shouldFetchFromApi = fresh || chatsCache.list().length === 0
 
       expect(shouldFetchFromApi).toBe(true)
+    })
+
+    function apiClient(communities: () => Promise<Chat[]>) {
+      return {
+        async *iterDialogs() {
+          yield fakeDialog({ kind: 'user', id: 1001, topMessage: 5 })
+        },
+        getJoinedCommunities: communities,
+      } as unknown as Pick<
+        TelegramClient,
+        'iterDialogs' | 'getJoinedCommunities'
+      >
+    }
+
+    it('fetchChatsFromApi caches joined communities next to dialogs', async () => {
+      const client = apiClient(async () => [
+        new Chat(fakeRawCommunity({ id: 5555555555, accessHash: '777' })),
+      ])
+
+      const rows = await fetchChatsFromApi(client, db)
+
+      expect(rows.map((row) => [row.chat_id, row.type])).toEqual([
+        ['1001', 'private'],
+        ['-1005555555555', 'community'],
+      ])
+      expect(chatsCache.list({ type: 'community' })).toMatchObject([
+        { chat_id: '-1005555555555', access_hash: '777' },
+      ])
+    })
+
+    it('fetchChatsFromApi still caches the dialogs when the communities request fails', async () => {
+      const client = apiClient(async () => {
+        throw new Error('RPC_CALL_FAIL')
+      })
+
+      const rows = await fetchChatsFromApi(client, db)
+
+      expect(rows.map((row) => row.chat_id)).toEqual(['1001'])
+      expect(chatsCache.getById('1001')).not.toBeNull()
+      expect(chatsCache.list({ type: 'community' })).toEqual([])
     })
   })
 

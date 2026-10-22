@@ -1,5 +1,8 @@
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
-import { dialogToCacheInput } from '../commands/chats/helpers'
+import {
+  dialogToCacheInput,
+  fetchJoinedCommunities,
+} from '../commands/chats/helpers'
 import {
   type ChatSyncStateService,
   createChatSyncStateService,
@@ -37,6 +40,11 @@ function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
  * without one. Such a chat starts syncing when a message arrives in it live,
  * which creates its state like in any other chat, or when `tg chats sync`
  * turns it on.
+ *
+ * Telegram lists joined communities apart from the dialogs, so the pass
+ * caches them with one more request (#58). A community has no messages of
+ * its own, so it gets no sync state, and a failure of that request is
+ * logged and leaves the pass complete: it says nothing about the chats.
  *
  * A daemon stop ends the pass at the next dialog, so the shutdown doesn't
  * wait for the rest of the list (#56), and ends the page request the pass
@@ -118,12 +126,13 @@ export async function syncAccountDialogs(
     }
   }
 
+  // The stop signal ends a page request at once, a FLOOD_WAIT it waits out
+  // included (#64)
+  const pages = client.withParams({
+    abortSignal: ctx.runtime.shutdown.signal,
+  })
+
   try {
-    // The stop signal ends a page request at once, a FLOOD_WAIT it waits out
-    // included (#64)
-    const pages = client.withParams({
-      abortSignal: ctx.runtime.shutdown.signal,
-    })
     for await (const dialog of pages.iterDialogs({ archived: 'keep' })) {
       // Leaving the loop fetches no further page. The stop signal is a
       // macrotask, so it can't land between this check and the next page's
@@ -156,10 +165,29 @@ export async function syncAccountDialogs(
   flushChats()
   flushUsers()
 
+  let communitiesCount = 0
+  if (!stopped && !ctx.state.shutdownRequested) {
+    try {
+      const rows = await fetchJoinedCommunities(pages)
+      if (rows.length > 0) chatsCache.upsertMany(rows)
+      communitiesCount = rows.length
+    } catch (err) {
+      if (!ctx.state.shutdownRequested) {
+        ctx.logger.warn(
+          `[Account ${accountId}] Failed to list joined communities: ${formatError(err)}`,
+        )
+      } else if (!isDaemonStopError(err)) {
+        ctx.logger.debug(
+          `[Account ${accountId}] Communities request failed during the stop: ${formatError(err)}`,
+        )
+      }
+    }
+  }
+
   if (complete) {
     const elapsedMs = Date.now() - start
     ctx.logger.info(
-      `[Account ${accountId}] Bootstrapped ${dialogsCount} dialogs (${archivedCount} archived), ${usersCount} users in ${Math.round(elapsedMs / 1000)}s`,
+      `[Account ${accountId}] Bootstrapped ${dialogsCount} dialogs (${archivedCount} archived), ${usersCount} users, ${communitiesCount} communities in ${Math.round(elapsedMs / 1000)}s`,
     )
   } else if (stopped) {
     ctx.logger.debug(

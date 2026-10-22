@@ -238,7 +238,9 @@ arrived live come from Telegram until the next catch-up covers them.
 ### Scheduling
 
 0. **Dialog pass** on start, one per connected account: fills `chats_cache` and updates
-   `chat_sync_state` (type, member count, policy, `top_message_id`)
+   `chat_sync_state` (type, member count, policy, `top_message_id`). One more request caches
+   the joined communities in `chats_cache`; if it fails, the daemon logs a warning and the
+   pass still counts as complete
 1. The scheduler recovers jobs a crash left running, deletes failed jobs (a restart retries
    them), drops pending catch-ups (older versions left one for every chat) and queues the work
    that is due: catch-up for chats that are behind, first pages and history

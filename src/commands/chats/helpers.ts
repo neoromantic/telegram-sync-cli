@@ -1,4 +1,4 @@
-import type { Dialog, tl } from '@mtcute/bun'
+import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 
 import type { CachedChat, CachedChatInput } from '../../db/chats-cache'
 import type { ChatType } from '../../db/types'
@@ -187,6 +187,24 @@ export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
     fetched_at: Date.now(),
     raw_json: JSON.stringify(chat),
   }
+}
+
+/**
+ * chats_cache rows for the communities the account joined, with their access
+ * hash. Telegram lists a community as `dialogCommunity`, apart from the other
+ * dialogs, and mtcute's dialog list drops it (#58). One request; errors are
+ * left to the caller.
+ */
+export async function fetchJoinedCommunities(
+  client: Pick<TelegramClient, 'getJoinedCommunities'>,
+): Promise<CachedChatInput[]> {
+  const chats = await client.getJoinedCommunities()
+  return (
+    chats
+      // A min community's access hash works only in the update that carried it
+      .filter((chat) => !(chat.raw._ === 'community' && chat.raw.min))
+      .map((chat) => rawChatToCacheInput(chat.raw))
+  )
 }
 
 /**

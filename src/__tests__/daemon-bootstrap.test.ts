@@ -5,6 +5,7 @@
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { TelegramClient } from '@mtcute/bun'
+import { fetchJoinedCommunities } from '../commands/chats/helpers'
 import {
   createDaemonRuntime,
   type DaemonContext,
@@ -21,11 +22,16 @@ import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { toLong } from '../utils/long'
 import {
   addAccountRuntime,
   createAccountCacheDb,
 } from './helpers/daemon-runtime'
-import { type FakeDialogInput, fakeDialogClient } from './helpers/fake-dialogs'
+import {
+  type FakeDialogInput,
+  fakeDialogClient,
+  fakeRawCommunity,
+} from './helpers/fake-dialogs'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 let testCacheDb: Database
@@ -161,11 +167,141 @@ describe('bootstrapDialogs', () => {
     const fake = await runPass([{ kind: 'user', id: 1001, topMessage: 5 }])
 
     expect(fake.calls).toEqual([{ archived: 'keep' }])
+    const infoLines = (ctx.logger.info as ReturnType<typeof mock>).mock.calls
     expect(
-      (ctx.logger.info as ReturnType<typeof mock>).mock.calls.some(([line]) =>
+      infoLines.some(([line]) =>
         /Bootstrapped 1 dialogs \(0 archived\)/.test(String(line)),
       ),
     ).toBe(true)
+    // An account without communities costs one request and no warning
+    expect(fake.communityCalls).toHaveLength(1)
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(infoLines.some(([line]) => /0 communities/.test(String(line)))).toBe(
+      true,
+    )
+  })
+
+  it('caches joined communities with their access hash', async () => {
+    const fake = await runPass([{ kind: 'user', id: 1001, topMessage: 5 }], {
+      communities: [{ id: 5555555555, accessHash: '777' }],
+    })
+
+    expect(
+      createChatsCache(testCacheDb).getById('-1005555555555'),
+    ).toMatchObject({ type: 'community', access_hash: '777' })
+    // No messages of its own: nothing to sync
+    expect(chatSyncState.get(-1005555555555)).toBeNull()
+    expect(fake.communityCalls).toHaveLength(1)
+    expect(fake.communityCalls[0]?.abortSignal).toBe(
+      ctx.runtime.shutdown.signal,
+    )
+    expect(
+      (ctx.logger.info as ReturnType<typeof mock>).mock.calls.some(([line]) =>
+        /1 communities/.test(String(line)),
+      ),
+    ).toBe(true)
+    assertPeerIdInvariants(testCacheDb)
+  })
+
+  it('a failed communities request is a warning and the pass stays complete', async () => {
+    const { markUnvisitedChats, syncAccountDialogs } = await import(
+      '../daemon/daemon-bootstrap'
+    )
+    // Left: no longer in the dialog list
+    seedSynced(1001, 1000, 1200)
+    const { client } = fakeDialogClient(
+      [{ kind: 'user', id: 1002, topMessage: 5 }],
+      { communitiesError: new Error('RPC_CALL_FAIL') },
+    )
+    addAccountRuntime(ctx, 1, testCacheDb)
+
+    const result = await syncAccountDialogs(ctx, 1, client)
+    markUnvisitedChats(chatSyncState, result.visited, result.complete, true)
+
+    expect(result).toMatchObject({ complete: true, stopped: false })
+    expect(createChatsCache(testCacheDb).getById('1002')).not.toBeNull()
+    // Caught up as after any complete pass
+    expect(chatSyncState.get(1001)?.top_message_id).toBe(1000)
+    expect(ctx.logger.warn).toHaveBeenCalledTimes(1)
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to list joined communities'),
+    )
+  })
+
+  it('a stop during the communities request ends it', async () => {
+    const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
+    const fake = fakeDialogClient([{ kind: 'user', id: 1001, topMessage: 5 }], {
+      communities: [{ id: 5555555555, accessHash: '777' }],
+      communitiesWaitUntilAbort: true,
+      onWait: () => requestShutdown(ctx),
+    })
+    connect(ctx, 1, fake.client)
+    addAccountRuntime(ctx, 1, testCacheDb)
+
+    await bootstrapDialogs(ctx)
+
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(fake.communityCalls).toHaveLength(1)
+    expect(createChatsCache(testCacheDb).getById('-1005555555555')).toBeNull()
+    expect(createChatsCache(testCacheDb).getById('1001')).not.toBeNull()
+  })
+
+  it('fetchJoinedCommunities passes the stop signal and keeps only usable communities', async () => {
+    // A real client that never connects: only its RPC call is replaced
+    const client = new TelegramClient({
+      apiId: 1,
+      apiHash: 'test-api-hash',
+      storage: ':memory:',
+    })
+    const signals: unknown[] = []
+    const call = mock(
+      async (request: { _: string }, params?: { abortSignal?: unknown }) => {
+        expect(request._).toBe('communities.getJoinedCommunities')
+        signals.push(params?.abortSignal)
+        return {
+          _: 'messages.chats',
+          chats: [
+            fakeRawCommunity({ id: 5555555551, accessHash: '701' }),
+            fakeRawCommunity({
+              id: 5555555552,
+              accessHash: '702',
+              forbidden: true,
+            }),
+            {
+              ...fakeRawCommunity({ id: 5555555553, accessHash: '703' }),
+              min: true,
+            },
+            {
+              _: 'channel',
+              id: 5555555554,
+              accessHash: toLong('704'),
+              title: 'Example Channel',
+              photo: { _: 'chatPhotoEmpty' },
+              date: 1_700_000_000,
+            },
+          ],
+        }
+      },
+    )
+    client._client.call = call as unknown as typeof client._client.call
+
+    try {
+      const { signal } = ctx.runtime.shutdown
+      const rows = await fetchJoinedCommunities(
+        client.withParams({ abortSignal: signal }),
+      )
+
+      expect(
+        rows.map((row) => [row.chat_id, row.type, row.access_hash]),
+      ).toEqual([
+        ['-1005555555551', 'community', '701'],
+        ['-1005555555552', 'community', '702'],
+      ])
+      expect(call).toHaveBeenCalledTimes(1)
+      expect(signals).toEqual([signal])
+    } finally {
+      await client.destroy()
+    }
   })
 
   it('raises the newest message ID and never lowers it', async () => {
@@ -577,6 +713,8 @@ describe('bootstrapDialogs', () => {
 
     expect(chatSyncState.get(1001)?.top_message_id).toBe(1000)
     expect(createChatsCache(testCacheDb).getById('1003')).not.toBeNull()
+    // The stop skips the communities request
+    expect(first.communityCalls).toEqual([])
     expect(second.calls).toEqual([])
     otherDb.close()
   })

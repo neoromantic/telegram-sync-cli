@@ -74,9 +74,8 @@ tg chats sync @examplenews        # sync this chat in the background
 ```
 
 `--type` takes `private`, `group`, `supergroup`, `channel` or `community` (a Telegram
-community, a collection of linked chats). tg doesn't cache joined communities yet
-([#58](https://github.com/neoromantic/telegram-sync-cli/issues/58)), so `--type community`
-finds none so far.
+community, a collection of linked chats). `--type community` lists the communities the
+account joined once a daemon start or `tg chats list --fresh` has cached them.
 
 `tg chats get --id` reads an ID like `tg chats sync` does. A bare 0.2.0 ID that names both a
 cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
@@ -107,9 +106,9 @@ tg chats sync @examplenews --auto # follow the default policy again
   both a cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
   `details: { chat, candidates }`, `candidates` being both marked IDs.
 - Cache-only: the chat must be in `chats_cache` or have sync state from the daemon. No Telegram
-  credentials needed. A daemon start caches every chat, archived ones too (communities not yet,
-  #58); `tg chats get --id @username` caches one chat; `tg chats list --fresh` caches only the
-  200 newest dialogs that aren't archived.
+  credentials needed. A daemon start caches every chat, archived ones and joined communities
+  too; `tg chats get --id @username` caches one chat; `tg chats list --fresh` caches the 200
+  newest dialogs that aren't archived and every joined community.
 - A chat that isn't found fails with `INVALID_ARGS` (exit 3) and the suggestion to start the
   daemon or run `tg chats get --id @username`. `--off` with `--auto` is `INVALID_ARGS` too.
 - A running daemon applies the change at its next refresh (30 seconds or less). A chat turned

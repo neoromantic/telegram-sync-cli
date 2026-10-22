@@ -1,7 +1,8 @@
+import type { Database } from 'bun:sqlite'
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
-import { createChatsCache } from '../../db/chats-cache'
+import { type CachedChatInput, createChatsCache } from '../../db/chats-cache'
 import type { ChatType } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
@@ -19,6 +20,7 @@ import {
   CHAT_TYPE_VALUES,
   chatRowToItem,
   dialogToCacheInput,
+  fetchJoinedCommunities,
   filterChatsByType,
   isValidChatType,
 } from './helpers'
@@ -39,6 +41,39 @@ async function collectDialogs(
   }
 
   return { dialogs, users }
+}
+
+/**
+ * Fetch the 200 newest unarchived dialogs and every joined community, which
+ * Telegram lists apart from the dialogs (#58), and cache them with the
+ * dialogs' users. A failed communities request leaves the dialogs listed.
+ */
+export async function fetchChatsFromApi(
+  client: Pick<TelegramClient, 'iterDialogs' | 'getJoinedCommunities'>,
+  cacheDb: Database,
+): Promise<CachedChatInput[]> {
+  const { dialogs, users } = await collectDialogs(client)
+
+  let communities: CachedChatInput[] = []
+  try {
+    communities = await fetchJoinedCommunities(client)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    verbose(`Skipped joined communities: ${message}`)
+  }
+
+  const userInputs = users.map(apiUserToCacheInput)
+  if (userInputs.length > 0) {
+    createUsersCache(cacheDb).upsertMany(userInputs)
+    verbose(`Cached ${userInputs.length} users from dialogs`)
+  }
+
+  const chatInputs = [...dialogs.map(dialogToCacheInput), ...communities]
+  createChatsCache(cacheDb).upsertMany(chatInputs)
+  verbose(
+    `Cached ${dialogs.length} dialogs and ${communities.length} communities`,
+  )
+  return chatInputs
 }
 
 export const listChatsCommand = defineCommand({
@@ -121,18 +156,7 @@ export const listChatsCommand = defineCommand({
         { context: 'cli:chats.list', accountId: account.id },
       )
 
-      const { dialogs, users } = await collectDialogs(client)
-
-      const usersCache = createUsersCache(cacheDb)
-      const userInputs = users.map(apiUserToCacheInput)
-      if (userInputs.length > 0) {
-        usersCache.upsertMany(userInputs)
-        verbose(`Cached ${userInputs.length} users from dialogs`)
-      }
-
-      const chatInputs = dialogs.map(dialogToCacheInput)
-      chatsCache.upsertMany(chatInputs)
-      verbose(`Cached ${chatInputs.length} dialogs`)
+      const chatInputs = await fetchChatsFromApi(client, cacheDb)
 
       const filteredChats = filterChatsByType(chatInputs, typeFilter)
       filteredChats.sort(
