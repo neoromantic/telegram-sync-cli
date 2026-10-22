@@ -160,6 +160,13 @@ CREATE TABLE sync_state (
 );
 ```
 
+The only row so far is `contacts`, written by each full contact list (`tg contacts list
+--fresh`): `last_sync_at` is when the list was last checked against Telegram, and
+`forward_cursor` is Telegram's `saved_count` from the last full list. The `contacts.getContacts`
+hash comes from that count and the IDs of the users with `is_contact = 1`. Without the row the
+next check fetches the full list. A contact the full list leaves out keeps its `users_cache` row
+with `is_contact = 0`.
+
 ### Table: messages_cache
 
 ```sql

@@ -5,6 +5,7 @@
 import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../config'
+import { applyContactsSnapshot } from '../db/contacts-sync'
 import { isCacheStale } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { getClientForAccount } from '../services/telegram'
@@ -121,13 +122,13 @@ export const listContactsCommand = defineCommand({
         return
       }
 
-      // Extract and cache users
       const apiUsers = result.users.filter(isRawUser)
 
-      // Cache all users
-      const cacheInputs = apiUsers.map(apiUserToCacheInput)
-      usersCache.upsertMany(cacheInputs)
-      verbose(`Cached ${cacheInputs.length} contacts`)
+      // The full list: cache it, and unmark the cached contacts it leaves out
+      const applied = applyContactsSnapshot(cacheDb, result, Date.now())
+      verbose(
+        `Cached ${applied.contacts} contacts, ${applied.unmarked} no longer contacts`,
+      )
 
       // Map to our Contact type
       const allContacts: Contact[] = apiUsers.map(apiUserToContact)
