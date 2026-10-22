@@ -25,6 +25,7 @@ import {
   ACCOUNT_SELECTOR_DESCRIPTION,
   resolveAccountSelector,
 } from '../utils/account-selector'
+import { keepActiveAccountInConfig } from '../utils/active-account'
 import { error, info, success } from '../utils/output'
 
 /**
@@ -115,6 +116,11 @@ export interface AuthDependencies {
   prompt: (message: string) => Promise<string>
   promptPassword: (message: string) => Promise<string>
   qrGenerator?: QrCodeGenerator
+  /**
+   * Write a logged-in account to activeAccount in config.json when the key
+   * is set and names another account; fail the command when it can't
+   */
+  keepActiveAccountInConfig: (accountId: number) => Promise<void>
 }
 
 /**
@@ -128,18 +134,27 @@ export function getDefaultDependencies(): AuthDependencies {
     isAuthorized,
     prompt,
     promptPassword,
+    keepActiveAccountInConfig: (accountId) =>
+      keepActiveAccountInConfig(accountId, {
+        context: `Logged in as account ${accountId}`,
+        details: { account_id: accountId },
+        suggestion: `Make config.json writable and run tg accounts switch --id ${accountId}, or remove activeAccount from it`,
+      }),
   }
 }
 
 /**
- * Make a login's account the one the next command uses (#62): the only
- * active account in data.db. Only after the login succeeded, so a failed
- * one leaves the active account alone
+ * Make a login's account the one the next command uses (#62): in
+ * config.json when it sets activeAccount, as every start applies that key,
+ * then as the only active account in data.db. Only after the login
+ * succeeded, so a failed one changes neither, and config.json first, so a
+ * config.json that can't be written leaves data.db's active account alone
  */
-function activateLoggedInAccount(
+async function activateLoggedInAccount(
   accountId: number,
   deps: AuthDependencies,
-): void {
+): Promise<void> {
+  await deps.keepActiveAccountInConfig(accountId)
   deps.accountsDb.setActive(accountId)
 }
 
@@ -238,7 +253,7 @@ export async function loginWithPhone(
     return { success: false, error: message }
   }
 
-  activateLoggedInAccount(loggedIn.id, deps)
+  await activateLoggedInAccount(loggedIn.id, deps)
   return { success: true, account: loggedIn }
 }
 
@@ -336,7 +351,7 @@ export async function loginWithQr(
     return { success: false, error: message }
   }
 
-  activateLoggedInAccount(loggedIn.id, deps)
+  await activateLoggedInAccount(loggedIn.id, deps)
   return { success: true, account: loggedIn }
 }
 

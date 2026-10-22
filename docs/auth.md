@@ -25,8 +25,10 @@ Flow:
 2. Start mtcute auth flow (phone → code → optional 2FA password).
 3. Persist session to `session_<id>.db`.
 4. Update account metadata (user ID, display name, label).
-5. Make the account the active one, so the next command uses it. A failed login leaves the
-   active account as it was.
+5. Make the account the active one, so the next command uses it: in `data.db`, and in
+   `activeAccount` when `config.json` sets that key (see
+   [configuration.md](configuration.md#runtime-behavior)). A failed login leaves the active
+   account as it was.
 
 ### QR Login
 
