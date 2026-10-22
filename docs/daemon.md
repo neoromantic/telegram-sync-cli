@@ -251,7 +251,7 @@ account's scheduler → its sync_jobs → its worker and client → its messages
   with the chat's current mode (`--auto` unless it was turned on; `tg status` prints the
   command). Each failure is logged as a warning (see [sync-strategy.md](sync-strategy.md#retries))
 - Tracks last activity to avoid noisy health checks
-- Skips an account's health check and reconnect while its sync job runs
+- Waits to reconnect an account until its running sync job ends
 - Validates sync job state transitions
 - Uses rate limit service with flood wait tracking
 
