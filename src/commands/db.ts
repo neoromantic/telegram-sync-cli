@@ -31,9 +31,6 @@ import {
 } from '../utils/account-selector'
 import { error, success } from '../utils/output'
 
-const STOP_DAEMON_SUGGESTION =
-  'tg daemon stop && tg db vacuum && tg daemon start'
-
 function sqliteCode(err: unknown): string {
   const code = (err as { code?: unknown } | null)?.code
   return typeof code === 'string' ? code : ''
@@ -68,7 +65,7 @@ function needsStoppedDaemon(accountId: number): never {
     ErrorCodes.DAEMON_ALREADY_RUNNING,
     `The cache of account ${accountId} has no incremental auto_vacuum yet: only a full VACUUM can compact it, and that needs the daemon stopped`,
     { account_id: accountId, auto_vacuum: 'none' },
-    STOP_DAEMON_SUGGESTION,
+    `tg daemon stop && tg db vacuum --account ${accountId} && tg daemon start`,
   )
 }
 
