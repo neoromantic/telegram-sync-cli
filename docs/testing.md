@@ -115,8 +115,11 @@ request's peer).
   by another option, a value such as `-hi`, or anything after `--`
 - `daemon-scheduler.test.ts`, `daemon-bootstrap.test.ts`, `daemon-accounts.connect.test.ts`,
   `daemon-start-caches.test.ts` — the daemon with two accounts: each job runs on its own
-  account's client, accounts take turns, dialogs, live messages and deletes land in the
+  account's client, each account runs its own jobs on its own 3 s delay and one account's
+  FLOOD_WAIT doesn't hold another's, dialogs, live messages and deletes land in the
   receiving account's cache, and an account whose cache doesn't open is left out
+- `daemon-loop.test.ts` — the daemon's main loop: per-account job loops, a stop ends the tick
+  wait at once, and a health check runs beside a sync job while a reconnect waits for it
 - `daemon-stop.test.ts` — the daemon's start and stop with fake clients: a stop during a
   FLOOD_WAIT in the startup dialog pass or a sync job ends the wait at once, and the job stays
   pending (`helpers/flood-wait.ts` waits like mtcute's flood waiter until the request's

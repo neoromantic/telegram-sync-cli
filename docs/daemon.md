@@ -127,7 +127,9 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
   account; the others keep syncing. One account's lost connection doesn't stop the others; a
   disconnected account's jobs stay pending until it reconnects. An account whose cache fails
   while its next job is picked (a corrupt page, a lock held past the 5-second
-  `busy_timeout`) is logged, waits out its delay and is tried again; the other accounts go on
+  `busy_timeout`) is logged, waits out its delay and is tried again; the other accounts go on.
+  A FLOOD_WAIT on one account's health-check `getMe` still pauses new job starts for every
+  account until it ends
 
 See [sync-strategy.md](sync-strategy.md) for the rules.
 
@@ -224,9 +226,10 @@ account's scheduler → its sync_jobs → its worker and client → its messages
   session files stay open until then: closing a client stops its updates loop,
   saves its update state and peers, and closes its session file and Telegram
   connections, and the update handlers stay on until it's done, so updates and
-  peers that arrive after the signal are saved. If closing the clients takes
-  longer than 30 seconds, the daemon exits with code 1 and still saves the queued session writes. A stop
-  ends the dialog pass at the next dialog, and a request that the pass or a
+  peers that arrive after the signal are saved. If waiting for the jobs and
+  closing the clients takes longer than 30 seconds, the daemon exits with
+  code 1 and still saves the queued session writes. A stop ends the dialog
+  pass at the next dialog, and a request that the pass or a
   sync job is waiting on ends at once, a FLOOD_WAIT of up to 5 minutes
   included: the pass counts as stopped and marks nothing, and the job is
   pending as it was, with no attempt used, so the next start runs it again.
