@@ -3,15 +3,10 @@
  */
 import { defineCommand } from 'citty'
 
-import {
-  ConfigError,
-  getConfigPath,
-  getConfigValue,
-  setConfigValue,
-} from '../config'
 import { accountsDb } from '../db'
 import { ErrorCodes } from '../types'
 import { settleCacheLayoutBeforeAccountChange } from '../utils/account-cache'
+import { keepActiveAccountInConfig } from '../utils/active-account'
 import { error, success } from '../utils/output'
 
 /**
@@ -74,24 +69,7 @@ export const switchAccountCommand = defineCommand({
       )
     }
 
-    // Every start applies activeAccount from config.json again (src/index.ts
-    // setup), so keep it in step or the switch lasts one command (#61)
-    try {
-      const pinned = await getConfigValue('activeAccount')
-      if (pinned !== undefined && pinned !== accountId) {
-        await setConfigValue('activeAccount', accountId)
-      }
-    } catch (err) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      error(
-        ErrorCodes.GENERAL_ERROR,
-        `Could not write activeAccount to ${getConfigPath()}: ${(err as Error).message}`,
-        { path: getConfigPath() },
-        'Make config.json writable or remove activeAccount from it',
-      )
-    }
+    await keepActiveAccountInConfig(accountId)
     accountsDb.setActive(accountId)
 
     success({
