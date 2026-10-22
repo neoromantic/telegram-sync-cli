@@ -79,7 +79,10 @@ At start the daemon moves the shared cache of 0.3 and older (see
 tg still holds it and there is one account, the daemon exits with an error. It then opens every
 account's cache. An account whose cache doesn't open (another account's file, a corrupt one) is
 logged, shown with status `error` and not connected; the others run. With no cache open the
-daemon exits with `AllAccountsFailed`.
+daemon exits with `AllAccountsFailed`. After the connections and the dialog pass, each
+connected account gets its scheduler; if one account's startup pass fails (for example its
+cache stays locked), that is logged, the account still runs its pending jobs and the next
+refresh queues the rest, and the other accounts start as usual.
 
 Everything an account receives or syncs lands only in its own cache: a live message, an edit,
 a delete without chat context, a dialog pass, a sync job. A job queued in an account's cache
