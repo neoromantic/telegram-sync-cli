@@ -637,5 +637,22 @@ describe('E2E: status per account', () => {
       /connected · 0 queued · 1 failed · history 0\/0 · 1 msgs/,
     )
     expect(output).toMatch(/reconnecting · 0 queued · history 0\/0 · 1 msgs/)
+    expect(output).not.toContain('Only account')
+  })
+
+  it('says in pretty output which account --account scoped the figures to', async () => {
+    const result = await runCliSuccess(
+      ['status', '--account', 'work', '--format', 'pretty'],
+      cliOptions(env),
+    )
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
+    const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, '')
+
+    expect(output).toContain(`Only account #2 ${BETA.phone} [work];`)
+    // The account's own line still prints under the overall total
+    expect(output).toMatch(/Total\s+2/)
+    expect(output).toContain(`#2 ${BETA.phone}`)
+    expect(output).toMatch(/reconnecting · 0 queued · history 0\/0 · 1 msgs/)
+    expect(output).not.toMatch(/connected · 0 queued · 1 failed/)
   })
 })
