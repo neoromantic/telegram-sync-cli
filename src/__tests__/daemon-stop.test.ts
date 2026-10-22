@@ -18,6 +18,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RpcCallOptions, TelegramClient } from '@mtcute/bun'
 
+import { CONTACTS_METHOD } from '../daemon/daemon-contacts'
 import type { DaemonContext } from '../daemon/daemon-context'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createDaemonStatusService } from '../db/daemon-status'
@@ -187,13 +188,19 @@ describe('daemon stop during a FLOOD_WAIT', () => {
     )
     const daemon = createDaemon({ pidPath, verbosity: 'verbose' }, accounts())
     let stoppedAt = 0
+    let jobRequests = 0
     const fake = fakeClient(
       [{ kind: 'user', id: CHAT, topMessage: 10 }],
       {},
-      // The aborted request rejects a moment later, so the job is still
-      // running when the shutdown starts
-      (_request, params) =>
-        waitLikeFloodWait(params, {
+      // The contacts check finds the list unchanged. The job's aborted
+      // request rejects a moment later, so the job is still running when
+      // the shutdown starts
+      (request, params) => {
+        if ((request as { _: string })._ === CONTACTS_METHOD) {
+          return Promise.resolve({ _: 'contacts.contactsNotModified' })
+        }
+        jobRequests++
+        return waitLikeFloodWait(params, {
           onWait: () => {
             stoppedAt = performance.now()
             daemon.stop()
@@ -201,7 +208,8 @@ describe('daemon stop during a FLOOD_WAIT', () => {
         }).catch(
           (err) =>
             new Promise((_resolve, reject) => setTimeout(() => reject(err), 5)),
-        ),
+        )
+      },
     )
     clients.set(1, fake.client)
 
@@ -211,7 +219,7 @@ describe('daemon stop during a FLOOD_WAIT', () => {
     expect(exitCode).toBe(DaemonExitCode.Success)
     expect(stoppedAt).toBeGreaterThan(0)
     expect(elapsed).toBeLessThan(1000)
-    expect(fake.call).toHaveBeenCalledTimes(1)
+    expect(jobRequests).toBe(1)
     expect(warn).not.toHaveBeenCalled()
     expect(error).not.toHaveBeenCalled()
     expect(output()).toContain(
