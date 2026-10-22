@@ -487,14 +487,33 @@ describe('MessagesCache', () => {
       expect(cache.get(-5151, 7)?.is_deleted).toBe(0)
     })
 
-    it('counts a repeated ID in one update once', () => {
-      cacheMessageSeven([4242])
+    it('marks the unique ID and reports the ambiguous one of the same delete', () => {
+      cacheMessageSeven([4242, -5151])
+      cache.upsert({
+        chat_id: 4242,
+        message_id: 8,
+        text: 'made-up reply in 4242',
+        message_type: 'text',
+        date: 1_760_000_100,
+        raw_json: '{}',
+      })
+
+      expect(cache.markDeletedByMessageIds([7, 8])).toEqual({
+        deleted: 1,
+        ambiguous: [{ messageId: 7, chatIds: [-5151, 4242] }],
+      })
+      expect(cache.get(4242, 8)?.is_deleted).toBe(1)
+      expect(cache.get(4242, 7)?.is_deleted).toBe(0)
+      expect(cache.get(-5151, 7)?.is_deleted).toBe(0)
+    })
+
+    it('reports a repeated ambiguous ID in one update once', () => {
+      cacheMessageSeven([4242, -5151])
 
       expect(cache.markDeletedByMessageIds([7, 7])).toEqual({
-        deleted: 1,
-        ambiguous: [],
+        deleted: 0,
+        ambiguous: [{ messageId: 7, chatIds: [-5151, 4242] }],
       })
-      expect(cache.get(4242, 7)?.is_deleted).toBe(1)
     })
   })
 

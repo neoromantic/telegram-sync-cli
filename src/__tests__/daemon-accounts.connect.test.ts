@@ -609,13 +609,16 @@ describe('daemon-accounts: connection + event wiring', () => {
     } satisfies DeleteMessageUpdateLike
 
     accountState.eventHandlers?.onDeleteMessage(asDeleteUpdate(deleteUpdate))
+    await Bun.sleep(0)
 
     expect(messagesCache.get(100, 1)?.is_deleted).toBe(1)
     expect(messagesCache.get(200, 2)?.is_deleted).toBe(1)
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
   })
 
   describe('deletes of a message ID that several chats cache', () => {
-    async function wireWithMessageSeven(chatIds: number[]) {
+    /** Caches each of `messageIds` in each of `chatIds` */
+    async function wireWithMessages(chatIds: number[], messageIds = [7]) {
       const accountsDb = createAccountsDb([
         { id: 1, phone: '+15550000001', user_id: 101 },
       ])
@@ -632,20 +635,22 @@ describe('daemon-accounts: connection + event wiring', () => {
 
       const messagesCache = createMessagesCache(testCacheDb)
       for (const chatId of chatIds) {
-        messagesCache.upsert({
-          chat_id: chatId,
-          message_id: 7,
-          text: `made-up message in ${chatId}`,
-          message_type: 'text',
-          date: 1_760_000_000,
-          raw_json: '{}',
-        })
+        for (const messageId of messageIds) {
+          messagesCache.upsert({
+            chat_id: chatId,
+            message_id: messageId,
+            text: `made-up message ${messageId} in ${chatId}`,
+            message_type: 'text',
+            date: 1_760_000_000 + messageId,
+            raw_json: '{}',
+          })
+        }
       }
       return { ctx, accountState, messagesCache }
     }
 
     it("marks a private chat's message deleted when a channel in the same account has the ID", async () => {
-      const { accountState, messagesCache } = await wireWithMessageSeven([
+      const { ctx, accountState, messagesCache } = await wireWithMessages([
         4242, -1001234567890,
       ])
 
@@ -656,10 +661,11 @@ describe('daemon-accounts: connection + event wiring', () => {
 
       expect(messagesCache.get(4242, 7)?.is_deleted).toBe(1)
       expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(0)
+      expect(ctx.logger.warn).not.toHaveBeenCalled()
     })
 
     it('marks only the channel message on a channel delete', async () => {
-      const { accountState, messagesCache } = await wireWithMessageSeven([
+      const { accountState, messagesCache } = await wireWithMessages([
         4242, -1001234567890,
       ])
 
@@ -673,7 +679,7 @@ describe('daemon-accounts: connection + event wiring', () => {
     })
 
     it('keeps both messages and warns when two private chats of the account have the ID', async () => {
-      const { ctx, accountState, messagesCache } = await wireWithMessageSeven([
+      const { ctx, accountState, messagesCache } = await wireWithMessages([
         4242, -5151,
       ])
 
@@ -689,6 +695,54 @@ describe('daemon-accounts: connection + event wiring', () => {
       const [line] = warn.mock.calls[0] as [string]
       expect(line).toContain('[Account 1]')
       expect(line).toContain('7 in -5151, 4242')
+    })
+
+    it('marks the unique ID of a delete and warns about the ambiguous one', async () => {
+      const { ctx, accountState, messagesCache } = await wireWithMessages([
+        4242, -5151,
+      ])
+      messagesCache.upsert({
+        chat_id: 4242,
+        message_id: 8,
+        text: 'made-up reply in 4242',
+        message_type: 'text',
+        date: 1_760_000_100,
+        raw_json: '{}',
+      })
+
+      accountState.eventHandlers?.onDeleteMessage(
+        asDeleteUpdate({ channelId: null, messageIds: [7, 8] }),
+      )
+      await Bun.sleep(0)
+
+      expect(messagesCache.get(4242, 8)?.is_deleted).toBe(1)
+      expect(messagesCache.get(4242, 7)?.is_deleted).toBe(0)
+      expect(messagesCache.get(-5151, 7)?.is_deleted).toBe(0)
+      const warn = ctx.logger.warn as ReturnType<typeof mock>
+      expect(warn).toHaveBeenCalledTimes(1)
+      const [line] = warn.mock.calls[0] as [string]
+      expect(line).toContain('Left 1 message ID(s)')
+      expect(line).toContain('(7 in -5151, 4242)')
+    })
+
+    it('lists at most five ambiguous IDs in the warning', async () => {
+      const { ctx, accountState, messagesCache } = await wireWithMessages(
+        [4242, -5151],
+        [1, 2, 3, 4, 5, 6],
+      )
+
+      accountState.eventHandlers?.onDeleteMessage(
+        asDeleteUpdate({ channelId: null, messageIds: [1, 2, 3, 4, 5, 6] }),
+      )
+      await Bun.sleep(0)
+
+      expect(messagesCache.get(4242, 6)?.is_deleted).toBe(0)
+      const warn = ctx.logger.warn as ReturnType<typeof mock>
+      expect(warn).toHaveBeenCalledTimes(1)
+      const [line] = warn.mock.calls[0] as [string]
+      expect(line).toContain('Left 6 message ID(s)')
+      expect(line).toContain('5 in -5151, 4242; 1 more)')
+      expect(line).not.toContain('6 in')
     })
   })
 
