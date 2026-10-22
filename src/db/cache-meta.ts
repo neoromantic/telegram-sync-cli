@@ -34,17 +34,49 @@ export function readCacheMeta(db: Database): CacheMeta {
   return meta
 }
 
-function assertOwner(meta: CacheMeta, owner: CacheOwner, path: string): void {
-  if (meta.account_id !== null && meta.account_id !== String(owner.id)) {
-    throw new CacheUnavailableError('owner_mismatch', path)
-  }
+export interface CacheOwnerOptions {
+  /**
+   * The Telegram user of an account in data.db: null while it doesn't know
+   * it, undefined if there is no such account. A file stamped for the same
+   * Telegram user and for an account ID that is gone (logged out, removed)
+   * or now belongs to another user (a recreated data.db) is handed to this
+   * account, so a re-login can take its old cache back. Without it, any
+   * other account ID is a mismatch.
+   */
+  accountUserId?: (accountId: number) => number | null | undefined
+}
+
+type Ownership = 'own' | 'reclaim' | 'foreign'
+
+function ownership(
+  meta: CacheMeta,
+  owner: CacheOwner,
+  options: CacheOwnerOptions,
+): Ownership {
   if (
     meta.user_id !== null &&
     owner.user_id !== null &&
     meta.user_id !== String(owner.user_id)
   ) {
-    throw new CacheUnavailableError('owner_mismatch', path)
+    return 'foreign'
   }
+  if (meta.account_id === null || meta.account_id === String(owner.id)) {
+    return 'own'
+  }
+  // Another account ID: only one that no longer is this Telegram user's
+  const stampedId = Number(meta.account_id)
+  const sameUser =
+    meta.user_id !== null &&
+    owner.user_id !== null &&
+    meta.user_id === String(owner.user_id)
+  if (!sameUser || !Number.isSafeInteger(stampedId) || !options.accountUserId) {
+    return 'foreign'
+  }
+  const stampedUser = options.accountUserId(stampedId)
+  const stampedAccountGone =
+    stampedUser === undefined ||
+    (stampedUser !== null && String(stampedUser) !== meta.user_id)
+  return stampedAccountGone ? 'reclaim' : 'foreign'
 }
 
 function missingStamps(
@@ -61,22 +93,36 @@ function missingStamps(
 
 /**
  * Throw CacheUnavailableError('owner_mismatch') if the file belongs to
- * another account; stamp what is missing otherwise. A stamped file is only
- * read, so opening it never waits for the write lock.
+ * another account; stamp what is missing otherwise. A file of an account
+ * that data.db no longer has, stamped for the same Telegram user, is
+ * stamped for this account instead (see CacheOwnerOptions). A stamped file
+ * is only read, so opening it never waits for the write lock.
  */
 export function checkCacheOwner(
   db: Database,
   owner: CacheOwner,
   path: string,
+  options: CacheOwnerOptions = {},
 ): void {
   const meta = readCacheMeta(db)
-  assertOwner(meta, owner, path)
-  if (missingStamps(meta, owner).length === 0) return
+  const found = ownership(meta, owner, options)
+  if (found === 'foreign') {
+    throw new CacheUnavailableError('owner_mismatch', path)
+  }
+  if (found === 'own' && missingStamps(meta, owner).length === 0) return
 
   const stamp = db.transaction(() => {
     // Read again under the write lock: another process may have stamped it
     const current = readCacheMeta(db)
-    assertOwner(current, owner, path)
+    const now = ownership(current, owner, options)
+    if (now === 'foreign') {
+      throw new CacheUnavailableError('owner_mismatch', path)
+    }
+    if (now === 'reclaim') {
+      db.prepare(
+        "INSERT OR REPLACE INTO cache_meta (key, value) VALUES ('account_id', $value)",
+      ).run({ $value: String(owner.id) })
+    }
     const insert = db.prepare(
       'INSERT OR IGNORE INTO cache_meta (key, value) VALUES ($key, $value)',
     )

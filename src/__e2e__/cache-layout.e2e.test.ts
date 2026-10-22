@@ -6,12 +6,19 @@
  */
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
 import { readCacheMeta } from '../db/cache-meta'
+import { createMessagesCache } from '../db/messages-cache'
 import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
 import { NO_CREDENTIALS, runCli, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
@@ -395,6 +402,47 @@ describe('E2E: upgrading from the shared cache', () => {
       expect(existsSync(shared)).toBe(false)
       expect(existsSync(join(env.dataDir, 'shared-cache.db'))).toBe(true)
     }, 30_000)
+  })
+
+  it("gives a logged-out account's cache to the same user's new account", async () => {
+    env.seedAccounts([
+      { phone: '+15550000001', user_id: 9001, is_active: true },
+    ])
+    const cache = env.openCacheDb(1)
+    createMessagesCache(cache).upsertBatch([
+      {
+        chat_id: 101,
+        message_id: 1,
+        text: 'kept across a re-login',
+        message_type: 'text',
+        date: 1_760_000_000,
+        raw_json: '{}',
+      },
+    ])
+    cache.run(
+      "INSERT INTO cache_meta (key, value) VALUES ('account_id', '1'), ('user_id', '9001')",
+    )
+    // Logout and login again: the same Telegram user gets a new account ID
+    await runCliSuccess(['accounts', 'remove', '--id', '1'], options())
+    env.seedAccounts([
+      { phone: '+15550000001', user_id: 9001, is_active: true },
+    ])
+    renameSync(
+      join(env.dataDir, 'accounts', '1'),
+      join(env.dataDir, 'accounts', '2'),
+    )
+
+    expect((await sqlCount('--account', '2')).count).toBe(1)
+
+    const moved = new Database(env.cachePath(2), { readonly: true })
+    try {
+      expect(readCacheMeta(moved)).toEqual({
+        account_id: '2',
+        user_id: '9001',
+      })
+    } finally {
+      moved.close()
+    }
   })
 
   it('refuses a cache stamped for another Telegram user', async () => {

@@ -58,6 +58,13 @@ Each account's data lives in its own `accounts/<id>/cache.db`, where `<id>` is t
 `tg accounts remove` and `tg auth logout` keep `accounts/<id>/`; delete the directory to drop
 that account's cache. Table layouts: [database-schema.md](database-schema.md).
 
+Logging in again after `tg auth logout` (or `tg accounts remove`) gives the same Telegram user
+a new account ID, and that account starts an empty cache: tg doesn't pick the old directory up
+by itself. To keep the old cache, stop the daemon, delete the new `accounts/<new-id>/` if it
+exists, and rename `accounts/<old-id>/` to `accounts/<new-id>/`. tg takes it on the next open,
+because the file is stamped for the same Telegram user and its old account ID is gone. A cache
+stamped for another Telegram user is refused with `CACHE_UNAVAILABLE` (`owner_mismatch`).
+
 ### Which account a command uses
 
 Every command that reads or writes a cache works on one account:

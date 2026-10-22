@@ -47,7 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does `tg auth login`, so a second account can't force the first one's
   cache aside. A file that can't be moved yet (`move_failed`: a read-only
   file, a full disk) waits the same way; only a file that is not a database
-  is set aside for a single account. Going back to 0.3 after the move is not
+  is set aside for a single account. A login after `tg auth logout` gives
+  the same Telegram user a new account ID and an empty cache; the old
+  `accounts/<id>/` stays, and renamed to the new ID it is taken back, as the
+  owner stamp matches the user. Going back to 0.3 after the move is not
   supported. Scripts that open `cache.db` directly must open
   `accounts/<id>/cache.db` or use `tg sql --account`. See "Upgrading to
   per-account caches" in `docs/configuration.md`.

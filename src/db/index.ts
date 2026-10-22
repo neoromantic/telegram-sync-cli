@@ -467,7 +467,12 @@ function openAccountCacheFile(accountId: number): Database {
   try {
     initCacheSchema(cache)
     initSyncSchema(cache)
-    checkCacheOwner(cache, account, path)
+    checkCacheOwner(cache, account, path, {
+      accountUserId: (id) => {
+        const stamped = accountsDb.getById(id)
+        return stamped ? stamped.user_id : undefined
+      },
+    })
   } catch (err) {
     // A failed migration rolled back; the next call opens and retries it
     cache.close()
