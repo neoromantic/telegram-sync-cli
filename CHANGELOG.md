@@ -27,7 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prints them on a line under each account. `tg status --account <selector>`
   reports only that account and sets the new top-level `account_id` (`null`
   for all). `tg daemon status` adds `accounts[]` with each account's
-  connection, last error, messages synced and cached, and chat counts.
+  connection, last error, messages synced and cached, and chat counts, and
+  the same `storage` as `tg status`, so a shared cache that an older daemon
+  still holds explains why every account reads empty.
 
 ### Changed
 
