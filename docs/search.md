@@ -110,8 +110,12 @@ On startup, `initSyncSchema()` checks:
 - The expected columns exist in `message_search`
 - The stored version matches the current `SEARCH_INDEX_VERSION`
 
-If either check fails, it drops and recreates `message_search` and rebuilds the
-index from `messages_cache`.
+If a column is missing, it drops and recreates `message_search` and its triggers;
+if either check fails, it rebuilds the index from `messages_cache`. That work runs
+in one transaction under the write lock and checks again there, so when several
+processes open the cache at once (the daemon and a command after the first login),
+one builds the index while the others wait and then find nothing to do. An
+up-to-date index is only read, so opening the cache doesn't wait for the lock.
 
 The `chat` column reads the chat's `chats_cache` row, which has the same marked
 peer ID as the message. Up to 0.2.0, `chats_cache` kept groups and channels under

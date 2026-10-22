@@ -166,7 +166,8 @@ function getMessageSearchColumns(db: Database): string[] {
   }
 }
 
-function ensureMessageSearchIndex(db: Database): void {
+/** What the search index needs: nothing, its rows again, or a new table */
+function searchIndexWork(db: Database): 'none' | 'rows' | 'schema' {
   const result = db
     .query(`SELECT value FROM search_meta WHERE key = 'search_index_version'`)
     .get() as { value?: string } | null
@@ -176,16 +177,31 @@ function ensureMessageSearchIndex(db: Database): void {
   const hasAllColumns = MESSAGE_SEARCH_COLUMNS.every((col) =>
     columns.includes(col),
   )
-  const needsSchemaRebuild = columns.length === 0 || !hasAllColumns
+  if (columns.length === 0 || !hasAllColumns) return 'schema'
+  return storedVersion === SEARCH_INDEX_VERSION ? 'none' : 'rows'
+}
 
-  if (needsSchemaRebuild) {
-    dropMessageSearchSchema(db)
-    createMessageSearchSchema(db)
-  }
+/**
+ * Bring the search index up to date. Processes that open a new cache at
+ * once all find it unbuilt, and one that read the table while another was
+ * creating it can find no columns. So the work runs under the write lock
+ * and is checked again there: one process builds the index while the
+ * others wait and then find nothing left, and none drops a table another
+ * one is filling. An up-to-date index is only read, so opening the cache
+ * never waits for the lock.
+ */
+function ensureMessageSearchIndex(db: Database): void {
+  if (searchIndexWork(db) === 'none') return
 
-  if (needsSchemaRebuild || storedVersion !== SEARCH_INDEX_VERSION) {
+  db.transaction(() => {
+    const work = searchIndexWork(db)
+    if (work === 'none') return
+    if (work === 'schema') {
+      dropMessageSearchSchema(db)
+      createMessageSearchSchema(db)
+    }
     rebuildMessageSearchIndex(db)
-  }
+  }).immediate()
 }
 
 /**

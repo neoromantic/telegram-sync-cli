@@ -93,6 +93,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "database is locked": SQLite fails all but one switch to WAL at once,
   without waiting. They now try again for up to 5 seconds. The cache moved
   from a shared one is also in this state on its first open.
+- Processes that opened a new cache, or one with an outdated search index,
+  at the same moment built the index together: one could drop the
+  `message_search` table or its triggers while another was filling it, and
+  fail with "no such table", "vtable constructor failed" or "database is
+  locked". One process now builds it under the write lock while the others
+  wait.
 - After a reconnect, a complete dialog pass now marks the account's chats it
   didn't list (left, deleted or migrated) caught up, as the startup pass
   does. Before, such a chat whose newest message an earlier failed pass had
