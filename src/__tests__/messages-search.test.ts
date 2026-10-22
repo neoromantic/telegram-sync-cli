@@ -325,3 +325,130 @@ describe('MessagesSearch', () => {
     expect(parenResults[0]!.message_id).toBe(3)
   })
 })
+
+describe('MessagesSearch on a contentless and a regular index', () => {
+  /**
+   * The same made-up cache, with the search index of the given kind, on a
+   * fixed clock so the rows' timestamps match
+   */
+  function buildCache(contentlessSearch: boolean): Database {
+    const realNow = Date.now
+    Date.now = () => 1_760_000_000_000
+    try {
+      return seedCache(contentlessSearch)
+    } finally {
+      Date.now = realNow
+    }
+  }
+
+  function seedCache(contentlessSearch: boolean): Database {
+    const db = new Database(':memory:')
+    initCacheSchema(db)
+    initSyncSchema(db, { contentlessSearch })
+    const now = 1_760_000_000_000
+    const users = createUsersCache(db)
+    const chats = createChatsCache(db)
+    const messages = createMessagesCache(db)
+    users.upsert({
+      user_id: '10',
+      username: 'alice',
+      first_name: 'Alice',
+      last_name: 'Able',
+      fetched_at: now,
+      raw_json: '{}',
+    })
+    users.upsert({
+      user_id: '12',
+      username: 'maria_example',
+      first_name: 'Мария',
+      last_name: null,
+      fetched_at: now,
+      raw_json: '{}',
+    })
+    for (const [chatId, title, username] of [
+      ['-1001234567890', 'Team Chat', 'teamchat'],
+      ['-300', 'Команда', null],
+    ] as const) {
+      chats.upsert({
+        chat_id: chatId,
+        type: 'supergroup',
+        title,
+        username,
+        member_count: 3,
+        access_hash: null,
+        is_creator: 0,
+        is_admin: 0,
+        last_message_id: null,
+        last_message_at: null,
+        fetched_at: now,
+        raw_json: '{}',
+      })
+    }
+    messages.upsertBatch(
+      [
+        [-1001234567890, 1, 10, 'hello team, the plan is ready'],
+        [-300, 2, 12, 'привет команда, встреча завтра'],
+        [-300, 3, 10, 'hello again, draft attached'],
+        [-1001234567890, 4, 12, 'first wording of the note'],
+        [-1001234567890, 5, 10, 'hello from a message deleted later'],
+      ].map(([chat_id, message_id, from_id, text]) => ({
+        chat_id: chat_id as number,
+        message_id: message_id as number,
+        from_id: from_id as number,
+        text: text as string,
+        message_type: 'text',
+        date: 1_760_000_000 + (message_id as number),
+        raw_json: '{}',
+      })),
+    )
+    messages.updateText(
+      -1001234567890,
+      4,
+      'second wording of the note',
+      1_760_000_100,
+    )
+    messages.markDeleted(-1001234567890, [5])
+    return db
+  }
+
+  const queries = [
+    'hello',
+    'привет',
+    'встреча',
+    'alice',
+    'Мария',
+    'teamchat',
+    'Команда',
+    'wording',
+  ]
+
+  it('finds the same messages for text, Cyrillic, sender and chat queries', () => {
+    const contentless = createMessagesSearch(buildCache(true))
+    const regular = createMessagesSearch(buildCache(false))
+
+    for (const query of queries) {
+      const found = contentless.search(query)
+      expect(found).toEqual(regular.search(query))
+    }
+    expect(contentless.search('hello', { includeDeleted: true })).toEqual(
+      regular.search('hello', { includeDeleted: true }),
+    )
+    expect(contentless.search('hello').map((row) => row.message_id)).toEqual([
+      3, 1,
+    ])
+    expect(contentless.search('Команда').map((row) => row.message_id)).toEqual([
+      3, 2,
+    ])
+  })
+
+  it('matches only the new text of an edited message', () => {
+    for (const contentlessSearch of [true, false]) {
+      const search = createMessagesSearch(buildCache(contentlessSearch))
+
+      expect(search.search('first wording')).toEqual([])
+      expect(search.search('second wording').map((row) => row.text)).toEqual([
+        'second wording of the note',
+      ])
+    }
+  })
+})

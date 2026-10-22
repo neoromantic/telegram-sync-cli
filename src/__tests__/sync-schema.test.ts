@@ -7,15 +7,19 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createMessagesCache } from '../db/messages-cache'
+import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import {
   ChatSyncStateRow,
   DaemonStatusRow,
   determineSyncPolicy,
   initSyncSchema,
+  isContentlessSearch,
   MessageCacheRow,
   SyncJobRow,
   SyncPriority,
+  supportsContentlessSearch,
 } from '../db/sync-schema'
 
 describe('sync schema', () => {
@@ -702,5 +706,117 @@ describe('message_id index on an existing cache', () => {
     expect(schemaOf(db)).toEqual(schema)
     expect(messagesOf(db)).toEqual(before)
     db.close()
+  })
+})
+
+describe('contentless message_search', () => {
+  const searchSql = (db: Database) =>
+    (
+      db
+        .query(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_search'",
+        )
+        .get() as { sql: string }
+    ).sql
+  const searchMeta = (db: Database) =>
+    db
+      .query(
+        "SELECT value, updated_at FROM search_meta WHERE key = 'search_index_version'",
+      )
+      .get() as { value: string; updated_at: number }
+  const triggers = (db: Database) =>
+    (
+      db
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'messages_cache_a%' ORDER BY name",
+        )
+        .all() as Array<{ name: string }>
+    ).map((row) => row.name)
+  const find = (db: Database, query: string) =>
+    (
+      createMessagesSearch(db).search(query) as Array<{ message_id: number }>
+    ).map((row) => row.message_id)
+
+  function seed(db: Database, ids: number[], word = 'lighthouse') {
+    createMessagesCache(db).upsertBatch(
+      ids.map((id) => ({
+        chat_id: 4242,
+        message_id: id,
+        text: `${word} note ${id}`,
+        message_type: 'text',
+        date: 1_700_000_000 + id,
+        raw_json: '{}',
+      })),
+    )
+  }
+
+  function openCache(contentlessSearch?: boolean): Database {
+    const db = new Database(':memory:')
+    initCacheSchema(db)
+    initSyncSchema(db, { contentlessSearch })
+    return db
+  }
+
+  it('this SQLite supports it', () => {
+    expect(supportsContentlessSearch(new Database(':memory:'))).toBe(true)
+  })
+
+  it('creates a new cache with a contentless index, or a regular one when asked', () => {
+    const contentless = openCache()
+    expect(searchSql(contentless)).toContain('contentless_delete=1')
+    expect(isContentlessSearch(contentless)).toBe(true)
+
+    const regular = openCache(false)
+    expect(searchSql(regular)).not.toContain('contentless_delete')
+    expect(isContentlessSearch(regular)).toBe(false)
+  })
+
+  it('moves a cache with the full-content index to the contentless one once', () => {
+    const db = openCache(false)
+    seed(db, [1, 2, 3])
+    db.run(
+      "UPDATE search_meta SET updated_at = 0 WHERE key = 'search_index_version'",
+    )
+
+    initSyncSchema(db)
+
+    expect(isContentlessSearch(db)).toBe(true)
+    expect(searchMeta(db).value).toBe('1')
+    const migratedAt = searchMeta(db).updated_at
+    expect(migratedAt).toBeGreaterThan(0)
+    expect(find(db, 'lighthouse')).toEqual([3, 2, 1])
+
+    initSyncSchema(db)
+    expect(searchMeta(db).updated_at).toBe(migratedAt)
+  })
+
+  it('on an older SQLite drops only the triggers, and a newer one rebuilds the index', () => {
+    const db = openCache()
+    seed(db, [1, 2])
+
+    // An older SQLite, without contentless_delete, opens the cache
+    initSyncSchema(db, { contentlessSearch: false })
+
+    expect(triggers(db)).toEqual([])
+    expect(searchMeta(db).value).toBe('0')
+    expect(isContentlessSearch(db)).toBe(true)
+    seed(db, [3])
+    expect(
+      (
+        db.query('SELECT COUNT(*) AS n FROM messages_cache').get() as {
+          n: number
+        }
+      ).n,
+    ).toBe(3)
+
+    initSyncSchema(db)
+
+    expect(triggers(db)).toEqual([
+      'messages_cache_ad',
+      'messages_cache_ai',
+      'messages_cache_au',
+    ])
+    expect(searchMeta(db).value).toBe('1')
+    expect(find(db, 'lighthouse')).toEqual([3, 2, 1])
   })
 })

@@ -205,7 +205,10 @@ CREATE INDEX idx_messages_cache_message_id ON messages_cache(message_id);
 ### Table: message_search
 
 FTS5 index for message search.
-Maintained via triggers on `messages_cache` and rebuilt when schema versions change.
+Maintained via triggers on `messages_cache` and rebuilt when schema versions change. On
+SQLite 3.43 and newer it is contentless: it holds only the index, its columns read as `NULL`,
+and search joins `messages_cache` by rowid for the text ([search.md](search.md#a-contentless-index)).
+With an older SQLite it is the full-content table, without the `content` options.
 
 ```sql
 CREATE VIRTUAL TABLE message_search USING fts5(
@@ -213,6 +216,7 @@ CREATE VIRTUAL TABLE message_search USING fts5(
   sender,
   chat,
   files,
+  content='', contentless_delete=1,
   tokenize='unicode61'
 );
 ```
@@ -550,12 +554,24 @@ supported: it would start an empty shared cache.
 
 ## Capacity Planning (Approx.)
 
+Measured on 20,000 made-up messages written through `upsertBatch` (SQLite 3.54.0, 4 KB pages),
+bytes per message as `tg status --sizes` reports them (indexes counted with their table):
+
+| Messages | `messages_cache` | `message_search` full-content | `message_search` contentless | File, contentless |
+|----------|------------------|-------------------------------|------------------------------|-------------------|
+| Text only, 3–32 words | ~910 B | ~330 B | ~100 B | ~1,020 B (18% smaller) |
+| One in ten with a photo | ~1,740 B | ~320 B | ~100 B | ~1,850 B (11% smaller) |
+
+`raw_json` (the stored TL object) is 43–61% of the file, most of it in media messages: a
+synthetic photo message's `raw_json` is about 7.7 KB, because byte arrays such as
+`fileReference` and the stripped thumbnail serialize as objects with one key per byte.
+
 | Data Type | Records | Est. Size |
 |-----------|---------|-----------|
 | users_cache | 500 | ~0.5 MB |
 | chats_cache | 200 | ~0.2 MB |
-| messages_cache (per chat) | 10,000 | ~10 MB |
-| messages_cache (50 synced chats) | 500,000 | ~500 MB |
+| messages_cache + message_search (per chat) | 10,000 | ~10–20 MB |
+| messages_cache + message_search (50 synced chats) | 500,000 | ~0.5–1 GB |
 | api_activity (7 days) | 10,000 | ~5 MB |
 
 ## Future Enhancements

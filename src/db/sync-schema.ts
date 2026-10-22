@@ -13,6 +13,43 @@ import { migratePeerIds } from './peer-id-migration'
 const SEARCH_INDEX_VERSION = 1
 const MESSAGE_SEARCH_COLUMNS = ['text', 'sender', 'chat', 'files'] as const
 
+/** The triggers on messages_cache that keep message_search in sync */
+const SEARCH_TRIGGERS = [
+  'messages_cache_ai',
+  'messages_cache_ad',
+  'messages_cache_au',
+] as const
+
+/** The first SQLite with FTS5's contentless_delete option */
+const CONTENTLESS_SEARCH_MIN_VERSION = [3, 43, 0] as const
+
+/**
+ * Whether this SQLite can keep message_search as a contentless table with
+ * deletes (3.43.0 and newer). On macOS Bun uses the system libsqlite3, so
+ * this depends on the OS version there.
+ */
+export function supportsContentlessSearch(db: Database): boolean {
+  const { version } = db.query('SELECT sqlite_version() AS version').get() as {
+    version: string
+  }
+  const parts = version.split('.').map((part) => Number.parseInt(part, 10))
+  for (const [i, min] of CONTENTLESS_SEARCH_MIN_VERSION.entries()) {
+    const part = parts[i] ?? 0
+    if (part !== min) return part > min
+  }
+  return true
+}
+
+/** Whether the cache's message_search is the contentless table */
+export function isContentlessSearch(db: Database): boolean {
+  const row = db
+    .query(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_search'`,
+    )
+    .get() as { sql: string | null } | null
+  return /contentless_delete\s*=\s*1/i.test(row?.sql ?? '')
+}
+
 function buildSenderSearchExpr(prefix: string): string {
   return `
     COALESCE(
@@ -50,25 +87,13 @@ function buildChatSearchExpr(prefix: string): string {
 }
 
 function dropMessageSearchSchema(db: Database): void {
-  db.run('DROP TRIGGER IF EXISTS messages_cache_ai')
-  db.run('DROP TRIGGER IF EXISTS messages_cache_ad')
-  db.run('DROP TRIGGER IF EXISTS messages_cache_au')
+  for (const trigger of SEARCH_TRIGGERS) {
+    db.run(`DROP TRIGGER IF EXISTS ${trigger}`)
+  }
   db.run('DROP TABLE IF EXISTS message_search')
 }
 
-function createMessageSearchSchema(db: Database): void {
-  // Message search index (FTS5)
-  db.run(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
-      text,
-      sender,
-      chat,
-      files,
-      tokenize='unicode61'
-    )
-  `)
-
-  // Search metadata table
+function createSearchMetaTable(db: Database): void {
   db.run(`
     CREATE TABLE IF NOT EXISTS search_meta (
       key TEXT PRIMARY KEY,
@@ -76,6 +101,42 @@ function createMessageSearchSchema(db: Database): void {
       updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
     )
   `)
+}
+
+function setSearchIndexVersion(db: Database, version: number): void {
+  db.query(
+    `
+      INSERT INTO search_meta (key, value, updated_at)
+      VALUES ($key, $value, $updated_at)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `,
+  ).run({
+    $key: 'search_index_version',
+    $value: String(version),
+    $updated_at: Date.now(),
+  })
+}
+
+/**
+ * The search index and the triggers that keep it in sync. A contentless
+ * table keeps only the index, not a copy of every message's text, sender
+ * and chat: search joins messages_cache by rowid for those, and
+ * contentless_delete lets the triggers delete and replace rows.
+ */
+function createMessageSearchSchema(db: Database, contentless: boolean): void {
+  // Message search index (FTS5)
+  db.run(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
+      text,
+      sender,
+      chat,
+      files,
+      ${contentless ? "content='', contentless_delete=1," : ''}
+      tokenize='unicode61'
+    )
+  `)
+
+  createSearchMetaTable(db)
 
   const senderExprNew = buildSenderSearchExpr('new')
   const chatExprNew = buildChatSearchExpr('new')
@@ -127,7 +188,11 @@ export function rebuildMessageSearchIndex(db: Database): void {
   const chatExpr = buildChatSearchExpr('m')
 
   db.transaction(() => {
-    db.run('DELETE FROM message_search')
+    if (isContentlessSearch(db)) {
+      db.run(`INSERT INTO message_search(message_search) VALUES('delete-all')`)
+    } else {
+      db.run('DELETE FROM message_search')
+    }
 
     db.run(`
       INSERT INTO message_search(rowid, text, sender, chat, files)
@@ -140,17 +205,7 @@ export function rebuildMessageSearchIndex(db: Database): void {
       FROM messages_cache m
     `)
 
-    db.query(
-      `
-        INSERT INTO search_meta (key, value, updated_at)
-        VALUES ($key, $value, $updated_at)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-      `,
-    ).run({
-      $key: 'search_index_version',
-      $value: String(SEARCH_INDEX_VERSION),
-      $updated_at: Date.now(),
-    })
+    setSearchIndexVersion(db, SEARCH_INDEX_VERSION)
   })()
 }
 
@@ -166,8 +221,14 @@ function getMessageSearchColumns(db: Database): string[] {
   }
 }
 
-/** What the search index needs: nothing, its rows again, or a new table */
-function searchIndexWork(db: Database): 'none' | 'rows' | 'schema' {
+/**
+ * What the search index needs: nothing, its rows again, or a new table. A
+ * regular table where a contentless one is wanted needs a new table.
+ */
+function searchIndexWork(
+  db: Database,
+  contentless: boolean,
+): 'none' | 'rows' | 'schema' {
   const result = db
     .query(`SELECT value FROM search_meta WHERE key = 'search_index_version'`)
     .get() as { value?: string } | null
@@ -178,6 +239,7 @@ function searchIndexWork(db: Database): 'none' | 'rows' | 'schema' {
     columns.includes(col),
   )
   if (columns.length === 0 || !hasAllColumns) return 'schema'
+  if (contentless && !isContentlessSearch(db)) return 'schema'
   return storedVersion === SEARCH_INDEX_VERSION ? 'none' : 'rows'
 }
 
@@ -190,18 +252,55 @@ function searchIndexWork(db: Database): 'none' | 'rows' | 'schema' {
  * one is filling. An up-to-date index is only read, so opening the cache
  * never waits for the lock.
  */
-function ensureMessageSearchIndex(db: Database): void {
-  if (searchIndexWork(db) === 'none') return
+function ensureMessageSearchIndex(db: Database, contentless: boolean): void {
+  if (searchIndexWork(db, contentless) === 'none') return
+
+  // A rebuild reads every message, which on a large cache read cold from
+  // disk can take longer than the 5-second busy_timeout another process
+  // waits for the lock with; so the build waits up to a minute, like an
+  // index build
+  withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
+    db.transaction(() => {
+      const work = searchIndexWork(db, contentless)
+      if (work === 'none') return
+      if (work === 'schema') {
+        dropMessageSearchSchema(db)
+        createMessageSearchSchema(db, contentless)
+      }
+      rebuildMessageSearchIndex(db)
+    }).immediate()
+  })
+}
+
+/**
+ * A SQLite older than 3.43 can't open a contentless table with deletes,
+ * which a newer tg created: its triggers would fail every message write,
+ * and so would dropping or inspecting the table. So drop only the triggers
+ * and mark the index stale. Messages are still cached; search fails with
+ * SQLite's error until a newer SQLite opens the cache, which recreates the
+ * triggers and rebuilds the index. Returns whether the index is disabled.
+ */
+function disableUnsupportedSearch(db: Database, contentless: boolean): boolean {
+  if (contentless || !isContentlessSearch(db)) return false
+
+  const triggers = db
+    .query(
+      `SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name IN (${SEARCH_TRIGGERS.map(() => '?').join(', ')})`,
+    )
+    .get(...SEARCH_TRIGGERS) as { n: number }
+  createSearchMetaTable(db)
+  const version = db
+    .query(`SELECT value FROM search_meta WHERE key = 'search_index_version'`)
+    .get() as { value?: string } | null
+  if (triggers.n === 0 && version?.value === '0') return true
 
   db.transaction(() => {
-    const work = searchIndexWork(db)
-    if (work === 'none') return
-    if (work === 'schema') {
-      dropMessageSearchSchema(db)
-      createMessageSearchSchema(db)
+    for (const trigger of SEARCH_TRIGGERS) {
+      db.run(`DROP TRIGGER IF EXISTS ${trigger}`)
     }
-    rebuildMessageSearchIndex(db)
+    setSearchIndexVersion(db, 0)
   }).immediate()
+  return true
 }
 
 /**
@@ -272,11 +371,24 @@ function ensureIndex(db: Database, name: string, definition: string): void {
   })
 }
 
+export interface SyncSchemaOptions {
+  /**
+   * Keep message_search as a contentless table; defaults to whether this
+   * SQLite supports it. Tests set it to act as an older SQLite.
+   */
+  contentlessSearch?: boolean
+}
+
 /**
  * Initialize the sync schema
  * Creates all tables and indexes for the sync system
  */
-export function initSyncSchema(db: Database): void {
+export function initSyncSchema(
+  db: Database,
+  options: SyncSchemaOptions = {},
+): void {
+  const contentless = options.contentlessSearch ?? supportsContentlessSearch(db)
+
   // Messages cache table - stores synced messages
   db.run(`
     CREATE TABLE IF NOT EXISTS messages_cache (
@@ -331,9 +443,11 @@ export function initSyncSchema(db: Database): void {
   // A delete without chat context names only message IDs (#7)
   ensureIndex(db, 'idx_messages_cache_message_id', 'messages_cache(message_id)')
 
-  createMessageSearchSchema(db)
-
-  ensureMessageSearchIndex(db)
+  // Checked first: an older SQLite can't even inspect a contentless table
+  if (!disableUnsupportedSearch(db, contentless)) {
+    createMessageSearchSchema(db, contentless)
+    ensureMessageSearchIndex(db, contentless)
+  }
 
   // History ranges - the message ID ranges of a chat cached without gaps
   // (src/db/history-ranges.ts); ranges of one chat never touch or overlap
