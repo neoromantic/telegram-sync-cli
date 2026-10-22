@@ -1,5 +1,6 @@
 import { SyncJobStatus } from '../db/sync-schema'
 import { attemptReconnect, scheduleReconnect } from './daemon-accounts'
+import { maybeSyncContacts } from './daemon-contacts'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
 import {
   cleanupOldJobs,
@@ -135,6 +136,15 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     // A stop as a job starts: no health check, refresh, tick or wait. The
     // shutdown waits for the jobs and marks every account stopped.
     if (ctx.state.shutdownRequested) break
+
+    // Contacts: due on start (after the dialog pass) and every 30 ticks
+    // after. A due check runs in the background (#8).
+    if (
+      loopIteration === 1 ||
+      loopIteration % SCHEDULER_REFRESH_INTERVAL_TICKS === 0
+    ) {
+      void maybeSyncContacts(ctx, now)
+    }
 
     if (loopIteration % HEALTH_CHECK_INTERVAL_TICKS === 0) {
       await runHealthChecks(ctx, now)

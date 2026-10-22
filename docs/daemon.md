@@ -10,6 +10,8 @@ The `tg daemon` subcommand runs a long-lived process that:
 - Bootstraps dialogs on startup and after each reconnect (seed `chats_cache` +
   `chat_sync_state`, archived chats included)
 - Schedules message sync jobs (forward catchup + backfill)
+- Keeps each account's contact list current: a background check by the peer TTL with
+  Telegram's hash, so an unchanged list costs one tiny reply (see [Contacts sync](#contacts-sync))
 - Writes only to local cache/sync tables (read-only to Telegram)
 
 **Key Principles:**
@@ -150,6 +152,43 @@ Key files:
 - `src/daemon/sync-worker-real-jobs.ts`
 - `src/daemon/sync-worker-real-context.ts`
 - `src/daemon/sync-retry.ts` (backoff and permanent errors)
+
+### Contacts sync
+
+The daemon keeps each connected account's contact list in its own cache (`users_cache.is_contact`)
+([#8](https://github.com/neoromantic/telegram-sync-cli/issues/8)). It only reads from Telegram:
+`contacts.getContacts`.
+
+- **When:** the main loop looks on its first tick, right after the startup dialog pass, and then
+  every 30 ticks (~30 seconds). A check is due when the account has no recorded list, when the
+  list is older than the peer TTL (`cache.staleness.peers`, one week by default), or when an
+  update hinted at a change. The TTL is read when the daemon starts, so a change to it needs a
+  restart. Most looks read one row of `sync_state` and do nothing.
+- **Hash:** the request carries Telegram's hash of the cached list: the `saved_count` of the last
+  full list and the IDs of the cached contacts. An unchanged list gets `contactsNotModified`
+  back, a few bytes, and only `sync_state.last_sync_at` moves. Because the hash comes from the
+  cache, any drift (a contact edited through `tg api contacts.*`, a missed update, a
+  `--fresh` from another process) makes it differ, and Telegram sends the full list.
+- **Full list:** applied as `tg contacts list --fresh` applies it: listed users are marked,
+  cached contacts it leaves out are unmarked and keep their row
+  ([contacts.md](contacts.md#removed-contacts)).
+- **In the background:** a check never holds the job loop. One check per account runs at a
+  time.
+- **Backoff:** a FLOOD_WAIT longer than the 5 minutes the client sleeps through is recorded in
+  the account's `rate_limits` (the CLI sees it too) and the account isn't checked again until
+  it ends. Any other error is logged as a warning and the account is checked again after 15
+  minutes; `last_sync_at` stays as it was.
+- **Stop:** the request gets the daemon's stop signal. A check that ends during a stop writes
+  nothing.
+
+Database growth: an unchanged list costs one small request and one `sync_state` UPDATE per
+account per TTL. A changed list rewrites the contact rows in place and runs one UPDATE for the
+removed contacts. New rows come only from new contacts. Nothing is deleted, and `sync_state`
+holds one row per account cache.
+
+Key files:
+- `src/daemon/daemon-contacts.ts`
+- `src/db/contacts-sync.ts`
 
 ---
 
