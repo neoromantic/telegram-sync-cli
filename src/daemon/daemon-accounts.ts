@@ -262,10 +262,21 @@ export function setupEventHandlers(
           .handleDeleteMessagesWithoutChat(ctxLocal, {
             messageIds: update.messageIds,
           })
-          .then((deletedCount) => {
+          .then(({ deleted, ambiguous }) => {
             ctx.logger.debug(
-              `[Account ${accountId}] Deleted ${deletedCount} message(s) without chat context`,
+              `[Account ${accountId}] Deleted ${deleted} message(s) without chat context`,
             )
+            if (ambiguous.length > 0) {
+              const shown = ambiguous
+                .slice(0, 5)
+                .map((a) => `${a.messageId} in ${a.chatIds.join(', ')}`)
+                .join('; ')
+              const more =
+                ambiguous.length > 5 ? `; ${ambiguous.length - 5} more` : ''
+              ctx.logger.warn(
+                `[Account ${accountId}] Left ${ambiguous.length} message ID(s) of a delete without chat context unmarked: more than one private chat or basic group has each (${shown}${more})`,
+              )
+            }
           })
           .catch((err) => {
             ctx.logger.error(

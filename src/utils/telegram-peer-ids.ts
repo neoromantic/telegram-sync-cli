@@ -45,6 +45,16 @@ function peerKind(peerId: number): PeerKind | null {
   return null
 }
 
+/**
+ * Whether a marked ID is a user or a basic group. Their messages take IDs
+ * from one sequence per account, so a delete update without a chat names at
+ * most one of them; each channel or supergroup numbers its own messages.
+ */
+export function sharesAccountMessageIds(peerId: number): boolean {
+  const kind = peerKind(peerId)
+  return kind === 'user' || kind === 'chat'
+}
+
 export function toPeerIdFromRawPeer(
   peer: RawPeerLike | null | undefined,
 ): number | null {

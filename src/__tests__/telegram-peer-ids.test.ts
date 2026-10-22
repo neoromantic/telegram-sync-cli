@@ -3,6 +3,7 @@ import { getMarkedPeerId, parseMarkedPeerId } from '@mtcute/bun'
 import Long from 'long'
 import {
   legacyChatIdCandidates,
+  sharesAccountMessageIds,
   toInputPeerFromPeerId,
   toMarkedPeerId,
   toPeerIdFromRawChat,
@@ -156,6 +157,28 @@ describe('legacyChatIdCandidates', () => {
   })
 })
 
+describe('sharesAccountMessageIds', () => {
+  it('holds for users and basic groups', () => {
+    for (const peerId of [1001, -1, -4242, -999_999_999_999]) {
+      expect(sharesAccountMessageIds(peerId)).toBe(true)
+    }
+  })
+
+  it('does not hold for channels, supergroups and IDs that name no peer', () => {
+    for (const peerId of [
+      -1001234567890,
+      -1_000_000_000_001,
+      -1005555555555,
+      0,
+      -1_000_000_000_000,
+      1.5,
+      Number.NaN,
+    ]) {
+      expect(sharesAccountMessageIds(peerId)).toBe(false)
+    }
+  })
+})
+
 describe('agreement with mtcute', () => {
   it('marks raw peers like getMarkedPeerId', () => {
     for (const peer of RAW_PEERS) {
@@ -171,6 +194,14 @@ describe('agreement with mtcute', () => {
       expect(marked).toBe(getMarkedPeerId(raw, mtcuteType))
       expect(parseMarkedPeerId(marked)).toEqual([mtcuteType, raw])
       expect(toRawPeerId(marked)).toBe(parseMarkedPeerId(marked)[1])
+    }
+  })
+
+  it('shares the account sequence for every peer mtcute does not read as a channel', () => {
+    for (const { marked } of SAMPLES) {
+      expect(sharesAccountMessageIds(marked)).toBe(
+        parseMarkedPeerId(marked)[0] !== 'channel',
+      )
     }
   })
 

@@ -3,6 +3,7 @@
  * Provides typed access to the messages_cache table
  */
 import type { Database } from 'bun:sqlite'
+import { sharesAccountMessageIds } from '../utils/telegram-peer-ids'
 import { MessageCacheRow } from './sync-schema'
 
 /**
@@ -36,6 +37,26 @@ export interface ListMessagesOptions {
   includeDeleted?: boolean
 }
 
+/** A message ID that more than one private chat or basic group has live */
+export interface AmbiguousMessageId {
+  messageId: number
+  /** Marked IDs of those chats, ascending */
+  chatIds: number[]
+}
+
+/** Where the message IDs of a delete without chat context live */
+export interface MessageChatLookup {
+  /** Message ID → the one private chat or basic group that has it live */
+  chatIds: Map<number, number>
+  ambiguous: AmbiguousMessageId[]
+}
+
+/** What a delete without chat context marked, and what it left */
+export interface DeleteWithoutChatResult {
+  deleted: number
+  ambiguous: AmbiguousMessageId[]
+}
+
 /**
  * Messages cache service interface
  */
@@ -46,14 +67,20 @@ export interface MessagesCache {
   upsertBatch(messages: MessageInput[]): void
   /** Get a message by chat_id and message_id */
   get(chatId: number, messageId: number): MessageCacheRow | null
-  /** Find chat IDs for given message IDs (for delete events without chat context) */
-  findChatIdsByMessageIds(messageIds: number[]): Map<number, number>
+  /**
+   * Find the chat of each message ID among the account's private chats and
+   * basic groups, for delete events without chat context
+   */
+  findChatIdsByMessageIds(messageIds: number[]): MessageChatLookup
   /** List messages for a chat in reverse chronological order */
   listByChatId(chatId: number, options: ListMessagesOptions): MessageCacheRow[]
   /** Mark messages as deleted */
   markDeleted(chatId: number, messageIds: number[]): void
-  /** Mark messages as deleted when chat ID is unknown - looks up chat from cache */
-  markDeletedByMessageIds(messageIds: number[]): number
+  /**
+   * Mark messages as deleted when the chat is unknown, each in the one chat
+   * among the account's private chats and basic groups that has it live
+   */
+  markDeletedByMessageIds(messageIds: number[]): DeleteWithoutChatResult
   /** Update message text (for edits) */
   updateText(
     chatId: number,
@@ -137,6 +164,11 @@ export function createMessagesCache(db: Database): MessagesCache {
       WHERE chat_id = $chat_id AND message_id = $message_id
     `),
 
+    findChatIdsByMessageId: db.query(`
+      SELECT chat_id FROM messages_cache
+      WHERE message_id = $message_id AND is_deleted = 0
+    `),
+
     updateText: db.prepare(`
       UPDATE messages_cache
       SET text = $text, is_edited = 1, edit_date = $edit_date, updated_at = $now
@@ -202,32 +234,32 @@ export function createMessagesCache(db: Database): MessagesCache {
       return stmts.get.get({ $chat_id: chatId, $message_id: messageId }) ?? null
     },
 
-    findChatIdsByMessageIds(messageIds: number[]): Map<number, number> {
-      const result = new Map<number, number>()
-      if (messageIds.length === 0) return result
+    findChatIdsByMessageIds(messageIds: number[]): MessageChatLookup {
+      const chatIds = new Map<number, number>()
+      const ambiguous: AmbiguousMessageId[] = []
 
-      // Query each message ID to find its chat
-      // Note: This does a table scan per message ID, but delete events typically have few IDs
-      const stmt = db.query(
-        'SELECT chat_id FROM messages_cache WHERE message_id = $message_id AND is_deleted = 0',
-      )
+      for (const messageId of new Set(messageIds)) {
+        const rows = stmts.findChatIdsByMessageId.all({
+          $message_id: messageId,
+        }) as Array<{ chat_id: number }>
+        // Each channel and supergroup numbers its own messages, so its rows
+        // say nothing about a delete without chat context. The primary key
+        // makes the chat IDs unique.
+        const candidates = rows
+          .map((row) => row.chat_id)
+          .filter(sharesAccountMessageIds)
 
-      for (const messageId of messageIds) {
-        const rows = stmt.all({ $message_id: messageId }) as Array<{
-          chat_id: number
-        }>
-        if (rows.length === 0) continue
-
-        const uniqueChatIds = new Set(rows.map((row) => row.chat_id))
-        if (uniqueChatIds.size === 1) {
-          const [chatId] = uniqueChatIds
-          if (chatId !== undefined) {
-            result.set(messageId, chatId)
-          }
+        if (candidates.length > 1) {
+          ambiguous.push({
+            messageId,
+            chatIds: candidates.sort((a, b) => a - b),
+          })
+        } else if (candidates[0] !== undefined) {
+          chatIds.set(messageId, candidates[0])
         }
       }
 
-      return result
+      return { chatIds, ambiguous }
     },
 
     listByChatId(
@@ -260,39 +292,26 @@ export function createMessagesCache(db: Database): MessagesCache {
       transaction()
     },
 
-    markDeletedByMessageIds(messageIds: number[]): number {
-      if (messageIds.length === 0) return 0
+    markDeletedByMessageIds(messageIds: number[]): DeleteWithoutChatResult {
+      if (messageIds.length === 0) return { deleted: 0, ambiguous: [] }
 
-      // First, find which chats these messages belong to
-      const chatMap = this.findChatIdsByMessageIds(messageIds)
-      if (chatMap.size === 0) return 0
-
-      // Group message IDs by chat ID for efficient batch updates
-      const byChatId = new Map<number, number[]>()
-      for (const [messageId, chatId] of chatMap) {
-        const existing = byChatId.get(chatId) ?? []
-        existing.push(messageId)
-        byChatId.set(chatId, existing)
+      const lookup = this.findChatIdsByMessageIds(messageIds)
+      if (lookup.chatIds.size === 0) {
+        return { deleted: 0, ambiguous: lookup.ambiguous }
       }
 
-      // Mark deleted for each chat
       const now = Date.now()
-      let deletedCount = 0
-      const transaction = db.transaction(() => {
-        for (const [chatId, msgIds] of byChatId) {
-          for (const messageId of msgIds) {
-            stmts.markDeleted.run({
-              $chat_id: chatId,
-              $message_id: messageId,
-              $now: now,
-            })
-            deletedCount++
-          }
+      db.transaction(() => {
+        for (const [messageId, chatId] of lookup.chatIds) {
+          stmts.markDeleted.run({
+            $chat_id: chatId,
+            $message_id: messageId,
+            $now: now,
+          })
         }
-      })
-      transaction()
+      })()
 
-      return deletedCount
+      return { deleted: lookup.chatIds.size, ambiguous: lookup.ambiguous }
     },
 
     updateText(

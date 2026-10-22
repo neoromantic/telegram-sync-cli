@@ -614,6 +614,84 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(messagesCache.get(200, 2)?.is_deleted).toBe(1)
   })
 
+  describe('deletes of a message ID that several chats cache', () => {
+    async function wireWithMessageSeven(chatIds: number[]) {
+      const accountsDb = createAccountsDb([
+        { id: 1, phone: '+15550000001', user_id: 101 },
+      ])
+      const ctx = createContext(accountsDb)
+      const { setupEventHandlers } = await import('../daemon/daemon-accounts')
+      const accountState: AccountConnectionState = {
+        accountId: 1,
+        phone: '+15550000001',
+        name: null,
+        status: 'connected',
+        client: createClient(),
+      }
+      setupEventHandlers(ctx, accountState)
+
+      const messagesCache = createMessagesCache(testCacheDb)
+      for (const chatId of chatIds) {
+        messagesCache.upsert({
+          chat_id: chatId,
+          message_id: 7,
+          text: `made-up message in ${chatId}`,
+          message_type: 'text',
+          date: 1_760_000_000,
+          raw_json: '{}',
+        })
+      }
+      return { ctx, accountState, messagesCache }
+    }
+
+    it("marks a private chat's message deleted when a channel in the same account has the ID", async () => {
+      const { accountState, messagesCache } = await wireWithMessageSeven([
+        4242, -1001234567890,
+      ])
+
+      accountState.eventHandlers?.onDeleteMessage(
+        asDeleteUpdate({ channelId: null, messageIds: [7] }),
+      )
+      await Bun.sleep(0)
+
+      expect(messagesCache.get(4242, 7)?.is_deleted).toBe(1)
+      expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(0)
+    })
+
+    it('marks only the channel message on a channel delete', async () => {
+      const { accountState, messagesCache } = await wireWithMessageSeven([
+        4242, -1001234567890,
+      ])
+
+      accountState.eventHandlers?.onDeleteMessage(
+        asDeleteUpdate({ channelId: -1001234567890, messageIds: [7] }),
+      )
+      await Bun.sleep(0)
+
+      expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(1)
+      expect(messagesCache.get(4242, 7)?.is_deleted).toBe(0)
+    })
+
+    it('keeps both messages and warns when two private chats of the account have the ID', async () => {
+      const { ctx, accountState, messagesCache } = await wireWithMessageSeven([
+        4242, -5151,
+      ])
+
+      accountState.eventHandlers?.onDeleteMessage(
+        asDeleteUpdate({ channelId: null, messageIds: [7] }),
+      )
+      await Bun.sleep(0)
+
+      expect(messagesCache.get(4242, 7)?.is_deleted).toBe(0)
+      expect(messagesCache.get(-5151, 7)?.is_deleted).toBe(0)
+      const warn = ctx.logger.warn as ReturnType<typeof mock>
+      expect(warn).toHaveBeenCalledTimes(1)
+      const [line] = warn.mock.calls[0] as [string]
+      expect(line).toContain('[Account 1]')
+      expect(line).toContain('7 in -5151, 4242')
+    })
+  })
+
   it('merges duplicate user_id by keeping real phone account', async () => {
     const accountsDb = createAccountsDb([
       { id: 1, phone: 'user:555', user_id: 555 },

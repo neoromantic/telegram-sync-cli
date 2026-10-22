@@ -222,6 +222,31 @@ describe('MessagesSearch', () => {
     expect(results3[0]!.is_deleted).toBe(1)
   })
 
+  it('hides a message deleted without chat context unless includeDeleted', () => {
+    messagesCache.upsert({
+      chat_id: 4242,
+      message_id: 7,
+      from_id: 4242,
+      text: 'rehearsal moved to friday',
+      message_type: 'text',
+      date: Date.now(),
+      raw_json: '{}',
+    })
+
+    messagesCache.markDeletedByMessageIds([7])
+
+    const search = createMessagesSearch(db)
+    expect(search.search('rehearsal')).toEqual([])
+
+    const withDeleted = search.search('rehearsal', { includeDeleted: true })
+    expect(withDeleted).toHaveLength(1)
+    expect(withDeleted[0]).toMatchObject({
+      chat_id: 4242,
+      message_id: 7,
+      is_deleted: 1,
+    })
+  })
+
   it('escapes FTS5 special characters in queries', () => {
     const now = Date.now()
 
