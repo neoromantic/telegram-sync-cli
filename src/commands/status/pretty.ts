@@ -322,7 +322,8 @@ function printAccountsSection(status: StatusSnapshot): void {
     printRow('Active', c.warning('None'))
   }
 
-  if (status.accounts.accounts.length <= 1) {
+  // With --account the list holds that account only; its line still shows
+  if (status.accounts.total <= 1) {
     return
   }
 
@@ -396,10 +397,29 @@ function printStorageSection(status: StatusSnapshot): void {
   }
 }
 
+/**
+ * With --account, a line under the title says which account the figures
+ * cover, so they don't read as totals over every account
+ */
+function printScope(status: StatusSnapshot): void {
+  if (status.account_id === null) return
+  const account = status.accounts.accounts.find(
+    (acc) => acc.id === status.account_id,
+  )
+  const label = account?.label ? ` [${account.label}]` : ''
+  const phone = account ? ` ${account.phone}` : ''
+  console.log(
+    c.warning(
+      `  Only account #${status.account_id}${phone}${label}; Daemon covers every account`,
+    ),
+  )
+}
+
 export function printPrettyStatus(status: StatusSnapshot): void {
   console.log()
   console.log(c.bold('  Telegram Sync CLI Status'))
   console.log(c.dim(`  ${status.timestamp}`))
+  printScope(status)
 
   printDaemonSection(status)
   printSyncJobsSection(status)

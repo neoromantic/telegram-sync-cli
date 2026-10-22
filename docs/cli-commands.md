@@ -280,7 +280,9 @@ part counts the daemon's sync jobs and lists some of them:
   accounts, pretty output prints a line with these under each account.
 - `--account <selector>` scopes the totals, the lists and `accounts.accounts` to one account;
   `account_id` says which (`null` without the flag). The `daemon` section always covers the
-  whole daemon.
+  whole daemon, and `accounts.total` and the `active_*` fields stay those of every account.
+  Pretty output says which account the figures cover in a line under the title, and still
+  prints that account's line.
 - `storage` reports the shared cache of 0.3 and older: `legacy_caches` lists the files set
   aside as `shared-cache*.db` (`path`, `size_bytes`), and `migration` is `null` or
   `{ reason, path, suggestion }` while the move waits (see
