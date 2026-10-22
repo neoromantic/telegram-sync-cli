@@ -26,6 +26,10 @@ tg api account.getAuthorizations --account 2
 tg api updates.getState --raw
 ```
 
+With `--raw` the command prints only the result and exits 0, so a script can pipe it. A failed
+call prints the usual error JSON to stderr and exits with its code. Either way `tg api` closes
+its Telegram connection before it exits.
+
 This maps directly to mtcute's `client.call()`:
 ```typescript
 await client.call({ _: 'account.checkUsername', username: 'myuser' })

@@ -4,7 +4,7 @@
  * This enables full access to Telegram's API without manually
  * mapping every method to a CLI command.
  */
-import type { tl } from '@mtcute/bun'
+import type { TelegramClient, tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
 import { ConfigError } from '../config'
@@ -13,7 +13,7 @@ import { ErrorCodes } from '../types'
 import { openAccountCache } from '../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
 import { mergeArgs } from '../utils/args'
-import { error, success } from '../utils/output'
+import { error, raw, success } from '../utils/output'
 import {
   isRateLimitError,
   wrapClientCallWithRateLimits,
@@ -69,12 +69,13 @@ export const apiCommand = defineCommand({
 
     // Rate limits are kept in the account's cache
     const { account } = openAccountCache(args.account)
+    let client: TelegramClient | undefined
 
     try {
-      const client = wrapClientCallWithRateLimits(
-        getClientForAccount(account.id),
-        { context: 'cli:api', accountId: account.id },
-      )
+      client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+        context: 'cli:api',
+        accountId: account.id,
+      })
 
       // Build request parameters
       // Remove known CLI args, keep the rest as API params
@@ -93,10 +94,11 @@ export const apiCommand = defineCommand({
       // Make the API call
       const request = { _: method, ...params } as tl.RpcMethod
       const result = await client.call(request)
+      await closeClient(client)
 
       // Output result
       if (args.raw) {
-        console.log(JSON.stringify(result, replacer, 2))
+        raw(JSON.stringify(result, replacer, 2))
       } else {
         success({
           method,
@@ -104,6 +106,7 @@ export const apiCommand = defineCommand({
         })
       }
     } catch (err) {
+      await closeClient(client)
       if (err instanceof ConfigError) {
         error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
       }
@@ -131,6 +134,15 @@ export const apiCommand = defineCommand({
     }
   },
 })
+
+/**
+ * Close the client before the output exits. mtcute's connection would keep
+ * the process alive, and destroy() saves the session. The result stands
+ * even if closing fails.
+ */
+async function closeClient(client: TelegramClient | undefined): Promise<void> {
+  await client?.destroy().catch(() => {})
+}
 
 /**
  * Custom JSON replacer to handle BigInt values

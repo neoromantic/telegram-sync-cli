@@ -40,8 +40,23 @@ export function success<T>(data: T): void {
       break
   }
 
-  // In production mode, exit to close any active connections (e.g., mtcute TelegramClient)
-  // This prevents the process from hanging when the event loop is kept alive by open sockets
+  exitAfterSuccess()
+}
+
+/**
+ * Output text as is, without the success wrapper or the output format
+ * (`tg api --raw`). Exits in production, as success() does.
+ */
+export function raw(text: string): void {
+  console.log(text)
+  exitAfterSuccess()
+}
+
+/**
+ * In production mode, exit to close any active connections (e.g., mtcute TelegramClient)
+ * This prevents the process from hanging when the event loop is kept alive by open sockets
+ */
+function exitAfterSuccess(): void {
   if (process.env.BUN_ENV !== 'test' && process.env.NODE_ENV !== 'test') {
     process.exit(0)
   }
