@@ -7,7 +7,6 @@ The list is in priority order.
 ## Reliability
 
 - [Run each account's sync jobs independently in the daemon](https://github.com/neoromantic/telegram-sync-cli/issues/60)
-- [Delete events without chat context can skip valid deletions](https://github.com/neoromantic/telegram-sync-cli/issues/7)
 - [Daemon doesn't sync contacts](https://github.com/neoromantic/telegram-sync-cli/issues/8)
 - [Database size management](https://github.com/neoromantic/telegram-sync-cli/issues/1)
 
