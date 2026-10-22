@@ -2,8 +2,12 @@
  * Runs the tg CLI (src/index.ts) with a fake Telegram client in place of
  * mtcute's, for api.e2e.test.ts. Pass it as `entry` to runCli.
  *
- * Like mtcute's open connection, the fake client keeps the process alive
- * until destroy(), which prints FAKE_CLIENT_DESTROYED to stderr.
+ * The fake client keeps the process alive even after destroy(), which
+ * prints FAKE_CLIENT_DESTROYED to stderr: a connected mtcute client might
+ * leave a handle open after it is closed, and that can't be checked
+ * offline. So tg api ends only through an explicit exit, as raw(),
+ * success() and error() do.
+ *
  * help.getConfig returns FAKE_CONFIG; any other method fails the way
  * Telegram rejects an unknown one.
  */
@@ -29,7 +33,8 @@ if (import.meta.main) {
   const { mock } = await import('bun:test')
   const telegram = await import('../../services/telegram')
 
-  const connection = setInterval(() => {}, 60_000)
+  // Never cleared, not even by destroy()
+  setInterval(() => {}, 60_000)
   const client = {
     async call(request: { _: string }) {
       if (request._ === 'help.getConfig') return FAKE_CONFIG
@@ -40,7 +45,6 @@ if (import.meta.main) {
     // exits without awaiting destroy() never prints it
     async destroy() {
       await Bun.sleep(20)
-      clearInterval(connection)
       console.error(FAKE_CLIENT_DESTROYED)
     },
   }

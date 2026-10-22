@@ -192,9 +192,9 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
   credentials; chat titles and IDs in search results, and the first run on a 0.2.0 cache
 - `chats-sync.e2e.test.ts` — `tg chats sync` against a seeded cache, without credentials
 - `api.e2e.test.ts` — `tg api` with a fake Telegram client (`helpers/fake-client-cli.ts`, run
-  as runCli's `entry`), which keeps the process alive until it is closed, as mtcute's
-  connection does: with and without `--raw` and on a failed call, the command prints its
-  output, closes the client and exits
+  as runCli's `entry`), which keeps the process alive even after it is closed, as a connected
+  mtcute client might: with and without `--raw` and on a failed call, the command prints its
+  output, closes the client and exits the process itself
 - `status.e2e.test.ts` — `tg status` counts and lists running, pending, retrying and failed
   sync jobs from a seeded cache, in JSON and pretty output, without credentials; the retry
   commands it prints delete the failed jobs and keep each chat's mode; it shows the daemon's
