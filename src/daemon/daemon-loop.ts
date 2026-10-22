@@ -78,9 +78,8 @@ function sleepUnlessStopped(ms: number, signal: AbortSignal): Promise<void> {
 
 async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
   for (const accountState of ctx.state.accounts.values()) {
-    // A running job uses the connection; a reconnect would close its client
-    if (ctx.runtime.jobsInFlight.has(accountState.accountId)) continue
-
+    // The check runs beside a running job, on the same client: a job starts
+    // on the same tick, so skipping busy accounts could skip one every time
     if (accountState.status === 'connected' && accountState.client) {
       const lastActivity = accountState.lastActivity ?? 0
       if (now - lastActivity < HEALTH_CHECK_COOLDOWN_MS) {
@@ -99,10 +98,13 @@ async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
       }
     }
 
+    // A reconnect would close the client under a running job: it waits for
+    // a later health check, after the job ends
     if (
       accountState.status === 'error' &&
       accountState.nextReconnectAt &&
-      now >= accountState.nextReconnectAt
+      now >= accountState.nextReconnectAt &&
+      !ctx.runtime.jobsInFlight.has(accountState.accountId)
     ) {
       attemptReconnect(ctx, accountState).catch((err) => {
         ctx.logger.error(

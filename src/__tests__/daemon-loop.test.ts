@@ -6,7 +6,7 @@ import type { TelegramClient } from '@mtcute/bun'
 import type { DaemonContext } from '../daemon/daemon-context'
 import { createDaemonRuntime, requestShutdown } from '../daemon/daemon-context'
 import { mainLoop } from '../daemon/daemon-loop'
-import { waitForJobsInFlight } from '../daemon/daemon-scheduler'
+import { startDueJobs, waitForJobsInFlight } from '../daemon/daemon-scheduler'
 import type { SyncScheduler } from '../daemon/scheduler'
 import type { RealSyncWorker } from '../daemon/sync-worker'
 import type { AccountConnectionState } from '../daemon/types'
@@ -528,44 +528,62 @@ describe('mainLoop', () => {
     expect(performance.now() - started).toBeLessThan(500)
   })
 
-  it('skips the health check of an account whose job is in flight', async () => {
+  it('checks a busy account but waits to reconnect one until its job ends', async () => {
     const ctx = createContext()
-    let finish = (_result: unknown) => {}
-    const processJobReal = mock(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve
-        }),
-    )
-    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      statusService: stopAfterTicks(ctx, 61),
-      scheduler: createMockScheduler({ getNextJob: () => jobOf(1) }),
-      worker: {
+    const finishes: Array<(result: unknown) => void> = []
+    const workerWithBlockedJob = () =>
+      ({
         client: {} as TelegramClient,
         canMakeApiCall: () => true,
-        processJobReal,
-      } as unknown as RealSyncWorker,
-    })
+        processJobReal: mock(
+          () =>
+            new Promise((resolve) => {
+              finishes.push(resolve)
+            }),
+        ),
+      }) as unknown as RealSyncWorker
     const getMe = mock(async () => ({}))
-    ctx.state.accounts.set(
-      1,
-      connectedState(1, { getMe } as unknown as TelegramClient),
-    )
+    // Account 1 is connected; account 2 is due to reconnect. Both start a
+    // job on the first tick, still running at the 60th.
+    for (const accountId of [1, 2]) {
+      addAccountRuntime(ctx, accountId, createAccountCacheDb(), {
+        statusService:
+          accountId === 1 ? stopAfterTicks(ctx, 61) : createMockStatusService(),
+        scheduler: createMockScheduler({ getNextJob: () => jobOf(accountId) }),
+        worker: workerWithBlockedJob(),
+      })
+      ctx.state.accounts.set(
+        accountId,
+        connectedState(accountId, { getMe } as unknown as TelegramClient),
+      )
+    }
+    const second = ctx.state.accounts.get(2) as AccountConnectionState
 
     const originalNow = Date.now
     Date.now = () => 120000
     try {
-      await runWithImmediateTimeouts(() => mainLoop(ctx))
+      await runWithImmediateTimeouts(async () => {
+        // The job starts while account 2 is connected, then its connection
+        // fails
+        startDueJobs(ctx)
+        second.status = 'error'
+        second.nextReconnectAt = 1
+        await mainLoop(ctx)
+      })
     } finally {
       Date.now = originalNow
     }
 
-    expect(getMe).not.toHaveBeenCalled()
+    // Account 1's health check ran beside its job
+    expect(getMe).toHaveBeenCalledTimes(1)
     expect(ctx.state.accounts.get(1)?.status).toBe('connected')
-    expect(processJobReal).toHaveBeenCalledTimes(1)
+    // Account 2's reconnect didn't close the client under its job
+    expect(second.status).toBe('error')
+    expect(second.nextReconnectAt).toBe(1)
 
-    finish({ success: true, messagesFetched: 0 })
+    for (const finish of finishes) finish({ success: true, messagesFetched: 0 })
     await waitForJobsInFlight(ctx)
+    expect(finishes).toHaveLength(2)
     expect(ctx.runtime.jobsInFlight.size).toBe(0)
   })
 })
