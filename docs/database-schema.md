@@ -391,7 +391,9 @@ once the account knows it). The first open writes what is missing. A file stampe
 account ID or another Telegram user is not opened; the command fails with `CACHE_UNAVAILABLE`
 (`details.reason`: `owner_mismatch`), so a directory moved by hand, or a `data.db` recreated
 with reused IDs, can't mix two accounts' data. The check needs `accounts.user_id`, which tg
-fills in at login.
+fills in at login. One exception lets a re-login take its old cache back: a file stamped for
+the same Telegram user and for an account ID that `data.db` no longer has (or that now belongs
+to another user) is stamped for the account that opens it.
 
 ---
 

@@ -19,7 +19,7 @@ const CACHE_UNAVAILABLE_SUGGESTIONS: Record<CacheUnavailableReason, string> = {
   move_failed:
     'Check that the data directory is writable, stop older tg processes, then retry',
   owner_mismatch:
-    'Move the account directory away (tg starts a new cache) or put it back under the account it belongs to',
+    'Move the account directory away (tg starts a new cache), or put it under an account of the Telegram user it belongs to',
 }
 
 /** What to do about a cache that can't be opened */
