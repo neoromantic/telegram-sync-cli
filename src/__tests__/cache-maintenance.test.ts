@@ -140,14 +140,15 @@ describe('pruneCache', () => {
     expect(ids).not.toContain(oldFailed)
   })
 
-  it('keeps a rate limit window whose FLOOD_WAIT still runs', () => {
+  it('keeps a rate limit window whose FLOOD_WAIT still runs, not one whose wait ended', () => {
     const oldWindow = NOW_SEC - 2 * 3600
     addWindow(oldWindow, NOW_SEC + 3 * 3600)
     addWindow(oldWindow - 60)
+    addWindow(oldWindow - 120, NOW_SEC - 60)
 
     const result = pruneCache(db, getDefaultRetentionConfig(), { now: NOW })
 
-    expect(result.rate_limits).toBe(1)
+    expect(result.rate_limits).toBe(2)
     const left = db.query('SELECT window_start FROM rate_limits').all()
     expect(left).toEqual([{ window_start: oldWindow }])
   })
