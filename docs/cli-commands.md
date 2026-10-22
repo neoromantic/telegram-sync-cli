@@ -405,7 +405,8 @@ without a daemon too, then gives the cache's free pages back to the disk:
 - **`skipped`**: the account has no cache file yet; none is created.
 
 Both modes end with a checkpoint that empties the WAL (`checkpointed: false` when another
-process was reading it; the next checkpoint empties it). A full vacuum needs free disk space of
+process was reading it; the next checkpoint empties it). While the daemon runs, the checkpoint
+never waits for a reader, so it doesn't hold up the daemon's writes. A full vacuum needs free disk space of
 about twice the cache: a copy of it in the temporary directory and a WAL as big as the cache.
 Output:
 

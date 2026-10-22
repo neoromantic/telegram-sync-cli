@@ -291,12 +291,19 @@ function totalBytes(path: string): number {
   return fileSize(path) + fileSize(`${path}-wal`)
 }
 
-/** Empty the WAL into the file; false when a reader or writer held it */
-function checkpoint(db: Database): boolean {
-  try {
-    const row = db.query('PRAGMA wal_checkpoint(TRUNCATE)').get() as {
+/**
+ * Empty the WAL into the file; false when a reader or writer held it.
+ * A TRUNCATE checkpoint holds the write lock while it waits for readers on
+ * an older snapshot, so with the daemon running it doesn't wait at all:
+ * a busy cache reports false at once instead of holding the daemon's writes.
+ */
+function checkpoint(db: Database, options: { wait: boolean }): boolean {
+  const run = () =>
+    db.query('PRAGMA wal_checkpoint(TRUNCATE)').get() as {
       busy: number
     } | null
+  try {
+    const row = options.wait ? run() : withBusyTimeout(db, 0, run)
     return (row?.busy ?? 0) === 0
   } catch {
     return false
@@ -314,7 +321,9 @@ function checkpoint(db: Database): boolean {
  *   it to incremental auto_vacuum. It waits up to a minute for the write
  *   lock, and rebuilds the search index if the rewrite moved rowids.
  *
- * Both end with a checkpoint that empties the WAL.
+ * Both end with a checkpoint that empties the WAL. With the daemon running
+ * it gives up at once when a reader holds the WAL, so the daemon's writes
+ * never wait for it.
  */
 export function vacuumCache(
   db: Database,
@@ -348,7 +357,7 @@ export function vacuumCache(
     rebuilt_search = rebuildSearchIfRowidsMoved(db, before)
   }
 
-  const checkpointed = checkpoint(db)
+  const checkpointed = checkpoint(db, { wait: !options.daemonRunning })
   const bytes_after = totalBytes(path)
   return {
     mode,
