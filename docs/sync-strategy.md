@@ -305,8 +305,8 @@ Rate limits are tracked per API method:
 - Catchup and realtime run concurrently; realtime handlers do not wait for catchup to complete.
 - Daemon bootstraps dialogs on startup to seed `chats_cache` + `chat_sync_state`, and runs the
   same pass in the background after each reconnect.
-- The daemon checks each account's contact list on start and then every peer TTL with
-  Telegram's hash, so an unchanged list costs one tiny reply (see
+- The daemon checks each account's contact list on start, after each reconnect and every
+  peer TTL with Telegram's hash, so an unchanged list costs one tiny reply (see
   [daemon.md](daemon.md#contacts-sync)). `tg contacts list --fresh` still fetches it at once.
 
 ## Implementation References
