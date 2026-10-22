@@ -192,9 +192,11 @@ describe('bootstrapDialogs', () => {
     // No messages of its own: nothing to sync
     expect(chatSyncState.get(-1005555555555)).toBeNull()
     expect(fake.communityCalls).toHaveLength(1)
-    expect(fake.communityCalls[0]?.abortSignal).toBe(
-      ctx.runtime.shutdown.signal,
-    )
+    expect(fake.communityCalls[0]).toEqual({
+      abortSignal: ctx.runtime.shutdown.signal,
+      // A FLOOD_WAIT fails the request instead of holding up the sync start
+      floodSleepThreshold: 0,
+    })
     expect(
       (ctx.logger.info as ReturnType<typeof mock>).mock.calls.some(([line]) =>
         /1 communities/.test(String(line)),

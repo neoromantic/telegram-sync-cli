@@ -49,14 +49,17 @@ async function collectDialogs(
  * dialogs' users. A failed communities request leaves the dialogs listed.
  */
 export async function fetchChatsFromApi(
-  client: Pick<TelegramClient, 'iterDialogs' | 'getJoinedCommunities'>,
+  client: Pick<TelegramClient, 'iterDialogs' | 'withParams'>,
   cacheDb: Database,
 ): Promise<CachedChatInput[]> {
   const { dialogs, users } = await collectDialogs(client)
 
   let communities: CachedChatInput[] = []
   try {
-    communities = await fetchJoinedCommunities(client)
+    // Best effort: a FLOOD_WAIT fails it at once instead of holding up the list
+    communities = await fetchJoinedCommunities(
+      client.withParams({ floodSleepThreshold: 0 }),
+    )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     verbose(`Skipped joined communities: ${message}`)

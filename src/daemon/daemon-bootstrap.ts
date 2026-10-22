@@ -43,8 +43,9 @@ function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
  *
  * Telegram lists joined communities apart from the dialogs, so the pass
  * caches them with one more request (#58). A community has no messages of
- * its own, so it gets no sync state, and a failure of that request is
- * logged and leaves the pass complete: it says nothing about the chats.
+ * its own, so it gets no sync state. A failure of that request, a
+ * FLOOD_WAIT included (it isn't waited out), is logged and leaves the pass
+ * complete: it says nothing about the chats, and the next pass retries.
  *
  * A daemon stop ends the pass at the next dialog, so the shutdown doesn't
  * wait for the rest of the list (#56), and ends the page request the pass
@@ -168,7 +169,14 @@ export async function syncAccountDialogs(
   let communitiesCount = 0
   if (!stopped && !ctx.state.shutdownRequested) {
     try {
-      const rows = await fetchJoinedCommunities(pages)
+      // The dialogs are saved and the next pass retries, so the request
+      // never sleeps out a FLOOD_WAIT that would hold up the start of sync
+      const rows = await fetchJoinedCommunities(
+        client.withParams({
+          abortSignal: ctx.runtime.shutdown.signal,
+          floodSleepThreshold: 0,
+        }),
+      )
       if (rows.length > 0) chatsCache.upsertMany(rows)
       communitiesCount = rows.length
     } catch (err) {
