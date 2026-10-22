@@ -843,8 +843,10 @@ describe('daemon-accounts: connection + event wiring', () => {
     nextGetMe = { id: 5550002, firstName: 'Sam', lastName: 'Example' }
     expect(await connectAccount(ctx, 2, '+15550000002', null)).toBe(true)
 
+    // Session files stay open until destroy(), so a closed one is a fault
+    // worth a warning, not an expected part of the stop (#56)
     createdClients[0]!.destroy.mockImplementation(async () => {
-      throw new Error('storage is locked')
+      throw new Error('Database has closed')
     })
 
     await disconnectAllAccounts(ctx)
@@ -852,7 +854,12 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(createdClients[0]!.destroy).toHaveBeenCalledTimes(1)
     expect(createdClients[1]!.destroy).toHaveBeenCalledTimes(1)
     expect(ctx.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to close client (shutdown)'),
+      expect.stringContaining(
+        'Failed to close client (shutdown): Error: Database has closed',
+      ),
+    )
+    expect(ctx.logger.debug).not.toHaveBeenCalledWith(
+      expect.stringContaining('already closed'),
     )
     expect(ctx.state.accounts.get(1)?.status).toBe('disconnected')
     expect(ctx.state.accounts.get(2)?.status).toBe('disconnected')
