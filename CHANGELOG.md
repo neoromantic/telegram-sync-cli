@@ -66,8 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The daemon runs each account with its own cache, scheduler and sync
   worker, taking turns between accounts; each account waits 3 seconds
   between its own jobs. An account whose cache doesn't open is logged and
-  left out; one whose scheduler fails its startup pass is logged and keeps
-  syncing, and never stops the accounts after it. `daemon_status` rows are per account; `tg status` and
+  left out; one whose scheduler fails its startup pass, or whose cache fails
+  while its next job is picked, is logged and keeps syncing, and never stops
+  the accounts after it. `daemon_status` rows are per account; `tg status` and
   `tg daemon status` sum them and count only rows the live daemon wrote.
 
 ### Fixed
