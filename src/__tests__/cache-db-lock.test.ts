@@ -414,6 +414,37 @@ describe('cache database lock', () => {
     migrated.close()
   }, 30_000)
 
+  it('waits past the 5-second busy timeout to build the message_id index', async () => {
+    const cache = new Database(path)
+    cache.run('DROP INDEX idx_messages_cache_message_id')
+    cache.close()
+
+    // Another process holds the lock longer than busy_timeout, as one that
+    // builds the index on a large cache read cold from disk can
+    const holder = spawnBun(HOLD_LOCK, {
+      LOCK_DB_PATH: path,
+      LOCK_HOLD_MS: '6000',
+    })
+    await waitForLine(holder.stdout, 'locked')
+
+    const db = new Database(path)
+    const started = performance.now()
+    initCacheSchema(db)
+    initSyncSchema(db)
+    expect(performance.now() - started).toBeGreaterThan(5000)
+    expect(
+      db
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_cache_message_id'",
+        )
+        .get(),
+    ).toEqual({ name: 'idx_messages_cache_message_id' })
+    expect(db.query('PRAGMA busy_timeout').get()).toEqual({ timeout: 5000 })
+    db.close()
+
+    expect(await holder.exited).toBe(0)
+  }, 20_000)
+
   it('opens the cache again after a migration that failed', async () => {
     const accountCache = join(dir, 'accounts', '1', 'cache.db')
     mkdirSync(join(dir, 'accounts', '1'), { recursive: true })

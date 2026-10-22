@@ -232,6 +232,35 @@ function ensureColumn(
   }
 }
 
+/** How long an index build waits for the write lock, as the peer ID migration does */
+const INDEX_BUILD_BUSY_TIMEOUT_MS = 60_000
+
+/**
+ * Create an index an older cache lacks. Building it reads the whole table,
+ * which on a large cache read cold from disk can take longer than the
+ * 5-second busy_timeout, and another process that opens the cache meanwhile
+ * (the daemon next to a command) waits for the same write lock. So the build
+ * waits up to a minute; a process that waited finds the index there and
+ * creates nothing. A cache that has the index is only read, so opening it
+ * never waits for the lock.
+ */
+function ensureIndex(db: Database, name: string, definition: string): void {
+  const exists = db
+    .query(`SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?`)
+    .get(name)
+  if (exists) return
+
+  const { timeout } = db.query('PRAGMA busy_timeout').get() as {
+    timeout: number
+  }
+  db.run(`PRAGMA busy_timeout = ${INDEX_BUILD_BUSY_TIMEOUT_MS}`)
+  try {
+    db.run(`CREATE INDEX IF NOT EXISTS ${name} ON ${definition}`)
+  } finally {
+    db.run(`PRAGMA busy_timeout = ${timeout}`)
+  }
+}
+
 /**
  * Initialize the sync schema
  * Creates all tables and indexes for the sync system
@@ -289,10 +318,7 @@ export function initSyncSchema(db: Database): void {
     ON messages_cache(fetched_at)
   `)
   // A delete without chat context names only message IDs (#7)
-  db.run(`
-    CREATE INDEX IF NOT EXISTS idx_messages_cache_message_id
-    ON messages_cache(message_id)
-  `)
+  ensureIndex(db, 'idx_messages_cache_message_id', 'messages_cache(message_id)')
 
   createMessageSearchSchema(db)
 
