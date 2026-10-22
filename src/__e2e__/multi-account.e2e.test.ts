@@ -15,7 +15,8 @@ import { createChatsCache } from '../db/chats-cache'
 import { createDaemonStatusService } from '../db/daemon-status'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
-import { SyncJobType, SyncPriority } from '../db/sync-schema'
+import { createRateLimitsService } from '../db/rate-limits'
+import { type SyncChatType, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { VERSION } from '../version'
 import {
@@ -656,5 +657,162 @@ describe('E2E: status per account', () => {
     expect(output).toContain(`#2 ${BETA.phone}`)
     expect(output).toMatch(/reconnecting · 0 queued · history 0\/0 · 1 msgs/)
     expect(output).not.toMatch(/connected · 0 queued · 1 failed/)
+  })
+})
+
+describe('E2E: status totals over two accounts', () => {
+  let env: TestEnvironment
+
+  beforeAll(() => {
+    env = createTwoAccounts('multi-account-status-totals')
+    const now = Math.floor(Date.now() / 1000)
+    // Calls of the last minute. window_start is now, not the minute's
+    // start, so a minute boundary before tg status reads can't drop them
+    const calls = (accountId: number, method: string, count: number) =>
+      env
+        .openCacheDb(accountId)
+        .run(
+          'INSERT INTO rate_limits (method, window_start, call_count, last_call_at) VALUES (?, ?, ?, ?)',
+          [method, now, count, now],
+        )
+    calls(1, 'messages.getHistory', 2)
+    calls(1, 'users.getUsers', 1)
+    calls(2, 'messages.getHistory', 3)
+    createRateLimitsService(env.openCacheDb(2)).setFloodWait(
+      'messages.getHistory',
+      600,
+    )
+
+    const syncing = (
+      accountId: number,
+      chatId: number,
+      chatType: SyncChatType,
+      synced: number,
+      complete: boolean,
+    ) => {
+      const state = createChatSyncStateService(env.openCacheDb(accountId))
+      state.upsert({
+        chat_id: chatId,
+        chat_type: chatType,
+        sync_priority: SyncPriority.Medium,
+        sync_enabled: true,
+      })
+      state.incrementSyncedMessages(chatId, synced)
+      if (complete) state.markHistoryComplete(chatId)
+    }
+    syncing(1, ALICE_ID, 'private', 50, false)
+    syncing(1, 102, 'private', 30, false)
+    syncing(1, 103, 'private', 90, true)
+    syncing(2, BOOK_CLUB_ID, 'group', 80, false)
+    syncing(2, BOB_ID, 'private', 20, true)
+    syncing(2, 203, 'private', 30, false)
+  })
+
+  afterAll(() => {
+    expectNoRootCache(env)
+    env.cleanup()
+  })
+
+  type FloodWait = { account_id: number; method: string }
+  type SampleChat = { account_id: number; chat_id: number }
+
+  it('sums the calls by method and lists flood waits with their account', async () => {
+    const data = await run(env, ['status'])
+    const rateLimits = data.rate_limits as {
+      api_calls_last_minute: number
+      calls_by_method: Record<string, number>
+      active_flood_waits: Array<FloodWait & { remaining_seconds: number }>
+    }
+
+    expect(rateLimits.api_calls_last_minute).toBe(6)
+    expect(rateLimits.calls_by_method).toEqual({
+      'messages.getHistory': 5,
+      'users.getUsers': 1,
+    })
+    expect(rateLimits.active_flood_waits).toEqual([
+      expect.objectContaining({
+        account_id: 2,
+        method: 'messages.getHistory',
+      }),
+    ])
+    expect(rateLimits.active_flood_waits[0]!.remaining_seconds).toBeGreaterThan(
+      500,
+    )
+    expect(
+      (
+        data.accounts as {
+          accounts: Array<{ id: number; rate_limits: unknown }>
+        }
+      ).accounts.map(({ id, rate_limits }) => ({ id, rate_limits })),
+    ).toEqual([
+      {
+        id: 1,
+        rate_limits: { api_calls_last_minute: 3, active_flood_waits: 0 },
+      },
+      {
+        id: 2,
+        rate_limits: { api_calls_last_minute: 3, active_flood_waits: 1 },
+      },
+    ])
+  })
+
+  it('orders the sample chats across accounts and keeps the overall top 5', async () => {
+    const data = await run(env, ['status'])
+    const progress = data.progress as {
+      chats_enabled: number
+      sample_chats: Array<SampleChat & { synced_messages: number }>
+    }
+
+    expect(progress.chats_enabled).toBe(6)
+    // History still to go first, then by messages synced, then by account
+    expect(
+      progress.sample_chats.map(({ account_id, chat_id, synced_messages }) => [
+        account_id,
+        chat_id,
+        synced_messages,
+      ]),
+    ).toEqual([
+      [2, BOOK_CLUB_ID, 80],
+      [1, ALICE_ID, 50],
+      [1, 102, 30],
+      [2, 203, 30],
+      [1, 103, 90],
+    ])
+  })
+
+  it('scopes the merged lists to the account --account selects', async () => {
+    const data = await run(env, ['status', '--account', '2'])
+    const rateLimits = data.rate_limits as {
+      calls_by_method: Record<string, number>
+      active_flood_waits: FloodWait[]
+    }
+    const progress = data.progress as { sample_chats: SampleChat[] }
+
+    expect(rateLimits.calls_by_method).toEqual({ 'messages.getHistory': 3 })
+    expect(rateLimits.active_flood_waits).toHaveLength(1)
+    expect(progress.sample_chats.map((chat) => chat.chat_id)).toEqual([
+      BOOK_CLUB_ID,
+      203,
+      BOB_ID,
+    ])
+  })
+
+  it('tags flood waits and sample chats with acct:<id> in pretty output', async () => {
+    const result = await runCliSuccess(
+      ['status', '--format', 'pretty'],
+      cliOptions(env),
+    )
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
+    const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, '')
+
+    expect(output).toMatch(/messages\.getHistory acct:2 → \d+s remaining/)
+    expect(output).not.toContain('messages.getHistory acct:1')
+    // The overall top 5 lines, in order, each with its account
+    expect(output).toMatch(
+      /group chat:-4242 acct:2 → 80 msgs → backfill\n.*private chat:101 acct:1 → 50 msgs/,
+    )
+    expect(output).toMatch(/private chat:103 acct:1 → 90 msgs → complete/)
+    // Top Methods sums both accounts' calls
+    expect(output).toMatch(/getHistory 5\n/)
   })
 })

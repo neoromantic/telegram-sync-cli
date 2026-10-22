@@ -192,7 +192,8 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `multi-account.e2e.test.ts` — two accounts, each with its own cache and a message with the
   same ID: every cache command returns only the selected account's rows, `tg accounts switch`
   changes which, `tg chats sync` writes only its account's file, the errors for zero, one or
-  several accounts, and no root `cache.db` is ever created
+  several accounts, `tg status` totals (calls by method summed, flood waits and the overall
+  top 5 sample chats with their `account_id`), and no root `cache.db` is ever created
 - `cache-layout.e2e.test.ts` — the first run after an upgrade from 0.3 or older: a shared cache
   adopted (a 0.2.0 one migrated too), set aside with one notice, deleted when empty,
   `CACHE_UNAVAILABLE` while an older tg holds it (and no account added or removed), and the
