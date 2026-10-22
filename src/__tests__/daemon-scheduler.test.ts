@@ -1242,6 +1242,41 @@ describe('a daemon stop during a sync job', () => {
       backward_cursor: 1,
     })
   })
+
+  it('ends the wait on the worker a reconnect rebuilt', async () => {
+    const ctx = createContext()
+    connect(ctx, 1)
+    addAccountRuntime(ctx, 1, db)
+    await initializeScheduler(ctx)
+    const jobs = createSyncJobsService(db)
+    const [queued] = jobs.getPendingJobs()
+    expect(queued).toMatchObject({
+      chat_id: CHAT,
+      job_type: SyncJobType.InitialLoad,
+    })
+
+    // The reconnect's client, which every later job on the account runs on
+    const fresh = fakeDialogClient([])
+    const call = mock(
+      (_request: unknown, params?: { abortSignal?: AbortSignal }) =>
+        waitLikeFloodWait(params, { onWait: () => requestShutdown(ctx) }),
+    )
+    Object.assign(fresh.client, { call })
+    connect(ctx, 1, fresh.client)
+    await rebuildSyncWorker(ctx, 1, fresh.client)
+
+    const started = performance.now()
+    await processJobs(ctx)
+
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(call.mock.calls[0]?.[1]).toEqual({
+      abortSignal: ctx.runtime.shutdown.signal,
+    })
+    expect(jobs.getById(queued!.id)).toEqual(queued!)
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.error).not.toHaveBeenCalled()
+  })
 })
 
 describe('cleanupScheduler', () => {
