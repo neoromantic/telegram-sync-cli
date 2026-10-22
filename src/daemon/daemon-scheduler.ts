@@ -44,34 +44,53 @@ function runtimesInOrder(ctx: DaemonContext): AccountRuntime[] {
 
 /**
  * Give every account that connected a scheduler and a sync worker on its
- * own cache, and queue its startup jobs.
+ * own cache, and queue its startup jobs. One account's failure never stops
+ * the others: an account whose scheduler can't be created is left out, and
+ * one whose startup pass fails keeps its scheduler and worker, so it runs
+ * the jobs it has and the next refresh queues the rest.
  */
 export async function initializeScheduler(ctx: DaemonContext): Promise<void> {
   ctx.logger.info('Initializing sync scheduler...')
 
   for (const rt of runtimesInOrder(ctx)) {
+    const tag = `[Account ${rt.accountId}]`
     const accountState = ctx.state.accounts.get(rt.accountId)
     if (accountState?.status !== 'connected' || !accountState.client) {
-      ctx.logger.debug(
-        `[Account ${rt.accountId}] Not connected; no sync scheduler`,
-      )
+      ctx.logger.debug(`${tag} Not connected; no sync scheduler`)
       continue
     }
 
-    rt.scheduler = createSyncScheduler({
-      db: rt.db,
-      jobsService: createSyncJobsService(rt.db),
-      chatSyncState: createChatSyncStateService(rt.db),
-      messagesCache: createMessagesCache(rt.db),
-    })
-    rt.worker = createAccountSyncWorker(rt.db, accountState.client)
-    ctx.logger.debug(`[Account ${rt.accountId}] Created sync worker`)
+    let scheduler: ReturnType<typeof createSyncScheduler>
+    try {
+      scheduler = createSyncScheduler({
+        db: rt.db,
+        jobsService: createSyncJobsService(rt.db),
+        chatSyncState: createChatSyncStateService(rt.db),
+        messagesCache: createMessagesCache(rt.db),
+      })
+      rt.worker = createAccountSyncWorker(rt.db, accountState.client)
+      rt.scheduler = scheduler
+    } catch (err) {
+      rt.scheduler = null
+      rt.worker = null
+      ctx.logger.error(
+        `${tag} Failed to create its scheduler, not syncing it: ${formatError(err)}`,
+      )
+      continue
+    }
+    ctx.logger.debug(`${tag} Created sync worker`)
 
-    await rt.scheduler.initializeForStartup()
-    const status = rt.scheduler.getStatus()
-    ctx.logger.info(
-      `[Account ${rt.accountId}] Scheduler initialized with ${status.pendingJobs} pending jobs`,
-    )
+    try {
+      await scheduler.initializeForStartup()
+      const status = scheduler.getStatus()
+      ctx.logger.info(
+        `${tag} Scheduler initialized with ${status.pendingJobs} pending jobs`,
+      )
+    } catch (err) {
+      ctx.logger.error(
+        `${tag} Failed to initialize scheduler: ${formatError(err)}; its pending jobs still run and the next refresh queues the rest`,
+      )
+    }
   }
 }
 

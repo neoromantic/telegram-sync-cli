@@ -869,6 +869,51 @@ describe('processJobs with two accounts', () => {
     ).toEqual(['222'])
   })
 
+  it("runs account 2's jobs after account 1's startup pass fails", async () => {
+    const ctx = createContext()
+    const first = seedAccount(ctx, 1, { withChat: true })
+    const second = seedAccount(ctx, 2, { withChat: true })
+    // Every write fails, as with a cache that stays locked past busy_timeout
+    first.db.run('PRAGMA query_only = ON')
+
+    await initializeScheduler(ctx)
+
+    expect(ctx.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('[Account 1] Failed to initialize scheduler'),
+    )
+    // Account 1 keeps its scheduler and worker and runs once it can write
+    expect(first.rt.scheduler).not.toBeNull()
+    expect(first.rt.worker).not.toBeNull()
+    expect(second.rt.scheduler).not.toBeNull()
+    expect(pendingJobs(second.db)).toHaveLength(1)
+
+    await processJobs(ctx)
+
+    expect(first.peers).toEqual([])
+    expect(second.peers).toHaveLength(1)
+    expect(pendingJobs(second.db)).toHaveLength(0)
+  })
+
+  it('leaves out an account whose scheduler cannot be created', async () => {
+    const ctx = createContext()
+    const first = seedAccount(ctx, 1, { withChat: false })
+    const second = seedAccount(ctx, 2, { withChat: true })
+    first.db.close()
+    dbs = dbs.filter((db) => db !== first.db)
+
+    await initializeScheduler(ctx)
+
+    expect(ctx.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('[Account 1] Failed to create its scheduler'),
+    )
+    expect(first.rt.scheduler).toBeNull()
+    expect(first.rt.worker).toBeNull()
+
+    await processJobs(ctx)
+
+    expect(second.peers).toHaveLength(1)
+  })
+
   it("runs account 2's jobs while account 1 waits out a FLOOD_WAIT", async () => {
     const ctx = createContext()
     const first = seedAccount(ctx, 1, { withChat: true })
