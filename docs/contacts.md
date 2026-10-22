@@ -34,9 +34,9 @@ tg sql "SELECT entity_type, last_sync_at FROM sync_state"
 
 ### Daemon refresh
 
-A running daemon keeps the list current by itself: on start when the list is older than the
-peer TTL (`cache.staleness.peers`, one week by default), and then every TTL, it checks the list
-with Telegram's hash in the background. An unchanged list costs one tiny reply and no cache
+A running daemon keeps the list current by itself: on each start and reconnect, and then every
+peer TTL (`cache.staleness.peers`, one week by default), it checks the list with Telegram's hash
+in the background. An unchanged list costs one tiny reply and no cache
 writes; a changed one is applied as above. Details: [daemon.md](daemon.md#contacts-sync).
 
 Contacts added or removed on another device reach the cache when Telegram sends the update

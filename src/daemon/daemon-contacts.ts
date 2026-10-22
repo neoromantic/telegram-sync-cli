@@ -3,8 +3,9 @@
  * from Telegram: contacts.getContacts with the hash of the cached list, so
  * an unchanged list costs one tiny contactsNotModified reply.
  *
- * A check is due when the cached list is older than the peer TTL, or when
- * an update hinted at a change (`checkAt`). The main loop looks once at the
+ * A check is due when the cached list is older than the peer TTL, after
+ * each start and reconnect, or when an update hinted at a change
+ * (`checkAt`). The main loop looks once at the
  * start and then every 30 ticks; a check runs in the background and never
  * holds the job loop.
  */
@@ -180,6 +181,20 @@ export function requestContactsCheck(
   if (!checkAt.has(accountId)) {
     checkAt.set(accountId, now + CONTACTS_HINT_DELAY_MS)
   }
+}
+
+/**
+ * Check the account's contacts at the next look, whatever the TTL. The
+ * daemon calls it after each start and reconnect: its clients don't catch
+ * up on updates missed while they were down (mtcute's `catchUp` is off),
+ * so a contact change made then reaches the cache only through a check.
+ */
+export function requestContactsCheckNow(
+  ctx: DaemonContext,
+  accountId: number,
+  now: number,
+): void {
+  ctx.runtime.contacts.checkAt.set(accountId, now)
 }
 
 /**

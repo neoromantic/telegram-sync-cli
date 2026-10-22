@@ -71,7 +71,10 @@ applies to the receiving account's `users_cache`:
 
 Ignored: `updateUserName` and `updateUserPhone` carry the user's own name and phone, not the
 name you saved the contact under, and every other update. Updates mtcute recovers after a gap
-reach the handler too; anything missed is caught by the next hash check.
+while the client runs reach the handler too. Updates sent while the daemon was stopped or an
+account was reconnecting are not replayed (the daemon's clients don't catch up), so each start
+and reconnect asks for a hash check at the next look (see
+[daemon.md](daemon.md#contacts-sync)).
 
 ## Gaps / Too Long Updates
 

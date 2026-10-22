@@ -14,7 +14,10 @@ import {
   type RawMessageFwdHeader,
 } from '../utils/message-parser'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
-import { handleContactRawUpdate } from './daemon-contacts'
+import {
+  handleContactRawUpdate,
+  requestContactsCheckNow,
+} from './daemon-contacts'
 import { type DaemonContext, requestShutdown } from './daemon-context'
 import { daemonPlatform } from './daemon-platform'
 import { rebuildSyncWorker } from './daemon-scheduler'
@@ -465,6 +468,8 @@ export async function connectAccount(
     ctx.logger.debug(`[Account ${accountId}] Starting updates...`)
     await client.startUpdatesLoop()
     ctx.logger.info(`[Account ${accountId}] Real-time updates active`)
+    // Changes made while the daemon was down aren't replayed (#8)
+    requestContactsCheckNow(ctx, accountId, Date.now())
 
     return true
   } catch (err) {
@@ -603,6 +608,8 @@ export async function attemptReconnect(
     accountState.lastError = undefined
 
     void rebuildSyncWorker(ctx, accountState.accountId, client)
+    // Changes made while it was reconnecting aren't replayed (#8)
+    requestContactsCheckNow(ctx, accountState.accountId, Date.now())
     ctx.logger.info(
       `[Account ${accountState.accountId}] Real-time updates active`,
     )

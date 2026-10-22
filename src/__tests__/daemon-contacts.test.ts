@@ -17,6 +17,7 @@ import {
   CONTACTS_RETRY_MS,
   handleContactRawUpdate,
   maybeSyncContacts,
+  requestContactsCheckNow,
 } from '../daemon/daemon-contacts'
 import {
   createDaemonRuntime,
@@ -212,6 +213,23 @@ describe('maybeSyncContacts', () => {
     calls[0]?.resolve(notModified)
     await Promise.all(started)
     expect(ctx.runtime.contacts.checkAt.has(1)).toBe(false)
+  })
+
+  it('checks a fresh list once after a start or reconnect asked for it', async () => {
+    const ctx = createContext()
+    const { client, calls } = fakeClient()
+    const db = connect(ctx, 1, client)
+    applyContactsSnapshot(db, contactsList([1001]), NOW - HOUR)
+
+    requestContactsCheckNow(ctx, 1, NOW)
+    const started = maybeSyncContacts(ctx, NOW)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.request.hash.toString()).toBe(contactsHash(db).toString())
+    calls[0]?.resolve(notModified)
+    await Promise.all(started)
+
+    expect(maybeSyncContacts(ctx, NOW + 1)).toHaveLength(0)
+    expect(calls).toHaveLength(1)
   })
 
   it('skips an account that is not connected', () => {

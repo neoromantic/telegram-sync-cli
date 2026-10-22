@@ -1145,6 +1145,34 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(newClient.onRawUpdate.handlers).toHaveLength(0)
   })
 
+  it('asks for a contacts check after each connect and reconnect', async () => {
+    const accountsDb = createAccountsDb([
+      { id: 1, phone: '+15550000001', user_id: 555 },
+    ])
+    const ctx = createContext(accountsDb)
+    const { attemptReconnect, connectAccount } = await import(
+      '../daemon/daemon-accounts'
+    )
+    const { checkAt } = ctx.runtime.contacts
+
+    // mtcute doesn't replay what the account missed while it was down
+    const beforeConnect = Date.now()
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
+    const connectedAt = checkAt.get(1)
+    expect(connectedAt).toBeGreaterThanOrEqual(beforeConnect)
+    expect(connectedAt).toBeLessThanOrEqual(Date.now())
+
+    // The check ran; a reconnect asks for the next one
+    checkAt.delete(1)
+    const accountState = ctx.state.accounts.get(1)!
+    accountState.status = 'error'
+    const beforeReconnect = Date.now()
+    expect(await attemptReconnect(ctx, accountState)).toBe(true)
+    const reconnectedAt = checkAt.get(1)
+    expect(reconnectedAt).toBeGreaterThanOrEqual(beforeReconnect)
+    expect(reconnectedAt).toBeLessThanOrEqual(Date.now())
+  })
+
   it('attemptReconnect cleans up the new client when updates fail to start', async () => {
     const accountsDb = createAccountsDb([
       { id: 1, phone: '+15550000001', user_id: 555 },

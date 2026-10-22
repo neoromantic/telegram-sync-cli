@@ -10,8 +10,8 @@ The `tg daemon` subcommand runs a long-lived process that:
 - Bootstraps dialogs on startup and after each reconnect (seed `chats_cache` +
   `chat_sync_state`, archived chats included)
 - Schedules message sync jobs (forward catchup + backfill)
-- Keeps each account's contact list current: a background check by the peer TTL with
-  Telegram's hash, so an unchanged list costs one tiny reply (see [Contacts sync](#contacts-sync))
+- Keeps each account's contact list current: a background check on start, after each
+  reconnect and by the peer TTL with Telegram's hash, so an unchanged list costs one tiny reply (see [Contacts sync](#contacts-sync))
 - Writes only to local cache/sync tables (read-only to Telegram)
 
 **Key Principles:**
@@ -165,10 +165,14 @@ The daemon keeps each connected account's contact list in its own cache (`users_
 
 - **When:** the main loop looks on its first tick, right after the startup dialog pass, and then
   every 30 ticks (~30 seconds). A check is due when the account has no recorded list, when the
-  list is older than the peer TTL (`cache.staleness.peers`, one week by default), or when an
-  update hinted at a change without the user's full record (a minute after the first hint;
-  later hints in that minute share the check). The TTL is read when the daemon starts, so a change to it needs a
-  restart. Most looks read one row of `sync_state` and do nothing.
+  list is older than the peer TTL (`cache.staleness.peers`, one week by default), after each
+  start and reconnect of the account, or when an update hinted at a change without the user's
+  full record (a minute after the first hint; later hints in that minute share the check). The
+  start and reconnect checks are there because the daemon's clients don't replay updates
+  missed while they were down (mtcute's `catchUp` is off), so a contact deleted on your phone
+  meanwhile reaches the cache only through a check; an unchanged list costs one tiny reply.
+  The TTL is read when the daemon starts, so a change to it needs a restart. Most looks read
+  one row of `sync_state` and do nothing.
 - **Hash:** the request carries Telegram's hash of the cached list: the `saved_count` of the last
   full list and the IDs of the cached contacts. An unchanged list gets `contactsNotModified`
   back, a few bytes, and only `sync_state.last_sync_at` moves. Because the hash comes from the
@@ -187,7 +191,7 @@ The daemon keeps each connected account's contact list in its own cache (`users_
   nothing.
 
 Database growth: an unchanged list costs one small request and one `sync_state` UPDATE per
-account per TTL. A changed list rewrites the contact rows in place and runs one UPDATE for the
+account per check (every TTL, plus one per start and reconnect). A changed list rewrites the contact rows in place and runs one UPDATE for the
 removed contacts. New rows come only from new contacts. Nothing is deleted, and `sync_state`
 holds one row per account cache.
 
