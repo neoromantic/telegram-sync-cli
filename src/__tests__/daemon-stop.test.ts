@@ -49,6 +49,8 @@ mock.module('../db', () =>
 
 /** The client each account connects with */
 const clients = new Map<number, TelegramClient>()
+/** How many sync jobs were still running when the clients were closed */
+let jobsInFlightAtDisconnect: number | null = null
 mock.module('../daemon/daemon-accounts', () => ({
   connectAccount: async (
     ctx: DaemonContext,
@@ -66,7 +68,9 @@ mock.module('../daemon/daemon-accounts', () => ({
     })
     return client !== undefined
   },
-  disconnectAllAccounts: async () => {},
+  disconnectAllAccounts: async (ctx: DaemonContext) => {
+    jobsInFlightAtDisconnect = ctx.runtime.jobsInFlight.size
+  },
   setupSignalHandlers: () => {},
   attemptReconnect: async () => {},
   scheduleReconnect: () => {},
@@ -118,6 +122,7 @@ afterEach(() => {
   for (const cache of caches.values()) cache.close()
   caches.clear()
   clients.clear()
+  jobsInFlightAtDisconnect = null
   rmSync(tempDir, { recursive: true, force: true })
 })
 
@@ -185,13 +190,18 @@ describe('daemon stop during a FLOOD_WAIT', () => {
     const fake = fakeClient(
       [{ kind: 'user', id: CHAT, topMessage: 10 }],
       {},
+      // The aborted request rejects a moment later, so the job is still
+      // running when the shutdown starts
       (_request, params) =>
         waitLikeFloodWait(params, {
           onWait: () => {
             stoppedAt = performance.now()
             daemon.stop()
           },
-        }),
+        }).catch(
+          (err) =>
+            new Promise((_resolve, reject) => setTimeout(() => reject(err), 5)),
+        ),
     )
     clients.set(1, fake.client)
 
@@ -215,6 +225,8 @@ describe('daemon stop during a FLOOD_WAIT', () => {
       started_at: null,
     })
     expect(jobs.countJobs().running).toBe(0)
+    // The shutdown waited for the job before it closed the clients
+    expect(jobsInFlightAtDisconnect).toBe(0)
     expect(createDaemonStatusService(cache).getAll()).toMatchObject({
       daemon_status: 'stopped',
     })
