@@ -79,7 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cached.
 - A delete without chat context could mark another account's message with
   the same ID as deleted (the cross-account part of #7).
-- One account's FLOOD_WAIT blocked API calls of every account.
+- A FLOOD_WAIT that one account recorded (one longer than mtcute waits out:
+  60 seconds in the CLI, 5 minutes in the daemon) blocked API calls of every
+  account. A shorter one that mtcute sleeps through inside a daemon job
+  still holds the job loop for every account (#60).
 - `tg chats search`, `messages search` and `chats sync` ignored `--account`.
 - After a reconnect, a complete dialog pass now marks the account's chats it
   didn't list (left, deleted or migrated) caught up, as the startup pass
