@@ -426,8 +426,9 @@ Output:
 
 `bytes_before` and `bytes_after` count the file and its WAL. Errors: `GENERAL_ERROR` with
 `details.reason` `cache_busy` when another process held the write lock past the wait (try again),
-or `disk_full` when the disk filled up during the VACUUM (the cache is unchanged; free space
-first).
+or `disk_full` when the disk filled up (free space first). The VACUUM is rolled back and the
+messages are intact, but the prune commits as it goes, so rows past their retention may already
+be gone; `details.pruned` has the counts, or `null` when the prune itself failed.
 
 ## Output Shape
 

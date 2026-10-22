@@ -124,8 +124,10 @@ const vacuumCommand = defineCommand({
       needsStoppedDaemon(account.id)
     }
 
+    // Each prune batch commits on its own, so a later failure keeps it
+    let pruned: PruneResult | null = null
     try {
-      const pruned = pruneCache(db, retention)
+      pruned = pruneCache(db, retention)
       const result = vacuumCache(db, getAccountCachePath(account.id), {
         daemonRunning,
       })
@@ -150,22 +152,22 @@ const vacuumCommand = defineCommand({
         error(
           ErrorCodes.GENERAL_ERROR,
           `The cache of account ${account.id} is busy: ${message}`,
-          { account_id: account.id, reason: 'cache_busy' },
+          { account_id: account.id, reason: 'cache_busy', pruned },
           'Another tg process holds the cache; try again in a moment',
         )
       }
       if (code.startsWith('SQLITE_FULL')) {
         error(
           ErrorCodes.GENERAL_ERROR,
-          `Not enough disk space to vacuum the cache of account ${account.id}: VACUUM needs free space of about twice the cache. The cache is unchanged.`,
-          { account_id: account.id, reason: 'disk_full' },
+          `Not enough disk space to vacuum the cache of account ${account.id}: a full VACUUM needs free space of about twice the cache. The VACUUM was rolled back and the messages are intact; rows past their retention may already be pruned.`,
+          { account_id: account.id, reason: 'disk_full', pruned },
           'Free some disk space, then run tg db vacuum again',
         )
       }
       error(
         ErrorCodes.GENERAL_ERROR,
         `Failed to vacuum the cache of account ${account.id}: ${message}`,
-        { account_id: account.id },
+        { account_id: account.id, pruned },
       )
     }
   },
