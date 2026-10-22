@@ -107,6 +107,8 @@ export function communityDialog({
 export interface FakeDialogClientOptions {
   /** Throw after listing this many dialogs */
   failAfter?: number
+  /** What `failAfter` throws, FLOOD_WAIT_600 by default */
+  error?: Error
   /** Called when the pass asks for the dialog after the `count`th one */
   onListed?: (count: number) => void
 }
@@ -123,7 +125,7 @@ export function fakeDialogClient(
     let listed = 0
     for (const input of dialogs) {
       if (options.failAfter !== undefined && listed >= options.failAfter) {
-        throw new Error('FLOOD_WAIT_600')
+        throw options.error ?? new Error('FLOOD_WAIT_600')
       }
       yield fakeDialog(input)
       listed++
