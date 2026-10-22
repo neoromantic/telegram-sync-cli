@@ -297,7 +297,9 @@ part counts the daemon's sync jobs and lists some of them:
   read cold from disk takes a while, so plain `tg status` leaves it out. Pretty output shows a
   Cache Size section with a line per account (the total, the WAL, the free space and, with
   `--sizes`, the three largest tables) and the `tg db vacuum --account <id>` command for each
-  account whose free pages are over 10% of its file.
+  account whose free pages are over 10% of its file. For a cache without auto_vacuum while the
+  daemon runs, the command stops the daemon first:
+  `tg daemon stop && tg db vacuum --account <id> && tg daemon start`.
 - `--account <selector>` scopes the totals, the lists and `accounts.accounts` to one account;
   `account_id` says which (`null` without the flag). The `daemon` section always covers the
   whole daemon, and `accounts.total` and the `active_*` fields stay those of every account.

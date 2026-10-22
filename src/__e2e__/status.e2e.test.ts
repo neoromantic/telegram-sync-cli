@@ -682,4 +682,38 @@ describe('E2E: status cache size', () => {
 
     expect(data.storage.cache_bytes).toBe(0)
   })
+
+  it('tells to stop the daemon before vacuuming a cache without auto_vacuum', async () => {
+    // A cache of an older version, most of it free pages
+    const db = env.openCacheDb(1)
+    db.run('PRAGMA auto_vacuum = NONE')
+    db.run('VACUUM')
+    createMessagesCache(db).upsertBatch(
+      Array.from({ length: 600 }, (_, i) => ({
+        chat_id: 101,
+        message_id: i + 2,
+        text: `made-up note ${i + 2} about the weekly plan`,
+        message_type: 'text',
+        date: 1_760_000_000 + i,
+        raw_json: '{}',
+      })),
+    )
+    db.run('DELETE FROM messages_cache WHERE message_id > 10')
+    db.run('PRAGMA wal_checkpoint(TRUNCATE)')
+    const pretty = async () =>
+      (
+        await runCliSuccess(['status', '--format', 'pretty'], {
+          env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+        })
+      ).stdout
+    const stopFirst =
+      'tg daemon stop && tg db vacuum --account 1 && tg daemon start'
+
+    const stopped = await pretty()
+    expect(stopped).toContain('tg db vacuum --account 1')
+    expect(stopped).not.toContain(stopFirst)
+
+    writeFileSync(join(env.dataDir, 'daemon.pid'), String(process.pid))
+    expect(await pretty()).toContain(stopFirst)
+  })
 })
