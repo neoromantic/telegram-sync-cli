@@ -3,6 +3,7 @@
  * Only the fields the daemon reads are filled in.
  */
 import {
+  Chat,
   Dialog,
   PeersIndex,
   type RpcCallOptions,
@@ -96,16 +97,7 @@ export function communityDialog({
     } as tl.RawDialog,
     PeersIndex.from({
       users: [],
-      chats: [
-        {
-          _: 'community',
-          id,
-          accessHash: toLong(accessHash),
-          title,
-          photo: { _: 'chatPhotoEmpty' },
-          date: 1_700_000_000,
-        },
-      ],
+      chats: [fakeRawCommunity({ id, title, accessHash })],
     }),
     new Map(),
   )
@@ -125,12 +117,49 @@ export interface FakeDialogClientOptions {
   waitAfter?: number
   /** Called on a timer once that wait has started */
   onWait?: () => void
+  /** What `getJoinedCommunities` lists, none by default */
+  communities?: FakeCommunityInput[]
+  /** What `getJoinedCommunities` throws */
+  communitiesError?: Error
+  /**
+   * `getJoinedCommunities` waits like a FLOOD_WAIT until the `abortSignal`
+   * given to `withParams` aborts; `onWait` is called once the wait started
+   */
+  communitiesWaitUntilAbort?: boolean
+}
+
+export interface FakeCommunityInput {
+  /** Raw community ID, a channel ID */
+  id: number
+  title?: string
+  accessHash: string
+  /** Listed as communityForbidden */
+  forbidden?: boolean
+}
+
+/** A raw community as `communities.getJoinedCommunities` lists it */
+export function fakeRawCommunity({
+  id,
+  title = 'Example Community',
+  accessHash,
+  forbidden = false,
+}: FakeCommunityInput): tl.RawCommunity | tl.RawCommunityForbidden {
+  return forbidden
+    ? { _: 'communityForbidden', id, accessHash: toLong(accessHash), title }
+    : {
+        _: 'community',
+        id,
+        accessHash: toLong(accessHash),
+        title,
+        photo: { _: 'chatPhotoEmpty' },
+        date: 1_700_000_000,
+      }
 }
 
 /**
- * A client whose `iterDialogs` lists the given dialogs. `withParams` returns
- * one whose `iterDialogs` makes its requests with those params, as mtcute's
- * does.
+ * A client whose `iterDialogs` lists the given dialogs and whose
+ * `getJoinedCommunities` lists `options.communities`. `withParams` returns
+ * one whose methods make their requests with those params, as mtcute's does.
  */
 export function fakeDialogClient(
   dialogs: FakeDialogInput[],
@@ -138,6 +167,7 @@ export function fakeDialogClient(
 ) {
   const calls: unknown[] = []
   const params: RpcCallOptions[] = []
+  const communityCalls: (RpcCallOptions | undefined)[] = []
 
   const nextPage = (callParams: RpcCallOptions | undefined) =>
     waitLikeFloodWait(callParams, { onWait: options.onWait })
@@ -160,11 +190,27 @@ export function fakeDialogClient(
     }
   }
 
+  function getJoinedCommunitiesWith(callParams?: RpcCallOptions) {
+    return async function getJoinedCommunities(): Promise<Chat[]> {
+      communityCalls.push(callParams)
+      if (options.communitiesWaitUntilAbort) await nextPage(callParams)
+      if (options.communitiesError) throw options.communitiesError
+      return (options.communities ?? []).map(
+        (input) => new Chat(fakeRawCommunity(input)),
+      )
+    }
+  }
+
   const client = {
     iterDialogs: iterDialogsWith(),
+    getJoinedCommunities: getJoinedCommunitiesWith(),
     withParams(callParams: RpcCallOptions) {
       params.push(callParams)
-      return { ...client, iterDialogs: iterDialogsWith(callParams) }
+      return {
+        ...client,
+        iterDialogs: iterDialogsWith(callParams),
+        getJoinedCommunities: getJoinedCommunitiesWith(callParams),
+      }
     },
   }
 
@@ -174,5 +220,7 @@ export function fakeDialogClient(
     calls,
     /** Params of every `withParams` call */
     params,
+    /** Call params of every `getJoinedCommunities` call */
+    communityCalls,
   }
 }
