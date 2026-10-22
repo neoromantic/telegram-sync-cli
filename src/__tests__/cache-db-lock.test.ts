@@ -299,6 +299,73 @@ describe('cache database lock', () => {
     }
   }, 60_000)
 
+  it('lets several processes rebuild an outdated search index at once', async () => {
+    // An index from before the files column: every opener must drop it,
+    // create it again and fill it from messages_cache
+    const outdated = new Database(path)
+    for (let id = 1; id <= 50; id++) {
+      outdated.run(
+        `INSERT INTO messages_cache (chat_id, message_id, text, date, fetched_at, raw_json)
+         VALUES (101, ?, ?, 1700000000, 1700000000000, '{}')`,
+        [id, `made-up message ${id}`],
+      )
+    }
+    for (const trigger of ['ai', 'ad', 'au']) {
+      outdated.run(`DROP TRIGGER messages_cache_${trigger}`)
+    }
+    outdated.run('DROP TABLE message_search')
+    outdated.run(
+      "CREATE VIRTUAL TABLE message_search USING fts5(text, sender, chat, tokenize='unicode61')",
+    )
+    outdated.close()
+
+    // They all find it outdated and queue for the lock: one rebuilds it
+    // while the others wait, then find nothing left. Before, each one
+    // dropped and created the table and its triggers statement by
+    // statement, so one could drop the table another one was filling
+    const holder = spawnBun(HOLD_LOCK, {
+      LOCK_DB_PATH: path,
+      LOCK_HOLD_MS: '1500',
+    })
+    await waitForLine(holder.stdout, 'locked')
+
+    const env = { LOCK_DB_PATH: path, SCHEMA_MODULE, SYNC_SCHEMA_MODULE }
+    const children = Array.from({ length: 4 }, () => spawnBun(INIT_SCHEMA, env))
+    const results = await Promise.all(
+      children.map(async (child) => ({
+        code: await child.exited,
+        stderr: await new Response(child.stderr).text(),
+      })),
+    )
+
+    expect(results).toEqual(results.map(() => ({ code: 0, stderr: '' })))
+    expect(await holder.exited).toBe(0)
+
+    const rebuilt = new Database(path)
+    rebuilt.run('PRAGMA busy_timeout = 5000')
+    expect(
+      rebuilt
+        .query('PRAGMA table_info(message_search)')
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).toEqual(['text', 'sender', 'chat', 'files'])
+    expect(
+      rebuilt
+        .query(
+          "SELECT COUNT(*) AS count FROM message_search WHERE message_search MATCH 'made'",
+        )
+        .get(),
+    ).toEqual({ count: 50 })
+    expect(
+      rebuilt
+        .query(
+          "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'messages_cache_a_'",
+        )
+        .get(),
+    ).toEqual({ count: 3 })
+    rebuilt.close()
+  }, 30_000)
+
   it('lets several processes move a 0.2.0 cache to marked IDs at once', async () => {
     const legacy = new Database(path)
     seedLegacyCache(legacy)
