@@ -232,8 +232,13 @@ account's scheduler → its sync_jobs → its worker and client → its messages
   sync job is waiting on ends at once, a FLOOD_WAIT of up to 5 minutes
   included: the pass counts as stopped and marks nothing, and the job is
   pending as it was, with no attempt used, so the next start runs it again.
-  `tg daemon stop --force` kills the daemon without saving the session writes
-  made since the last save
+  A FLOOD_WAIT in a connect or reconnect (the client start or `getMe`) or in
+  the health check's `getMe` still holds the stop until it ends. If the daemon
+  hasn't exited within `tg daemon stop`'s `--timeout` (10 seconds by default),
+  the command reports `DAEMON_SHUTDOWN_TIMEOUT` and the daemon keeps shutting
+  down on its own; a longer `--timeout` waits for it, and with `--force` the
+  command kills the daemon instead, which loses the session writes made since
+  the last save
 - After a reconnect, a dialog pass runs on the new client in the background
   (one per account at a time), then the scheduler catches up the chats that got
   messages while the connection was down. If the pass fails part-way, every
