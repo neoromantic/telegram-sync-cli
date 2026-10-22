@@ -9,6 +9,7 @@ import { mainLoop } from '../daemon/daemon-loop'
 import type { SyncScheduler } from '../daemon/scheduler'
 import type { AccountConnectionState } from '../daemon/types'
 import type { DaemonStatusService, DaemonTick } from '../db/daemon-status'
+import { SyncJobType, SyncPriority } from '../db/sync-schema'
 import {
   addAccountRuntime,
   createAccountCacheDb,
@@ -176,7 +177,20 @@ describe('mainLoop', () => {
 
   it("writes each account's tick to its own cache", async () => {
     const ctx = createContext()
-    const first = addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+    // Account 1 has no scheduler: its queue is counted from its own cache
+    const firstDb = createAccountCacheDb()
+    for (const [chatId, status] of [
+      [101, 'pending'],
+      [102, 'running'],
+      [103, 'failed'],
+      [104, 'completed'],
+    ] as const) {
+      firstDb.run(
+        'INSERT INTO sync_jobs (chat_id, job_type, priority, status) VALUES (?, ?, ?, ?)',
+        [chatId, SyncJobType.BackwardHistory, SyncPriority.Low, status],
+      )
+    }
+    const first = addAccountRuntime(ctx, 1, firstDb, {
       messagesSynced: 40,
     })
     const second = addAccountRuntime(ctx, 2, createAccountCacheDb(), {
@@ -220,7 +234,8 @@ describe('mainLoop', () => {
       connectionStatus: 'connected',
       lastError: null,
       messagesSynced: 40,
-      pendingJobs: 0,
+      pendingJobs: 1,
+      runningJobs: 1,
     })
     expect(second.statusService.getDaemonInfo()).toMatchObject({
       connectionStatus: 'error',
