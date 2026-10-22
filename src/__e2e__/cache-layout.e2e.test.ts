@@ -6,7 +6,7 @@
  */
 import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
@@ -57,6 +57,7 @@ function holdOpen(path: string) {
     },
   )
   return {
+    pid: holder.pid,
     async ready() {
       const decoder = new TextDecoder()
       let text = ''
@@ -178,6 +179,37 @@ describe('E2E: upgrading from the shared cache', () => {
 
       expect((await sqlCount()).count).toBe(5)
       expect(existsSync(shared)).toBe(false)
+    }, 30_000)
+
+    it('says in tg daemon status that an older daemon still holds the shared cache', async () => {
+      seedInChild(shared, 'legacySharedCache')
+      // The 0.3 daemon left running after the upgrade: its PID is live
+      const holder = holdOpen(shared)
+      await holder.ready()
+      writeFileSync(join(env.dataDir, 'daemon.pid'), String(holder.pid))
+
+      try {
+        const result = await runCliSuccess(['daemon', 'status'], options())
+        const data = (result.json as { data: Record<string, unknown> }).data
+
+        expect(data).toMatchObject({
+          status: 'running',
+          pid: holder.pid,
+          messagesCached: 0,
+          storage: {
+            legacy_caches: [],
+            migration: {
+              reason: 'shared_cache_in_use',
+              path: shared,
+              suggestion: expect.stringContaining('tg daemon stop'),
+            },
+          },
+        })
+        expect(existsSync(shared)).toBe(true)
+        expect(existsSync(join(env.dataDir, 'accounts'))).toBe(false)
+      } finally {
+        await holder.release()
+      }
     }, 30_000)
   })
 

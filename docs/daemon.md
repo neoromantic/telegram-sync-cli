@@ -158,6 +158,10 @@ Key files:
 - `lastUpdate`
 - `accounts[]`: each account's `id`, `connection` and `lastError` (from a live daemon, else
   `null`), `messagesSynced`, `messagesCached`, `chatsEnabled` and `chatsHistoryComplete`
+- `storage`: the same `{ legacy_caches, migration }` as in `tg status`. While the shared cache
+  of 0.3 waits to move (`migration.reason` `shared_cache_in_use`, typically a 0.3 daemon still
+  running after an upgrade), no account has its cache yet and every figure above reads 0;
+  `migration.suggestion` says what to do (`tg daemon stop`)
 
 The daemon writes each account's figures to that account's `daemon_status` rows every second,
 in one transaction per account (keys: [database-schema.md](database-schema.md#table-daemon_status)),

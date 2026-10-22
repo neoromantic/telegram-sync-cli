@@ -153,7 +153,9 @@ const statusCommand = defineCommand({
       return
     }
 
-    collectStorageStatus(dataDir)
+    // Moves a shared cache first; a move that waits (an older daemon still
+    // holds it) is why every account below may read as empty
+    const storage = collectStorageStatus(dataDir)
     const snapshots = accountsDb
       .getAll()
       .map((account) => readAccountStatus(account.id))
@@ -199,6 +201,7 @@ const statusCommand = defineCommand({
           chatsHistoryComplete: snapshot.progress.chats_history_complete,
         }
       }),
+      storage,
     })
   },
 })

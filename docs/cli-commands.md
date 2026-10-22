@@ -285,7 +285,8 @@ part counts the daemon's sync jobs and lists some of them:
   aside as `shared-cache*.db` (`path`, `size_bytes`), and `migration` is `null` or
   `{ reason, path, suggestion }` while the move waits (see
   [configuration.md](configuration.md#upgrading-to-per-account-caches)). Pretty output shows a
-  Storage section only when there is something in it.
+  Storage section only when there is something in it. `tg daemon status` of a running daemon
+  returns the same `storage` (see [daemon.md](daemon.md#status-output)).
 
 ```json
 {
