@@ -465,7 +465,8 @@ they can't be split by account. The first command that needs a cache (and `tg st
 3. It opens the file without creating it and switches it to `journal_mode = DELETE`. That folds
    the WAL into the file and works only while no other process has it open, even an idle one,
    so it also proves no older tg is using it. A non-empty `-wal` left afterwards means the same.
-   It then deletes the empty `-wal` and the `-shm`.
+   It then deletes the empty `-wal` and the `-shm`. Only a file that is not a database or is
+   malformed (`SQLITE_NOTADB`, `SQLITE_CORRUPT`) skips the fold and is set aside as it is.
 4. It decides:
    - **Adopt**: with exactly one account and no `accounts/*/cache.db` yet, it renames the file
      to `accounts/<id>/cache.db`. Every cursor, history range, job, retry, sync mode, rate limit
@@ -485,8 +486,11 @@ wrote it after the move) is set aside or deleted the same way, never merged.
 When another process still has the shared file open, adopting fails the command with
 `CACHE_UNAVAILABLE` (`details.reason`: `shared_cache_in_use`) and changes nothing: creating an
 empty per-account cache first would force the shared file aside later. Setting aside waits
-instead: the command goes on and a later run moves the file. A failed rename (`EXDEV`,
-`EACCES`) is `move_failed`. `tg status` reports a waiting move under `storage.migration`.
+instead: the command goes on and a later run moves the file. Any other error is `move_failed`
+and is handled the same way, with nothing changed: a fold that fails (a read-only file, a full
+disk, an I/O error) or a failed `mkdir`, rename or delete (`EXDEV`, `EACCES`). So a single
+account never starts an empty cache because of an error that a retry may not have. `tg status`
+reports a waiting move under `storage.migration`.
 
 Handing a set-aside file to an account by hand: stop the daemon, move the account's
 `accounts/<id>/cache.db`, `-wal` and `-shm` away, then move `shared-cache.db` to

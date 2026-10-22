@@ -14,7 +14,10 @@
  *
  * Before the move the file is switched to `journal_mode = DELETE`, which
  * folds the WAL into the file and only works while no other process has it
- * open: an older tg still running keeps it in place.
+ * open: an older tg still running keeps it in place. Only a file that is
+ * not a database (or a malformed one) is set aside without a fold; any
+ * other error, such as a read-only file or a full disk, keeps it in place
+ * too, so a single account never loses its cache to a transient error.
  */
 import { Database } from 'bun:sqlite'
 import {
@@ -176,12 +179,45 @@ export function listSharedCaches(
     })
 }
 
+function sqliteCode(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code
+  return typeof code === 'string' ? code : ''
+}
+
 function isBusyError(err: unknown): boolean {
   if (!(err instanceof Error)) return false
-  const code = (err as { code?: unknown }).code
-  if (typeof code === 'string' && code.startsWith('SQLITE_BUSY')) return true
-  if (typeof code === 'string' && code.startsWith('SQLITE_LOCKED')) return true
+  const code = sqliteCode(err)
+  if (code.startsWith('SQLITE_BUSY') || code.startsWith('SQLITE_LOCKED')) {
+    return true
+  }
   return /database is locked|database table is locked/i.test(err.message)
+}
+
+/**
+ * The file itself is broken: not a database, or a malformed one. Any other
+ * error (a read-only file, a full disk, an I/O error) says nothing about
+ * the rows, so the file stays where it is.
+ */
+function isCorruptError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const code = sqliteCode(err)
+  if (code.startsWith('SQLITE_NOTADB') || code.startsWith('SQLITE_CORRUPT')) {
+    return true
+  }
+  return /file is not a database|database disk image is malformed/i.test(
+    err.message,
+  )
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** What a failed open or fold means for the file */
+function foldFailure(err: unknown): FoldResult {
+  if (isBusyError(err)) return { state: 'in_use' }
+  if (isCorruptError(err)) return { state: 'unreadable' }
+  return { state: 'error', error: errorMessage(err) }
 }
 
 function hasRows(db: Database, table: string): boolean {
@@ -196,28 +232,56 @@ function hasRows(db: Database, table: string): boolean {
 }
 
 export type FoldResult =
-  /** Folded: the file holds every row and has no sidecars */
-  | { state: 'folded'; hasData: boolean }
+  /**
+   * Folded: the file holds every row and has no sidecars. `hasData` is
+   * known only when the fold was asked to check it.
+   */
+  | { state: 'folded'; hasData?: boolean }
   /** Another process has it open */
   | { state: 'in_use' }
-  /** Not a database SQLite can read: kept as it is */
+  /** Not a database, or a malformed one: kept as it is */
   | { state: 'unreadable' }
+  /**
+   * Any other error (a read-only file, a full disk, an I/O error): the file
+   * stays in place, and a later run tries again
+   */
+  | { state: 'error'; error: string }
+
+/**
+ * Delete what a fold leaves next to the file: an empty -wal and the -shm.
+ * A non-empty -wal holds rows another process wrote after the fold, so the
+ * file is in use and nothing is deleted.
+ */
+export function removeFoldSidecars(path: string): 'removed' | 'in_use' {
+  const wal = `${path}-wal`
+  if (existsSync(wal)) {
+    if (statSync(wal).size > 0) return 'in_use'
+    unlinkSync(wal)
+  }
+  const shm = `${path}-shm`
+  if (existsSync(shm)) unlinkSync(shm)
+  return 'removed'
+}
 
 /**
  * Fold the WAL into the file. `journal_mode = DELETE` needs the only
  * connection to the file, so it also proves no other process has it open,
  * even an idle one. The presence of a -wal file proves nothing: macOS
- * leaves an empty one after a normal close.
+ * leaves an empty one after a normal close. With `checkData`, it also says
+ * whether any table that makes the file worth keeping has rows.
  */
-export function foldSharedCache(path: string): FoldResult {
+export function foldSharedCache(
+  path: string,
+  options: { checkData?: boolean } = {},
+): FoldResult {
   let db: Database
   try {
     db = new Database(path, { readwrite: true, create: false })
   } catch (err) {
-    return isBusyError(err) ? { state: 'in_use' } : { state: 'unreadable' }
+    return foldFailure(err)
   }
 
-  let hasData = true
+  let hasData: boolean | undefined
   try {
     db.run(`PRAGMA busy_timeout = ${FOLD_BUSY_TIMEOUT_MS}`)
     const row = db.query('PRAGMA journal_mode = DELETE').get() as {
@@ -226,23 +290,24 @@ export function foldSharedCache(path: string): FoldResult {
     if (row?.journal_mode?.toLowerCase() !== 'delete') {
       return { state: 'in_use' }
     }
-    hasData = DATA_TABLES.some((table) => hasRows(db, table))
+    if (options.checkData) {
+      hasData = DATA_TABLES.some((table) => hasRows(db, table))
+    }
   } catch (err) {
-    return isBusyError(err) ? { state: 'in_use' } : { state: 'unreadable' }
+    return foldFailure(err)
   } finally {
     db.close()
   }
 
-  const wal = `${path}-wal`
-  if (existsSync(wal)) {
-    // Rows another process wrote after the fold
-    if (statSync(wal).size > 0) return { state: 'in_use' }
-    unlinkSync(wal)
+  try {
+    if (removeFoldSidecars(path) === 'in_use') return { state: 'in_use' }
+  } catch (err) {
+    return { state: 'error', error: errorMessage(err) }
   }
-  const shm = `${path}-shm`
-  if (existsSync(shm)) unlinkSync(shm)
 
-  return { state: 'folded', hasData }
+  return hasData === undefined
+    ? { state: 'folded' }
+    : { state: 'folded', hasData }
 }
 
 /** Move a file and whichever sidecars it still has */
@@ -289,18 +354,17 @@ export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
         ? accounts[0]!
         : null
 
-    const fold = foldSharedCache(shared)
-    if (fold.state === 'in_use') {
+    // An adopter takes the file whatever it holds, so only a file set
+    // aside or deleted needs its rows checked
+    const fold = foldSharedCache(shared, { checkData: adopter === null })
+    if (fold.state === 'in_use' || fold.state === 'error') {
       // Adopting blocks: an empty per-account cache created now would force
       // the shared file aside later. Nothing waits for a set-aside file.
+      const reason =
+        fold.state === 'in_use' ? 'shared_cache_in_use' : 'move_failed'
       return adopter
-        ? {
-            state: 'blocked',
-            reason: 'shared_cache_in_use',
-            path: shared,
-            accountId: adopter.id,
-          }
-        : { state: 'deferred', reason: 'shared_cache_in_use', path: shared }
+        ? { state: 'blocked', reason, path: shared, accountId: adopter.id }
+        : { state: 'deferred', reason, path: shared }
     }
 
     if (adopter && fold.state === 'folded') {
@@ -329,7 +393,7 @@ export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
       return { state: 'adopted', path: target, accountId: adopter.id }
     }
 
-    if (fold.state === 'folded' && !fold.hasData) {
+    if (fold.state === 'folded' && fold.hasData === false) {
       try {
         unlinkSync(shared)
       } catch {
