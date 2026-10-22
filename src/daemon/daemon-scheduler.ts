@@ -19,13 +19,18 @@ import {
   type RealSyncWorker,
 } from './sync-worker'
 
-/** A sync worker on the account's own cache, rate limits and client */
+/**
+ * A sync worker on the account's own cache, rate limits and client. The
+ * daemon's stop signal ends the request its job waits on.
+ */
 function createAccountSyncWorker(
   cacheDb: Database,
   client: TelegramClient,
+  signal: AbortSignal,
 ): RealSyncWorker {
   return createRealSyncWorker({
     client,
+    signal,
     messagesCache: createMessagesCache(cacheDb),
     historyRanges: createHistoryRanges(cacheDb),
     chatSyncState: createChatSyncStateService(cacheDb),
@@ -68,7 +73,11 @@ export async function initializeScheduler(ctx: DaemonContext): Promise<void> {
         chatSyncState: createChatSyncStateService(rt.db),
         messagesCache: createMessagesCache(rt.db),
       })
-      rt.worker = createAccountSyncWorker(rt.db, accountState.client)
+      rt.worker = createAccountSyncWorker(
+        rt.db,
+        accountState.client,
+        ctx.runtime.shutdown.signal,
+      )
       rt.scheduler = scheduler
     } catch (err) {
       rt.scheduler = null
@@ -111,7 +120,11 @@ export function rebuildSyncWorker(
   const rt = ctx.runtime.accounts.get(accountId)
   if (!rt?.scheduler) return
 
-  rt.worker = createAccountSyncWorker(rt.db, client)
+  rt.worker = createAccountSyncWorker(
+    rt.db,
+    client,
+    ctx.runtime.shutdown.signal,
+  )
   ctx.logger.debug(`[Account ${accountId}] Rebuilt sync worker`)
 
   return refreshDialogsAfterReconnect(ctx, accountId, client)
@@ -200,6 +213,12 @@ function logJobOutcome(
       )
       return
     }
+    case 'stopped':
+      // The stop cut its request short; no fault of the job
+      ctx.logger.debug(
+        `${tag} Job ${job.id} left pending: the daemon is stopping`,
+      )
+      return
     case 'cancelled':
       ctx.logger.debug(
         `${tag} Job ${job.id} dropped: chat ${job.chat_id} was turned off while it ran`,

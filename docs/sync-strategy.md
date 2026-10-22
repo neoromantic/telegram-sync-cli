@@ -128,6 +128,9 @@ priority at that time (a chat turned on while its first page ran gets the retry 
 - **A chat turned off** while its job runs: if the job fails or hits a FLOOD_WAIT, it is
   dropped, not retried or kept as `failed`, whatever the error and attempt.
 - **A crash** doesn't count as an attempt: on start, the jobs it left running are pending again.
+- **A stop** doesn't count either: a job whose request the daemon stop cut short, a FLOOD_WAIT
+  it was waiting out included, is pending as it was and runs again on the next start (a
+  catch-up job is queued again if its chat is still behind).
 
 ## Sync Flow (Current)
 

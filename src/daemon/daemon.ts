@@ -25,6 +25,7 @@ import { bootstrapDialogs } from './daemon-bootstrap'
 import {
   createDaemonRuntime,
   type DaemonContext,
+  requestShutdown,
   totalMessagesSynced,
 } from './daemon-context'
 import { createLogger } from './daemon-logger'
@@ -319,7 +320,7 @@ export function createDaemon(
       return startDaemon(ctx)
     },
     stop(): void {
-      ctx.state.shutdownRequested = true
+      requestShutdown(ctx)
     },
     getStatus(): DaemonStatus {
       const connectedAccounts = Array.from(ctx.state.accounts.values()).filter(

@@ -1,4 +1,6 @@
 import type { tl } from '@mtcute/bun'
+import { isDaemonStopError } from './daemon-utils'
+import { isPermanentSyncError } from './sync-retry'
 import {
   buildInputPeer,
   extractFloodWaitSeconds,
@@ -52,5 +54,30 @@ export function resolveFloodWaitResult(
     messagesFetched: 0,
     rateLimited: true,
     waitSeconds: seconds,
+  }
+}
+
+/**
+ * The result of a job whose request failed. A request the daemon stop cut
+ * short is no failure: the job is pending again as it was. A FLOOD_WAIT
+ * defers the job; any other error fails it, for good if it is permanent.
+ */
+export function resolveJobError(
+  ctx: RealSyncWorkerContext,
+  err: unknown,
+): RealJobResult {
+  if (isDaemonStopError(err)) {
+    return { success: false, messagesFetched: 0, stopped: true }
+  }
+  const floodResult = resolveFloodWaitResult(ctx, err)
+  if (floodResult) {
+    return floodResult
+  }
+  const error = err instanceof Error ? err : new Error(String(err))
+  return {
+    success: false,
+    messagesFetched: 0,
+    error: error.message,
+    permanent: isPermanentSyncError(err),
   }
 }

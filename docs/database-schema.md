@@ -303,11 +303,11 @@ CREATE INDEX idx_sync_jobs_chat ON sync_jobs(chat_id);
 - `status`: `pending` includes jobs waiting for a retry. A `failed` job keeps its chat from
   getting a new job of the same type until it is deleted: by the daemon after 24 hours or on
   start, or by `tg chats sync` for its chat.
-- `attempts`: failed tries so far. A FLOOD_WAIT doesn't count; the fifth failure, or a
-  permanent error, marks the job `failed`.
+- `attempts`: failed tries so far. A FLOOD_WAIT or a daemon stop doesn't count; the fifth
+  failure, or a permanent error, marks the job `failed`.
 - `next_run_at`: when a pending job may run, in milliseconds since the epoch. `0` means now;
-  a job that failed or hit a FLOOD_WAIT waits until then (see
-  [sync-strategy.md](sync-strategy.md#retries)).
+  a job that failed or hit a FLOOD_WAIT waits until then, and a job a daemon stop cut short
+  keeps its own (see [sync-strategy.md](sync-strategy.md#retries)).
 - `error_message`: the last error, kept while the job waits for its retry.
 - Databases from 0.1.4 get `attempts` and `next_run_at` added with their defaults.
 

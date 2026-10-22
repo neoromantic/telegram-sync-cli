@@ -8,6 +8,7 @@ import type { TelegramClient, tl } from '@mtcute/bun'
 import type { AccountRuntime, DaemonContext } from '../daemon/daemon-context'
 import {
   createDaemonRuntime,
+  requestShutdown,
   totalMessagesSynced,
 } from '../daemon/daemon-context'
 import {
@@ -30,6 +31,8 @@ import {
   createAccountCacheDb,
 } from './helpers/daemon-runtime'
 import { fakeDialogClient } from './helpers/fake-dialogs'
+import { createFakeHistory, range } from './helpers/fake-history'
+import { waitLikeFloodWait } from './helpers/flood-wait'
 
 function createLogger() {
   return {
@@ -504,6 +507,38 @@ describe('rebuildSyncWorker dialog pass', () => {
     expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
   })
 
+  it('a stop during a FLOOD_WAIT in a reconnect pass ends the wait at once', async () => {
+    const ctx = createContext()
+    const refreshQueues = mock(() => {})
+    addAccountRuntime(ctx, 1, cacheDb, {
+      scheduler: createSchedulerStub({ refreshQueues }),
+    })
+    const fake = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 1000 },
+        { kind: 'user', id: 1002, topMessage: 1007 },
+      ],
+      { waitAfter: 1, onWait: () => requestShutdown(ctx) },
+    )
+
+    const started = performance.now()
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(fake.params).toEqual([{ abortSignal: ctx.runtime.shutdown.signal }])
+    // Neither caught up nor unknown: their sync state stays as it was
+    for (const userId of [1002, 1003]) {
+      expect(chatSyncState.get(userId)?.top_message_id).toBe(1000)
+    }
+    expect(refreshQueues).not.toHaveBeenCalled()
+    expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.error).not.toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      '[Account 1] Dialog pass stopped after 1 dialogs: the daemon is stopping',
+    )
+  })
+
   it('a reconnect pass whose page fails during a stop logs at debug and marks nothing', async () => {
     const ctx = createContext()
     const refreshQueues = mock(() => {})
@@ -755,11 +790,15 @@ describe('processJobs', () => {
         worker: createWorkerStub({ processJobReal: mock(async () => result) }),
       })
       await processJobs(ctx)
-      const lines = (level: 'warn' | 'debug') =>
+      const lines = (level: 'warn' | 'debug' | 'error') =>
         (ctx.logger[level] as ReturnType<typeof mock>).mock.calls.map((call) =>
           String(call[0]),
         )
-      return { warn: lines('warn'), debug: lines('debug') }
+      return {
+        warn: lines('warn'),
+        debug: lines('debug'),
+        error: lines('error'),
+      }
     }
 
     it('warns with the attempt and the error when the job will retry', async () => {
@@ -803,6 +842,21 @@ describe('processJobs', () => {
       expect(exhausted.warn).toHaveLength(1)
       expect(exhausted.warn[0]).toContain(
         '(after 5 attempts): connection reset',
+      )
+    })
+
+    it('only debug-logs a job that a daemon stop left pending', async () => {
+      const { warn, debug, error } = await run({
+        success: false,
+        messagesFetched: 0,
+        stopped: true,
+        outcome: { state: 'stopped', attempts: 2, nextRunAt: 0 },
+      })
+
+      expect(warn).toEqual([])
+      expect(error).toEqual([])
+      expect(debug).toContain(
+        '[Account 1] Job 3 left pending: the daemon is stopping',
       )
     })
 
@@ -1117,6 +1171,76 @@ describe('processJobs with two accounts', () => {
     expect(
       createRateLimitsService(second.db).isBlocked('messages.getHistory'),
     ).toBe(false)
+  })
+})
+
+describe('a daemon stop during a sync job', () => {
+  const CHAT = 5001
+  let db: Database
+
+  beforeEach(() => {
+    db = createAccountCacheDb()
+    // A private chat due for its first page
+    createChatSyncStateService(db).upsert({
+      chat_id: CHAT,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+    })
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  it('leaves the job pending as it was, and the next start runs it', async () => {
+    const ctx = createContext()
+    const call = mock(
+      (_request: unknown, params?: { abortSignal?: AbortSignal }) =>
+        waitLikeFloodWait(params, { onWait: () => requestShutdown(ctx) }),
+    )
+    connect(ctx, 1, asTelegramClient({ call } as Partial<TelegramClient>))
+    addAccountRuntime(ctx, 1, db)
+    await initializeScheduler(ctx)
+    const jobs = createSyncJobsService(db)
+    const [queued] = jobs.getPendingJobs()
+    expect(queued).toMatchObject({
+      chat_id: CHAT,
+      job_type: SyncJobType.InitialLoad,
+    })
+
+    const started = performance.now()
+    await processJobs(ctx)
+
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(call.mock.calls[0]?.[1]).toEqual({
+      abortSignal: ctx.runtime.shutdown.signal,
+    })
+    expect(jobs.getById(queued!.id)).toEqual(queued!)
+    expect(jobs.countJobs().running).toBe(0)
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.error).not.toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      `[Account 1] Job ${queued!.id} left pending: the daemon is stopping`,
+    )
+
+    // The next start, on the same cache
+    const restarted = createContext()
+    const history = createFakeHistory(range(1, 5))
+    connect(restarted, 1, history.client)
+    addAccountRuntime(restarted, 1, db)
+    await initializeScheduler(restarted)
+    expect(jobs.getPendingJobs().map((job) => job.id)).toEqual([queued!.id])
+
+    await processJobs(restarted)
+
+    expect(history.requests).toHaveLength(1)
+    expect(jobs.getById(queued!.id)?.status).toBe('completed')
+    expect(createChatSyncStateService(db).get(CHAT)).toMatchObject({
+      forward_cursor: 5,
+      backward_cursor: 1,
+    })
   })
 })
 

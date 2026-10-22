@@ -10,6 +10,22 @@ export function calculateReconnectDelay(
   )
 }
 
+/**
+ * The reason a daemon stop aborts the requests it waits on. Only
+ * `requestShutdown` creates it, so a request that ends with it was cut short
+ * by the stop, not by a fault.
+ */
+export class DaemonStopError extends Error {
+  constructor() {
+    super('The daemon is stopping')
+    this.name = 'DaemonStopError'
+  }
+}
+
+export function isDaemonStopError(err: unknown): err is DaemonStopError {
+  return err instanceof DaemonStopError
+}
+
 export function formatError(err: unknown): string {
   if (err instanceof Error) {
     return err.stack ?? err.message

@@ -505,6 +505,22 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
         expect(errors.text).not.toMatch(
           /Failed to close client|Database has closed|closed database/,
         )
+        // The stop cuts short the request a sync job waits on and leaves the
+        // job pending, with nothing logged for it (#64)
+        const running = await runCliSuccess(
+          [
+            'sql',
+            '--query',
+            "SELECT COUNT(*) AS n FROM sync_jobs WHERE status = 'running'",
+          ],
+          cli(),
+        )
+        expect(
+          (running.json as Envelope<{ rows: Array<{ n: number }> }>).data
+            .rows[0]?.n,
+        ).toBe(0)
+        expect(logs.text).not.toMatch(/DaemonStopError|AbortError/)
+        expect(errors.text).not.toMatch(/DaemonStopError|AbortError/)
       } finally {
         daemon.kill()
       }

@@ -9,7 +9,7 @@ import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { apiUserToCacheInput } from '../utils/telegram-mappers'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
-import { formatError } from './daemon-utils'
+import { formatError, isDaemonStopError } from './daemon-utils'
 
 const DIALOG_BOOTSTRAP_BATCH_SIZE = 200
 
@@ -39,7 +39,8 @@ function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
  * turns it on.
  *
  * A daemon stop ends the pass at the next dialog, so the shutdown doesn't
- * wait for the rest of the list (#56).
+ * wait for the rest of the list (#56), and ends the page request the pass
+ * is waiting on, a FLOOD_WAIT of up to five minutes included (#64).
  */
 export async function syncAccountDialogs(
   ctx: DaemonContext,
@@ -118,8 +119,15 @@ export async function syncAccountDialogs(
   }
 
   try {
-    for await (const dialog of client.iterDialogs({ archived: 'keep' })) {
-      // Leaving the loop fetches no further page
+    // The stop signal ends a page request at once, a FLOOD_WAIT it waits out
+    // included (#64)
+    const pages = client.withParams({
+      abortSignal: ctx.runtime.shutdown.signal,
+    })
+    for await (const dialog of pages.iterDialogs({ archived: 'keep' })) {
+      // Leaving the loop fetches no further page. The stop signal is a
+      // macrotask, so it can't land between this check and the next page's
+      // request: no page starts with the signal already aborted.
       if (ctx.state.shutdownRequested) {
         stopped = true
         break
@@ -129,11 +137,14 @@ export async function syncAccountDialogs(
     complete = !stopped
   } catch (err) {
     if (ctx.state.shutdownRequested) {
-      // A page that fails while the daemon stops is no fault of the account
+      // A page that fails while the daemon stops is no fault of the account;
+      // one the stop cut short is the stop itself, not worth a line
       stopped = true
-      ctx.logger.debug(
-        `[Account ${accountId}] Dialog page failed during the stop: ${formatError(err)}`,
-      )
+      if (!isDaemonStopError(err)) {
+        ctx.logger.debug(
+          `[Account ${accountId}] Dialog page failed during the stop: ${formatError(err)}`,
+        )
+      }
     } else {
       ctx.logger.warn(
         `[Account ${accountId}] Failed to bootstrap dialogs after ${dialogsCount}: ${formatError(err)}`,

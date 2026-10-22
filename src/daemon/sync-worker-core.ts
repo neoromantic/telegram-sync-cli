@@ -119,6 +119,8 @@ export interface JobResult {
   waitSeconds?: number
   /** The error won't go away on a retry, so the job fails at once */
   permanent?: boolean
+  /** A daemon stop cut the job's request short, so it stays pending */
+  stopped?: boolean
   /** How the job row ended: completed, deferred, retrying, failed… */
   outcome?: JobOutcome
 }

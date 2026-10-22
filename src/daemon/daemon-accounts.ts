@@ -14,7 +14,7 @@ import {
   type RawMessageFwdHeader,
 } from '../utils/message-parser'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
-import type { DaemonContext } from './daemon-context'
+import { type DaemonContext, requestShutdown } from './daemon-context'
 import { daemonPlatform } from './daemon-platform'
 import { rebuildSyncWorker } from './daemon-scheduler'
 import {
@@ -134,7 +134,7 @@ export function setupSignalHandlers(ctx: DaemonContext): void {
 
   const handleShutdown = (signal: string) => {
     ctx.logger.info(`Received ${signal}, initiating graceful shutdown...`)
-    ctx.state.shutdownRequested = true
+    requestShutdown(ctx)
   }
 
   process.on('SIGTERM', () => handleShutdown('SIGTERM'))
@@ -326,6 +326,29 @@ export function removeEventHandlers(
 // five minutes instead of failing the request (mtcute's default is 10s).
 const DAEMON_FLOOD_WAIT_MAX_MS = 5 * 60 * 1000
 
+/**
+ * The network middlewares of the account's daemon client. The flood waiter
+ * sleeps inside the request; a request given the daemon's stop signal
+ * (`ctx.runtime.shutdown`) ends that sleep when the daemon stops (#64).
+ */
+export function daemonNetworkMiddlewares(
+  ctx: DaemonContext,
+  accountId: number,
+) {
+  return networkMiddlewares.basic({
+    floodWaiter: {
+      maxWait: DAEMON_FLOOD_WAIT_MAX_MS,
+      maxRetries: 5,
+      store: true,
+      onBeforeWait: (waitCtx, seconds) => {
+        ctx.logger.info(
+          `[Account ${accountId}] ${waitCtx.request._}: FLOOD_WAIT, waiting ${seconds}s`,
+        )
+      },
+    },
+  })
+}
+
 function createDaemonClient(
   ctx: DaemonContext,
   accountId: number,
@@ -345,20 +368,7 @@ function createDaemonClient(
     platform: daemonPlatform,
     logLevel: ctx.verbosity === 'verbose' ? 5 : 2,
     ...(telegramConfig.transport && { transport: telegramConfig.transport }),
-    network: {
-      middlewares: networkMiddlewares.basic({
-        floodWaiter: {
-          maxWait: DAEMON_FLOOD_WAIT_MAX_MS,
-          maxRetries: 5,
-          store: true,
-          onBeforeWait: (waitCtx, seconds) => {
-            ctx.logger.info(
-              `[Account ${accountId}] ${waitCtx.request._}: FLOOD_WAIT, waiting ${seconds}s`,
-            )
-          },
-        },
-      }),
-    },
+    network: { middlewares: daemonNetworkMiddlewares(ctx, accountId) },
   })
   wrapClientCallWithRecordReplay(client, {
     accountId,

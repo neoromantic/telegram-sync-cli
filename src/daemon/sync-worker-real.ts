@@ -65,6 +65,7 @@ export function createRealSyncWorker(deps: RealSyncWorkerDeps) {
     rateLimits: deps.rateLimits,
     chatsCache: deps.chatsCache,
     config,
+    signal: deps.signal,
   }
 
   return {
