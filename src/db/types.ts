@@ -21,6 +21,25 @@ export interface CacheStalenessConfig {
 }
 
 /**
+ * How long the cache keeps its bookkeeping rows, in milliseconds. Messages,
+ * chats and users are never pruned.
+ */
+export interface CacheRetentionConfig {
+  /** api_activity rows - default 7 days */
+  apiActivity: number
+  /** rate_limits windows; a running FLOOD_WAIT is always kept - default 1 hour */
+  rateLimits: number
+  /** Completed sync jobs - default 24 hours */
+  completedJobs: number
+  /**
+   * Failed sync jobs - default 24 hours. A failed row keeps its job from
+   * being queued again, so this is also the retry delay after the backoff
+   * gives up.
+   */
+  failedJobs: number
+}
+
+/**
  * Complete cache configuration
  */
 export interface CacheConfig {
@@ -30,6 +49,8 @@ export interface CacheConfig {
   backgroundRefresh: boolean
   /** Hard limit before cache eviction in milliseconds */
   maxCacheAge: number
+  /** How long the bookkeeping tables keep their rows */
+  retention: CacheRetentionConfig
 }
 
 // Duration constants in milliseconds
@@ -38,6 +59,16 @@ const MINUTE = 60 * SECOND
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 const WEEK = 7 * DAY
+
+/** Default retention of the bookkeeping tables */
+export function getDefaultRetentionConfig(): CacheRetentionConfig {
+  return {
+    apiActivity: WEEK,
+    rateLimits: HOUR,
+    completedJobs: DAY,
+    failedJobs: DAY,
+  }
+}
 
 /**
  * Returns default cache configuration
@@ -51,6 +82,7 @@ export function getDefaultCacheConfig(): CacheConfig {
     },
     backgroundRefresh: true,
     maxCacheAge: 30 * DAY, // 30 days
+    retention: getDefaultRetentionConfig(),
   }
 }
 

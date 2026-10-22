@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import type { AccountsDbInterface } from '../db'
 import type { DaemonStatusService } from '../db/daemon-status'
-import { getDefaultCacheConfig } from '../db/types'
+import { type CacheRetentionConfig, getDefaultCacheConfig } from '../db/types'
 import { DaemonStopError } from './daemon-utils'
 import type { PidFile } from './pid-file'
 import type { SyncScheduler } from './scheduler'
@@ -74,6 +74,11 @@ export interface DaemonContext {
   state: DaemonState
   accountsDb: AccountsDbInterface
   runtime: DaemonRuntime
+  /**
+   * How long each cache keeps its bookkeeping rows, read from config.json
+   * once at start; the defaults when absent
+   */
+  retention?: CacheRetentionConfig
 }
 
 export function createDaemonRuntime(): DaemonRuntime {

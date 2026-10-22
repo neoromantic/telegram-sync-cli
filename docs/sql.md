@@ -31,9 +31,9 @@ account the command fails with `AUTH_REQUIRED`; with several and none active, wi
 | `history_ranges` | Message ID ranges cached without gaps | Eternal |
 | `sync_state` | Global sync progress tracking | N/A |
 | `chat_sync_state` | Per-chat sync progress | N/A |
-| `sync_jobs` | Background sync job queue | N/A |
-| `rate_limits` | API rate limiting data | N/A |
-| `api_activity` | API call audit log | N/A (no automatic cleanup yet) |
+| `sync_jobs` | Background sync job queue | Completed and failed jobs: `cache.retention.completedJobs` / `failedJobs` (24 h) |
+| `rate_limits` | API rate limiting data | `cache.retention.rateLimits` (1 h); running FLOOD_WAITs are kept |
+| `api_activity` | API call audit log | `cache.retention.apiActivity` (7 days) |
 | `daemon_status` | Daemon runtime state for this account | N/A |
 | `cache_meta` | Which account the file belongs to (`account_id`, `user_id`) | N/A |
 

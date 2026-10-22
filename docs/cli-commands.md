@@ -268,7 +268,8 @@ part counts the daemon's sync jobs and lists some of them:
   5 newest failed ones, each with `account_id` (whose cache holds it), `attempts`, `error` (the last error, or `null`), `next_run_at` (when a waiting job runs
   again, or `null` if it is due) and `sync_mode` (the chat's mode, or `null` if the chat has no
   sync state).
-- A failed job is retried after 24 hours or a daemon restart. `tg chats sync <chat_id>` with
+- A failed job is retried after `cache.retention.failedJobs` (24 hours by default) or a daemon
+  restart. `tg chats sync <chat_id>` with
   the flag of its `sync_mode` (`--auto` for `auto`, none for `on`) deletes the chat's failed
   jobs, so a running daemon retries them at its next refresh (30 seconds or less). Without a
   flag the command turns an `auto` chat on. `--format pretty` shows the same, with a Retrying

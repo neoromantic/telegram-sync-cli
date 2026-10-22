@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { TelegramClient } from '@mtcute/bun'
+import { pruneCache } from '../db/cache-maintenance'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
@@ -7,6 +8,7 @@ import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
+import { getDefaultRetentionConfig } from '../db/types'
 import { refreshDialogsAfterReconnect } from './daemon-bootstrap'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
 import { formatError } from './daemon-utils'
@@ -322,20 +324,30 @@ export async function waitForJobsInFlight(ctx: DaemonContext): Promise<void> {
   await Promise.allSettled([...ctx.runtime.jobsInFlight.values()])
 }
 
-/** Delete every account's old completed and failed jobs */
+/**
+ * Prune every account's cache: old API activity, rate limit windows and
+ * finished sync jobs, by the retention read at start. Every account whose
+ * cache is open is pruned, with a scheduler or not, and one whose cache
+ * fails is logged and doesn't stop the others.
+ */
 export function cleanupOldJobs(ctx: DaemonContext): void {
+  const retention = ctx.retention ?? getDefaultRetentionConfig()
   for (const rt of runtimesInOrder(ctx)) {
-    if (!rt.scheduler) continue
     try {
-      const cleaned = rt.scheduler.cleanup(24 * 60 * 60 * 1000)
-      if (cleaned > 0) {
+      const pruned = pruneCache(rt.db, retention)
+      const total =
+        pruned.api_activity +
+        pruned.rate_limits +
+        pruned.completed_jobs +
+        pruned.failed_jobs
+      if (total > 0) {
         ctx.logger.debug(
-          `[Account ${rt.accountId}] Cleaned up ${cleaned} old jobs`,
+          `[Account ${rt.accountId}] Pruned ${pruned.api_activity} API activity rows, ${pruned.rate_limits} rate limit windows, ${pruned.completed_jobs} completed and ${pruned.failed_jobs} failed jobs`,
         )
       }
     } catch (err) {
       ctx.logger.warn(
-        `[Account ${rt.accountId}] Failed to clean up old jobs: ${formatError(err)}`,
+        `[Account ${rt.accountId}] Failed to prune its cache: ${formatError(err)}`,
       )
     }
   }

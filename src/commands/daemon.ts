@@ -9,7 +9,9 @@
 
 import { join } from 'node:path'
 import { defineCommand } from 'citty'
+import { loadRetentionConfig } from '../config'
 import { createDaemon, createPidFile, DaemonExitCode } from '../daemon'
+import { createLogger } from '../daemon/daemon-logger'
 import { accountsDb, getDataDir } from '../db'
 import { summarizeDaemonStatus } from '../db/daemon-status'
 import { ErrorCodes } from '../types'
@@ -45,7 +47,11 @@ const startCommand = defineCommand({
   },
   async run({ args }) {
     const verbosity = args.quiet ? 'quiet' : args.verbose ? 'verbose' : 'normal'
-    const daemon = createDaemon({ verbosity })
+    // Read once: a change takes effect at the next start. A bad config
+    // never keeps the daemon from starting.
+    const { retention, warning } = await loadRetentionConfig()
+    if (warning) createLogger(verbosity).warn(warning)
+    const daemon = createDaemon({ verbosity, retention })
     const exitCode = await daemon.start()
 
     process.exit(exitCode)

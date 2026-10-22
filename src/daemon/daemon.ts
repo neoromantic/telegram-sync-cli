@@ -14,6 +14,7 @@ import {
   isCacheUnavailableError,
 } from '../db'
 import { createDaemonStatusService } from '../db/daemon-status'
+import { getDefaultRetentionConfig } from '../db/types'
 import { requireDefaultConfig } from '../services/telegram'
 import { VERSION } from '../version'
 import {
@@ -94,6 +95,7 @@ function createContext(
     state,
     accountsDb,
     runtime: createDaemonRuntime(),
+    retention: config.retention ?? getDefaultRetentionConfig(),
   }
 }
 
