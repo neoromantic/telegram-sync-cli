@@ -524,6 +524,43 @@ describe('bootstrapDialogs', () => {
     otherDb.close()
   })
 
+  it('a cache write that fails during a stop is still a warning', async () => {
+    const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
+    // The stop closes nothing under the startup pass, so a failed save
+    // after it is a cache fault
+    testCacheDb.run(
+      `CREATE TRIGGER fail_chat_save BEFORE INSERT ON chats_cache
+       BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END`,
+    )
+    const first = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 10 },
+        { kind: 'user', id: 1002, topMessage: 10 },
+      ],
+      {
+        onListed: () => {
+          ctx.state.shutdownRequested = true
+        },
+      },
+    )
+    connect(ctx, 1, first.client)
+    addAccountRuntime(ctx, 1, testCacheDb)
+    const otherDb = createAccountCacheDb()
+    const second = fakeDialogClient([{ kind: 'user', id: 2001 }])
+    connect(ctx, 2, second.client)
+    addAccountRuntime(ctx, 2, otherDb)
+
+    await bootstrapDialogs(ctx)
+
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[Account 1\] Failed to bootstrap dialogs: .*database or disk is full/,
+      ),
+    )
+    expect(second.calls).toEqual([])
+    otherDb.close()
+  })
+
   it('leaves a supergroup without a member count off', async () => {
     await runPass([{ kind: 'supergroup', id: 2001, topMessage: 50 }])
 
