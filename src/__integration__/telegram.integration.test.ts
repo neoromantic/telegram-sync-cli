@@ -469,13 +469,42 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
           },
         })
 
+        // Stop during an active sync, while the clients still write update
+        // state and peers to their session files (#56)
+        await waitFor(
+          async () => {
+            const result = await runCli(
+              [
+                'sql',
+                '--query',
+                "SELECT COUNT(*) AS n FROM sync_jobs WHERE status IN ('pending', 'running')",
+              ],
+              cli(),
+            )
+            const payload = result.json as Envelope<{
+              rows: Array<{ n: number }>
+            }>
+            const count = payload?.data?.rows?.[0]?.n ?? 0
+            return count > 0 ? count : null
+          },
+          30_000,
+          'queued sync jobs',
+        )
+
         const stop = await runCliSuccess(['daemon', 'stop'], cli())
         expect(stop.json).toMatchObject({ success: true })
         expect(await daemon.exited).toBe(0)
-        // A normal stop logs no close warning, although mtcute has already
-        // closed the session files when the signal arrived (#34)
-        await errors.done
-        expect(errors.text).not.toContain('Failed to close client')
+        await Promise.all([logs.done, errors.done])
+        // The session files stay open until each client closes, so the
+        // signal isn't sent a second time and no write fails (#56). mtcute
+        // logs to stdout.
+        expect(logs.text.match(/Received SIGTERM/g)).toHaveLength(1)
+        expect(logs.text).not.toMatch(
+          /updates loop encountered error|failed to write pending updates|Database has closed|closed database/,
+        )
+        expect(errors.text).not.toMatch(
+          /Failed to close client|Database has closed|closed database/,
+        )
       } finally {
         daemon.kill()
       }
