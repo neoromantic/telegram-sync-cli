@@ -501,7 +501,9 @@ reports a waiting move under `storage.migration`.
 Handing a set-aside file to an account by hand: stop the daemon, move the account's
 `accounts/<id>/cache.db`, `-wal` and `-shm` away, then move `shared-cache.db` to
 `accounts/<id>/cache.db`. The folded file has no sidecars. tg stamps it for that account on
-the next open.
+the next open. It carries every account's rows from before the upgrade, which tg then serves
+as that account's, foreign access hashes included: hand it over only when a single account
+synced into it, and otherwise read it as an archive with `sqlite3`.
 
 A single account that adopts the shared file may inherit rows that accounts removed earlier
 left in it; they can't be told apart. Going back to 0.3 or older after the move is not
