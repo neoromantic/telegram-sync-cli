@@ -1350,25 +1350,31 @@ describe('a daemon stop during a sync job', () => {
   })
 })
 
-/** An api_activity row ten days old, past the 7-day default retention */
-function addOldActivity(db: Database) {
-  const tenDaysAgo = Math.floor(Date.now() / 1000) - 10 * 24 * 3600
+/** An api_activity row `ageDays` old; the default ten is past the 7-day default retention */
+function addOldActivity(db: Database, ageDays = 10) {
+  const timestamp = Math.floor(Date.now() / 1000) - ageDays * 24 * 3600
   db.query(
     "INSERT INTO api_activity (timestamp, method, success) VALUES (?, 'messages.getHistory', 1)",
-  ).run(tenDaysAgo)
+  ).run(timestamp)
 }
 
 const activityRows = (db: Database) =>
   (db.query('SELECT COUNT(*) AS n FROM api_activity').get() as { n: number }).n
 
 describe('cleanupOldJobs', () => {
-  it('prunes every account, with a scheduler or not', () => {
+  it("prunes every account, with a scheduler or not, by the daemon's configured retention", () => {
     const ctx = createContext()
-    ctx.retention = getDefaultRetentionConfig()
+    // One day: the 7-day default would keep the 2-day-old rows
+    ctx.retention = {
+      ...getDefaultRetentionConfig(),
+      apiActivity: 24 * 60 * 60 * 1000,
+    }
     const withScheduler = runAccount(ctx, 1)
     const withoutScheduler = addAccountRuntime(ctx, 2)
     expect(withoutScheduler.scheduler).toBeNull()
-    for (const rt of [withScheduler, withoutScheduler]) addOldActivity(rt.db)
+    for (const rt of [withScheduler, withoutScheduler]) {
+      addOldActivity(rt.db, 2)
+    }
 
     cleanupOldJobs(ctx)
 
