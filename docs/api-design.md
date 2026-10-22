@@ -45,11 +45,13 @@ option, or last, is `true` (`--silent`), and `--no-name` is `false`. Any other v
 with `-` needs `=` (`--message=-hi`). Both forms type values the same way: `true`/`false`,
 numbers and `{…}`/`[…]` JSON; a string that looks like one of these goes in `--json`.
 
-tg reads its own options wherever they appear and keeps them out of the request: `--json`/`-j`,
-`--account`/`-a`, `--raw`/`-r`, and the global `--format`/`-f`, `--verbose`/`-v`,
-`--quiet`/`-q` (also `--q`, `--f`, `--v`) and `--help`/`-h`. A method argument with one of those
-names goes in `--json`, for example
-`tg api contacts.search --json '{"q":"alice","limit":5}'`.
+tg keeps its own options out of the request: `--json`/`-j`, `--account`/`-a`, `--raw`/`-r`, and
+the global `--format`/`-f`, `--verbose`/`-v`, `--quiet`/`-q` (also `--q`, `--f`, `--v`) and
+`--help`/`-h`. Put them after the method. `--json`, `--account` and `--raw` also work between
+`api` and the method, and the global options before `api`. Don't put `-f`/`--format` between
+`api` and the method: its value is taken as the method. A method argument with one of those
+names goes in `--json`, such as `q` in `contacts.search` and `messages.search` or `format` in
+`account.getThemes`: `tg api contacts.search --json '{"q":"alice","limit":5}'`.
 
 ```bash
 # Named args
