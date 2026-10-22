@@ -221,8 +221,8 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `api-args.e2e.test.ts` — the request `tg api` builds: each test records a replay fixture
   for an exact request with a stub client, then `tg api` in replay mode finds it only if it
   sends that request with no extra keys; `--username myuser`, `--username=myuser` and `--json`
-  build the same call, as do flags with no value, dotted names and negative numbers in either
-  form, with `--account`/`-a` before or after the method
+  build the same call, as do flags with no value, dotted names and negative numbers (`-10`,
+  `-1.5`) in either form, with `--account`/`-a` before or after the method
 
 ### E2E Helpers
 

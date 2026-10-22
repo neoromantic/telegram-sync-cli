@@ -174,4 +174,49 @@ describe('E2E: tg api builds the request from its arguments', () => {
       })
     },
   )
+
+  // citty reads `-1.5` as the short options 1, . and 5; none may reach the request
+  it.each([
+    [
+      '--name value',
+      [
+        '--geoPoint._',
+        'inputGeoPoint',
+        '--geoPoint.lat',
+        '-1.5',
+        '--geoPoint.long',
+        '2.5',
+      ],
+    ],
+    [
+      '--name=value',
+      [
+        '--geoPoint._=inputGeoPoint',
+        '--geoPoint.lat=-1.5',
+        '--geoPoint.long=2.5',
+      ],
+    ],
+  ])(
+    'contacts.getLocated reads a negative decimal with %s',
+    async (_form, args) => {
+      const response = { _: 'updates', updates: [], users: [], chats: [] }
+      await recordFixture(
+        {
+          _: 'contacts.getLocated',
+          geoPoint: { _: 'inputGeoPoint', lat: -1.5, long: 2.5 },
+        },
+        response,
+      )
+
+      const result = await runCliSuccess(
+        ['api', 'contacts.getLocated', ...args],
+        replayOptions(),
+      )
+
+      expect(result.json).toEqual({
+        success: true,
+        data: { method: 'contacts.getLocated', result: response },
+      })
+    },
+  )
 })
