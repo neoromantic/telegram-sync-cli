@@ -194,11 +194,14 @@ export const syncChatCommand = defineCommand({
     // A community only groups linked chats: there is no history to fetch,
     // so jobs for it would only fail (#58)
     if (mode === 'on' && chat.type === 'community') {
+      // 0.4 turned a community on, and its jobs keep failing until it's off
+      const turnedOn =
+        createChatSyncStateService(db).get(chat.peerId)?.sync_mode === 'on'
       error(
         ErrorCodes.INVALID_ARGS,
         `${chat.title ?? input} is a Telegram community: it has no messages of its own, so there is nothing to sync`,
         { chat: input, id: chat.id, type: 'community', account_id: account.id },
-        'Its linked chats are ordinary supergroups and channels: find them with tg chats list --type supergroup or --type channel and turn each on with tg chats sync <chat>',
+        `Its linked chats are ordinary supergroups and channels: find them with tg chats list --type supergroup or --type channel and turn each on with tg chats sync <chat>${turnedOn ? `. An earlier version turned this community on: tg chats sync ${input} --auto turns it off and clears its failed jobs` : ''}`,
       )
     }
 

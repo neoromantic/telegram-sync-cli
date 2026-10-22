@@ -479,6 +479,49 @@ describe('E2E: chats sync', () => {
     expect(off.data).toMatchObject({ type: 'community', syncEnabled: false })
   })
 
+  it('tells how to turn off a community an earlier version turned on', async () => {
+    const communityId = -1005555555555
+    createChatsCache(cacheDb).upsertMany([
+      rawChatToCacheInput(
+        fakeRawCommunity({ id: 5555555555, accessHash: '777' }),
+      ),
+    ])
+    // As 0.4 left it: turned on, with a job that failed
+    const states = createChatSyncStateService(cacheDb)
+    states.upsert({
+      chat_id: communityId,
+      chat_type: 'community',
+      member_count: null,
+      sync_priority: SyncPriority.Low,
+      sync_enabled: false,
+    })
+    states.setSyncMode(communityId, 'on')
+    const jobs = createSyncJobsService(cacheDb)
+    const job = jobs.create({
+      chat_id: communityId,
+      job_type: SyncJobType.InitialLoad,
+      priority: SyncPriority.Low,
+    })
+    jobs.markRunning(job.id)
+    jobs.markFailed(job.id, 'Telegram API error 400: CHANNEL_INVALID')
+
+    const result = await runCliFailure(
+      ['chats', 'sync', String(communityId)],
+      3,
+      options(),
+    )
+    const suggestion = (result.json as { error: { suggestion: string } }).error
+      .suggestion
+    expect(suggestion).toContain(`tg chats sync ${communityId} --auto`)
+
+    const auto = await sync(String(communityId), '--auto')
+    expect(auto.data).toMatchObject({
+      mode: 'auto',
+      syncEnabled: false,
+      clearedFailedJobs: 1,
+    })
+  })
+
   it('is listed in tg chats --help', async () => {
     const result = await runCliSuccess(['chats', '--help'], options())
 
