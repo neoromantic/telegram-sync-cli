@@ -190,6 +190,12 @@ export async function syncAccountDialogs(
         )
       }
     }
+    // A stop during the request ends the pass like one during a page: it
+    // marks nothing and refreshes no queues
+    if (ctx.state.shutdownRequested) {
+      stopped = true
+      complete = false
+    }
   }
 
   if (complete) {

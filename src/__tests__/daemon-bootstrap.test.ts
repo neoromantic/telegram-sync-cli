@@ -230,19 +230,29 @@ describe('bootstrapDialogs', () => {
     )
   })
 
-  it('a stop during the communities request ends it', async () => {
-    const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
+  it('a stop during the communities request ends it and the pass', async () => {
+    const { syncAccountDialogs } = await import('../daemon/daemon-bootstrap')
     const fake = fakeDialogClient([{ kind: 'user', id: 1001, topMessage: 5 }], {
       communities: [{ id: 5555555555, accessHash: '777' }],
       communitiesWaitUntilAbort: true,
       onWait: () => requestShutdown(ctx),
     })
-    connect(ctx, 1, fake.client)
     addAccountRuntime(ctx, 1, testCacheDb)
 
-    await bootstrapDialogs(ctx)
+    // Stopped, so the caller marks nothing and refreshes no queues
+    expect(await syncAccountDialogs(ctx, 1, fake.client)).toMatchObject({
+      complete: false,
+      stopped: true,
+    })
 
     expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.info).not.toHaveBeenCalledWith(
+      expect.stringContaining('Bootstrapped'),
+    )
+    // The stop signal ended the wait, not the fake's guard timer
+    expect(ctx.logger.debug).not.toHaveBeenCalledWith(
+      expect.stringContaining('Communities request failed'),
+    )
     expect(fake.communityCalls).toHaveLength(1)
     expect(createChatsCache(testCacheDb).getById('-1005555555555')).toBeNull()
     expect(createChatsCache(testCacheDb).getById('1001')).not.toBeNull()
