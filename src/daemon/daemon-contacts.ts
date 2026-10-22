@@ -182,6 +182,13 @@ function handleContactsError(
   }
 
   state.retryAt.set(accountId, now + CONTACTS_RETRY_MS)
+  // A reconnect closes the old client, failing its request; the new one checks
+  if (ctx.state.accounts.get(accountId)?.status !== 'connected') {
+    ctx.logger.debug(
+      `[Account ${accountId}] Contacts check ended by a lost connection: ${formatError(err)}`,
+    )
+    return
+  }
   ctx.logger.warn(
     `[Account ${accountId}] Contacts check failed, retrying in 15 min: ${formatError(err)}`,
   )
@@ -210,6 +217,8 @@ export function requestContactsCheck(
  * daemon calls it after each start and reconnect: its clients don't catch
  * up on updates missed while they were down (mtcute's `catchUp` is off),
  * so a contact change made then reaches the cache only through a check.
+ * It drops the 15-minute wait of a failed check, which a dropped connection
+ * usually caused; a FLOOD_WAIT still holds through the rate limits.
  */
 export function requestContactsCheckNow(
   ctx: DaemonContext,
@@ -217,6 +226,7 @@ export function requestContactsCheckNow(
   now: number,
 ): void {
   ctx.runtime.contacts.checkAt.set(accountId, now)
+  ctx.runtime.contacts.retryAt.delete(accountId)
 }
 
 /**

@@ -188,7 +188,9 @@ The daemon keeps each connected account's contact list in its own cache (`users_
 - **Backoff:** a FLOOD_WAIT longer than the 5 minutes the client sleeps through is recorded in
   the account's `rate_limits` (the CLI sees it too) and the account isn't checked again until
   it ends. Any other error is logged as a warning and the account is checked again after 15
-  minutes; `last_sync_at` stays as it was.
+  minutes, or at once after its next reconnect; `last_sync_at` stays as it was. A check that
+  fails because the connection dropped is logged at debug level, and the reconnect's check runs
+  right away.
 - **Stop:** the request gets the daemon's stop signal. A check that ends during a stop writes
   nothing.
 

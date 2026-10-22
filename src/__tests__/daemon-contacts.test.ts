@@ -296,6 +296,38 @@ describe('maybeSyncContacts', () => {
     expect(calls).toHaveLength(2)
   })
 
+  it('checks at once after a reconnect, even after a failed check', async () => {
+    const ctx = createContext()
+    const { client, calls } = fakeClient()
+    const db = connect(ctx, 1, client)
+    applyContactsSnapshot(db, contactsList([1001]), NOW - WEEK)
+
+    const started = maybeSyncContacts(ctx, NOW)
+    // The connection drops: the reconnect closes the client and fails the call
+    const accountState = ctx.state.accounts.get(1)
+    if (accountState) accountState.status = 'reconnecting'
+    calls[0]?.reject(new Error('connection closed'))
+    await Promise.all(started)
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+
+    if (accountState) accountState.status = 'connected'
+    requestContactsCheckNow(ctx, 1, NOW + 1000)
+    maybeSyncContacts(ctx, NOW + 1000)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('keeps a FLOOD_WAIT through a reconnect', () => {
+    const ctx = createContext()
+    const { client, calls } = fakeClient()
+    const db = connect(ctx, 1, client)
+    createRateLimitsService(db).setFloodWait('contacts.getContacts', 600)
+    ctx.runtime.contacts.retryAt.set(1, NOW + 600_000)
+
+    requestContactsCheckNow(ctx, 1, NOW)
+    expect(maybeSyncContacts(ctx, NOW)).toHaveLength(0)
+    expect(calls).toHaveLength(0)
+  })
+
   it('records a FLOOD_WAIT and waits it out', async () => {
     const ctx = createContext()
     const { client, calls } = fakeClient()
