@@ -4,9 +4,11 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createDaemon } from '../daemon/daemon'
+import { createContext, createDaemon } from '../daemon/daemon'
+import { createLogger } from '../daemon/daemon-logger'
 import { DaemonExitCode } from '../daemon/types'
 import type { AccountsDbInterface } from '../db'
+import { getDefaultRetentionConfig } from '../db/types'
 import type { Account } from '../types'
 
 function createAccountsDb(
@@ -134,5 +136,29 @@ describe('daemon status', () => {
 
     const status = daemon.getStatus()
     expect(status.running).toBe(false)
+  })
+})
+
+describe('daemon context', () => {
+  const accountsDb = createAccountsDb([])
+  const logger = createLogger('quiet')
+
+  it('keeps the retention it is given', () => {
+    const retention = {
+      apiActivity: 30 * 24 * 60 * 60 * 1000,
+      rateLimits: 2 * 60 * 60 * 1000,
+      completedJobs: 60 * 60 * 1000,
+      failedJobs: 3 * 24 * 60 * 60 * 1000,
+    }
+
+    const ctx = createContext({ pidPath, retention }, accountsDb, logger)
+
+    expect(ctx.retention).toEqual(retention)
+  })
+
+  it('falls back to the default retention', () => {
+    const ctx = createContext({ pidPath }, accountsDb, logger)
+
+    expect(ctx.retention).toEqual(getDefaultRetentionConfig())
   })
 })
