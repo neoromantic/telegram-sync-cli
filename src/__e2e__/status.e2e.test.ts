@@ -10,6 +10,7 @@ import { join } from 'node:path'
 
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createDaemonStatusService } from '../db/daemon-status'
+import { createMessagesCache } from '../db/messages-cache'
 import { SyncJobType, type SyncMode, SyncPriority } from '../db/sync-schema'
 import { VERSION } from '../version'
 import { runCliSuccess } from './helpers/cli'
@@ -596,5 +597,89 @@ describe('E2E: status, daemon version', () => {
     const output = await prettyStatus()
     expect(output).not.toMatch(/^\s+Version\s/m)
     expect(output).not.toContain('⚠ The daemon')
+  })
+})
+
+describe('E2E: status cache size', () => {
+  let env: TestEnvironment
+
+  interface SizeStatus {
+    data: {
+      accounts: {
+        accounts: Array<{
+          id: number
+          cache: {
+            status: string
+            size: {
+              file_bytes: number
+              wal_bytes: number
+              free_pages: number
+              auto_vacuum: string
+              tables?: Record<string, number> | null
+            } | null
+          }
+        }>
+      }
+      storage: { cache_bytes: number }
+    }
+  }
+
+  beforeEach(() => {
+    env = createTestEnvironment('status-size')
+    env.initDatabase()
+    env.seedAccounts([
+      { phone: '+15550000001', is_active: true },
+      { phone: '+15550000002' },
+    ])
+    // Account 2 has no cache file
+    createMessagesCache(env.openCacheDb(1)).upsertBatch([
+      {
+        chat_id: 101,
+        message_id: 1,
+        text: 'made-up note',
+        message_type: 'text',
+        date: 1_760_000_000,
+        raw_json: '{}',
+      },
+    ])
+  })
+
+  afterEach(() => {
+    env.cleanup()
+  })
+
+  async function sizeStatus(args: string[] = []): Promise<SizeStatus> {
+    const result = await runCliSuccess(['status', '--json', ...args], {
+      env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+    })
+    return result.json as SizeStatus
+  }
+
+  it("reports each account's cache size and their sum", async () => {
+    const { data } = await sizeStatus()
+    const [first, second] = data.accounts.accounts
+
+    expect(first?.cache.size?.file_bytes).toBeGreaterThan(0)
+    expect(typeof first?.cache.size?.free_pages).toBe('number')
+    expect(typeof first?.cache.size?.auto_vacuum).toBe('string')
+    expect(first?.cache.size).not.toHaveProperty('tables')
+    expect(second?.cache).toMatchObject({ status: 'missing', size: null })
+    expect(data.storage.cache_bytes).toBe(
+      first!.cache.size!.file_bytes + first!.cache.size!.wal_bytes,
+    )
+  })
+
+  it("adds each table's size with --sizes", async () => {
+    const { data } = await sizeStatus(['--sizes'])
+
+    expect(
+      data.accounts.accounts[0]?.cache.size?.tables?.messages_cache,
+    ).toBeGreaterThan(0)
+  })
+
+  it('sums only the account --account selects', async () => {
+    const { data } = await sizeStatus(['--account', '2'])
+
+    expect(data.storage.cache_bytes).toBe(0)
   })
 })

@@ -18,6 +18,7 @@ import {
   listSharedCaches,
   openExistingAccountCacheDb,
 } from '../db'
+import { type CacheSize, readCacheSize } from '../db/cache-maintenance'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import {
   createDaemonStatusService,
@@ -90,6 +91,12 @@ export const statusCommand = defineCommand({
       type: 'string',
       description: `${ACCOUNT_SELECTOR_DESCRIPTION}; report only this account (default: all)`,
     },
+    sizes: {
+      type: 'boolean',
+      description:
+        "Add each table's size (reads every page of the cache, so slower)",
+      default: false,
+    },
   },
   async run({ args }) {
     const dataDir = getDataDir()
@@ -98,7 +105,10 @@ export const statusCommand = defineCommand({
     const accountId = resolveAccountSelector(args.account)
 
     // Collect all status data
-    const statusData = await collectStatus(pidFile, { accountId })
+    const statusData = await collectStatus(pidFile, {
+      accountId,
+      sizes: args.sizes,
+    })
 
     // Determine output format
     const format = getOutputFormat()
@@ -154,7 +164,12 @@ export interface StatusFloodWait {
 /** What one account's cache says */
 export interface AccountStatusSnapshot {
   accountId: number
-  cache: { status: 'ok' | 'missing' | 'error'; error?: string }
+  cache: {
+    status: 'ok' | 'missing' | 'error'
+    error?: string
+    /** The cache's size; null for a missing cache or one that failed */
+    size: CacheSize | null
+  }
   daemon: DaemonInfo | null
   sync: {
     pending_jobs: number
@@ -185,7 +200,7 @@ export interface AccountStatusSnapshot {
 function emptyAccountSnapshot(accountId: number): AccountStatusSnapshot {
   return {
     accountId,
-    cache: { status: 'missing' },
+    cache: { status: 'missing', size: null },
     daemon: null,
     sync: {
       pending_jobs: 0,
@@ -228,6 +243,7 @@ function failedAccountSnapshot(
     cache: {
       status: 'error',
       error: err instanceof Error ? err.message : String(err),
+      size: null,
     },
   }
 }
@@ -238,7 +254,10 @@ function failedAccountSnapshot(
  * query (a corrupt page, say) reads as `error` with zeroed figures, so the
  * other accounts and the daemon section still report.
  */
-export function readAccountStatus(accountId: number): AccountStatusSnapshot {
+export function readAccountStatus(
+  accountId: number,
+  options: { sizes?: boolean } = {},
+): AccountStatusSnapshot {
   let cacheDb: Database | null
   try {
     cacheDb = openExistingAccountCacheDb(accountId)
@@ -248,7 +267,7 @@ export function readAccountStatus(accountId: number): AccountStatusSnapshot {
   if (!cacheDb) return emptyAccountSnapshot(accountId)
 
   try {
-    return readOpenAccountStatus(accountId, cacheDb)
+    return readOpenAccountStatus(accountId, cacheDb, options.sizes ?? false)
   } catch (err) {
     return failedAccountSnapshot(accountId, err)
   }
@@ -257,9 +276,13 @@ export function readAccountStatus(accountId: number): AccountStatusSnapshot {
 function readOpenAccountStatus(
   accountId: number,
   cacheDb: Database,
+  sizes: boolean,
 ): AccountStatusSnapshot {
   const snapshot = emptyAccountSnapshot(accountId)
-  snapshot.cache = { status: 'ok' }
+  snapshot.cache = {
+    status: 'ok',
+    size: readCacheSize(cacheDb, cacheDb.filename, { tables: sizes }),
+  }
 
   snapshot.daemon = createDaemonStatusService(cacheDb).getDaemonInfo()
 
@@ -477,7 +500,7 @@ function sumRecords(records: Array<Record<string, number>>) {
  */
 export async function collectStatus(
   pidFile: ReturnType<typeof createPidFile>,
-  options: { dataDir?: string; accountId?: number } = {},
+  options: { dataDir?: string; accountId?: number; sizes?: boolean } = {},
 ) {
   const dataDir = options.dataDir ?? getDataDir()
   const pid = pidFile.read()
@@ -490,7 +513,12 @@ export async function collectStatus(
   const allAccounts = accountsDb.getAll()
   const activeAccount = accountsDb.getActive()
   const allSnapshots = allAccounts.map((account) =>
-    readAccountStatus(account.id),
+    readAccountStatus(account.id, {
+      // dbstat reads the whole file: only for the accounts shown
+      sizes:
+        (options.sizes ?? false) &&
+        (options.accountId === undefined || account.id === options.accountId),
+    }),
   )
   const inScope = (accountId: number) =>
     options.accountId === undefined || accountId === options.accountId
@@ -625,7 +653,13 @@ export async function collectStatus(
     progress: progressStatus,
     rate_limits: rateLimitsStatus,
     accounts: accountsStatus,
-    storage,
+    storage: {
+      ...storage,
+      /** The files and WALs of the caches in scope */
+      cache_bytes: sum((s) =>
+        s.cache.size ? s.cache.size.file_bytes + s.cache.size.wal_bytes : 0,
+      ),
+    },
     cli_version: VERSION,
     timestamp: new Date().toISOString(),
   }

@@ -68,6 +68,7 @@ describe('tg status with a cache that fails a query', () => {
     expect(snapshot.cache).toEqual({
       status: 'error',
       error: expect.stringContaining('messages_cache'),
+      size: null,
     })
     expect(snapshot.progress.messages_cached).toBe(0)
     expect(snapshot.sync.pending_jobs).toBe(0)
