@@ -220,10 +220,17 @@ account's scheduler → its sync_jobs → its worker and client → its messages
   stay open until then: closing a client stops its updates loop, saves its
   update state and peers, and closes its session file and Telegram
   connections, and the update handlers stay on until it's done, so updates and
-  peers that arrive after the signal are saved. If the shutdown times out, the
-  session writes still queued are saved on exit. A stop during a dialog pass
-  ends the pass at the next dialog, but a FLOOD_WAIT the pass or a sync job is
-  waiting out still holds the stop until it ends
+  peers that arrive after the signal are saved. If closing the clients takes
+  longer than 30 seconds, the daemon exits with code 1 and still saves the
+  queued session writes. A stop during a dialog pass ends the pass at the next
+  dialog, but a FLOOD_WAIT (up to 5 minutes) that the pass or a sync job is
+  waiting out holds the stop until it ends
+  ([#64](https://github.com/neoromantic/telegram-sync-cli/issues/64)).
+  `tg daemon stop` then reports `DAEMON_SHUTDOWN_TIMEOUT` after its
+  `--timeout` (10 seconds by default) while the daemon keeps running and stops
+  on its own once the wait ends; a longer `--timeout` waits for it, and
+  `--force` kills it without saving the session writes made since the last
+  save
 - After a reconnect, a dialog pass runs on the new client in the background
   (one per account at a time), then the scheduler catches up the chats that got
   messages while the connection was down. If the pass fails part-way, every
