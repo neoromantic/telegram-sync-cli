@@ -122,7 +122,9 @@ export function rebuildSyncWorker(
  * account whose job ran last. An account is skipped while it is not
  * connected, while its worker can't call Telegram (a FLOOD_WAIT), or while
  * its own inter-job delay runs. Each account runs only the jobs in its own
- * cache.
+ * cache. An account whose cache fails to answer (a corrupt page, a lock
+ * held past busy_timeout) is logged and waits out its delay, so it never
+ * stops the accounts after it.
  */
 function pickNextJob(
   ctx: DaemonContext,
@@ -143,7 +145,6 @@ function pickNextJob(
 
     const accountState = ctx.state.accounts.get(rt.accountId)
     if (accountState?.status !== 'connected' || !accountState.client) continue
-    if (!worker.canMakeApiCall()) continue
     if (
       rt.lastJobProcessTime !== 0 &&
       now - rt.lastJobProcessTime < DEFAULT_JOB_EXECUTOR_CONFIG.interJobDelayMs
@@ -151,8 +152,17 @@ function pickNextJob(
       continue
     }
 
-    const job = scheduler.getNextJob()
-    if (job) return { rt, worker, job }
+    try {
+      // Both read the account's cache: rate_limits, then sync_jobs
+      if (!worker.canMakeApiCall()) continue
+      const job = scheduler.getNextJob()
+      if (job) return { rt, worker, job }
+    } catch (err) {
+      rt.lastJobProcessTime = now
+      ctx.logger.warn(
+        `[Account ${rt.accountId}] Failed to pick a job: ${formatError(err)}`,
+      )
+    }
   }
 
   return null

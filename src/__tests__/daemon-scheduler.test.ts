@@ -749,6 +749,73 @@ describe('processJobs', () => {
     // 1 and 2 at 0 s and 1 s; both wait 3 s from their own last job
     expect(ran).toEqual([1, 2, 1, 2])
   })
+
+  it("runs account 2's jobs while account 1's cache fails to pick one", async () => {
+    const ctx = createContext()
+    const failingGetNextJob = mock((): SyncJobRow | null => {
+      throw new Error('database disk image is malformed')
+    })
+    runAccount(ctx, 1, {
+      scheduler: createSchedulerStub({ getNextJob: failingGetNextJob }),
+    })
+    const ran: number[] = []
+    runAccount(ctx, 2, {
+      scheduler: createSchedulerStub({
+        getNextJob: () => jobOf(SyncJobType.ForwardCatchup),
+      }),
+      worker: createWorkerStub({
+        processJobReal: mock(async () => {
+          ran.push(2)
+          return { success: true, messagesFetched: 1 }
+        }),
+      }),
+    })
+    const clock = useClock()
+
+    try {
+      // Account 1 comes first on every tick until a job runs
+      await processJobs(ctx)
+      clock.advance(1000)
+      await processJobs(ctx)
+    } finally {
+      clock.restore()
+    }
+
+    expect(ran).toEqual([2])
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[Account 1\] Failed to pick a job: .*database disk image is malformed/,
+      ),
+    )
+    // The failing account waits out its own delay instead of every tick
+    expect(failingGetNextJob).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs account 2's jobs while account 1's rate limits fail to read", async () => {
+    const ctx = createContext()
+    runAccount(ctx, 1, {
+      worker: createWorkerStub({
+        canMakeApiCall: () => {
+          throw new Error('database is locked')
+        },
+      }),
+    })
+    const processJobReal = mock(async () => ({
+      success: true,
+      messagesFetched: 1,
+    }))
+    runAccount(ctx, 2, {
+      scheduler: createSchedulerStub({
+        getNextJob: () => jobOf(SyncJobType.ForwardCatchup),
+      }),
+      worker: createWorkerStub({ processJobReal }),
+    })
+
+    await processJobs(ctx)
+
+    expect(processJobReal).toHaveBeenCalledTimes(1)
+    expect(ctx.runtime.lastJobAccountId).toBe(2)
+  })
 })
 
 describe('processJobs with two accounts', () => {
