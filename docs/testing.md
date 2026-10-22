@@ -214,6 +214,9 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
   adopted (a 0.2.0 one migrated too), set aside with one notice, deleted when empty,
   `CACHE_UNAVAILABLE` while an older tg holds it (and no account added or removed), and the
   owner check
+- `api-args.e2e.test.ts` — the request `tg api` builds: each test records a replay fixture
+  for an exact request with a stub client, then `tg api` in replay mode finds it only if it
+  sends that request with no extra keys; `--username=myuser` and `--json` build the same call
 
 ### E2E Helpers
 

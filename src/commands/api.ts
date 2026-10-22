@@ -79,7 +79,17 @@ export const apiCommand = defineCommand({
 
       // Build request parameters
       // Remove known CLI args, keep the rest as API params
-      const cliOnlyArgs = ['method', 'json', 'account', 'raw', '_', '--']
+      const cliOnlyArgs = [
+        'method',
+        'json',
+        'j',
+        'account',
+        'a',
+        'raw',
+        'r',
+        '_',
+        '--',
+      ]
       const apiArgs: Record<string, unknown> = {}
 
       for (const [key, value] of Object.entries(args)) {
