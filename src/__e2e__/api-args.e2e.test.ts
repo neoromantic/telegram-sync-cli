@@ -48,8 +48,19 @@ describe('E2E: tg api builds the request from its arguments', () => {
         ...env.getCliOptions().env,
         TELEGRAM_API_REPLAY: '1',
         TELEGRAM_API_FIXTURES_DIR: fixturesDir,
+        // mtcute's debug log goes to stdout; keep a developer's shell from turning it on
+        MTCUTE_LOG_LEVEL: undefined,
+        VERBOSE: undefined,
       },
     }
+  }
+
+  /**
+   * The JSON envelope on stdout. -v also turns on mtcute's debug log, which
+   * prints to stdout before the JSON when tg api closes its client.
+   */
+  function envelope(stdout: string): unknown {
+    return JSON.parse(stdout.slice(stdout.indexOf('{\n')))
   }
 
   it.each([
@@ -77,7 +88,7 @@ describe('E2E: tg api builds the request from its arguments', () => {
         replayOptions(),
       )
 
-      expect(result.json).toEqual({
+      expect(envelope(result.stdout)).toEqual({
         success: true,
         data: { method: 'account.checkUsername', result: true },
       })
