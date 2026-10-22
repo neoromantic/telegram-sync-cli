@@ -102,3 +102,33 @@ export function mergeArgs(
 
   return parsed
 }
+
+/** A negative number after a flag is its value (`--addOffset -10`), not short options */
+const NEGATIVE_NUMBER = /^-\d+(\.\d+)?$/
+
+/**
+ * Values of method arguments written as `--name value` after the method.
+ * citty reads an undeclared `--name` without `=` as `true` and leaves the value as a positional.
+ */
+export function spacedFlagValues(
+  rawArgs: string[],
+  method: string,
+  args: Record<string, unknown>,
+): Map<string, string> {
+  const values = new Map<string, string>()
+  for (let i = rawArgs.indexOf(method) + 1; i < rawArgs.length - 1; i++) {
+    const arg = rawArgs[i]!
+    if (arg === '--') break
+    const next = rawArgs[i + 1]!
+    const name = arg.slice(2)
+    if (
+      arg.startsWith('--') &&
+      args[name] === true &&
+      (!next.startsWith('-') || NEGATIVE_NUMBER.test(next))
+    ) {
+      values.set(name, next)
+      i++
+    }
+  }
+  return values
+}
