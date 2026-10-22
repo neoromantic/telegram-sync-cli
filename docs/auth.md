@@ -24,7 +24,9 @@ Flow:
 1. Create or reuse an account record in `data.db`.
 2. Start mtcute auth flow (phone → code → optional 2FA password).
 3. Persist session to `session_<id>.db`.
-4. Update account metadata (user ID, display name, label, active account).
+4. Update account metadata (user ID, display name, label).
+5. Make the account the active one, so the next command uses it. A failed login leaves the
+   active account as it was.
 
 ### QR Login
 
@@ -37,6 +39,7 @@ Flow:
 1. Generate a login QR code in the terminal.
 2. Scan with Telegram mobile app: **Settings → Devices → Link Desktop Device**.
 3. Persist session and update account metadata (including label when provided).
+4. Make the account the active one, as the phone login does.
 
 ### Logout
 

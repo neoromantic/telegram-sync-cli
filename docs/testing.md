@@ -71,7 +71,8 @@ const deps: AuthDependencies = {
 
 ### Core Unit Test Files
 
-- `auth.test.ts` — authentication flows (phone, QR, logout)
+- `auth.test.ts` — authentication flows (phone, QR, logout); a login makes its account the
+  only active one, and a failed one leaves the active account alone
 - `db.test.ts` — database operations
 - `output.test.ts` — JSON/pretty/quiet output formatting
 - `telegram.test.ts` — Telegram service layer
