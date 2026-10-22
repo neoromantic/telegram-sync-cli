@@ -44,6 +44,14 @@ Columns:
 - `response_ms`
 - `context`
 
+### Retention
+
+The daemon prunes both tables on a schedule, and `tg db vacuum` before it compacts
+([daemon.md](daemon.md#cache-pruning)): `api_activity` rows after `cache.retention.apiActivity`
+(7 days by default) and `rate_limits` windows after `cache.retention.rateLimits` (1 hour). A
+window whose `flood_wait_until` is still in the future is kept, however old, so an active
+FLOOD_WAIT is never forgotten, and so is the current 60-second window.
+
 ## Runtime Flow
 
 1. Before an API call, the caller checks `RateLimitsService.isBlocked()`.

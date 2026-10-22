@@ -199,7 +199,9 @@ function printSyncJobsSection(status: StatusSnapshot): void {
   if (failed_jobs > 0) {
     console.log()
     console.log(
-      c.dim('  Failed jobs are retried after 24 h or a daemon restart.'),
+      c.dim(
+        '  Failed jobs are retried after cache.retention.failedJobs (24 h by default) or a daemon restart.',
+      ),
     )
     const commands = new Set(
       status.sync.jobs

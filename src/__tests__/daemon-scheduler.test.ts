@@ -12,6 +12,7 @@ import {
   totalMessagesSynced,
 } from '../daemon/daemon-context'
 import {
+  cleanupOldJobs,
   cleanupScheduler,
   initializeScheduler,
   processJobs,
@@ -28,6 +29,7 @@ import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { getDefaultRetentionConfig } from '../db/types'
 import {
   addAccountRuntime,
   createAccountCacheDb,
@@ -1348,24 +1350,63 @@ describe('a daemon stop during a sync job', () => {
   })
 })
 
-describe('cleanupScheduler', () => {
-  it("cleans up every account's old jobs and drops its scheduler and worker", async () => {
+/** An api_activity row ten days old, past the 7-day default retention */
+function addOldActivity(db: Database) {
+  const tenDaysAgo = Math.floor(Date.now() / 1000) - 10 * 24 * 3600
+  db.query(
+    "INSERT INTO api_activity (timestamp, method, success) VALUES (?, 'messages.getHistory', 1)",
+  ).run(tenDaysAgo)
+}
+
+const activityRows = (db: Database) =>
+  (db.query('SELECT COUNT(*) AS n FROM api_activity').get() as { n: number }).n
+
+describe('cleanupOldJobs', () => {
+  it('prunes every account, with a scheduler or not', () => {
     const ctx = createContext()
-    const schedulers = [1, 2].map((accountId) => {
-      const scheduler = createSchedulerStub({ cleanup: mock(() => 2) })
-      runAccount(ctx, accountId, { scheduler })
-      return scheduler
-    })
+    ctx.retention = getDefaultRetentionConfig()
+    const withScheduler = runAccount(ctx, 1)
+    const withoutScheduler = addAccountRuntime(ctx, 2)
+    expect(withoutScheduler.scheduler).toBeNull()
+    for (const rt of [withScheduler, withoutScheduler]) addOldActivity(rt.db)
+
+    cleanupOldJobs(ctx)
+
+    expect(activityRows(withScheduler.db)).toBe(0)
+    expect(activityRows(withoutScheduler.db)).toBe(0)
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      '[Account 2] Pruned 1 API activity rows, 0 rate limit windows, 0 completed and 0 failed jobs',
+    )
+  })
+
+  it("warns about an account whose cache fails and still prunes the next one's", () => {
+    const ctx = createContext()
+    const broken = createAccountCacheDb()
+    broken.run('DROP TABLE api_activity')
+    addAccountRuntime(ctx, 1, broken)
+    const healthy = addAccountRuntime(ctx, 2)
+    addOldActivity(healthy.db)
+
+    cleanupOldJobs(ctx)
+
+    expect(ctx.logger.warn).toHaveBeenCalledTimes(1)
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('[Account 1] Failed to prune its cache'),
+    )
+    expect(activityRows(healthy.db)).toBe(0)
+  })
+})
+
+describe('cleanupScheduler', () => {
+  it("prunes every account's cache and drops its scheduler and worker", async () => {
+    const ctx = createContext()
+    const runtimes = [1, 2].map((accountId) => runAccount(ctx, accountId))
+    for (const rt of runtimes) addOldActivity(rt.db)
 
     await cleanupScheduler(ctx)
 
-    for (const scheduler of schedulers) {
-      expect(scheduler.cleanup).toHaveBeenCalled()
-    }
-    expect(ctx.logger.debug).toHaveBeenCalledWith(
-      '[Account 1] Cleaned up 2 old jobs',
-    )
-    for (const rt of ctx.runtime.accounts.values()) {
+    for (const rt of runtimes) {
+      expect(activityRows(rt.db)).toBe(0)
       expect(rt.scheduler).toBeNull()
       expect(rt.worker).toBeNull()
     }

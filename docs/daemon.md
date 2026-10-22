@@ -45,9 +45,10 @@ tg daemon stop --force
 tg daemon status
 ```
 
-`tg daemon` reads no key of `config.json` and skips the start-up check of that file that other
-commands run, so an invalid or unreadable one doesn't stop `tg daemon start`, `--quiet` included
-(see [configuration.md](configuration.md#runtime-behavior)).
+`tg daemon` reads only `cache.retention.*` from `config.json`, non-strictly and once at start,
+and skips the start-up check of that file that other commands run, so an invalid or unreadable
+one doesn't stop `tg daemon start`, `--quiet` included: it logs one warning and uses the default
+for each value it can't read (see [configuration.md](configuration.md#runtime-behavior)).
 
 ### Daemon PID
 
@@ -203,6 +204,25 @@ Key files:
 - `src/daemon/daemon-contacts.ts`
 - `src/db/contacts-sync.ts`
 
+### Cache Pruning
+
+Every 300 loop ticks (about five minutes) and once at shutdown, the daemon prunes the cache of
+every account it opened, connected or not:
+- `api_activity` rows older than `cache.retention.apiActivity` (default 7 days);
+- `rate_limits` windows older than `cache.retention.rateLimits` (default 1 hour), keeping the
+  current 60-second window and any FLOOD_WAIT that is still running;
+- completed and failed `sync_jobs` that finished longer ago than `cache.retention.completedJobs`
+  and `cache.retention.failedJobs` (24 hours each by default). Pending and running jobs are
+  never touched.
+
+Rows go in batches of 5,000, each its own short write, so a first prune of a large table never
+holds the write lock for long. One account's failure is logged as a warning and the pass goes
+on with the next one; the counts are logged at debug level (`--verbose`). Messages, chats and
+users are never pruned. The retention is read at start: restart the daemon after changing it
+([configuration.md](configuration.md#configuration-file)).
+
+Key file: `src/db/cache-maintenance.ts`
+
 ---
 
 ## Status Output
@@ -302,7 +322,8 @@ account's scheduler → its sync_jobs → its worker and client → its messages
 - A sync job that fails retries after 1, 2, 4 and 8 minutes and is marked failed after the
   fifth attempt; a permanent error (such as `CHANNEL_PRIVATE`) fails it at once, and a
   FLOOD_WAIT only delays it. A failed job's chat isn't queued again for that job type until
-  the failed row is deleted: after 24 hours, on the next start or by `tg chats sync <chat>`
+  the failed row is deleted: after `cache.retention.failedJobs` (24 hours by default), on the
+  next start or by `tg chats sync <chat>`
   with the chat's current mode (`--auto` unless it was turned on; `tg status` prints the
   command). Each failure is logged as a warning (see [sync-strategy.md](sync-strategy.md#retries))
 - Tracks last activity to avoid noisy health checks

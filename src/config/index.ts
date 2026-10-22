@@ -1,10 +1,26 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { type AccountsDbInterface, accountsDb } from '../db'
-import type { CacheConfig, DurationString } from '../db/types'
-import { getDefaultCacheConfig, parseDuration } from '../db/types'
+import type {
+  CacheConfig,
+  CacheRetentionConfig,
+  DurationString,
+} from '../db/types'
+import {
+  getDefaultCacheConfig,
+  getDefaultRetentionConfig,
+  parseDuration,
+} from '../db/types'
 
-type ConfigValueType = 'number' | 'boolean' | 'duration'
+/** `positiveDuration` is a duration above 0, such as a retention */
+type ConfigValueType = 'number' | 'boolean' | 'duration' | 'positiveDuration'
+
+const TYPE_DESCRIPTIONS: Record<ConfigValueType, string> = {
+  number: 'number',
+  boolean: 'boolean',
+  duration: 'duration',
+  positiveDuration: 'duration above 0',
+}
 
 export type ConfigLeafKey =
   | 'activeAccount'
@@ -13,6 +29,10 @@ export type ConfigLeafKey =
   | 'cache.staleness.fullInfo'
   | 'cache.backgroundRefresh'
   | 'cache.maxCacheAge'
+  | 'cache.retention.apiActivity'
+  | 'cache.retention.rateLimits'
+  | 'cache.retention.completedJobs'
+  | 'cache.retention.failedJobs'
 
 const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   activeAccount: 'number',
@@ -21,9 +41,25 @@ const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   'cache.staleness.fullInfo': 'duration',
   'cache.backgroundRefresh': 'boolean',
   'cache.maxCacheAge': 'duration',
+  'cache.retention.apiActivity': 'positiveDuration',
+  'cache.retention.rateLimits': 'positiveDuration',
+  'cache.retention.completedJobs': 'positiveDuration',
+  'cache.retention.failedJobs': 'positiveDuration',
 }
 
-const CONFIG_PREFIX_KEYS = new Set<string>(['cache', 'cache.staleness'])
+const CONFIG_PREFIX_KEYS = new Set<string>([
+  'cache',
+  'cache.staleness',
+  'cache.retention',
+])
+
+/** The retention keys and the CacheRetentionConfig field each one sets */
+const RETENTION_KEYS = {
+  apiActivity: 'cache.retention.apiActivity',
+  rateLimits: 'cache.retention.rateLimits',
+  completedJobs: 'cache.retention.completedJobs',
+  failedJobs: 'cache.retention.failedJobs',
+} as const satisfies Record<keyof CacheRetentionConfig, ConfigLeafKey>
 
 export interface CacheStalenessConfigFile {
   peers?: DurationString
@@ -31,8 +67,16 @@ export interface CacheStalenessConfigFile {
   fullInfo?: DurationString
 }
 
+export interface CacheRetentionConfigFile {
+  apiActivity?: DurationString
+  rateLimits?: DurationString
+  completedJobs?: DurationString
+  failedJobs?: DurationString
+}
+
 export interface CacheConfigFile {
   staleness?: CacheStalenessConfigFile
+  retention?: CacheRetentionConfigFile
   backgroundRefresh?: boolean
   maxCacheAge?: DurationString
 }
@@ -119,11 +163,14 @@ function normalizeDuration(value: string): string {
   return value.trim().toLowerCase()
 }
 
-function isValidDuration(value: string): value is DurationString {
+function isValidDuration(
+  value: string,
+  options: { positive?: boolean } = {},
+): value is DurationString {
   const normalized = normalizeDuration(value)
   try {
-    parseDuration(normalized as DurationString)
-    return true
+    const ms = parseDuration(normalized as DurationString)
+    return !options.positive || ms > 0
   } catch {
     return false
   }
@@ -137,6 +184,10 @@ function validateValue(type: ConfigValueType, value: unknown): boolean {
       return typeof value === 'boolean'
     case 'duration':
       return typeof value === 'string' && isValidDuration(value)
+    case 'positiveDuration':
+      return (
+        typeof value === 'string' && isValidDuration(value, { positive: true })
+      )
     default:
       return false
   }
@@ -156,13 +207,14 @@ function sanitizeConfig(raw: Record<string, unknown>): {
     if (!validateValue(type as ConfigValueType, value)) {
       errors.push({
         path,
-        message: `Expected ${type}`,
+        message: `Expected ${TYPE_DESCRIPTIONS[type as ConfigValueType]}`,
       })
       continue
     }
 
     const normalizedValue =
-      type === 'duration' && typeof value === 'string'
+      (type === 'duration' || type === 'positiveDuration') &&
+      typeof value === 'string'
         ? normalizeDuration(value)
         : value
     setPathValue(
@@ -271,6 +323,18 @@ export function parseConfigValue(
       }
       return normalized
     }
+    case 'positiveDuration': {
+      const normalized = normalizeDuration(trimmed)
+      if (!isValidDuration(normalized, { positive: true })) {
+        throw new ConfigError('Invalid value', [
+          {
+            path: key,
+            message: 'Expected a duration above 0, like 7d, 1h, 30m',
+          },
+        ])
+      }
+      return normalized
+    }
   }
 }
 
@@ -292,7 +356,10 @@ export async function setConfigValue(
 ): Promise<void> {
   if (!validateValue(CONFIG_LEAF_TYPES[key], value)) {
     throw new ConfigError('Invalid value', [
-      { path: key, message: `Expected ${CONFIG_LEAF_TYPES[key]}` },
+      {
+        path: key,
+        message: `Expected ${TYPE_DESCRIPTIONS[CONFIG_LEAF_TYPES[key]]}`,
+      },
     ])
   }
 
@@ -315,6 +382,7 @@ export async function getResolvedCacheConfig(
   const resolved: CacheConfig = {
     ...defaults,
     staleness: { ...defaults.staleness },
+    retention: resolveRetention(config),
   }
 
   if (config.cache?.staleness?.peers) {
@@ -334,6 +402,55 @@ export async function getResolvedCacheConfig(
   }
 
   return resolved
+}
+
+/** The retention config.json sets, over the defaults */
+function resolveRetention(config: ConfigFile): CacheRetentionConfig {
+  const retention = getDefaultRetentionConfig()
+  for (const field of Object.keys(RETENTION_KEYS) as Array<
+    keyof CacheRetentionConfig
+  >) {
+    const value = config.cache?.retention?.[field]
+    if (value) retention[field] = parseDuration(value)
+  }
+  return retention
+}
+
+/**
+ * The retention for the daemon, read once at its start. Unlike the
+ * commands it never fails: bad JSON, an unreadable file or a bad value
+ * gives one warning, and every key that can't be read keeps its default.
+ */
+export async function loadRetentionConfig(
+  options: { dataDir?: string } = {},
+): Promise<{ retention: CacheRetentionConfig; warning: string | null }> {
+  const fallback = 'using the default retention'
+  let loaded: Awaited<ReturnType<typeof loadConfig>>
+  try {
+    loaded = await loadConfig({ dataDir: options.dataDir, strict: false })
+  } catch (err) {
+    const why =
+      err instanceof ConfigError
+        ? `${err.message}${err.issues[0] ? `: ${err.issues[0].message}` : ''}`
+        : err instanceof Error
+          ? err.message
+          : String(err)
+    return {
+      retention: getDefaultRetentionConfig(),
+      warning: `${getConfigPath(options.dataDir)}: ${why}; ${fallback}`,
+    }
+  }
+
+  const bad = loaded.errors.filter((issue) =>
+    issue.path.startsWith('cache.retention.'),
+  )
+  return {
+    retention: resolveRetention(loaded.config),
+    warning:
+      bad.length === 0
+        ? null
+        : `Invalid ${bad.map((issue) => `${issue.path} (${issue.message})`).join(', ')} in ${getConfigPath(options.dataDir)}; using the default for ${bad.length === 1 ? 'it' : 'them'}`,
+  }
 }
 
 export async function syncActiveAccountFromConfig(

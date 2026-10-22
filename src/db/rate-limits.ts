@@ -9,13 +9,7 @@ import { ApiActivityRow, RateLimitRow } from './schema'
 import type { ApiActivityEntry } from './types'
 
 /** Duration of rate tracking windows in seconds */
-const RATE_WINDOW_SECONDS = 60
-
-/** Default max age for rate limit windows in seconds (1 hour) */
-const DEFAULT_WINDOW_MAX_AGE_SECONDS = 3600
-
-/** Default max age for API activity in days */
-const DEFAULT_ACTIVITY_MAX_AGE_DAYS = 7
+export const RATE_WINDOW_SECONDS = 60
 
 /**
  * Flood wait information for a blocked method
@@ -70,8 +64,6 @@ export class RateLimitsService {
   private getActivityByMethodStmt: Statement
   private getActivityErrorsStmt: Statement
   private getActivityByMethodErrorsStmt: Statement
-  private pruneWindowsStmt: Statement
-  private pruneActivityStmt: Statement
   private getCallsByMethodStmt: Statement
   private getActiveFloodWaitsStmt: Statement
 
@@ -198,18 +190,6 @@ export class RateLimitsService {
     `,
       )
       .as(ApiActivityRow)
-
-    // Prune old windows
-    this.pruneWindowsStmt = db.query(`
-      DELETE FROM rate_limits
-      WHERE window_start < $cutoff
-    `)
-
-    // Prune old activity
-    this.pruneActivityStmt = db.query(`
-      DELETE FROM api_activity
-      WHERE timestamp < $cutoff
-    `)
 
     // Get calls by method for status
     this.getCallsByMethodStmt = db
@@ -422,32 +402,6 @@ export class RateLimitsService {
       request_size: null,
       response_size: null,
     }))
-  }
-
-  /**
-   * Prune old rate limit windows
-   * Returns the number of pruned entries
-   */
-  pruneOldWindows(
-    maxAgeSeconds: number = DEFAULT_WINDOW_MAX_AGE_SECONDS,
-  ): number {
-    const now = Math.floor(Date.now() / 1000)
-    const cutoff = now - maxAgeSeconds
-
-    const result = this.pruneWindowsStmt.run({ $cutoff: cutoff })
-    return result.changes
-  }
-
-  /**
-   * Prune old API activity
-   * Returns the number of pruned entries
-   */
-  pruneOldActivity(maxAgeDays: number = DEFAULT_ACTIVITY_MAX_AGE_DAYS): number {
-    const now = Math.floor(Date.now() / 1000)
-    const cutoff = now - maxAgeDays * 24 * 60 * 60
-
-    const result = this.pruneActivityStmt.run({ $cutoff: cutoff })
-    return result.changes
   }
 
   /**

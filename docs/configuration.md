@@ -135,6 +135,20 @@ Supported keys:
 - `cache.staleness.fullInfo` (duration)
 - `cache.backgroundRefresh` (boolean)
 - `cache.maxCacheAge` (duration)
+- `cache.retention.apiActivity` (duration, default `7d`): how long each account's cache keeps
+  its `api_activity` rows
+- `cache.retention.rateLimits` (duration, default `1h`): how long it keeps `rate_limits`
+  windows. The current 60-second window and a FLOOD_WAIT that is still running are always
+  kept, whatever the value
+- `cache.retention.completedJobs` (duration, default `24h`): how long it keeps completed sync
+  jobs
+- `cache.retention.failedJobs` (duration, default `24h`): how long it keeps failed sync jobs.
+  A failed row keeps its chat from getting a new job of the same type, so this is also how
+  long a job waits for its next try after its retries ran out
+
+The retention keys take a value above 0; `0s` is rejected. The daemon prunes on a schedule
+([daemon.md](daemon.md#cache-pruning)) and `tg db vacuum` prunes before it compacts.
+Messages, chats and users are never pruned.
 
 Duration format: `<number><unit>` with units `s`, `m`, `h`, `d`, `w`
 (case-insensitive). Values are normalized to lowercase (e.g., `7D` → `7d`).
@@ -151,7 +165,13 @@ Example:
       "fullInfo": "7d"
     },
     "backgroundRefresh": true,
-    "maxCacheAge": "30d"
+    "maxCacheAge": "30d",
+    "retention": {
+      "apiActivity": "7d",
+      "rateLimits": "1h",
+      "completedJobs": "24h",
+      "failedJobs": "24h"
+    }
   }
 }
 ```
@@ -195,9 +215,11 @@ tg config set activeAccount 2
 - An invalid `config.json` (not a JSON object, or a supported key with a wrong value) fails
   every command except `tg config`, `tg skill` and `tg daemon` with `INVALID_ARGS` and issue
   details before it runs; `tg config set` can still fix a wrong value. A `config.json` that
-  can't be read fails them with `GENERAL_ERROR` (`details.path`). `tg daemon` reads no key of
-  `config.json`, so such a file doesn't stop `tg daemon start`, with `--quiet` or without; the
-  next other command reports it.
+  can't be read fails them with `GENERAL_ERROR` (`details.path`). `tg daemon` reads only
+  `cache.retention.*`, non-strictly, once at start, so such a file doesn't stop
+  `tg daemon start`, with `--quiet` or without: the daemon logs one warning and uses the
+  default for each value it can't read, and the next other command reports the file. A
+  change to `cache.retention.*` takes effect when the daemon restarts.
 - Cache-related commands resolve TTLs via `config.json` overrides.
 
 ## Validation

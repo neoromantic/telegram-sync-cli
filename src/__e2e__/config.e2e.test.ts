@@ -145,6 +145,20 @@ describe('E2E: Config Commands', () => {
     expect(status.json).toMatchObject({ data: { status: 'stopped' } })
   })
 
+  it('starts tg daemon with a bad retention, warning once', async () => {
+    writeFileSync(
+      join(env.dataDir, 'config.json'),
+      '{"cache":{"retention":{"apiActivity":"0s"}}}',
+    )
+
+    const result = await runCli(['daemon', 'start'], env.getCliOptions())
+
+    expect(result.stderr).toContain('cache.retention.apiActivity')
+    expect(result.stderr.match(/\[WARN\]/g)).toHaveLength(1)
+    expect(result.stderr).toContain('No accounts configured')
+    expect(result.exitCode).toBe(3)
+  })
+
   it('runs tg skill with an invalid config.json under -f json', async () => {
     writeFileSync(join(env.dataDir, 'config.json'), '{"activeAccount":"one"}')
 

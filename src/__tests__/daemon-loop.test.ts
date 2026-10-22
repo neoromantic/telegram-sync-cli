@@ -517,17 +517,21 @@ describe('mainLoop', () => {
     expect(call).not.toHaveBeenCalled()
   })
 
-  it('cleans up old jobs on cleanup interval', async () => {
+  it('prunes the caches on cleanup interval', async () => {
     const ctx = createContext()
-    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+    const db = createAccountCacheDb()
+    db.query(
+      "INSERT INTO api_activity (timestamp, method, success) VALUES (?, 'messages.getHistory', 1)",
+    ).run(Math.floor(Date.now() / 1000) - 30 * 24 * 3600)
+    addAccountRuntime(ctx, 1, db, {
       statusService: stopAfterTicks(ctx, 300),
-      scheduler: createMockScheduler({ cleanup: () => 2 }),
+      scheduler: createMockScheduler(),
     })
 
     await runWithImmediateTimeouts(() => mainLoop(ctx))
 
     expect(ctx.logger.debug).toHaveBeenCalledWith(
-      '[Account 1] Cleaned up 2 old jobs',
+      '[Account 1] Pruned 1 API activity rows, 0 rate limit windows, 0 completed and 0 failed jobs',
     )
   })
 

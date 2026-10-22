@@ -12,12 +12,17 @@ import {
   getConfigValue,
   getResolvedCacheConfig,
   loadConfig,
+  loadRetentionConfig,
   parseConfigValue,
   setConfigValue,
   syncActiveAccountFromConfig,
 } from '../config'
 import { createTestDatabase } from '../db'
-import { getDefaultCacheConfig, parseDuration } from '../db/types'
+import {
+  getDefaultCacheConfig,
+  getDefaultRetentionConfig,
+  parseDuration,
+} from '../db/types'
 
 let dataDir: string
 
@@ -116,5 +121,87 @@ describe('config', () => {
     expect(active?.id).not.toBe(account1.id)
 
     db.close()
+  })
+
+  describe('cache.retention', () => {
+    const keys = [
+      'cache.retention.apiActivity',
+      'cache.retention.rateLimits',
+      'cache.retention.completedJobs',
+      'cache.retention.failedJobs',
+    ] as const
+
+    it('accepts a duration and rejects 0 and garbage', () => {
+      for (const key of keys) {
+        expect(parseConfigValue(key, '3d')).toBe('3d')
+        expect(() => parseConfigValue(key, '0s')).toThrow(ConfigError)
+        expect(() => parseConfigValue(key, 'abc')).toThrow(ConfigError)
+      }
+    })
+
+    it('defaults to 7d, 1h, 24h and 24h', async () => {
+      const { retention } = await getResolvedCacheConfig({ dataDir })
+
+      expect(retention).toEqual({
+        apiActivity: 7 * 24 * 60 * 60 * 1000,
+        rateLimits: 60 * 60 * 1000,
+        completedJobs: 24 * 60 * 60 * 1000,
+        failedJobs: 24 * 60 * 60 * 1000,
+      })
+    })
+
+    it('resolves a value config.json sets', async () => {
+      await setConfigValue('cache.retention.failedJobs', '2h', { dataDir })
+
+      const { retention } = await getResolvedCacheConfig({ dataDir })
+
+      expect(retention.failedJobs).toBe(parseDuration('2h'))
+      expect(retention.apiActivity).toBe(
+        getDefaultRetentionConfig().apiActivity,
+      )
+    })
+
+    it('rejects 0s in config.json in strict mode', async () => {
+      await Bun.write(
+        getConfigPath(dataDir),
+        JSON.stringify({ cache: { retention: { rateLimits: '0s' } } }),
+      )
+
+      await expect(getResolvedCacheConfig({ dataDir })).rejects.toThrow(
+        ConfigError,
+      )
+    })
+  })
+
+  describe('loadRetentionConfig', () => {
+    it('falls back to the defaults on invalid JSON', async () => {
+      await Bun.write(getConfigPath(dataDir), '{ not json')
+
+      const result = await loadRetentionConfig({ dataDir })
+
+      expect(result.retention).toEqual(getDefaultRetentionConfig())
+      expect(result.warning).toContain('Invalid JSON')
+    })
+
+    it('falls back to the default for a bad value', async () => {
+      await Bun.write(
+        getConfigPath(dataDir),
+        JSON.stringify({ cache: { retention: { apiActivity: 'x' } } }),
+      )
+
+      const result = await loadRetentionConfig({ dataDir })
+
+      expect(result.retention).toEqual(getDefaultRetentionConfig())
+      expect(result.warning).toContain('cache.retention.apiActivity')
+    })
+
+    it('reads valid values without a warning', async () => {
+      await setConfigValue('cache.retention.apiActivity', '3d', { dataDir })
+
+      const result = await loadRetentionConfig({ dataDir })
+
+      expect(result.retention.apiActivity).toBe(parseDuration('3d'))
+      expect(result.warning).toBeNull()
+    })
   })
 })

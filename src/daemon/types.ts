@@ -7,6 +7,7 @@ import type {
   RawUpdateInfo,
   TelegramClient,
 } from '@mtcute/bun'
+import type { CacheRetentionConfig } from '../db/types'
 import type { UpdateHandlers } from './handlers'
 
 /**
@@ -87,6 +88,8 @@ export interface DaemonConfig {
   interJobDelayMs: number
   /** Shutdown timeout in milliseconds - force exit if cleanup takes longer */
   shutdownTimeoutMs?: number
+  /** How long the caches keep their bookkeeping rows; defaults if absent */
+  retention?: CacheRetentionConfig
 }
 
 /**

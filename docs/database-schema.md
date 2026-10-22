@@ -310,8 +310,9 @@ CREATE INDEX idx_sync_jobs_chat ON sync_jobs(chat_id);
 ```
 
 - `status`: `pending` includes jobs waiting for a retry. A `failed` job keeps its chat from
-  getting a new job of the same type until it is deleted: by the daemon after 24 hours or on
-  start, or by `tg chats sync` for its chat.
+  getting a new job of the same type until it is deleted: by the daemon after
+  `cache.retention.failedJobs` (24 hours by default) or on start, or by `tg chats sync` for its
+  chat. Completed jobs are deleted after `cache.retention.completedJobs` (24 hours).
 - `attempts`: failed tries so far. A FLOOD_WAIT or a daemon stop doesn't count; the fifth
   failure, or a permanent error, marks the job `failed`.
 - `next_run_at`: when a pending job may run, in milliseconds since the epoch. `0` means now;
@@ -533,6 +534,8 @@ supported: it would start an empty shared cache.
 - **Peers expire** — users/chats are considered stale based on TTL and can be refreshed on demand.
 - **raw_json is always stored** — all cached entities keep the original TL payload.
 - **Rate limits** — tracked per method + window with optional flood wait.
+- **Retention** — the daemon prunes `api_activity`, `rate_limits` and finished `sync_jobs` by
+  `cache.retention.*` ([daemon.md](daemon.md#cache-pruning)); messages are never pruned.
 - **Message search** — FTS5 index maintained via triggers on `messages_cache`.
 
 ## Capacity Planning (Approx.)
@@ -549,4 +552,3 @@ supported: it would start an empty shared cache.
 
 - Media cache table with eviction policy
 - Drafts / reactions tables
-- Automated cleanup for `api_activity`

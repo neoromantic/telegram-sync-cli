@@ -123,7 +123,8 @@ priority at that time (a chat turned on while its first page ran gets the retry 
   errors that the connection health check handles, so they retry like network errors, timeouts
   and database errors.
 - **Failed jobs**: a `failed` row blocks its chat's jobs of that type, so no refresh queues the
-  chat for it again. The daemon deletes failed rows after 24 hours, and all of them on start;
+  chat for it again. The daemon deletes failed rows after `cache.retention.failedJobs` (24 hours by
+  default; see [configuration.md](configuration.md#configuration-file)), and all of them on start;
   `tg chats sync <chat>` deletes the chat's failed rows at once, in any mode, so pass the
   chat's current mode to keep it (`tg status` prints the command). The next refresh then
   queues the chat again.
