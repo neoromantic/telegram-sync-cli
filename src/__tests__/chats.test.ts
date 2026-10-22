@@ -573,16 +573,20 @@ describe('listChatsCommand', () => {
       expect(shouldFetchFromApi).toBe(true)
     })
 
+    /** Params of every `withParams` call of the last `apiClient` */
+    let withParams: unknown[] = []
+
     function apiClient(communities: () => Promise<Chat[]>) {
+      withParams = []
       return {
         async *iterDialogs() {
           yield fakeDialog({ kind: 'user', id: 1001, topMessage: 5 })
         },
-        getJoinedCommunities: communities,
-      } as unknown as Pick<
-        TelegramClient,
-        'iterDialogs' | 'getJoinedCommunities'
-      >
+        withParams(params: unknown) {
+          withParams.push(params)
+          return { getJoinedCommunities: communities }
+        },
+      } as unknown as Pick<TelegramClient, 'iterDialogs' | 'withParams'>
     }
 
     it('fetchChatsFromApi caches joined communities next to dialogs', async () => {
@@ -599,6 +603,8 @@ describe('listChatsCommand', () => {
       expect(chatsCache.list({ type: 'community' })).toMatchObject([
         { chat_id: '-1005555555555', access_hash: '777' },
       ])
+      // A FLOOD_WAIT fails the request instead of holding up the list
+      expect(withParams).toEqual([{ floodSleepThreshold: 0 }])
     })
 
     it('fetchChatsFromApi still caches the dialogs when the communities request fails', async () => {
