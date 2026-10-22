@@ -12,7 +12,7 @@ import { getClientForAccount } from '../services/telegram'
 import { ErrorCodes } from '../types'
 import { openAccountCache } from '../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
-import { mergeArgs } from '../utils/args'
+import { mergeArgs, spacedFlagValues } from '../utils/args'
 import { error, raw, success } from '../utils/output'
 import {
   isRateLimitError,
@@ -31,7 +31,8 @@ import {
 export const apiCommand = defineCommand({
   meta: {
     name: 'api',
-    description: 'Call any Telegram API method directly',
+    description:
+      'Call any Telegram API method directly. Pass its arguments after the method as --name value or --name=value',
   },
   args: {
     method: {
@@ -56,7 +57,7 @@ export const apiCommand = defineCommand({
       default: false,
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const method = args.method as string
 
     // Validate method name format
@@ -91,11 +92,17 @@ export const apiCommand = defineCommand({
         '--',
       ]
       const apiArgs: Record<string, unknown> = {}
+      const spaced = spacedFlagValues(
+        rawArgs,
+        method,
+        args as Record<string, unknown>,
+      )
 
       for (const [key, value] of Object.entries(args)) {
-        if (!cliOnlyArgs.includes(key)) {
-          apiArgs[key] = value
-        }
+        // citty reads a negative number as short options named after its
+        // digits, and no TL field starts with a digit
+        if (cliOnlyArgs.includes(key) || /^[\d.]/.test(key)) continue
+        apiArgs[key] = spaced.get(key) ?? value
       }
 
       // Merge with JSON input if provided

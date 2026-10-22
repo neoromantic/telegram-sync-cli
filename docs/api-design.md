@@ -37,7 +37,19 @@ await client.call({ _: 'account.checkUsername', username: 'myuser' })
 
 ### Argument Merging
 
-The `api` command merges named CLI args with JSON (JSON wins on conflicts):
+The `api` command merges named CLI args with JSON (JSON wins on conflicts).
+
+Method arguments go after the method, as `--name value` or `--name=value`; both build the same
+call, and a negative number works either way (`--addOffset -10`). A flag followed by another
+option, or last, is `true` (`--silent`), and `--no-name` is `false`. Any other value that starts
+with `-` needs `=` (`--message=-hi`). Both forms type values the same way: `true`/`false`,
+numbers and `{…}`/`[…]` JSON; a string that looks like one of these goes in `--json`.
+
+tg reads its own options wherever they appear: `--json`/`-j`, `--account`/`-a`, `--raw`/`-r`,
+and the global `--format`/`-f`, `--verbose`/`-v`, `--quiet`/`-q` (also `--q`, `--f`, `--v`) and
+`--help`/`-h`. A method argument with one of those names goes in `--json`, for example
+`tg api contacts.search --json '{"q":"alice","limit":5}'`.
+
 ```bash
 # Named args
 tg api account.checkUsername --username myuser

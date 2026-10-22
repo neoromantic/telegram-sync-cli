@@ -10,8 +10,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { join } from 'node:path'
 import type { TelegramClient, tl } from '@mtcute/bun'
 
+import { ErrorCodes } from '../types'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
-import { runCliSuccess } from './helpers/cli'
+import { runCliFailure, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
 describe('E2E: tg api builds the request from its arguments', () => {
@@ -52,6 +53,7 @@ describe('E2E: tg api builds the request from its arguments', () => {
   }
 
   it.each([
+    ['--username myuser', ['--username', 'myuser']],
     ['--username=myuser', ['--username=myuser']],
     ['--json', ['--json', '{"username":"myuser"}']],
   ])(
@@ -70,6 +72,105 @@ describe('E2E: tg api builds the request from its arguments', () => {
       expect(result.json).toEqual({
         success: true,
         data: { method: 'account.checkUsername', result: true },
+      })
+    },
+  )
+
+  it('misses the fixture for another username', async () => {
+    await recordFixture(
+      { _: 'account.checkUsername', username: 'myuser' },
+      true,
+    )
+
+    const result = await runCliFailure(
+      ['api', 'account.checkUsername', '--username', 'otheruser'],
+      5,
+      replayOptions(),
+    )
+
+    const { error } = result.json as {
+      error: { code: string; message: string }
+    }
+    expect(error.code).toBe(ErrorCodes.TELEGRAM_ERROR)
+    expect(error.message).toContain('Replay fixture not found')
+  })
+
+  it.each([
+    'contacts.getTopPeers --correspondents --offset 0 --limit 5 --hash 0',
+    'contacts.getTopPeers --offset 0 --limit 5 --hash 0 --correspondents',
+    '--account 1 contacts.getTopPeers --offset 0 --limit 5 --hash 0 --correspondents',
+    'contacts.getTopPeers -a 1 --correspondents --offset 0 --limit 5 --hash 0',
+  ])('a flag with no value is true: %s', async (command) => {
+    const response = { _: 'contacts.topPeersNotModified' }
+    await recordFixture(
+      {
+        _: 'contacts.getTopPeers',
+        correspondents: true,
+        offset: 0,
+        limit: 5,
+        hash: 0,
+      },
+      response,
+    )
+
+    const result = await runCliSuccess(
+      ['api', ...command.split(' ')],
+      replayOptions(),
+    )
+
+    expect(result.json).toEqual({
+      success: true,
+      data: { method: 'contacts.getTopPeers', result: response },
+    })
+  })
+
+  it.each([
+    [
+      '--name value',
+      ['--peer._', 'inputPeerSelf', '--addOffset', '-10', '--limit', '10'],
+    ],
+    [
+      '--name=value',
+      ['--peer._=inputPeerSelf', '--addOffset=-10', '--limit=10'],
+    ],
+  ])(
+    'messages.getHistory reads a dotted name, a negative number and --json with %s',
+    async (_form, args) => {
+      const response = {
+        _: 'messages.messages',
+        messages: [],
+        chats: [],
+        users: [],
+      }
+      await recordFixture(
+        {
+          _: 'messages.getHistory',
+          peer: { _: 'inputPeerSelf' },
+          offsetId: 0,
+          offsetDate: 0,
+          addOffset: -10,
+          limit: 10,
+          maxId: 0,
+          minId: 0,
+          hash: 0,
+        },
+        response,
+      )
+
+      const result = await runCliSuccess(
+        [
+          'api',
+          'messages.getHistory',
+          ...args,
+          '--json',
+          '{"offsetId":0,"offsetDate":0,"maxId":0,"minId":0,"hash":0}',
+        ],
+        replayOptions(),
+      )
+
+      expect(result.json).toEqual({
+        success: true,
+        data: { method: 'messages.getHistory', result: response },
       })
     },
   )

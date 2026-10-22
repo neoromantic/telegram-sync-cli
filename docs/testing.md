@@ -109,6 +109,10 @@ request's peer).
 - `cache-db-lock.test.ts` — several processes opening, migrating and moving caches at once
 - `account-selector.test.ts` — `resolveAccount`: `--account`, the active account, the only one,
   and the errors
+- `args.test.ts` — which `tg api` flags take the next argument as their value: a method
+  argument after the method, followed by a value or a negative number; not `--name=value`,
+  `--no-name`, `--account`/`-a`, `--json`/`-j` or `-r`, a flag before the method or followed
+  by another option, a value such as `-hi`, or anything after `--`
 - `daemon-scheduler.test.ts`, `daemon-bootstrap.test.ts`, `daemon-accounts.connect.test.ts`,
   `daemon-start-caches.test.ts` — the daemon with two accounts: each job runs on its own
   account's client, accounts take turns, dialogs, live messages and deletes land in the
@@ -216,7 +220,9 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
   owner check
 - `api-args.e2e.test.ts` — the request `tg api` builds: each test records a replay fixture
   for an exact request with a stub client, then `tg api` in replay mode finds it only if it
-  sends that request with no extra keys; `--username=myuser` and `--json` build the same call
+  sends that request with no extra keys; `--username myuser`, `--username=myuser` and `--json`
+  build the same call, as do flags with no value, dotted names and negative numbers in either
+  form, with `--account`/`-a` before or after the method
 
 ### E2E Helpers
 
