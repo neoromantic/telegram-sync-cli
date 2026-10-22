@@ -17,6 +17,8 @@ import type { Account } from '../types'
 // Set test environment
 process.env.BUN_ENV = 'test'
 
+const PHONE = '+15550000002'
+
 describe('Authentication Commands', () => {
   let accountsDb: AccountsDbInterface
   let mockClients: Map<number, TelegramClient>
@@ -417,6 +419,71 @@ describe('Authentication Commands', () => {
       expect(result.account?.id).toBe(existing.id)
       expect(accountsDb.count()).toBe(1)
       expect(accountsDb.getById(existing.id)?.phone).toBe('+19990000000')
+    })
+  })
+
+  /**
+   * The command after a login has to use the account it logged in (#62).
+   * Account 1 is active at the start of each test; the phone login signs in
+   * user 123 and the QR login user 456, so both add account 2.
+   */
+  describe('the account a login makes active', () => {
+    const logins = [
+      ['tg auth login', (d: AuthDependencies) => loginWithPhone(PHONE, d)],
+      ['tg auth login-qr', (d: AuthDependencies) => loginWithQr('Second', d)],
+    ] as const
+
+    const activeIds = () =>
+      accountsDb
+        .getAll()
+        .filter((account) => account.is_active === 1)
+        .map((account) => account.id)
+
+    const failLogins = () => {
+      deps.createClient = mock(() =>
+        createMockClient({
+          start: mock(() => Promise.reject(new Error('Code expired'))),
+          signInQr: mock(() => Promise.reject(new Error('QR expired'))),
+        }),
+      )
+    }
+
+    beforeEach(() => {
+      deps.qrGenerator = { generate: mock(() => {}) }
+      accountsDb.create({
+        phone: '+15550000001',
+        user_id: 999,
+        is_active: true,
+      })
+    })
+
+    for (const [name, login] of logins) {
+      it(`${name} makes a new account the only active one`, async () => {
+        const result = await login(deps)
+
+        expect(result.account?.id).toBe(2)
+        expect(activeIds()).toEqual([2])
+        expect(accountsDb.getActive()?.id).toBe(2)
+      })
+
+      it(`${name} leaves the active account alone when it fails`, async () => {
+        failLogins()
+
+        const result = await login(deps)
+
+        expect(result.success).toBe(false)
+        expect(activeIds()).toEqual([1])
+      })
+    }
+
+    it('a failed re-login leaves the active account alone', async () => {
+      accountsDb.create({ phone: PHONE })
+      failLogins()
+
+      const result = await loginWithPhone(PHONE, deps)
+
+      expect(result.success).toBe(false)
+      expect(activeIds()).toEqual([1])
     })
   })
 

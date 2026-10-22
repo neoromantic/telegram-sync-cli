@@ -132,6 +132,36 @@ export function getDefaultDependencies(): AuthDependencies {
 }
 
 /**
+ * Make a login's account the one the next command uses (#62): the only
+ * active account in data.db. Only after the login succeeded, so a failed
+ * one leaves the active account alone
+ */
+function activateLoggedInAccount(
+  accountId: number,
+  deps: AuthDependencies,
+): void {
+  deps.accountsDb.setActive(accountId)
+}
+
+/** The account a phone login signed in */
+interface PhoneLoginAccount {
+  id: number
+  phone: string
+  name?: string
+  username?: string
+  label?: string | null
+}
+
+/** The account a QR login signed in */
+interface QrLoginAccount {
+  id: number
+  name?: string
+  username?: string
+  userId?: number
+  label?: string | null
+}
+
+/**
  * Login with phone number - core logic
  */
 export async function loginWithPhone(
@@ -140,30 +170,21 @@ export async function loginWithPhone(
   options: { label?: string } = {},
 ): Promise<{
   success: boolean
-  account?: {
-    id: number
-    phone: string
-    name?: string
-    username?: string
-    label?: string | null
-  }
+  account?: PhoneLoginAccount
   error?: string
 }> {
   const { accountsDb, createClient, prompt, promptPassword } = deps
   const label = options.label?.trim()
   const labelValue = label ? label : undefined
 
-  // Check if account already exists
-  let account = accountsDb.getByPhone(phone)
-  if (!account) {
-    // Create new account record
-    account = accountsDb.create({ phone, is_active: true, label: labelValue })
-  } else {
-    // Set as active
-    accountsDb.setActive(account.id)
-  }
+  // Reuse the account record of this phone or create one. It becomes the
+  // active account only once the login succeeds
+  const account =
+    accountsDb.getByPhone(phone) ??
+    accountsDb.create({ phone, label: labelValue })
 
   const client = createClient(account.id)
+  let loggedIn: PhoneLoginAccount
 
   try {
     // Start authentication flow
@@ -186,7 +207,6 @@ export async function loginWithPhone(
         username: user.username ?? null,
         label: labelValue,
       })
-      accountsDb.setActive(existingAccount.id)
 
       // Delete the newly created account
       accountsDb.delete(account.id)
@@ -204,15 +224,12 @@ export async function loginWithPhone(
     // Close client to allow process to exit
     await client.destroy()
 
-    return {
-      success: true,
-      account: {
-        id: finalAccount.id,
-        phone: phone,
-        name: user.firstName,
-        username: user.username ?? undefined,
-        label: labelValue ?? finalAccount.label ?? null,
-      },
+    loggedIn = {
+      id: finalAccount.id,
+      phone: phone,
+      name: user.firstName,
+      username: user.username ?? undefined,
+      label: labelValue ?? finalAccount.label ?? null,
     }
   } catch (err) {
     // Close client even on error
@@ -220,6 +237,9 @@ export async function loginWithPhone(
     const message = err instanceof Error ? err.message : 'Unknown error'
     return { success: false, error: message }
   }
+
+  activateLoggedInAccount(loggedIn.id, deps)
+  return { success: true, account: loggedIn }
 }
 
 /**
@@ -230,13 +250,7 @@ export async function loginWithQr(
   deps: AuthDependencies,
 ): Promise<{
   success: boolean
-  account?: {
-    id: number
-    name?: string
-    username?: string
-    userId?: number
-    label?: string | null
-  }
+  account?: QrLoginAccount
   error?: string
 }> {
   const { accountsDb, createClient, qrGenerator } = deps
@@ -244,14 +258,15 @@ export async function loginWithQr(
   // Create a new account record for QR login
   const label = accountName?.trim()
   const name = label && label.length > 0 ? label : `qr_account_${Date.now()}`
+  // It becomes the active account only once the login succeeds
   const account = accountsDb.create({
     phone: `qr:${name}`, // QR logins don't have phone until authenticated
     name,
     label: label && label.length > 0 ? label : undefined,
-    is_active: true,
   })
 
   const client = createClient(account.id)
+  let loggedIn: QrLoginAccount
 
   try {
     const qr = qrGenerator || (await getQrGenerator())
@@ -287,7 +302,6 @@ export async function loginWithQr(
         username: user.username ?? null,
         label: label && label.length > 0 ? label : undefined,
       })
-      accountsDb.setActive(existingAccount.id)
 
       // Delete the newly created account
       accountsDb.delete(account.id)
@@ -306,15 +320,12 @@ export async function loginWithQr(
     // Close client to allow process to exit
     await client.destroy()
 
-    return {
-      success: true,
-      account: {
-        id: finalAccount.id,
-        name: user.firstName,
-        username: user.username ?? undefined,
-        userId: user.id,
-        label: label ?? finalAccount.label ?? null,
-      },
+    loggedIn = {
+      id: finalAccount.id,
+      name: user.firstName,
+      username: user.username ?? undefined,
+      userId: user.id,
+      label: label ?? finalAccount.label ?? null,
     }
   } catch (err) {
     // Close client even on error
@@ -324,6 +335,9 @@ export async function loginWithQr(
     const message = err instanceof Error ? err.message : 'Unknown error'
     return { success: false, error: message }
   }
+
+  activateLoggedInAccount(loggedIn.id, deps)
+  return { success: true, account: loggedIn }
 }
 
 /**

@@ -70,9 +70,10 @@ stamped for another Telegram user is refused with `CACHE_UNAVAILABLE` (`owner_mi
 Every command that reads or writes a cache works on one account:
 
 1. the account `--account` selects (ID, `@username` or label);
-2. otherwise the active account, set with `tg accounts switch --id <id>`. When `config.json`
-   sets `activeAccount`, that value wins at the start of every command and `tg accounts switch`
-   updates it; see [Runtime Behavior](#runtime-behavior);
+2. otherwise the active account: the one `tg accounts switch --id <id>` or the last successful
+   `tg auth login` or `login-qr` made active. When `config.json` sets `activeAccount`, that
+   value wins at the start of every command and `tg accounts switch` updates it; see
+   [Runtime Behavior](#runtime-behavior);
 3. otherwise the only account, if there is exactly one.
 
 With no account, cache commands fail with `AUTH_REQUIRED` (exit 2). With several accounts and
