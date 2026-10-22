@@ -15,6 +15,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { applySyncMode } from '../commands/chats/sync'
+import { checkCacheOwner } from '../db/cache-meta'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
 import { initCacheSchema } from '../db/schema'
@@ -228,11 +229,13 @@ describe('cache database lock', () => {
     expect(await holder.exited).toBe(0)
   }, 20_000)
 
-  it('opens a migrated cache without waiting for the write lock', async () => {
+  it('opens a migrated, stamped cache without waiting for the write lock', async () => {
+    const owner = { id: 1, user_id: 101 }
     const cache = new Database(path)
     seedLegacyCache(cache)
     initCacheSchema(cache)
     initSyncSchema(cache)
+    checkCacheOwner(cache, owner, path)
     cache.close()
 
     const holder = spawnBun(HOLD_LOCK, {
@@ -241,12 +244,14 @@ describe('cache database lock', () => {
     })
     await waitForLine(holder.stdout, 'locked')
 
-    // Every tg command opens the cache this way; with nothing to migrate it
-    // must not queue behind a daemon write batch
+    // Every tg command opens the cache this way (getAccountCacheDb); with
+    // nothing to migrate or stamp it must not queue behind a daemon write
+    // batch
     const db = new Database(path)
     const started = performance.now()
     initCacheSchema(db)
     initSyncSchema(db)
+    checkCacheOwner(db, owner, path)
     expect(performance.now() - started).toBeLessThan(500)
     expect(db.query('PRAGMA busy_timeout').get()).toEqual({ timeout: 5000 })
     db.close()
