@@ -32,6 +32,17 @@ last checked, and `forward_cursor` holds Telegram's `saved_count` from it.
 tg sql "SELECT entity_type, last_sync_at FROM sync_state"
 ```
 
+### Daemon refresh
+
+A running daemon keeps the list current by itself: on start when the list is older than the
+peer TTL (`cache.staleness.peers`, one week by default), and then every TTL, it checks the list
+with Telegram's hash in the background. An unchanged list costs one tiny reply and no cache
+writes; a changed one is applied as above. Details: [daemon.md](daemon.md#contacts-sync).
+
+A contact you add or delete with `tg api contacts.*` reaches the cache at the daemon's next
+check at the latest, within the peer TTL: the hash comes from the cache, so it differs, and
+Telegram sends the full list. `tg contacts list --fresh` applies it at once.
+
 ## Current Storage
 
 Contacts are stored in the **users cache** (`users_cache`). See `docs/database-schema.md` for the full schema.

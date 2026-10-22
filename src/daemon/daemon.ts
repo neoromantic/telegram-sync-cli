@@ -4,6 +4,7 @@
  */
 
 import { join } from 'node:path'
+import { ConfigError, getResolvedCacheConfig } from '../config'
 import {
   type AccountsDbInterface,
   closeAccountCacheDbs,
@@ -214,6 +215,24 @@ async function performCleanup(ctx: DaemonContext): Promise<void> {
   await cleanupWithTimeout(ctx, cleanupWork)
 }
 
+/**
+ * The contacts sync waits `cache.staleness.peers` between checks. It is
+ * read once here; a config change takes effect at the next start. A config
+ * that can't be read keeps the default and says so.
+ */
+async function loadContactsTtl(ctx: DaemonContext): Promise<void> {
+  try {
+    const config = await getResolvedCacheConfig({ dataDir: ctx.dataDir })
+    ctx.runtime.contacts.peersTtlMs = config.staleness.peers
+  } catch (err) {
+    // Not worth stopping a daemon whose accounts already connected
+    const why = err instanceof ConfigError ? err.message : formatError(err)
+    ctx.logger.warn(
+      `Failed to read the cache config, contacts sync uses the default peer TTL: ${why}`,
+    )
+  }
+}
+
 async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
   ctx.logger.info(`Starting Telegram Sync CLI daemon ${VERSION}...`)
 
@@ -294,6 +313,8 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
     ctx.logger.error(`Failed to initialize scheduler: ${formatError(err)}`)
   }
   await updateDaemonStatus(ctx)
+
+  await loadContactsTtl(ctx)
 
   try {
     await mainLoop(ctx)

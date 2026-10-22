@@ -57,8 +57,9 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 
 - Multi-account management (`tg accounts`, `--account`)
 - Phone and QR login (`tg auth`)
-- Read-only daemon for real-time sync and history backfill; catch-up and history for large
-  groups and channels on request (`tg chats sync`); the CLI does all mutations (`tg send`)
+- Read-only daemon for real-time sync and history backfill that keeps contacts current;
+  catch-up and history for large groups and channels on request (`tg chats sync`); the CLI does
+  all mutations (`tg send`)
 - Full Telegram API access through `tg api <method>`
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
 - Chat history with cursor paging (`tg messages list`) and a message in context

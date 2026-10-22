@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import type { AccountsDbInterface } from '../db'
 import type { DaemonStatusService } from '../db/daemon-status'
+import { getDefaultCacheConfig } from '../db/types'
 import { DaemonStopError } from './daemon-utils'
 import type { PidFile } from './pid-file'
 import type { SyncScheduler } from './scheduler'
@@ -44,6 +45,22 @@ export interface DaemonRuntime {
    * signal to their requests, so a FLOOD_WAIT they wait out ends at once
    */
   shutdown: AbortController
+  /** The background contacts sync of every account (#8) */
+  contacts: ContactsSyncState
+}
+
+export interface ContactsSyncState {
+  /**
+   * How old the account's contact list may get before the daemon checks it
+   * again: `cache.staleness.peers`, read when the daemon starts
+   */
+  peersTtlMs: number
+  /** Accounts whose contacts.getContacts is still running */
+  inFlight: Set<number>
+  /** Per account: no check before this time, after a failed one */
+  retryAt: Map<number, number>
+  /** Per account: an update hinted at a change, check at this time */
+  checkAt: Map<number, number>
 }
 
 export interface DaemonContext {
@@ -66,6 +83,12 @@ export function createDaemonRuntime(): DaemonRuntime {
     signalHandlersSetup: false,
     dialogPassesInFlight: new Set(),
     shutdown: new AbortController(),
+    contacts: {
+      peersTtlMs: getDefaultCacheConfig().staleness.peers,
+      inFlight: new Set(),
+      retryAt: new Map(),
+      checkAt: new Map(),
+    },
   }
 }
 

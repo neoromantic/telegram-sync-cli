@@ -432,6 +432,57 @@ describe('mainLoop', () => {
     expect(getMe).not.toHaveBeenCalled()
   })
 
+  it('checks contacts on the first tick and not again before the 30th', async () => {
+    const ctx = createContext()
+    const requests: string[] = []
+    // The request never settles: the loop doesn't wait for it
+    const client = {
+      withParams: () => ({
+        call: (request: { _: string }) => {
+          requests.push(request._)
+          return new Promise(() => {})
+        },
+      }),
+    } as unknown as TelegramClient
+    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      statusService: stopAfterTicks(ctx, 29),
+    })
+    ctx.state.accounts.set(1, {
+      accountId: 1,
+      phone: '+15550000001',
+      name: null,
+      status: 'connected',
+      client,
+    })
+
+    await runWithImmediateTimeouts(() => mainLoop(ctx))
+    expect(requests).toEqual(['contacts.getContacts'])
+  })
+
+  it('makes no contacts call after a stop during the first tick', async () => {
+    const ctx = createContext()
+    const call = mock(() => new Promise(() => {}))
+    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      scheduler: createMockScheduler({
+        getNextJob: () => {
+          requestShutdown(ctx)
+          return null
+        },
+      }),
+      worker: { canMakeApiCall: () => true } as unknown as RealSyncWorker,
+    })
+    ctx.state.accounts.set(1, {
+      accountId: 1,
+      phone: '+15550000001',
+      name: null,
+      status: 'connected',
+      client: { withParams: () => ({ call }) } as unknown as TelegramClient,
+    })
+
+    await runWithImmediateTimeouts(() => mainLoop(ctx))
+    expect(call).not.toHaveBeenCalled()
+  })
+
   it('cleans up old jobs on cleanup interval', async () => {
     const ctx = createContext()
     addAccountRuntime(ctx, 1, createAccountCacheDb(), {
