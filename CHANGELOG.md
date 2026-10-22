@@ -104,6 +104,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does. Before, such a chat whose newest message an earlier failed pass had
   left unknown still cost a `messages.getHistory` call. A chat turned on with
   `tg chats sync` still gets its checking page.
+- The daemon could skip a delete in a private chat or basic group, or mark the
+  wrong message deleted. Telegram names no chat for such a delete, and the
+  daemon matched the ID across every cached chat of the account. When a
+  channel or supergroup had a message with the same ID, the deleted message
+  stayed unmarked; when the deleted message wasn't cached, that channel post
+  was marked deleted instead and dropped out of `tg messages list` and
+  `messages search`. The daemon now looks only among the account's private
+  chats and basic groups, which share one ID sequence, through a new index on
+  `messages_cache.message_id` instead of reading every cached message. An ID
+  that two of them still have is left as it is and logged as a warning (#7).
+- An account whose first connect failed (login, `getMe` or the updates loop)
+  kept its Telegram client, its connection and its session file open until the
+  daemon stopped. Stopping the daemon (`tg daemon stop`, SIGTERM or SIGINT)
+  also exited without closing any client's connection. The daemon now closes
+  each client once, right after a failed connect and on shutdown (#34).
+- History pages stored no sender for an incoming private message, a channel
+  post or a message in Saved Messages, because Telegram leaves the sender out
+  of those, while the same message cached live had one. `fromId` and
+  `sender.id` were `null` for them in `tg messages search`, `list` and `get`,
+  `sender` had no name, and `--sender` missed them. A daemon catch-up or a
+  `--fresh` page also erased the sender that a live update had stored. They
+  now get the sender a live message gets: the other user in a private chat,
+  your own user in Saved Messages and the channel's marked ID (`-100…`) for a
+  channel post. The first run of the new version fills in the messages cached
+  before. Stop the daemon before upgrading and start it again after, so the
+  old daemon neither loses writes while that one-time fill holds the database
+  nor stores new messages without a sender; any it caches after the upgrade
+  stay without a sender until they are fetched again (`tg messages list
+  --fresh`) (#44).
+- A Telegram community (a collection of linked chats) would have been cached
+  as a basic group without its access hash, so `tg chats list --type group`
+  would have listed it, and syncing it with `tg chats sync` would have reached
+  Telegram with access hash 0. The cache now stores a community as type
+  `community` with its access hash: `type` in `tg chats` output, `chat_type`
+  in `tg status`, and `chats_cache.type` / `chat_sync_state.chat_type` in `tg
+  sql` say `community`, `tg chats list --type community` filters on it, and
+  like a channel it is off by default. tg doesn't cache joined communities
+  yet, because mtcute's dialog list skips them (#58), so `--type community`
+  finds none so far (#45).
+- `tg status` didn't say when the running daemon was a different version from
+  `tg`, so after an upgrade a daemon left running kept writing the cache in
+  the old format and nothing said to restart it. The daemon now records its
+  version when it starts. `tg status` reports it as `daemon.version` and sets
+  `daemon.version_mismatch` when it differs from this `tg` (`cli_version`).
+  `--format pretty` shows a Version row and how to restart the daemon, or,
+  when the daemon is the newer one, says to use the newer `tg` instead. A
+  daemon started by 0.3.0 or older records no version and counts as older
+  (#46).
+- `tg send --to`, `tg messages list` and `get --chat` took a positive number
+  the cache doesn't know as basic group N, so a typo or an uncached user ID
+  could send to that group or fail with `PEER_ID_INVALID`. Such a number is
+  now user N and never a group: basic group N is `-N`. Without a cached access
+  hash Telegram may still refuse the user; use its `@username` or `+phone`
+  once and the ID works after that. A number of 10 or more digits is still
+  read only as a phone number (#47).
+- A daemon stop closed the session files under running clients, so update
+  state and peers that arrived between the signal and the shutdown were lost,
+  the updates loop logged errors until the process exited, and "Received
+  SIGTERM" appeared twice. The daemon now keeps the session files open until
+  it closes its clients, so those writes are saved and the stop logs no
+  updates-loop error or failed save. A stop during the dialog pass ends it at
+  the next dialog; a FLOOD_WAIT the daemon is already waiting out still holds
+  the stop until it ends (#64) (#56).
+- `tg accounts switch` lasted one command when `config.json` set
+  `activeAccount`: the next command made that account active again and read
+  its cache. The switch now writes the new ID to `activeAccount` when the key
+  is set; without the key `config.json` is not created (#61).
+- The startup handling of `config.json` had four more gaps: `-q` skipped
+  applying `activeAccount` and the file check that every other format runs, so
+  a quiet command could use another account; `-f <format>` before `tg config`
+  or `tg skill` ran the check, so `tg config set` couldn't repair an invalid
+  file; a file that couldn't be read printed a stack trace instead of a
+  `GENERAL_ERROR` with the path in `details.path`; and an invalid file stopped
+  `tg daemon start`, though the daemon reads none of its keys (#61).
 
 ## [0.3.0] - 2026-10-22
 
