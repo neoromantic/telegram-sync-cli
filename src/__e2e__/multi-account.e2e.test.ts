@@ -418,14 +418,16 @@ describe('E2E: tg chats sync with two accounts', () => {
   })
 
   it("rejects a chat that is only in the other account's cache", async () => {
-    const result = await failure(env, ['chats', 'sync', String(BOB_ID)])
+    // Book Club is in account 2's chats_cache, which --account 2 syncs
+    // above; without --account, account 1 is active and doesn't know it
+    const result = await failure(env, ['chats', 'sync', String(BOOK_CLUB_ID)])
 
     expect(result.exitCode).toBe(3)
     expect(result.error).toMatchObject({
       code: 'INVALID_ARGS',
-      details: { chat: String(BOB_ID), account_id: 1 },
+      details: { chat: String(BOOK_CLUB_ID), account_id: 1 },
     })
-    expect(stateOf(1, BOB_ID)).toBeNull()
+    expect(stateOf(1, BOOK_CLUB_ID)).toBeNull()
   })
 })
 
