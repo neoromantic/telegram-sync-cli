@@ -5,9 +5,12 @@
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
-import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { fakeDialog, fakeRawCommunity } from '../__tests__/helpers/fake-dialogs'
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
-import { dialogToCacheInput } from '../commands/chats/helpers'
+import {
+  dialogToCacheInput,
+  rawChatToCacheInput,
+} from '../commands/chats/helpers'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createSyncJobsService } from '../db/sync-jobs'
@@ -431,6 +434,49 @@ describe('E2E: chats sync', () => {
           'Start the daemon (its dialog pass lists every chat, archived ones too) or run tg chats get --id @username, then retry',
       },
     })
+  })
+
+  it('refuses to turn on a community and points at its linked chats', async () => {
+    const communityId = -1005555555555
+    createChatsCache(cacheDb).upsertMany([
+      rawChatToCacheInput(
+        fakeRawCommunity({
+          id: 5555555555,
+          title: 'Example Community',
+          accessHash: '777',
+        }),
+      ),
+    ])
+
+    const result = await runCliFailure(
+      ['chats', 'sync', String(communityId)],
+      3,
+      options(),
+    )
+
+    const failure = result.json as {
+      error: {
+        code: string
+        message: string
+        details: { type: string; id: number }
+        suggestion: string
+      }
+    }
+    expect(failure.error.code).toBe('INVALID_ARGS')
+    expect(failure.error.message).toContain('community')
+    expect(failure.error.details).toMatchObject({
+      type: 'community',
+      id: communityId,
+    })
+    expect(failure.error.suggestion).toContain('linked chats')
+    expect(stateOf(communityId)).toBeNull()
+    expect(cacheDb.query('SELECT COUNT(*) AS n FROM sync_jobs').get()).toEqual({
+      n: 0,
+    })
+
+    // Off matches the default policy, so it still works
+    const off = await sync(String(communityId), '--off')
+    expect(off.data).toMatchObject({ type: 'community', syncEnabled: false })
   })
 
   it('is listed in tg chats --help', async () => {

@@ -84,9 +84,10 @@ cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
 ### Chat sync
 
 The daemon syncs DMs and groups of up to 100 members by default. Archived ones start when a
-message arrives in them live, or with `tg chats sync`. A community is off by default; the chats
-linked to it are ordinary supergroups and channels and sync as such. Groups of unknown size or
-over 100 members and channels get catch-up and history only on request:
+message arrives in them live, or with `tg chats sync`. A community has no messages of its own,
+so `tg chats sync <community>` refuses to turn it on (see the errors below); the chats linked to
+it are ordinary supergroups and channels and sync as such. Groups of unknown size or over 100
+members and channels get catch-up and history only on request:
 
 ```bash
 tg chats sync @examplenews        # turn sync on
@@ -111,6 +112,10 @@ tg chats sync @examplenews --auto # follow the default policy again
   newest dialogs that aren't archived and every joined community.
 - A chat that isn't found fails with `INVALID_ARGS` (exit 3) and the suggestion to start the
   daemon or run `tg chats get --id @username`. `--off` with `--auto` is `INVALID_ARGS` too.
+- Turning on a community (no flag) is `INVALID_ARGS` (exit 3) with
+  `details: { chat, id, type: 'community', account_id }` and a suggestion that points at its
+  linked supergroups and channels. The command writes nothing and queues no jobs. `--off` and
+  `--auto` still work: they match the default policy, which leaves a community off.
 - A running daemon applies the change at its next refresh (30 seconds or less). A chat turned
   on gets its first page ahead of other first pages. A changed mode cancels the chat's pending
   jobs; a job that is running finishes.

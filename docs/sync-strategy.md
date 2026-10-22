@@ -55,11 +55,12 @@ Implemented in `determineSyncPolicy`:
   - `20–100` → enabled, **Medium**
   - `> 100` → disabled, **Low**
 - `channel`, `community` → disabled, **Low**. A community is a collection of linked chats; the
-  chats linked to it are ordinary supergroups and channels and get their own policy.
+  chats linked to it are ordinary supergroups and channels and get their own policy. A
+  community has no messages of its own, so `tg chats sync` refuses to turn one on.
 
 ### Turning a chat on or off
 
-`tg chats sync <chat>` turns sync on for any chat, `--off` turns it off and `--auto` goes back
+`tg chats sync <chat>` turns sync on for any chat but a community, `--off` turns it off and `--auto` goes back
 to the policy. The choice is stored in `chat_sync_state.sync_mode` (`auto`, `on`, `off`), and
 the dialog pass and live updates never overwrite it: an upsert keeps `sync_enabled` at 1 for
 `on` and 0 for `off`, and `sync_priority` at High for `on`, while the chat type and member
