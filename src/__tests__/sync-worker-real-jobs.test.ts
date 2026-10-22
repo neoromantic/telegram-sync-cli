@@ -557,6 +557,7 @@ describe('sync-worker real jobs', () => {
       ['a FLOOD_WAIT', new Error('FLOOD_WAIT_30'), 0],
       ['a permanent error', new tl.RpcError(400, 'CHANNEL_PRIVATE'), 0],
       ['its last attempt', new Error('connection reset'), 4],
+      ['a daemon stop', new DaemonStopError(), 0],
     ] as const) {
       it(`drops a job whose chat was turned off while it ran, on ${label}`, async () => {
         ctx.client = {
