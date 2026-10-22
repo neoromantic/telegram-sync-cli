@@ -56,6 +56,14 @@ describe('E2E: tg api builds the request from its arguments', () => {
     ['--username myuser', ['--username', 'myuser']],
     ['--username=myuser', ['--username=myuser']],
     ['--json', ['--json', '{"username":"myuser"}']],
+    // tg's global options reach this command undeclared
+    ['--username myuser -v', ['--username', 'myuser', '-v']],
+    ['--verbose --username myuser', ['--verbose', '--username', 'myuser']],
+    ['-f json --username myuser', ['-f', 'json', '--username', 'myuser']],
+    [
+      '--username myuser --format json',
+      ['--username', 'myuser', '--format', 'json'],
+    ],
   ])(
     'account.checkUsername %s sends only the username',
     async (_form, args) => {
@@ -73,6 +81,24 @@ describe('E2E: tg api builds the request from its arguments', () => {
         success: true,
         data: { method: 'account.checkUsername', result: true },
       })
+    },
+  )
+
+  it.each(['-q', '--quiet'])(
+    'account.checkUsername with %s sends only the username',
+    async (flag) => {
+      await recordFixture(
+        { _: 'account.checkUsername', username: 'myuser' },
+        true,
+      )
+
+      // Quiet prints nothing on success; a missed fixture fails with exit code 5
+      const result = await runCliSuccess(
+        ['api', 'account.checkUsername', '--username', 'myuser', flag],
+        replayOptions(),
+      )
+
+      expect(result.stdout).toBe('')
     },
   )
 

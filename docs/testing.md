@@ -222,7 +222,8 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
   for an exact request with a stub client, then `tg api` in replay mode finds it only if it
   sends that request with no extra keys; `--username myuser`, `--username=myuser` and `--json`
   build the same call, as do flags with no value, dotted names and negative numbers (`-10`,
-  `-1.5`) in either form, with `--account`/`-a` before or after the method
+  `-1.5`) in either form, with `--account`/`-a` before or after the method; tg's own options
+  (`-v`, `--verbose`, `-f json`, `--format json`, `-q`, `--quiet`) stay out of the request
 
 ### E2E Helpers
 
