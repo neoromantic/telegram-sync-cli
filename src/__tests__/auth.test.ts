@@ -345,6 +345,8 @@ describe('Authentication Commands', () => {
       expect(result.account?.id).toBe(existing.id)
       expect(inMemoryDb.count()).toBe(1)
       expect(inMemoryDb.getById(existing.id)?.phone).toBe('+15550001111')
+      expect(deps.keepActiveAccountInConfig).toHaveBeenCalledWith(existing.id)
+      expect(inMemoryDb.getActive()?.id).toBe(existing.id)
     })
 
     it('closes client after successful login', async () => {
