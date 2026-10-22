@@ -59,3 +59,13 @@ export function cacheWithRowsInWal(
   )
   return 'exit-without-close'
 }
+
+/**
+ * A shared cache that is already in rollback-journal mode, as a fold leaves
+ * it: no -wal or -shm after the process exits
+ */
+export function foldedCache(db: Database, args: { empty?: boolean }): void {
+  if (args?.empty) emptyCache(db)
+  else legacySharedCache(db)
+  db.run('PRAGMA journal_mode = DELETE')
+}

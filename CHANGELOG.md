@@ -40,7 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be split by account, so it is kept as `shared-cache.db` and each account
   syncs again from an empty cache; an empty one is deleted. While an older
   tg still has the file open, a single account's commands fail with
-  `CACHE_UNAVAILABLE` until it exits. Going back to 0.3 after the move is not
+  `CACHE_UNAVAILABLE` until it exits, and while the file can't be moved
+  (`move_failed`: a read-only file, a full disk) until that is fixed; only a
+  file that is not a database is set aside for a single account. Going back to 0.3 after the move is not
   supported. Scripts that open `cache.db` directly must open
   `accounts/<id>/cache.db` or use `tg sql --account`. See "Upgrading to
   per-account caches" in `docs/configuration.md`.
