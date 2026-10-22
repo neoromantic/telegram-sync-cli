@@ -39,6 +39,10 @@ account the command fails with `AUTH_REQUIRED`; with several and none active, wi
 
 **Note:** Account information is stored separately in `data.db`. Use `tg accounts list` for account queries.
 
+`message_search` is the full-text index of `messages_cache`. On SQLite 3.43 and newer it keeps
+no copy of the text, so its columns read as `NULL`: join it to `messages_cache` by rowid and read
+the text from there, as `tg messages search` does ([search.md](search.md#a-contentless-index)).
+
 ---
 
 ## Usage

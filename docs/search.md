@@ -10,6 +10,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
   sender,
   chat,
   files,
+  content='', contentless_delete=1,  -- SQLite 3.43 and newer
   tokenize='unicode61'
 );
 
@@ -19,6 +20,39 @@ CREATE TABLE IF NOT EXISTS search_meta (
   updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
 );
 ```
+
+### A contentless index
+
+`message_search` keeps only the full-text index, not a copy of every message's text, sender
+and chat: a contentless FTS5 table (`content=''`) stores the tokens and the rowid, and
+`contentless_delete=1` lets the triggers below delete and replace rows on an edit or a delete.
+Search never reads the table's columns: the query joins `messages_cache` by rowid and returns
+the text from there, and nothing uses `snippet()`, `highlight()` or `bm25()`. So results are
+the same as with the full-content table of 0.4 and older, column filters (`sender:alice`)
+included, while the index takes about a third of the space (see
+[database-schema.md](database-schema.md#capacity-planning-approx)). Selecting a column of
+`message_search` itself (`tg sql`) returns `NULL`.
+
+`contentless_delete` needs SQLite 3.43.0 or newer (`sqlite_version()`). On macOS Bun uses the
+system libsqlite3, so this depends on the macOS version; on Linux and Windows Bun's bundled
+SQLite is used ([build-distribution.md](build-distribution.md#notes)). With an older SQLite a
+new cache gets the full-content table instead.
+
+The first open of a cache with the full-content index, by this version on a new enough SQLite,
+drops it and builds the contentless one from `messages_cache`, under the write lock like any
+rebuild below (it waits up to a minute for the lock); `search_index_version` stays `1`. A 0.4
+tg on the same SQLite reads the contentless table as up to date, so going back needs no
+rebuild. The dropped index's pages stay in the file as free pages: run `tg db vacuum` once,
+with the daemon stopped, to give them back to the disk and to switch the cache to incremental
+auto_vacuum ([cli-commands.md](cli-commands.md#cache-maintenance)). Stop the daemon before
+upgrading, so that the old daemon doesn't write while the new tg moves the index.
+
+If an older SQLite opens a cache that has the contentless table (the same data directory used
+from a newer macOS, say), it can't read that table: it drops only the three `messages_cache_a*`
+triggers and sets `search_index_version` to `0`. Messages are still cached, and
+`tg messages search` fails with SQLite's error (`GENERAL_ERROR`). The next open on a SQLite
+with `contentless_delete` recreates the triggers and rebuilds the index, so search finds every
+message again, those cached in between too.
 
 ### Indexed Columns
 
@@ -110,7 +144,8 @@ On startup, `initSyncSchema()` checks:
 - The expected columns exist in `message_search`
 - The stored version matches the current `SEARCH_INDEX_VERSION`
 
-If a column is missing, it drops and recreates `message_search` and its triggers;
+If a column is missing, or the table is the full-content one where a contentless one is
+supported, it drops and recreates `message_search` and its triggers;
 if either check fails, it rebuilds the index from `messages_cache`. That work runs
 in one transaction under the write lock and checks again there, so when several
 processes open the cache at once (the daemon and a command after the first login),

@@ -62,6 +62,11 @@ bun i -g @goodit/telegram-sync-cli
 ## Notes
 
 - The compiled binary includes the Bun runtime and SQLite; size is 70–100 MB.
+- SQLite: on macOS both `bun run` and the compiled binary use the system libsqlite3, so its
+  version follows the macOS version; Linux and Windows use the SQLite bundled with Bun. The
+  contentless search index needs 3.43.0 or newer, and an older SQLite falls back to the
+  full-content one ([search.md](search.md#a-contentless-index)). Check with
+  `tg sql --query "SELECT sqlite_version() AS v"`.
 - The npm tarball excludes the binary; `tg` runs from source with Bun.
 - The version comes only from `package.json` (`src/version.ts` reads it).
 - `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` are required only by commands that

@@ -404,7 +404,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     // -------------------------------------------------------------------------
     message_search: {
       description:
-        'Full-text search index for messages_cache (FTS5 virtual table).',
+        'Full-text search index for messages_cache (FTS5 virtual table). On SQLite 3.43+ it is contentless: its columns read as NULL, so JOIN messages_cache m ON m.rowid = message_search.rowid and read m.text; filter with message_search MATCH.',
       primaryKey: 'rowid',
       columns: {
         text: {
