@@ -487,6 +487,43 @@ describe('bootstrapDialogs', () => {
     otherDb.close()
   })
 
+  it('a dialog page that fails during a stop is logged at debug and marks nothing', async () => {
+    const { bootstrapDialogs } = await import('../daemon/daemon-bootstrap')
+    seedSynced(1005, 1000, 1200)
+    // The page after the stop signal fails
+    const first = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 10 },
+        { kind: 'user', id: 1002, topMessage: 10 },
+      ],
+      {
+        failAfter: 1,
+        onListed: () => {
+          ctx.state.shutdownRequested = true
+        },
+      },
+    )
+    connect(ctx, 1, first.client)
+    addAccountRuntime(ctx, 1, testCacheDb)
+    const otherDb = createAccountCacheDb()
+    const second = fakeDialogClient([{ kind: 'user', id: 2001 }])
+    connect(ctx, 2, second.client)
+    addAccountRuntime(ctx, 2, otherDb)
+
+    await bootstrapDialogs(ctx)
+
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[Account 1] Dialog page failed during the stop: Error: FLOOD_WAIT_600',
+      ),
+    )
+    // Not unknown: a pass the stop ended tells nothing about it
+    expect(chatSyncState.get(1005)?.top_message_id).toBe(1200)
+    expect(second.calls).toEqual([])
+    otherDb.close()
+  })
+
   it('leaves a supergroup without a member count off', async () => {
     await runPass([{ kind: 'supergroup', id: 2001, topMessage: 50 }])
 

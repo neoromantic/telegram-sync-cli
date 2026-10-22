@@ -504,6 +504,77 @@ describe('rebuildSyncWorker dialog pass', () => {
     expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
   })
 
+  it('a reconnect pass whose page fails during a stop logs at debug and marks nothing', async () => {
+    const ctx = createContext()
+    const refreshQueues = mock(() => {})
+    addAccountRuntime(ctx, 1, cacheDb, {
+      scheduler: createSchedulerStub({ refreshQueues }),
+    })
+    // Closing the client on a stop aborts the page the pass is waiting for
+    const fake = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 1000 },
+        { kind: 'user', id: 1002, topMessage: 1007 },
+      ],
+      {
+        failAfter: 1,
+        error: new Error('Connection closed'),
+        onListed: () => {
+          ctx.state.shutdownRequested = true
+        },
+      },
+    )
+
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    // Not unknown: their sync state stays as it was
+    for (const userId of [1002, 1003]) {
+      expect(chatSyncState.get(userId)?.top_message_id).toBe(1000)
+    }
+    expect(refreshQueues).not.toHaveBeenCalled()
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.error).not.toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[Account 1] Dialog page failed during the stop: Error: Connection closed',
+      ),
+    )
+    expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
+  })
+
+  it('a reconnect pass whose cache closes during a stop logs at debug', async () => {
+    const ctx = createContext()
+    const refreshQueues = mock(() => {})
+    addAccountRuntime(ctx, 1, cacheDb, {
+      scheduler: createSchedulerStub({ refreshQueues }),
+    })
+    // The shutdown closes the account caches while the pass still runs
+    const fake = fakeDialogClient(
+      [
+        { kind: 'user', id: 1001, topMessage: 1000 },
+        { kind: 'user', id: 1002, topMessage: 1007 },
+      ],
+      {
+        onListed: () => {
+          ctx.state.shutdownRequested = true
+          cacheDb.close()
+        },
+      },
+    )
+
+    await rebuildSyncWorker(ctx, 1, fake.client)
+
+    expect(refreshQueues).not.toHaveBeenCalled()
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(ctx.logger.error).not.toHaveBeenCalled()
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[Account 1] Dialog pass after reconnect failed: RangeError: Cannot use a closed database',
+      ),
+    )
+    expect(ctx.runtime.dialogPassesInFlight.size).toBe(0)
+  })
+
   it('starts no reconnect pass once the daemon is stopping', async () => {
     const ctx = createRunningContext()
     ctx.state.shutdownRequested = true
