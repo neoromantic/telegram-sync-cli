@@ -1,4 +1,5 @@
 import { SYNC_RETRY_CONFIG } from '../../daemon/sync-retry'
+import { UPGRADE_DOCS_URL } from '../../db/cache-layout'
 import { SyncJobStatus, type SyncMode } from '../../db/sync-schema'
 import { formatBytes, formatRelativeTime } from '../../utils/formatting'
 import { formatDuration } from '../../utils/time'
@@ -391,7 +392,7 @@ function printStorageSection(status: StatusSnapshot): void {
   if (legacy_caches.length > 0) {
     console.log(
       c.dim(
-        "  A shared cache from an older version can't be split by account; see docs/configuration.md",
+        `  A shared cache from an older version can't be split by account; see ${UPGRADE_DOCS_URL}`,
       ),
     )
   }
