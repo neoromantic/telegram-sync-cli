@@ -175,6 +175,7 @@ describe('E2E: upgrading from the shared cache', () => {
         ).toEqual({
           cache_bytes: 0,
           legacy_caches: [],
+          media_bytes: null,
           migration: {
             reason: 'shared_cache_in_use',
             path: shared,
@@ -388,6 +389,7 @@ describe('E2E: upgrading from the shared cache', () => {
       ).toEqual({
         cache_bytes: expect.any(Number),
         legacy_caches: [{ path: parked, size_bytes: statSync(parked).size }],
+        media_bytes: null,
         migration: null,
       })
       const pretty = await runCliSuccess(
