@@ -15,6 +15,7 @@ import {
 /** What `tg send` asked Telegram to send */
 export type SentMessageRequest = {
   peer: tl.TypeInputPeer
+  /** The text, or the caption of a file */
   text: string
   replyTo?: number
 }
@@ -74,8 +75,9 @@ function fromUpdates(updates: tl.TypeUpdate[]): MessageInput[] {
 }
 
 /**
- * Turn a `messages.sendMessage` response into messages_cache rows, with
- * marked peer IDs as `chat_id` like the daemon.
+ * Turn a `messages.sendMessage` or `messages.sendMedia` response into
+ * messages_cache rows, with marked peer IDs as `chat_id` like the daemon.
+ * The messages cache writes a sent file's attachment row with its message.
  */
 export function buildSentMessageInputs(
   result: tl.TypeUpdates,

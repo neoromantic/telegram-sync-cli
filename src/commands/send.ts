@@ -1,3 +1,5 @@
+import { accessSync, constants, statSync } from 'node:fs'
+import { basename } from 'node:path'
 import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
@@ -9,8 +11,10 @@ import { getClientForAccount } from '../services/telegram'
 import { ErrorCodes } from '../types'
 import { openAccountCache } from '../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
+import { flagValues } from '../utils/args'
 import { toLong } from '../utils/long'
 import { error, success, verbose } from '../utils/output'
+import { createProgress } from '../utils/progress'
 import {
   isRateLimitError,
   wrapClientCallWithRateLimits,
@@ -20,6 +24,7 @@ import {
   createDmLookup,
   resolvePeer,
 } from './send/peer-resolver'
+import { sendFile, sentAttachment } from './send/send-file'
 import { cacheSentMessage, resolveSelfId } from './send/sent-message-cache'
 
 function extractMessageInfo(result: tl.TypeUpdates): {
@@ -81,13 +86,112 @@ function handleSendError(recipient: string, message: string): never {
   error(ErrorCodes.TELEGRAM_ERROR, `Failed to send message: ${message}`)
 }
 
+function sendMessageRequest(
+  peer: tl.TypeInputPeer,
+  text: string,
+  silent: boolean,
+  replyTo: number | undefined,
+): tl.messages.RawSendMessageRequest {
+  const request: tl.messages.RawSendMessageRequest = {
+    _: 'messages.sendMessage',
+    peer,
+    message: text,
+    randomId: toLong(
+      BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
+    ),
+    noWebpage: false,
+    silent,
+  }
+
+  if (replyTo) {
+    request.replyTo = {
+      _: 'inputReplyToMessage',
+      replyToMsgId: replyTo,
+    }
+  }
+  return request
+}
+
+/** What to send: text, or one file with an optional caption */
+type SendContent =
+  | { file: null; text: string }
+  | { file: string; caption: string; forceDocument: boolean }
+
+/** Exits with INVALID_ARGS unless path names a readable, non-empty regular file */
+function checkSendableFile(path: string): void {
+  let size: number
+  try {
+    const stats = statSync(path)
+    if (!stats.isFile()) throw new Error('not a regular file')
+    accessSync(path, constants.R_OK)
+    size = stats.size
+  } catch {
+    error(ErrorCodes.INVALID_ARGS, `Not a readable file: ${path}`, {
+      file: path,
+    })
+  }
+  if (size === 0) {
+    error(ErrorCodes.INVALID_ARGS, `File is empty: ${path}`, { file: path })
+  }
+}
+
+/** Checks that need no account and no network, run before either opens */
+function readSendContent(
+  args: {
+    message?: string
+    file?: string
+    caption?: string
+    'force-document'?: boolean
+  },
+  rawArgs: string[],
+): SendContent {
+  const files = flagValues(rawArgs, 'file')
+  if (files.length > 1) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      "Send one file per message: albums aren't supported yet",
+      { files },
+    )
+  }
+
+  const file = args.file
+  if (file === undefined) {
+    if (args.message === undefined) {
+      error(ErrorCodes.INVALID_ARGS, 'Pass --message <text> or --file <path>')
+    }
+    if (args.caption !== undefined) {
+      error(ErrorCodes.INVALID_ARGS, '--caption needs --file')
+    }
+    if (args['force-document']) {
+      error(ErrorCodes.INVALID_ARGS, '--force-document needs --file')
+    }
+    if (args.message.trim() === '') {
+      error(ErrorCodes.INVALID_ARGS, 'Message text cannot be empty')
+    }
+    return { file: null, text: args.message }
+  }
+
+  if (args.message !== undefined) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      'Use --caption for the text sent with --file',
+    )
+  }
+  checkSendableFile(file)
+  return {
+    file,
+    caption: args.caption ?? '',
+    forceDocument: args['force-document'] ?? false,
+  }
+}
+
 /**
  * Send message command
  */
 export const sendCommand = defineCommand({
   meta: {
     name: 'send',
-    description: 'Send a message to a user, group, or channel',
+    description: 'Send a message or a file to a user, group, or channel',
   },
   args: {
     to: {
@@ -99,8 +203,21 @@ export const sendCommand = defineCommand({
     message: {
       type: 'string',
       alias: 'm',
-      description: 'Message text to send',
-      required: true,
+      description: 'Message text (or use --file)',
+    },
+    file: {
+      type: 'string',
+      description:
+        'Send this file: a photo for JPEG/PNG/WebP images up to 10 MB, otherwise a document. One per message',
+    },
+    caption: {
+      type: 'string',
+      description: 'Text sent with --file',
+    },
+    'force-document': {
+      type: 'boolean',
+      default: false,
+      description: 'Send an image as a file (document), not as a photo',
     },
     account: {
       type: 'string',
@@ -116,17 +233,15 @@ export const sendCommand = defineCommand({
       description: 'Message ID to reply to',
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const recipient = args.to
-    const messageText = args.message
     const silent = args.silent
     const replyTo = args['reply-to']
       ? Number.parseInt(args['reply-to'], 10)
       : undefined
 
-    if (!messageText || messageText.trim() === '') {
-      error(ErrorCodes.INVALID_ARGS, 'Message text cannot be empty')
-    }
+    // Tests call run() with args only
+    const content = readSendContent(args, rawArgs ?? [])
 
     // The recipient resolves with this account's access hashes
     const { account, db: cacheDb } = openAccountCache(args.account)
@@ -150,27 +265,37 @@ export const sendCommand = defineCommand({
         createDmLookup(cacheDb),
       )
 
-      verbose(`Sending message to ${name}...`)
-
-      const request: tl.messages.RawSendMessageRequest = {
-        _: 'messages.sendMessage',
-        peer: inputPeer,
-        message: messageText,
-        randomId: toLong(
-          BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
-        ),
-        noWebpage: false,
-        silent,
-      }
-
-      if (replyTo) {
-        request.replyTo = {
-          _: 'inputReplyToMessage',
-          replyToMsgId: replyTo,
+      const text = content.file === null ? content.text : content.caption
+      let result: tl.TypeUpdates
+      let fileOutput = {}
+      if (content.file === null) {
+        verbose(`Sending message to ${name}...`)
+        result = await client.call(
+          sendMessageRequest(inputPeer, content.text, silent, replyTo),
+        )
+      } else {
+        const fileName = basename(content.file)
+        verbose(`Sending ${fileName} to ${name}...`)
+        const sent = await sendFile(client, {
+          peer: inputPeer,
+          path: content.file,
+          caption: content.caption,
+          silent,
+          replyTo,
+          forceDocument: content.forceDocument,
+          progress: createProgress(fileName),
+        })
+        result = sent.result
+        fileOutput = {
+          file: {
+            name: sent.fileName,
+            mimeType: sent.mimeType,
+            size: sent.size,
+            sentAs: sent.kind,
+          },
+          attachment: sentAttachment(result),
         }
       }
-
-      const result = await client.call(request)
       const { messageId, timestamp } = extractMessageInfo(result)
 
       await cacheSentMessage(
@@ -179,7 +304,7 @@ export const sendCommand = defineCommand({
           getSelfId: () => resolveSelfId(client, accountId, accountsDb),
         },
         result,
-        { peer: inputPeer, text: messageText, replyTo },
+        { peer: inputPeer, text, replyTo },
       )
 
       success({
@@ -192,6 +317,7 @@ export const sendCommand = defineCommand({
         timestamp: timestamp ? timestamp * 1000 : Date.now(),
         replyTo: replyTo ?? null,
         silent,
+        ...fileOutput,
       })
     } catch (err) {
       if (err instanceof AmbiguousPeerError) {
