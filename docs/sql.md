@@ -36,12 +36,23 @@ account the command fails with `AUTH_REQUIRED`; with several and none active, wi
 | `api_activity` | API call audit log | `cache.retention.apiActivity` (7 days) |
 | `daemon_status` | Daemon runtime state for this account | N/A |
 | `cache_meta` | Which account the file belongs to (`account_id`, `user_id`) | N/A |
+| `message_search_text` | View: full-text matches with the message, chat and sender columns | N/A |
 
 **Note:** Account information is stored separately in `data.db`. Use `tg accounts list` for account queries.
 
 `message_search` is the full-text index of `messages_cache`. On SQLite 3.43 and newer it keeps
-no copy of the text, so its columns read as `NULL`: join it to `messages_cache` by rowid and read
-the text from there, as `tg messages search` does ([search.md](search.md#a-contentless-index)).
+no copy of the text, so its columns read as `NULL`. Query the view `message_search_text` instead:
+it joins the index with `messages_cache`, the chat and the sender, and has the same columns as a
+`tg messages search` row (`chat_id`, `message_id`, `text`, `date`, `chat_title`,
+`sender_username`, …) plus `rank` and `rowid`. Filter with its column named like the view, which
+SQLite hands to FTS5 ([search.md](search.md#sql-the-message_search_text-view)):
+
+```bash
+tg sql "SELECT chat_title, message_id, text FROM message_search_text WHERE message_search_text MATCH 'deploy OR release' AND date >= unixepoch('now', '-7 days') ORDER BY rank LIMIT 20"
+```
+
+`snippet()` and `highlight()` don't work on the contentless index;
+`tg messages search --snippet` returns highlighted fragments instead.
 
 ---
 
@@ -258,6 +269,14 @@ Every table stores a chat under the same marked peer ID (`-100…` for supergrou
 [database-schema.md](database-schema.md#peer-ids)). `chats_cache.chat_id` is TEXT and
 `messages_cache.chat_id` is INTEGER, so the join casts the message side, which lets SQLite use
 the `chats_cache` primary key.
+
+### Full-text search with the message text
+```bash
+tg sql --query="SELECT chat_title, sender_username, datetime(date, 'unixepoch') AS sent, text FROM message_search_text WHERE message_search_text MATCH 'квартир*' AND is_deleted = 0 ORDER BY date DESC LIMIT 20"
+```
+
+`messages_cache.date` is in Unix seconds, so it takes `datetime(date, 'unixepoch')` without the
+`/1000` that the `*_at` columns in milliseconds need.
 
 ### Find users by username pattern
 ```bash

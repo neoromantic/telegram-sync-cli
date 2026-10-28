@@ -219,4 +219,34 @@ describe('E2E: messages search query rules', () => {
 
     expect((await searchData('hello world')).count).toBeNull()
   })
+
+  it('adds a highlighted snippet to each result with --snippet', async () => {
+    const snippets = async (...args: string[]) =>
+      Object.fromEntries(
+        (await searchData(...args, '--snippet')).results.map((item) => [
+          item.messageId,
+          (item as MessageSearchItem & { snippet: string }).snippet,
+        ]),
+      )
+
+    expect(await snippets('hel* world')).toEqual({
+      3: '**hello** there, wide **world**',
+      4: '**world**, **hello**',
+      5: '**hello** **world** from the club',
+    })
+    expect(await snippets('квартир*')).toEqual({
+      6: 'сдаю **квартиру** на месяц',
+      7: '**квартира** свободна',
+    })
+    // Found by the sender only: the start of the text, nothing highlighted
+    expect(await snippets('sender:alice AND chat:club')).toEqual({
+      5: 'hello world from the club',
+    })
+    expect(await snippets('deploy NOT failed')).toEqual({
+      10: '**deploy** **deploy** **deploy**',
+    })
+
+    const plain = await searchData('deploy')
+    expect(plain.results[0]).not.toHaveProperty('snippet')
+  })
 })

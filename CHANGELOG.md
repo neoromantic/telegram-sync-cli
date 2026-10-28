@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `24h`); `--sort relevance` puts the best matches first; `--count` also
   returns how many messages match over all pages, as `count`. `total` is
   still the number of results on the page (#85).
+- `tg messages search --snippet` adds a short fragment of each message around
+  the matched words, with the words in `**`, for Latin and Cyrillic text and
+  prefixes like `квартир*`. For `tg sql`, the new view `message_search_text`
+  returns full-text matches with the message text, chat and sender, so
+  `WHERE message_search_text MATCH 'deploy' ORDER BY rank` needs no join. The
+  view stores nothing, so the cache stays the same size (#81).
 
 ### Changed
 

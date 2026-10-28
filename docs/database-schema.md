@@ -242,6 +242,16 @@ CREATE VIRTUAL TABLE message_search USING fts5(
 );
 ```
 
+### View: message_search_text
+
+`message_search` joined with `messages_cache`, the chat (`chats_cache`) and the sender
+(`users_cache`). It stores nothing, so the cache stays the same size; it lets `tg sql` read a
+match's text without writing the join. Its column `message_search_text` is the index's own
+column: `WHERE message_search_text MATCH '…' ORDER BY rank` goes to FTS5. The other columns are
+`rank`, `rowid` and the columns of a `tg messages search` row. Created with `CREATE VIEW IF NOT
+EXISTS` after the index; it outlives an index rebuild that drops and recreates `message_search`
+([search.md](search.md#sql-the-message_search_text-view)).
+
 ### Table: search_meta
 
 ```sql

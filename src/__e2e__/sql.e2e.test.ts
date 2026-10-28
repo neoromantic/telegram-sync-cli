@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
+import { createMessagesCache } from '../db/messages-cache'
 import { runCliFailure, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
@@ -102,6 +103,44 @@ describe('E2E: SQL Command', () => {
     expect(result.json).toMatchObject({
       success: false,
       error: { code: 'SQL_WRITE_NOT_ALLOWED' },
+    })
+  })
+
+  it('reads search matches with their text from the message_search_text view', async () => {
+    const db = env.openCacheDb(1)
+    createMessagesCache(db).upsertBatch(
+      [
+        [1, 'the deploy failed'],
+        [2, 'lunch at noon'],
+        [3, 'deploy again, deploy now'],
+      ].map(([message_id, text]) => ({
+        chat_id: -1001234567890,
+        message_id: message_id as number,
+        from_id: 10,
+        text: text as string,
+        message_type: 'text',
+        date: 1_760_000_000 + (message_id as number),
+        raw_json: '{}',
+      })),
+    )
+
+    const result = await runCliSuccess(
+      [
+        'sql',
+        '--query',
+        "SELECT message_id, text FROM message_search_text WHERE message_search_text MATCH 'deploy' ORDER BY rank",
+      ],
+      env.getCliOptions(),
+    )
+
+    expect(result.json).toMatchObject({
+      success: true,
+      data: {
+        rows: [
+          { message_id: 3, text: 'deploy again, deploy now' },
+          { message_id: 1, text: 'the deploy failed' },
+        ],
+      },
     })
   })
 })

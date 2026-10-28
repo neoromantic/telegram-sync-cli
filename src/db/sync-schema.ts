@@ -8,6 +8,7 @@
  */
 import type { Database } from 'bun:sqlite'
 
+import { createMessageSearchTextView } from './messages-search'
 import { migratePeerIds } from './peer-id-migration'
 
 const SEARCH_INDEX_VERSION = 1
@@ -502,6 +503,7 @@ export function initSyncSchema(
   if (!disableUnsupportedSearch(db, contentless)) {
     createMessageSearchSchema(db, contentless)
     ensureMessageSearchIndex(db, contentless)
+    createMessageSearchTextView(db)
   }
   upgradeMessagesCacheWrites(db)
 

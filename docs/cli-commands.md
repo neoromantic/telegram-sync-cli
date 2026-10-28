@@ -165,7 +165,7 @@ tg messages search --query "hello world"           # both words, any order
 tg messages search --query '"hello world"'         # the exact phrase (or --phrase)
 tg messages search --query "error OR timeout" --chat @teamchat --sender @alice
 tg messages search --query "квартир*" --includeDeleted   # every word form
-tg messages search --query "deploy" --since 7d --sort relevance --count
+tg messages search --query "deploy" --since 7d --sort relevance --count --snippet
 ```
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
@@ -217,7 +217,8 @@ word, in any order; a query with FTS5 syntax (`"phrase"`, `OR`, `NOT`, `sender:a
 phrase. A query FTS5 can't parse is `INVALID_ARGS` (exit 3) with a suggestion. `--since` and
 `--until` take a date, a date and time or a duration back from now (`24h`, `7d`); `--sort
 relevance` puts the best matches first (bm25); `--count` adds `count`, every match over all
-pages, while `total` stays the size of the page. The rules and examples are in
+pages, while `total` stays the size of the page; `--snippet` adds `snippet` to each item, the
+text around the first match with matched words in `**`. The rules and examples are in
 [search.md](search.md#query-rules).
 
 ### Send

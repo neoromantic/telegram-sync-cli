@@ -407,7 +407,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     // -------------------------------------------------------------------------
     message_search: {
       description:
-        'Full-text search index for messages_cache (FTS5 virtual table). On SQLite 3.43+ it is contentless: its columns read as NULL, so JOIN messages_cache m ON m.rowid = message_search.rowid and read m.text; filter with message_search MATCH.',
+        'Full-text search index for messages_cache (FTS5 virtual table). On SQLite 3.43+ it is contentless: its columns read as NULL. Query the view message_search_text for matches with their text.',
       primaryKey: 'rowid',
       columns: {
         text: {
@@ -428,6 +428,101 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
       },
       indexes: {},
+    },
+
+    // -------------------------------------------------------------------------
+    // Message Search View
+    // -------------------------------------------------------------------------
+    message_search_text: {
+      description:
+        "View: message_search joined with messages_cache, the chat and the sender, so a full-text match comes with its text. SELECT message_id, chat_title, text FROM message_search_text WHERE message_search_text MATCH 'deploy' ORDER BY rank. It stores nothing; snippet() and highlight() don't work on it (tg messages search --snippet does).",
+      primaryKey: 'rowid',
+      columns: {
+        message_search_text: {
+          description:
+            "The index itself: filter with message_search_text MATCH '<FTS5 query>'",
+          nullable: true,
+        },
+        rank: {
+          description:
+            'bm25 rank of the match, lower is better: ORDER BY rank puts the best first',
+          nullable: true,
+        },
+        rowid: { description: 'messages_cache rowid' },
+        chat_id: { description: 'Marked peer ID of the chat' },
+        message_id: { description: 'Message ID within the chat' },
+        from_id: {
+          description: 'Marked peer ID of the sender (see messages_cache)',
+          nullable: true,
+        },
+        text: { description: 'Message text', nullable: true },
+        message_type: { description: 'Type of message content' },
+        has_media: {
+          description: 'Whether message contains media',
+          semanticType: 'boolean_int',
+        },
+        media_path: { description: 'Local media path', nullable: true },
+        is_outgoing: {
+          description: 'Whether message was sent by current user',
+          semanticType: 'boolean_int',
+        },
+        is_edited: {
+          description: 'Whether message has been edited',
+          semanticType: 'boolean_int',
+        },
+        is_pinned: {
+          description: 'Whether message is pinned',
+          semanticType: 'boolean_int',
+        },
+        is_deleted: {
+          description: 'Whether message was deleted (soft delete)',
+          semanticType: 'boolean_int',
+        },
+        reply_to_id: {
+          description: 'ID of message being replied to',
+          nullable: true,
+        },
+        forward_from_id: {
+          description: 'Marked peer ID of the original sender of a forward',
+          nullable: true,
+        },
+        edit_date: {
+          description: 'When the message was last edited, in Unix seconds',
+          semanticType: 'timestamp_sec',
+          nullable: true,
+        },
+        date: {
+          description: 'When the message was sent, in Unix seconds',
+          semanticType: 'timestamp_sec',
+        },
+        fetched_at: {
+          description: 'When this message was fetched from API',
+          semanticType: 'timestamp',
+        },
+        chat_title: {
+          description: 'Title of the chat (chats_cache)',
+          nullable: true,
+        },
+        chat_username: {
+          description: 'Public @username of the chat, without @',
+          semanticType: 'username',
+          nullable: true,
+        },
+        chat_type: { description: 'Type of chat', nullable: true },
+        sender_username: {
+          description: "Sender's @username, without @ (users_cache)",
+          semanticType: 'username',
+          nullable: true,
+        },
+        sender_first_name: {
+          description: "Sender's first name",
+          nullable: true,
+        },
+        sender_last_name: {
+          description: "Sender's last name",
+          nullable: true,
+        },
+      },
     },
 
     // -------------------------------------------------------------------------

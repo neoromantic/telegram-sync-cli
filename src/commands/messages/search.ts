@@ -14,6 +14,7 @@ import {
   normalizeUsername,
 } from '../../utils/identifiers'
 import { error, success } from '../../utils/output'
+import { buildSnippet, snippetTerms } from '../../utils/search-snippet'
 import { parseTimeBound } from '../../utils/time-bounds'
 import { messageRowToItem } from './helpers'
 
@@ -105,6 +106,12 @@ export const searchMessagesCommand = defineCommand({
         'Order: date (newest first, default) or relevance (best match first)',
       default: 'date',
     },
+    snippet: {
+      type: 'boolean',
+      description:
+        'Add a snippet to each result: the text around the first match, matched words in **',
+      default: false,
+    },
     count: {
       type: 'boolean',
       description:
@@ -170,6 +177,9 @@ export const searchMessagesCommand = defineCommand({
       }
       const results = search.search(query, { ...options, limit, offset, sort })
       const count = args.count ? search.count(query, options) : null
+      const terms = args.snippet
+        ? snippetTerms(query, { phrase: options.phrase })
+        : []
 
       success({
         query,
@@ -182,7 +192,14 @@ export const searchMessagesCommand = defineCommand({
           until: args.until ?? null,
         },
         sort,
-        results: results.map(messageRowToItem),
+        results: results.map((row) =>
+          args.snippet
+            ? {
+                ...messageRowToItem(row),
+                snippet: buildSnippet(row.text, terms),
+              }
+            : messageRowToItem(row),
+        ),
         total: results.length,
         count,
         limit,
