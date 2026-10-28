@@ -13,6 +13,7 @@ import { configCommand } from './commands/config'
 import { contactsCommand } from './commands/contacts'
 import { daemonCommand } from './commands/daemon'
 import { dbCommand } from './commands/db'
+import { mediaCommand } from './commands/media'
 import { messagesCommand } from './commands/messages'
 import { sendCommand } from './commands/send'
 import { skillCommand } from './commands/skill'
@@ -136,6 +137,7 @@ const main = defineCommand({
     daemon: daemonCommand,
     db: dbCommand,
     messages: messagesCommand,
+    media: mediaCommand,
     api: apiCommand,
     me: meCommand,
     user: userCommand,

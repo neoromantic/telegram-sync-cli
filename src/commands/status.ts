@@ -18,6 +18,7 @@ import {
   listSharedCaches,
   openExistingAccountCacheDb,
 } from '../db'
+import { accountMediaPath } from '../db/cache-layout'
 import { type CacheSize, readCacheSize } from '../db/cache-maintenance'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import {
@@ -33,6 +34,7 @@ import {
   ACCOUNT_SELECTOR_DESCRIPTION,
   resolveAccountSelector,
 } from '../utils/account-selector'
+import { type MediaUsage, readMediaUsage } from '../utils/media-cache'
 import { getOutputFormat, success } from '../utils/output'
 import { VERSION } from '../version'
 import { printPrettyStatus } from './status/pretty'
@@ -94,7 +96,7 @@ export const statusCommand = defineCommand({
     sizes: {
       type: 'boolean',
       description:
-        "Add each table's size (reads every page of the cache, so slower)",
+        "Add each table's size and the media cache's (reads every page of the cache and lists every cached file, so slower)",
       default: false,
     },
   },
@@ -170,6 +172,8 @@ export interface AccountStatusSnapshot {
     /** The cache's size; null for a missing cache or one that failed */
     size: CacheSize | null
   }
+  /** The media cache's size; only with --sizes, else null */
+  media: MediaUsage | null
   daemon: DaemonInfo | null
   sync: {
     pending_jobs: number
@@ -201,6 +205,7 @@ function emptyAccountSnapshot(accountId: number): AccountStatusSnapshot {
   return {
     accountId,
     cache: { status: 'missing', size: null },
+    media: null,
     daemon: null,
     sync: {
       pending_jobs: 0,
@@ -394,6 +399,18 @@ function readOpenAccountStatus(
   return snapshot
 }
 
+/** An account's media cache size; null when its folder can't be read */
+function readAccountMediaUsage(
+  dataDir: string,
+  accountId: number,
+): MediaUsage | null {
+  try {
+    return readMediaUsage(accountMediaPath(dataDir, accountId))
+  } catch {
+    return null
+  }
+}
+
 /**
  * The shared cache of an older version: set-aside files, and a move that
  * waits for another process. Never fails the command.
@@ -463,6 +480,7 @@ function accountBreakdown(
 ) {
   return {
     cache: snapshot.cache,
+    media: snapshot.media,
     connection: liveConnection(snapshot, livePid),
     sync: {
       pending_jobs: snapshot.sync.pending_jobs,
@@ -512,16 +530,21 @@ export async function collectStatus(
 
   const allAccounts = accountsDb.getAll()
   const activeAccount = accountsDb.getActive()
-  const allSnapshots = allAccounts.map((account) =>
-    readAccountStatus(account.id, {
-      // dbstat reads the whole file: only for the accounts shown
-      sizes:
-        (options.sizes ?? false) &&
-        (options.accountId === undefined || account.id === options.accountId),
-    }),
-  )
   const inScope = (accountId: number) =>
     options.accountId === undefined || accountId === options.accountId
+  // dbstat reads the whole file and the media walk stats every file: only
+  // for the accounts shown
+  const sizesOf = (accountId: number) =>
+    (options.sizes ?? false) && inScope(accountId)
+  const allSnapshots = allAccounts.map((account) => {
+    const snapshot = readAccountStatus(account.id, {
+      sizes: sizesOf(account.id),
+    })
+    if (sizesOf(account.id)) {
+      snapshot.media = readAccountMediaUsage(dataDir, account.id)
+    }
+    return snapshot
+  })
   const accounts = allAccounts.filter((account) => inScope(account.id))
   const snapshots = allSnapshots.filter((snapshot) =>
     inScope(snapshot.accountId),
@@ -659,6 +682,13 @@ export async function collectStatus(
       cache_bytes: sum((s) =>
         s.cache.size ? s.cache.size.file_bytes + s.cache.size.wal_bytes : 0,
       ),
+      /**
+       * The media caches in scope, partial downloads included; only with
+       * --sizes. Counted apart from the caches: no shared limit.
+       */
+      media_bytes: options.sizes
+        ? sum((s) => (s.media ? s.media.bytes + s.media.partial_bytes : 0))
+        : null,
     },
     cli_version: VERSION,
     timestamp: new Date().toISOString(),

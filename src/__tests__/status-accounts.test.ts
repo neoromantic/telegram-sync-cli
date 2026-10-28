@@ -4,6 +4,9 @@
  */
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import type { createPidFile } from '../daemon'
 import { createMessagesCache } from '../db/messages-cache'
@@ -87,5 +90,53 @@ describe('tg status with a cache that fails a query', () => {
     expect(status.accounts.accounts[1]?.progress.messages_cached).toBe(1)
     expect(status.progress.messages_cached).toBe(1)
     expect(status.daemon.status).toBe('stopped')
+  })
+})
+
+describe('tg status --sizes and the media cache', () => {
+  let dataDir: string
+  const empty = { bytes: 0, files: 0, partial_bytes: 0, partial_files: 0 }
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'tg-status-media-'))
+    const folder = join(dataDir, 'accounts', '2', 'media', 'AgADBAADexample')
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(join(folder, 'report.pdf'), Buffer.alloc(10))
+    writeFileSync(join(folder, 'thumb-m.jpg'), Buffer.alloc(3))
+    writeFileSync(join(folder, '.video.mp4.part'), Buffer.alloc(4))
+  })
+
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  it("reports each account's media cache apart from its cache", async () => {
+    const status = await collectStatus(noDaemon, { dataDir, sizes: true })
+
+    expect(status.accounts.accounts.map((a) => [a.id, a.media])).toEqual([
+      [1, empty],
+      [2, { bytes: 13, files: 2, partial_bytes: 4, partial_files: 1 }],
+    ])
+    expect(status.storage.media_bytes).toBe(17)
+  })
+
+  it('reads only the account --account selects', async () => {
+    const status = await collectStatus(noDaemon, {
+      dataDir,
+      sizes: true,
+      accountId: 1,
+    })
+
+    expect(status.accounts.accounts.map((a) => [a.id, a.media])).toEqual([
+      [1, empty],
+    ])
+    expect(status.storage.media_bytes).toBe(0)
+  })
+
+  it('reads no media cache without --sizes', async () => {
+    const status = await collectStatus(noDaemon, { dataDir })
+
+    expect(status.accounts.accounts.map((a) => a.media)).toEqual([null, null])
+    expect(status.storage.media_bytes).toBeNull()
   })
 })

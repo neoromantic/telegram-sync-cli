@@ -5,7 +5,7 @@
 
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { createChatSyncStateService } from '../db/chat-sync-state'
@@ -618,9 +618,15 @@ describe('E2E: status cache size', () => {
               tables?: Record<string, number> | null
             } | null
           }
+          media: {
+            bytes: number
+            files: number
+            partial_bytes: number
+            partial_files: number
+          } | null
         }>
       }
-      storage: { cache_bytes: number }
+      storage: { cache_bytes: number; media_bytes: number | null }
     }
   }
 
@@ -675,6 +681,37 @@ describe('E2E: status cache size', () => {
     expect(
       data.accounts.accounts[0]?.cache.size?.tables?.messages_cache,
     ).toBeGreaterThan(0)
+  })
+
+  it("reports each account's media cache with --sizes", async () => {
+    const folder = join(env.dataDir, 'accounts', '1', 'media', 'AgADexample')
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(join(folder, 'report.pdf'), Buffer.alloc(1_000, 1))
+    writeFileSync(join(folder, '.video.mp4.part'), Buffer.alloc(300, 1))
+
+    const plain = await sizeStatus()
+    expect(plain.data.accounts.accounts.map((a) => a.media)).toEqual([
+      null,
+      null,
+    ])
+    expect(plain.data.storage.media_bytes).toBeNull()
+
+    const { data } = await sizeStatus(['--sizes'])
+    expect(data.accounts.accounts.map((a) => a.media)).toEqual([
+      { bytes: 1_000, files: 1, partial_bytes: 300, partial_files: 1 },
+      { bytes: 0, files: 0, partial_bytes: 0, partial_files: 0 },
+    ])
+    expect(data.storage.media_bytes).toBe(1_300)
+
+    const pretty = stripAnsi(
+      (
+        await runCliSuccess(['status', '--sizes', '--format', 'pretty'], {
+          env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+        })
+      ).stdout,
+    )
+    expect(pretty).toContain('Media Cache')
+    expect(pretty).toMatch(/Account #1\s+1000 B · 1 file · 1 partial 300 B/)
   })
 
   it('sums only the account --account selects', async () => {

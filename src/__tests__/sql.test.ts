@@ -289,6 +289,24 @@ describe('SQL Command', () => {
       ).toContain('round')
     })
 
+    it('describes every column of chat_content_protection', () => {
+      const db = new Database(':memory:')
+      initCacheSchema(db)
+      initSyncSchema(db)
+      const columns = (
+        db.query('PRAGMA table_info(chat_content_protection)').all() as Array<{
+          name: string
+        }>
+      ).map((column) => column.name)
+      db.close()
+
+      expect(getTableNames()).toContain('chat_content_protection')
+      expect(getColumnNames('chat_content_protection')).toEqual(columns)
+      expect(
+        getColumnAnnotation('chat_content_protection', 'reason')?.enumValues,
+      ).toEqual(['chat', 'private_chat'])
+    })
+
     it('describes every column of the message_search_text view, in order', () => {
       const db = new Database(':memory:')
       initCacheSchema(db)

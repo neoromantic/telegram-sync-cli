@@ -5,6 +5,7 @@
  */
 import { Database } from 'bun:sqlite'
 import {
+  accountMediaPath,
   CacheUnavailableError,
   isCacheUnavailableError,
 } from '../../db/cache-layout'
@@ -130,6 +131,8 @@ export function mockDbModule(options: {
       return db
     },
     getDataDir: () => process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? '',
+    getAccountMediaDir: (accountId: number) =>
+      accountMediaPath(process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? '', accountId),
     getLegacyCachePath: () =>
       `${process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? ''}/cache.db`,
     listSharedCaches: () => [],
