@@ -79,6 +79,12 @@ Longer waits fail the request and are recorded as described above. CLI commands 
 as `RATE_LIMITED` with `details: { method, wait_seconds }`, both on the failed request and on
 later calls while the method is blocked.
 
+File transfers (`tg media download`, `tg send --file`) go through the same wrapper, so every
+`upload.getFile`, `upload.saveFilePart` and `upload.saveBigFilePart` call is recorded for the
+account. They sleep through flood waits of up to 10 seconds, part by part and without a log
+line; a longer wait ends the command with `RATE_LIMITED`. A download keeps its partial file, and
+the next run after the wait resumes it ([media.md](media.md#download)).
+
 ## Daemon Sync Jobs
 
 The daemon's sync jobs make one `messages.getHistory` call each, at most one job every 3

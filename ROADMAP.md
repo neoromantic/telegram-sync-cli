@@ -19,7 +19,11 @@ The list is in priority order.
 
 - [Wait for new messages](https://github.com/neoromantic/telegram-sync-cli/issues/24)
 - [Unread messages and mark as read](https://github.com/neoromantic/telegram-sync-cli/issues/25)
-- [Send and download media](https://github.com/neoromantic/telegram-sync-cli/issues/22)
+- [Transcribe voice messages and video notes](https://github.com/neoromantic/telegram-sync-cli/issues/102)
+- [Download many attachments at once, with name templates](https://github.com/neoromantic/telegram-sync-cli/issues/104)
+- [Search media on the server, beyond the cached history](https://github.com/neoromantic/telegram-sync-cli/issues/105)
+- [Background media download in the daemon, with a disk quota](https://github.com/neoromantic/telegram-sync-cli/issues/99)
+- [Extract text from documents and images (PDF, office files, OCR)](https://github.com/neoromantic/telegram-sync-cli/issues/103)
 - [Edit, delete, forward and pin messages](https://github.com/neoromantic/telegram-sync-cli/issues/23)
 - [Read-only mode and a chat allowlist for agents](https://github.com/neoromantic/telegram-sync-cli/issues/26)
 - [Semantic search over messages](https://github.com/neoromantic/telegram-sync-cli/issues/82)

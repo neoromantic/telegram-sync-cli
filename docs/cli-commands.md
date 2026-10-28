@@ -13,7 +13,8 @@
 | `contacts` | list, search, get (cached; supports `--fresh`) |
 | `chats` | list, search (cache-only), get (@username only), sync (cache-only) |
 | `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only) |
-| `send` | send messages (`--to`, `--message`) |
+| `send` | send a message or one file (`--to`, `--message`, `--file`) |
+| `media` | download (cache-first), clean |
 | `api` | raw Telegram API calls |
 | `me` | current user |
 | `user` | user lookup |
@@ -212,6 +213,11 @@ returned with `isDeleted: true`.
 Items are exactly the objects `tg messages search` prints. Deleted messages are left out unless
 `--includeDeleted` is set.
 
+Every item has `attachment`, the message's file (`kind`, `source`, `fileName`, `mimeType`,
+`size`, `duration`, `width`, `height`, `uniqueFileId`, `groupedId`), or `null` when it has
+none. It is read from the message's `raw_json`, so messages cached by older versions have it
+too ([media.md](media.md#attachments)).
+
 `tg messages search` reads only the cache. A plain query matches messages that contain every
 word, in any order; a query with FTS5 syntax (`"phrase"`, `OR`, `NOT`, `sender:alice`,
 `chat:team`, `word*`) goes to FTS5 as written, and `--phrase` matches the whole query as one
@@ -222,6 +228,38 @@ pages, while `total` stays the size of the page; `--snippet` adds `snippet` to e
 text around the first match with matched words in `**`. The rules and examples are in
 [search.md](search.md#query-rules).
 
+### Media
+
+```bash
+tg media download --chat me --id 42                   # into the media cache, prints the path
+tg media download --chat @username --id 42 --out ./   # also copy it into this directory
+tg media download --chat me --id 42 --out - > report.pdf
+tg media download --chat me --id 42 --thumb           # the file's small preview
+tg media clean --older-than 30d                       # files not used for 30 days
+```
+
+`tg media download` saves a message's file into the account's media cache,
+`accounts/<id>/media/<uniqueFileId>/<name>`, and prints `{ path, cachePath, fileName,
+mimeType, size, kind, chatId, messageId, uniqueFileId, groupedId, cached, resumedFrom, thumb }`.
+
+- A cached message whose file is in the media cache needs no network and no credentials
+  (`cached: true`). Otherwise, or with `--fresh`, the command fetches the message again for a
+  fresh file reference, checks its content protection and downloads the file. A partial
+  download is kept and the next run resumes it (`resumedFrom`).
+- `--out` copies the file into a directory or to a file path; `--out -` writes the bytes to
+  stdout with no JSON. An existing target is `FILE_EXISTS` unless `--overwrite` is set.
+- Errors, all exit 1: `NO_MEDIA` (no file, or no preview with `--thumb`), `MESSAGE_NOT_FOUND`
+  (Telegram has no such message in the chat), `CONTENT_PROTECTED` (`details.reason`:
+  `message`, `chat`, `private_chat` or `self_destructing`), `MEDIA_UNSUPPORTED` (a file served
+  from Telegram's CDN), `FILE_EXISTS`. A stalled download is `NETWORK_ERROR` (exit 4) and a
+  long flood wait `RATE_LIMITED` (exit 5); both keep the partial download. Ctrl-C keeps it too
+  and exits 130.
+
+`tg media clean` removes partial downloads untouched for a day; `--older-than <30d|date>`,
+`--chat <peer>` (a file another chat also holds stays) and `--all` remove complete files too.
+It prints `{ accountId, removedFiles, removedPartialFiles, freedBytes, keptFiles, sharedFiles,
+filters }`. The cache layout, protection rules and limits are in [media.md](media.md).
+
 ### Send
 
 ```bash
@@ -229,6 +267,8 @@ tg send --to @username --message "Hello"
 tg send --to @username -m "Reply" --reply-to 123
 tg send --to me -m "Note to self"   # Saved Messages
 tg send --to -1001234567890 -m "Hi" # a chat ID as tg messages search prints it
+tg send --to me --file ./report.pdf --caption "Q3"
+tg send --to @username --file ./photo.jpg --force-document
 ```
 
 `--to` takes an `@username`, a user or chat ID as any `tg` command prints it (`tg chats list`,
@@ -248,6 +288,14 @@ that, whatever its length.
 A sent message goes into the message cache right away, so `tg messages search`
 finds it without the daemon.
 
+`--file` sends one file: JPEG, PNG and WebP images up to 10 MB as a photo, anything else as a
+document under its file name (`--force-document` sends an image as a document too). `--caption`
+is its text. `--message` with `--file`, `--caption` or `--force-document` without it, a second
+`--file` (albums aren't supported yet), and a path that isn't a readable, non-empty file are
+`INVALID_ARGS` (exit 3), checked before any connection. The result adds
+`file: { name, mimeType, size, sentAs }` and `attachment`, whose `uniqueFileId` is the media
+cache folder `tg media download` saves the file in ([media.md](media.md#send-a-file)).
+
 ### API
 
 ```bash
@@ -265,7 +313,7 @@ tg daemon status
 
 tg status
 tg status --account work        # only this account's figures
-tg status --sizes               # add each table's size (reads the whole cache)
+tg status --sizes               # add each table's size and the media cache's (reads the whole cache)
 
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg sql --query "SELECT COUNT(*) AS n FROM messages_cache" --account 2
@@ -320,6 +368,11 @@ part counts the daemon's sync jobs and lists some of them:
   prints that account's line.
 - `storage.cache_bytes` is the sum of `file_bytes` and `wal_bytes` over the accounts in scope
   (only `--account`'s with the flag).
+- With `--sizes`, `accounts.accounts[].media` is the account's media cache,
+  `{ bytes, files, partial_bytes, partial_files }` (partial downloads counted apart), and
+  `storage.media_bytes` the sum over the accounts in scope, partial downloads included. Both are
+  `null` without `--sizes`: the media cache is counted apart from `cache_bytes`. Pretty output
+  adds a Media Cache section with a line per account.
 - `storage` also reports the shared cache of 0.3 and older: `legacy_caches` lists the files set
   aside as `shared-cache*.db` (`path`, `size_bytes`), and `migration` is `null` or
   `{ reason, path, suggestion }` while the move waits (see

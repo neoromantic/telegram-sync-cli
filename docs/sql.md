@@ -28,6 +28,8 @@ account the command fails with `AUTH_REQUIRED`; with several and none active, wi
 | `users_cache` | Cached Telegram user information | 1 week |
 | `chats_cache` | Cached chat/group/channel information | 1 week |
 | `messages_cache` | Synced messages from enabled chats | Eternal |
+| `message_attachments` | The file of each cached message (kind, name, MIME type, size, `unique_file_id`), for messages written by this version and later | Eternal |
+| `chat_content_protection` | What `tg media download` last found about a chat's content protection | N/A |
 | `history_ranges` | Message ID ranges cached without gaps | Eternal |
 | `sync_state` | Global sync progress tracking | N/A |
 | `chat_sync_state` | Per-chat sync progress | N/A |
@@ -292,6 +294,17 @@ tg sql --query="SELECT chat_title, sender_username, datetime(date, 'unixepoch') 
 
 `messages_cache.date` is in Unix seconds, so it takes `datetime(date, 'unixepoch')` without the
 `/1000` that the `*_at` columns in milliseconds need.
+
+### Largest cached files
+```bash
+tg sql --query="SELECT m.chat_id, m.message_id, a.kind, a.file_name, a.file_size FROM message_attachments a JOIN messages_cache m USING (chat_id, message_id) ORDER BY a.file_size DESC LIMIT 10"
+```
+
+`message_attachments` has rows for messages written by this version and later; older messages
+get theirs later ([#89](https://github.com/neoromantic/telegram-sync-cli/issues/89)). Until then
+their file is only in `raw_json`, which `tg messages list`/`get`/`search` read for every message
+(`attachment`). `tg media download --chat <chat_id> --id <message_id>` saves a file the query
+finds.
 
 ### Find users by username pattern
 ```bash

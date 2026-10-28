@@ -28,6 +28,40 @@ sent is listed on https://usage.sergeybaus.com.
   are on and which rule decided, the install ID and the state file (`telemetry.json` in the
   data directory); `off` also deletes the install ID.
 - The Homebrew formula's caveats repeat the notice, and its test runs with usage stats off.
+- `tg messages list`, `get` and `search` items have `attachment`: the
+  message's file with its kind (photo, video, video note, GIF, voice, audio,
+  sticker, document), file name, MIME type, size, duration, dimensions, album
+  ID and `uniqueFileId`, or `null`. It is read from `raw_json`, so messages
+  cached before have it too. For `tg sql`, the new table
+  `message_attachments` holds the same for messages written from now on;
+  older messages get their rows later (#89) (#22).
+- `tg media download --chat <chat> --id <message>` saves a message's file
+  into the account's media cache, `accounts/<id>/media`, and prints its path.
+  A cached file needs no network and no credentials. Otherwise the message
+  is fetched again for a fresh file reference, and a partial download
+  resumes on the next run. `--out` copies the file to a directory or a path
+  (`FILE_EXISTS` unless `--overwrite`), `--out -` writes it to stdout, and
+  `--thumb` fetches its small preview. Media from chats and messages with
+  content protection, and self-destructing media, is refused with
+  `CONTENT_PROTECTED`. New error codes, all exit 1: `NO_MEDIA`,
+  `MESSAGE_NOT_FOUND`, `CONTENT_PROTECTED`, `MEDIA_UNSUPPORTED` (files from
+  Telegram's CDN) and `FILE_EXISTS`. See `docs/media.md` (#22).
+- `tg media clean` removes partial downloads untouched for a day; with
+  `--older-than`, `--chat` or `--all` it removes cached files too, and
+  reports the bytes it freed (#22).
+- `tg send --file <path> [--caption <text>]` sends one file: a JPEG, PNG or
+  WebP image up to 10 MB as a photo, anything else as a document
+  (`--force-document` for an image too). The sent message is cached with its
+  attachment (#22).
+- `tg status --sizes` shows each account's media cache
+  (`accounts.accounts[].media`, `storage.media_bytes`), counted apart from
+  the cache database (#22).
+
+### Changed
+
+- History sync writes the same `message_type` as live updates: `voice`,
+  `video`, `sticker`, `audio` and `dice` instead of `document` or `media`.
+  Messages cached before keep their type until they are fetched again (#22).
 
 ## [0.6.0] - 2026-10-28
 

@@ -65,6 +65,9 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Chat history with cursor paging (`tg messages list`) and a message in context
   (`tg messages get`), cache-first
 - Full-text search (FTS5) over cached messages
+- Files: send one with `tg send --file`; download a message's file into a per-account media
+  cache with `tg media download` (cached files need no network, partial downloads resume);
+  every message item shows its attachment (kind, name, MIME type, size)
 - Contacts, chats and users (`tg contacts`, `tg chats`, `tg me`, `tg user`)
 - Read-only SQL over the cache (`tg sql`) with an annotated schema
 - Rate-limit tracking, config and status tooling (`tg config`, `tg status`)
@@ -88,7 +91,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Read chat history | ✅ `tg messages list` (paging) and `tg messages get` (context), cache-first, `--fresh` | ✅ |
 | Send text | ✅ replies, silent | ✅ replies, Markdown/HTML |
 | Edit, delete, forward, pin | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)) | ✅ |
-| Send and download media | ❌ ([#22](https://github.com/neoromantic/telegram-sync-cli/issues/22)) | ✅ files, albums, voice, transcription |
+| Send and download media | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`); albums, voice later | ✅ files, albums, voice, transcription |
 | Wait for new messages | ❌ ([#24](https://github.com/neoromantic/telegram-sync-cli/issues/24)) | ✅ |
 | Groups, channels, admin rights | partial: via `tg api` | ✅ |
 | Contacts | list, search, get; the rest via `tg api` | ✅ add, import, block, export |
@@ -111,6 +114,8 @@ tg messages list --chat @username --limit 20
 tg messages get --chat @username --id 42 --context 3
 tg messages search --query "hello world" --since 7d   # both words, any order
 tg send --to @username --message "Hi there"
+tg send --to me --file ./report.pdf --caption "Q3"
+tg media download --chat me --id 42 --out ./   # into the media cache, then copied here
 tg api account.checkUsername --username=myuser
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg daemon start
@@ -144,7 +149,7 @@ Reference: [CLI commands](docs/cli-commands.md), [authentication](docs/auth.md),
 [configuration](docs/configuration.md), [architecture](docs/architecture.md),
 [daemon](docs/daemon.md), [sync strategy](docs/sync-strategy.md), [caching](docs/caching.md),
 [database schema](docs/database-schema.md), [SQL](docs/sql.md), [search](docs/search.md),
-[rate limiting](docs/rate-limiting.md). Known gaps are tracked in
+[media](docs/media.md), [rate limiting](docs/rate-limiting.md). Known gaps are tracked in
 [issues](https://github.com/neoromantic/telegram-sync-cli/issues).
 
 ## For AI agents
@@ -158,9 +163,9 @@ Reference: [CLI commands](docs/cli-commands.md), [authentication](docs/auth.md),
 - `tg skill manifest` prints a skill manifest, `tg skill validate` checks the environment and
   `tg skill install` writes the manifest to the default location.
 - The daemon never sends or edits anything, so it is safe to leave running.
-- `tg status` reports each account's cache size (`--sizes` adds each table's); `tg db vacuum`
-  prunes old bookkeeping rows and gives free space back to the disk, and works while the
-  daemon runs on a cache this version created.
+- `tg status` reports each account's cache size (`--sizes` adds each table's and the media
+  cache's); `tg db vacuum` prunes old bookkeeping rows and gives free space back to the disk,
+  and works while the daemon runs on a cache this version created.
 
 ## Usage stats
 

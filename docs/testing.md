@@ -209,6 +209,13 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `messages-search-query.e2e.test.ts` — the query rules of `tg messages search` (plain words,
   FTS5 syntax, `--phrase`, query errors), `--since`/`--until`, `--sort` and `--count`
 - `chats-sync.e2e.test.ts` — `tg chats sync` against a seeded cache, without credentials
+- `media.e2e.test.ts` — `tg media download` cache hits without credentials (`--out` to a
+  directory, a file and stdout, `FILE_EXISTS` and `--overwrite`, `--thumb`), a file the cache
+  lacks needing credentials, `NO_MEDIA`, `CONTENT_PROTECTED` from a cached message or a stored
+  check, and `tg media clean` (bare,
+  `--older-than`, `--all`, `--chat`, invalid flags) on made-up files
+- `send-file.e2e.test.ts` — `tg send --file` argument errors (`INVALID_ARGS`, exit 3) before
+  any connection
 - `api.e2e.test.ts` — `tg api` with a fake Telegram client (`helpers/fake-client-cli.ts`, run
   as runCli's `entry`), which keeps the process alive even after it is closed, as a connected
   mtcute client might: with and without `--raw` and on a failed call, the command prints its
@@ -275,6 +282,7 @@ real Telegram API. It is skipped unless the variables below are set, and it neve
 | send to Saved Messages | `send --to me` delivers a message; `tg api messages.getMessages` reads it back |
 | send caches for search | with no daemon running, `messages search` finds a message right after `send --to me`, under the own user ID |
 | messages list and get | after two sends whose cache rows are dropped, `messages list --chat me --fresh` returns them newest first from the API under the own user ID; the next read comes from the cache with equal items, `messages search` finds them, `--after` pages forward, and `messages get --context 1` reads one in context from the API, then from the cache; a cache-first `get --context 2` returns it with the newer message and up to two older ones |
+| send and download a file | `send --to me --file` uploads 700,000 made-up bytes as a document with a caption; `media download --chat me --id <id>` saves them into `accounts/<id>/media/<uniqueFileId>/` byte for byte (`cached: false`), and a second run serves them from the cache (`cached: true`) |
 | daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs) into `accounts/<id>/cache.db` (no root `cache.db`), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` while sync jobs are queued: exit code 0, one "Received SIGTERM", no updates-loop error, closed-database error or failed close, no job left running and no `DaemonStopError` or `AbortError` in the output |
 
 Each test copies the session into its own temp data dir. Messages go only to the account's

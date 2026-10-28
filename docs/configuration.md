@@ -50,14 +50,17 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 ├── data.db              # Accounts table
 ├── session_<id>.db      # mtcute session per account
 ├── accounts/<id>/       # One directory per account (mode 0700)
-│   └── cache.db         # The account's cache, sync state, jobs and rate limits
+│   ├── cache.db         # The account's cache, sync state, jobs and rate limits
+│   └── media/           # Files tg media download saved, one folder per file
 ├── daemon.pid           # PID file when daemon is running
 ├── config.json          # User config
 └── telemetry.json       # Usage stats: install ID, on/off, notice seen
 ```
 
 Each account's data lives in its own `accounts/<id>/cache.db`, where `<id>` is the ID that
-`tg accounts list` prints. Back up or delete one account by its directory.
+`tg accounts list` prints. Back up or delete one account by its directory. `media/` holds the
+files `tg media download` saved; `tg media clean` removes them
+([media.md](media.md#media-cache)).
 `tg accounts remove` and `tg auth logout` keep `accounts/<id>/`; delete the directory to drop
 that account's cache. Table layouts: [database-schema.md](database-schema.md).
 
@@ -283,6 +286,6 @@ and switch. When the directory can't be written, nothing is sent.
 
 ## Security
 
-- Treat `session_<id>.db`, `data.db`, `accounts/<id>/cache.db` and any `shared-cache*.db` as
-  sensitive.
+- Treat `session_<id>.db`, `data.db`, `accounts/<id>/cache.db`, `accounts/<id>/media/` and
+  any `shared-cache*.db` as sensitive.
 - Do not embed API credentials in compiled binaries.
