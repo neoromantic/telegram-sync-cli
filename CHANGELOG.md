@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-28
+
+Stop the daemon before you upgrade and start it again after: the first open
+of a cache replaces its search trigger and drops an index nothing used
+(#87). Then `tg db vacuum` gives that index's space back. `tg messages search`
+now reads a query the way FTS5 does: `hello world` finds both words
+anywhere, and `--phrase` gives the old exact-phrase search (#84).
+
 ### Added
 
 - `tg messages search` filters by date and ranks by relevance. `--since` and
@@ -593,7 +601,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.3.0...v0.4.0
