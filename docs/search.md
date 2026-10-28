@@ -324,8 +324,9 @@ messages that match with the same filters, over every page, and is `null` withou
 is a second query, so it is opt-in. Page with `--offset` until `results` is empty, or until
 `offset + total` reaches `count`.
 
-The `files` column is empty for now: tg doesn't store attachment names yet, so `files:` finds
-nothing.
+The `files` column is empty for now: attachment names are in `message_attachments` and in
+each item's `attachment`, but not in the index yet
+([#94](https://github.com/neoromantic/telegram-sync-cli/issues/94)), so `files:` finds nothing.
 
 ### Snippets
 

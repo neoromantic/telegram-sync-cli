@@ -19,7 +19,8 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 ├── data.db              # Accounts table, nothing else
 ├── session_<id>.db      # mtcute session per account
 ├── accounts/<id>/       # One directory per account (mode 0700)
-│   └── cache.db         # The account's cache, sync state, jobs and rate limits
+│   ├── cache.db         # The account's cache, sync state, jobs and rate limits
+│   └── media/           # Files tg media download saved (see media.md)
 ├── shared-cache.db      # Only after an upgrade with several accounts (see Migrations)
 ├── daemon.pid           # PID file when daemon is running
 └── config.json          # User config (cache TTLs, active account)
@@ -221,6 +222,63 @@ CREATE INDEX idx_messages_cache_reply ON messages_cache(chat_id, reply_to_id) WH
 CREATE INDEX idx_messages_cache_type ON messages_cache(chat_id, message_type) WHERE has_media = 1;
 CREATE INDEX idx_messages_cache_pinned ON messages_cache(chat_id) WHERE is_pinned = 1;
 CREATE INDEX idx_messages_cache_message_id ON messages_cache(message_id);
+```
+
+`message_type` is `text`, `service`, or the kind of media: `photo`, `video`, `document`,
+`sticker`, `voice`, `audio`, `poll`, `contact`, `location`, `venue`, `game`, `invoice`,
+`webpage`, `dice`, and `unknown` for other media, such as stories. Live updates, history pages and
+`tg send` write the same values. Rows that history sync wrote in earlier versions keep theirs
+until the message is fetched again: `document` for every file (voice messages, videos and
+stickers too) and `media` for other media. `has_media` is 1 for the media a Telegram client shows; the file itself is in
+`message_attachments`.
+
+### Table: message_attachments
+
+The file of a cached message, one row per message that has one, written in the same transaction
+as the message. A message written again unchanged writes nothing; one that lost its file loses
+its row. Rows exist for messages written by this version and later, an older message fetched
+again included; the other older messages get theirs later ([#89](https://github.com/neoromantic/telegram-sync-cli/issues/89)). `tg messages
+list`/`get`/`search` read the attachment from `raw_json` instead, so they show it for every
+cached message.
+
+```sql
+CREATE TABLE message_attachments (
+  chat_id        INTEGER NOT NULL,  -- marked peer ID, as in messages_cache
+  message_id     INTEGER NOT NULL,
+  kind           TEXT NOT NULL,     -- photo, video, round, animation, voice, audio, sticker, document
+  source         TEXT NOT NULL DEFAULT 'message', -- or webpage: the photo or file of a link preview
+  file_name      TEXT,              -- the name the sender gave a document
+  mime_type      TEXT,              -- image/jpeg for photos
+  file_size      INTEGER,           -- bytes; a photo's largest size
+  duration       REAL,              -- seconds
+  width          INTEGER,
+  height         INTEGER,
+  unique_file_id TEXT NOT NULL,     -- the same for the same file in any chat; the media cache folder
+  grouped_id     TEXT,              -- album ID, a decimal string like access_hash
+  PRIMARY KEY (chat_id, message_id)
+);
+
+CREATE INDEX idx_message_attachments_unique_file_id ON message_attachments(unique_file_id);
+```
+
+Join it with `messages_cache USING (chat_id, message_id)`. A soft-deleted message keeps its
+row. The table has no `raw_json` of its own: it is derived from the message's.
+
+### Table: chat_content_protection
+
+What the last online check of `tg media download` found about a chat's content protection
+([media.md](media.md#content-protection)). Neither a dialog row nor a private chat's cached
+user carries the flag, so the command records it here, and a later run refuses that chat's
+cached files offline too. A check that finds protection off writes `protected = 0`, which lifts
+the block. Only `tg media download` writes it; the daemon never does.
+
+```sql
+CREATE TABLE chat_content_protection (
+  chat_id    INTEGER PRIMARY KEY,  -- marked peer ID
+  protected  INTEGER NOT NULL,     -- 1: the last online check found content protection
+  reason     TEXT,                 -- chat or private_chat when protected, else NULL
+  fetched_at INTEGER NOT NULL      -- ms, when that check ran
+);
 ```
 
 ### Table: message_search
@@ -482,6 +540,10 @@ that lacks it. The build reads the whole table under the write lock, so that ope
 other process opening the cache meanwhile, waits up to 60 seconds for the lock instead of 5;
 the process that waited finds the index built. Opens of a cache that has it only read.
 
+`message_attachments` (with its index) and `chat_content_protection` are created on the first
+open of a cache that lacks them. They start empty, so the step rewrites nothing and takes no
+time; opens that find them only read.
+
 The search update trigger `messages_cache_au` of 0.5.0 and older re-indexed a message on every
 update, and `idx_messages_cache_fetched` (`messages_cache(fetched_at)`) served no query. The
 first open of such a cache by a newer version replaces the trigger with one that re-indexes
@@ -618,5 +680,5 @@ objects with one key per byte, about 7.7 KB per synthetic photo message. Now the
 
 ## Future Enhancements
 
-- Media cache table with eviction policy
+- Background downloads with a disk quota ([#99](https://github.com/neoromantic/telegram-sync-cli/issues/99))
 - Drafts / reactions tables

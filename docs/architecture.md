@@ -39,7 +39,8 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 ├── data.db              # accounts
 ├── session_<id>.db      # mtcute session per account
 ├── accounts/<id>/
-│   └── cache.db         # the account's cache + sync tables
+│   ├── cache.db         # the account's cache + sync tables
+│   └── media/           # files tg media download saved
 └── daemon.pid           # daemon PID when running
 ```
 
@@ -62,7 +63,7 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 - Uses Citty for command parsing
 - Each command is a separate module
 - Commands delegate to services and cache layers
-- Implemented: `auth`, `accounts`, `contacts`, `chats`, `messages`, `send`, `api`, `me`, `user`, `daemon`, `status`, `sql`
+- Implemented: `auth`, `accounts`, `contacts`, `chats`, `messages`, `send`, `media`, `api`, `me`, `user`, `daemon`, `status`, `sql`
 
 ### 2. Service Layer (`src/services/`)
 - Telegram client management
@@ -179,7 +180,10 @@ Commands:
   messages get      One message with --context messages on each side (cache-first, --fresh)
   messages search   Search cached messages (FTS5, --chat/--sender/--since/--until/--sort)
 
-  send              Send message to user/chat
+  send              Send a message or one file (--file) to a user/chat
+
+  media download    A message's file into the account's media cache (cache-first, resumes)
+  media clean       Remove cached files and stale partial downloads
 
   api               Generic API call
   me                Show current user

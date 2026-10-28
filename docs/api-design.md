@@ -105,6 +105,11 @@ tg messages search --query "hello" --includeDeleted
 tg send --to @username --message "Hello"
 tg send --to @username -m "Hello" --silent
 tg send --to @username -m "Reply" --reply-to 123
+tg send --to me --file ./report.pdf --caption "Q3"   # one file: a photo or a document
+
+# Media: a message's file into the account's media cache (cache-first)
+tg media download --chat me --id 42 --out ./
+tg media clean --older-than 30d
 
 # Status
 tg status
@@ -222,6 +227,24 @@ Exit codes:
 - 4: Network error
 - 5: Telegram API error / rate limited
 - 6: Account not found
+
+`tg media download` adds these codes, all exit 1 ([media.md](media.md)):
+
+- `NO_MEDIA`: the message has no file to download, or no preview with `--thumb`;
+  `details: { chatId, messageId, messageType }` or `{ chatId, messageId, reason: "no_thumbnail" }`.
+- `MESSAGE_NOT_FOUND`: Telegram has no such message in the chat; `details: { chatId, messageId }`.
+  `tg messages get` still reports a missing message as `TELEGRAM_ERROR`.
+- `CONTENT_PROTECTED`: the chat, channel, private chat or message has content protection, or the
+  media self-destructs; `details: { chatId, messageId, reason }`, `reason` being `message`,
+  `chat`, `private_chat` or `self_destructing`.
+- `MEDIA_UNSUPPORTED`: the file is served from Telegram's CDN, which tg doesn't support yet;
+  `details: { reason: "cdn" }`.
+- `FILE_EXISTS`: the `--out` target exists and `--overwrite` isn't set; `details: { path }`.
+
+A download that stalls for 60 seconds or loses its connection is `NETWORK_ERROR` (exit 4) with
+`details.resumable: true`; a flood wait over 10 seconds is `RATE_LIMITED` (exit 5) with
+`details: { method: "upload.getFile", wait_seconds }`. Both keep the partial download for the
+next run. A download stopped with Ctrl-C or SIGTERM exits 130 and prints no JSON.
 
 `DAEMON_ALREADY_RUNNING` (exit 1) is returned by `tg db vacuum` for a cache that only a full
 VACUUM can compact while the daemon runs, with `details: { account_id, auto_vacuum: "none" }`

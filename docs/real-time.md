@@ -38,6 +38,8 @@ Media types are normalized to `message_type` values such as:
 - `poll`, `contact`, `location`, `venue`, `game`, `invoice`, `webpage`, `dice`
 - `service` for service messages
 
+History pages and `tg send` write the same values ([database-schema.md](database-schema.md#table-messages_cache)).
+
 ### Deletes
 
 Delete updates mark rows as deleted instead of removing them:
