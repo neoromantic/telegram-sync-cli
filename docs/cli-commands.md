@@ -161,9 +161,10 @@ tg messages list --chat @username --before 1200    # the page older than message
 tg messages list --chat -1001234567890 --after 0   # from the first message on
 tg messages list --chat me --limit 5 --fresh       # from Telegram, then cached
 tg messages get --chat @username --id 1200 --context 3   # 3 newer and 3 older around it
-tg messages search --query "hello"
-tg messages search --query "hello" --chat @teamchat --sender @alice
-tg messages search --query "hello" --includeDeleted
+tg messages search --query "hello world"           # both words, any order
+tg messages search --query '"hello world"'         # the exact phrase (or --phrase)
+tg messages search --query "error OR timeout" --chat @teamchat --sender @alice
+tg messages search --query "квартир*" --includeDeleted   # every word form
 ```
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
@@ -208,6 +209,12 @@ returned with `isDeleted: true`.
 
 Items are exactly the objects `tg messages search` prints. Deleted messages are left out unless
 `--includeDeleted` is set.
+
+`tg messages search` reads only the cache. A plain query matches messages that contain every
+word, in any order; a query with FTS5 syntax (`"phrase"`, `OR`, `NOT`, `sender:alice`,
+`chat:team`, `word*`) goes to FTS5 as written, and `--phrase` matches the whole query as one
+phrase. A query FTS5 can't parse is `INVALID_ARGS` (exit 3) with a suggestion. The rules and
+examples are in [search.md](search.md#query-rules).
 
 ### Send
 

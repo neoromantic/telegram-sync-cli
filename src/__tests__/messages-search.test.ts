@@ -5,7 +5,11 @@ import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it } from 'bun:test'
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
-import { createMessagesSearch } from '../db/messages-search'
+import {
+  createMessagesSearch,
+  isFts5QueryError,
+  toFts5Query,
+} from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
@@ -309,20 +313,62 @@ describe('MessagesSearch', () => {
 
     const search = createMessagesSearch(db)
 
-    // Search with hyphen should NOT throw "no such column" error
+    // A plain query quotes each word, so a hyphen is never syntax
     const hyphenResults = search.search('че-нить')
     expect(hyphenResults).toHaveLength(1)
     expect(hyphenResults[0]!.message_id).toBe(1)
 
-    // Search with asterisk (would be wildcard without escaping)
+    // An asterisk is FTS5 syntax: a prefix, then another word
     const asteriskResults = search.search('test*value')
     expect(asteriskResults).toHaveLength(1)
     expect(asteriskResults[0]!.message_id).toBe(2)
 
-    // Search with parentheses (would be grouping without escaping)
-    const parenResults = search.search('function(arg)')
+    // Parentheses are FTS5 syntax too; as a phrase they are punctuation
+    expect(() => search.search('function(arg)')).toThrow(/fts5: syntax error/)
+    const parenResults = search.search('function(arg)', { phrase: true })
     expect(parenResults).toHaveLength(1)
     expect(parenResults[0]!.message_id).toBe(3)
+  })
+})
+
+describe('toFts5Query', () => {
+  it('quotes each word of a plain query', () => {
+    expect(toFts5Query('hello world')).toBe('"hello" "world"')
+    expect(toFts5Query("  don't  e-mail ")).toBe('"don\'t" "e-mail"')
+  })
+
+  it('passes a query with FTS5 syntax as written', () => {
+    for (const query of [
+      'error OR timeout',
+      '"exact phrase"',
+      'sender:alice',
+      'квартир*',
+      'NEAR(one two)',
+      '^start',
+      'a NOT b',
+    ]) {
+      expect(toFts5Query(query)).toBe(query)
+    }
+  })
+
+  it('reads lowercase operators and operator-like words as plain words', () => {
+    expect(toFts5Query('cats and dogs')).toBe('"cats" "and" "dogs"')
+    expect(toFts5Query('NOTES ORдер')).toBe('"NOTES" "ORдер"')
+  })
+
+  it('makes the whole query one phrase with phrase', () => {
+    expect(toFts5Query('say "hi" now', { phrase: true })).toBe(
+      '"say ""hi"" now"',
+    )
+  })
+
+  it('recognizes FTS5 query errors', () => {
+    expect(isFts5QueryError(new Error('fts5: syntax error near "x"'))).toBe(
+      true,
+    )
+    expect(isFts5QueryError(new Error('no such column: foo'))).toBe(true)
+    expect(isFts5QueryError(new Error('unterminated string'))).toBe(true)
+    expect(isFts5QueryError(new Error('database is locked'))).toBe(false)
   })
 })
 

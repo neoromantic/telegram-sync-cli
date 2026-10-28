@@ -234,20 +234,51 @@ tg messages search \
   --includeDeleted
 ```
 
+### Query Rules
+
+A query without FTS5 syntax is a list of words: a message matches when it contains every word,
+in any order. Each word is quoted before it goes to FTS5, so punctuation inside a word
+(`don't`, `e-mail`, `че-нить`) is never read as syntax.
+
+A query with FTS5 syntax goes to FTS5 as written. FTS5 syntax is any of `"`, `*`, `:`, `(`,
+`)`, `^`, `+`, or one of the words `AND`, `OR`, `NOT`, `NEAR` in capitals (lowercase `and` is
+a plain word):
+
+| Query | Finds |
+|-------|-------|
+| `hello world` | messages with both words, anywhere |
+| `"hello world"` | the exact phrase |
+| `error OR timeout` | either word |
+| `hello NOT club` | `hello` without `club` in the text, sender or chat |
+| `sender:alice` | messages whose sender's username, name or ID contains `alice` |
+| `chat:team` | messages in chats whose title, username or ID contains `team` |
+| `hel*` | words that start with `hel` |
+| `квартир*` | every form of a word: `квартира`, `квартиру`, `квартирой` |
+| `^hello` | messages whose text starts with `hello` |
+
+FTS5 doesn't stem words, so a prefix (`word*`) is the way to find other forms of a word, in
+Russian especially. Matching ignores case, and diacritics in Latin letters (`cafe` finds
+`café`); `ё` and `й` stay distinct from `е` and `и`.
+
+`--phrase` matches the whole query as one exact phrase, the way `tg messages search` read
+every query up to 0.5: `--query "function(arg)" --phrase` finds the text without reading the
+parentheses as syntax.
+
+A query FTS5 can't parse, such as `error OR` or `meet at 10:30` (`10:` reads as a column
+name), returns `INVALID_ARGS` (exit 3) with a suggestion: quote the words with punctuation
+(`meet at "10:30"`) or pass `--phrase`. Other SQLite errors return `GENERAL_ERROR`.
+
 ### Supported Filters
 
 - `--chat` (chat id or `@username`)
 - `--sender` (user ID, `@username`, or the marked ID of a group or channel that posts as itself,
   such as `-1001234567890`)
 - `--includeDeleted` (alias: `--include-deleted`)
+- `--phrase`: the whole query as one phrase
 - `--limit`, `--offset`
 
-### FTS Query Tips
-
-- Phrase: `"exact phrase"`
-- Prefix: `hel*`
-- Column filter: `sender:alice`, `chat:team`, `files:pdf`
-- Boolean: `hello OR world`, `hello NOT world`
+The `files` column is empty for now: tg doesn't store attachment names yet, so `files:` finds
+nothing.
 
 ## Behavior Notes
 

@@ -3,16 +3,45 @@
  */
 import type { Database } from 'bun:sqlite'
 
+/** Characters and words that make a query FTS5 syntax rather than plain words */
+const FTS5_SYNTAX =
+  /["*:()^+]|(?<![\p{L}\p{N}_])(?:AND|OR|NOT|NEAR)(?![\p{L}\p{N}_])/u
+
+/** Whether a query uses FTS5 syntax: phrases, operators, prefixes or column filters */
+export function hasFts5Syntax(query: string): boolean {
+  return FTS5_SYNTAX.test(query)
+}
+
+/** A string as one FTS5 phrase, inner double quotes doubled */
+function quotePhrase(text: string): string {
+  return `"${text.replace(/"/g, '""')}"`
+}
+
 /**
- * Escape a user query for FTS5 MATCH.
- * Wraps the query in double quotes to treat it as a literal phrase,
- * and escapes any internal double quotes.
+ * The FTS5 MATCH expression for a user query. A plain query matches every
+ * word in any order: each word is quoted, so punctuation (`don't`, `e-mail`)
+ * is never syntax. A query with FTS5 syntax goes to FTS5 as written, and
+ * `phrase` makes the whole query one phrase.
  */
-function escapeFts5Query(query: string): string {
-  // Escape internal double quotes by doubling them
-  const escaped = query.replace(/"/g, '""')
-  // Wrap in double quotes to treat as literal phrase
-  return `"${escaped}"`
+export function toFts5Query(
+  query: string,
+  options: { phrase?: boolean } = {},
+): string {
+  if (options.phrase) return quotePhrase(query)
+  if (hasFts5Syntax(query)) return query
+  return query.split(/\s+/).filter(Boolean).map(quotePhrase).join(' ')
+}
+
+/**
+ * Whether an error is FTS5 rejecting the query: a syntax error, an unknown
+ * column filter (`foo:bar`, `10:30`) or an unclosed quote. The search's own
+ * SQL never changes, so these come from the query.
+ */
+export function isFts5QueryError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return /^fts5:|no such column|unterminated string|unknown special query/i.test(
+    message,
+  )
 }
 
 /**
@@ -58,6 +87,8 @@ export interface MessageSearchOptions {
   senderId?: number
   senderUsername?: string
   includeDeleted?: boolean
+  /** Match the whole query as one phrase */
+  phrase?: boolean
 }
 
 export interface MessageSearchRow {
@@ -100,7 +131,9 @@ export function createMessagesSearch(db: Database): MessagesSearchService {
       const includeDeleted = options.includeDeleted ?? false
 
       const conditions: string[] = ['message_search MATCH ?']
-      const params: Array<string | number> = [escapeFts5Query(query)]
+      const params: Array<string | number> = [
+        toFts5Query(query, { phrase: options.phrase }),
+      ]
 
       if (!includeDeleted) {
         conditions.push('m.is_deleted = 0')
