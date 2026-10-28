@@ -243,12 +243,21 @@ tg sql --query="DELETE FROM users_cache"
 # Error: SQL_WRITE_NOT_ALLOWED
 ```
 
+Two layers enforce it. A keyword check refuses statements that don't start with `SELECT`,
+`WITH` or `PRAGMA`, those with a write keyword, and pragma assignments (`PRAGMA user_version =
+0`), with a clear message. Then tg opens and migrates the cache as usual and runs the query on a
+second connection opened read-only, with `PRAGMA query_only = ON`, so nothing that passes the
+check can change the file either: a write such as `PRAGMA user_version(0)` or
+`PRAGMA wal_checkpoint(TRUNCATE)` also returns `SQL_WRITE_NOT_ALLOWED`. Reading pragmas works:
+`PRAGMA user_version`, `PRAGMA table_info(messages_cache)`. A pragma gets no `LIMIT`.
+
 ### Blocked Operations
 
 - `INSERT`, `UPDATE`, `DELETE`, `REPLACE`
 - `DROP`, `ALTER`, `CREATE`, `TRUNCATE`
 - `ATTACH`, `DETACH`
 - `VACUUM`, `REINDEX`
+- Setting a pragma: `PRAGMA <name> = <value>`
 
 ---
 

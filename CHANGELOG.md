@@ -53,6 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every form of a word. A query FTS5 can't parse returns `INVALID_ARGS` with a
   suggestion instead of `TELEGRAM_ERROR` (#84).
 
+### Fixed
+
+- `tg sql` can no longer change the cache with a pragma. It let
+  `PRAGMA user_version = 0` through, which made the next start run the
+  one-time migrations again. Queries now run on a read-only connection and
+  such a statement returns `SQL_WRITE_NOT_ALLOWED`. Reading pragmas such as
+  `PRAGMA table_info(messages_cache)` works, and no longer fails with a
+  syntax error from the row limit (#88).
+
 ## [0.5.0] - 2026-10-22
 
 Stop the daemon before you upgrade and start it again after: the first open
