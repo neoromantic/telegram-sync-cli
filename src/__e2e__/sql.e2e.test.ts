@@ -61,6 +61,85 @@ describe('E2E: SQL Command', () => {
     })
   })
 
+  it('prints a query result as CSV with --output=csv', async () => {
+    const result = await runCliSuccess(
+      ['sql', '--output=csv', 'SELECT 1 AS one'],
+      env.getCliOptions(),
+    )
+
+    expect(result.stdout).toBe('one\n1')
+  })
+
+  it.each([
+    ['print-schema', ['sql', 'print-schema', '--output=xml']],
+    ['a query', ['sql', '--output=xml', 'SELECT 1']],
+  ])(
+    'rejects an unknown --output for %s with INVALID_ARGS',
+    async (_label, args) => {
+      const result = await runCliFailure(args, 3, env.getCliOptions())
+
+      expect(result.json).toMatchObject({
+        success: false,
+        error: { code: 'INVALID_ARGS' },
+      })
+    },
+  )
+
+  it('rejects a print-schema format for a query', async () => {
+    const result = await runCliFailure(
+      ['sql', '--output=sql', 'SELECT 1'],
+      3,
+      env.getCliOptions(),
+    )
+
+    expect(result.json).toMatchObject({
+      success: false,
+      error: { code: 'INVALID_ARGS' },
+    })
+  })
+
+  describe('print-schema', () => {
+    it.each([
+      ['--output=sql', ['sql', 'print-schema', '--output=sql']],
+      ['-o sql before the subcommand', ['sql', '-o', 'sql', 'print-schema']],
+    ])('prints annotated DDL with %s', async (_label, args) => {
+      const result = await runCliSuccess(args, env.getCliOptions())
+
+      expect(result.stdout).toContain('CREATE TABLE users_cache (')
+      expect(result.stdout).toContain('CREATE TABLE messages_cache (')
+    })
+
+    it('prints one table as DDL with --table and --output=sql', async () => {
+      const result = await runCliSuccess(
+        ['sql', 'print-schema', '--table=users_cache', '--output=sql'],
+        env.getCliOptions(),
+      )
+
+      expect(result.stdout).toContain('CREATE TABLE users_cache (')
+      expect(result.stdout).not.toContain('CREATE TABLE messages_cache (')
+    })
+
+    it('prints one table as text with --output=text', async () => {
+      const result = await runCliSuccess(
+        ['sql', 'print-schema', '--table', 'users_cache', '--output=text'],
+        env.getCliOptions(),
+      )
+
+      expect(result.stdout).toStartWith('Table: users_cache\n')
+      expect(result.stdout).toContain('Columns:')
+    })
+
+    it('prints every table as text with --output=text', async () => {
+      const result = await runCliSuccess(
+        ['sql', 'print-schema', '--output=text'],
+        env.getCliOptions(),
+      )
+
+      expect(result.stdout).toContain('Table: users_cache\n')
+      expect(result.stdout).toContain('Table: messages_cache\n')
+    })
+  })
+
   it('runs the docs example that lists messages per chat with titles on a cache from 0.2.0', async () => {
     // The shared cache of 0.3 and older moves to the only account first
     const legacyPath = join(env.dataDir, 'cache.db')

@@ -119,6 +119,9 @@ tg sql print-schema --table=users_cache --output=sql
 Every account's cache has the same schema, so `print-schema` needs no account and creates no
 file.
 
+`--output` may come before the subcommand too (`tg sql -o sql print-schema`). A format the
+command doesn't take, such as `csv` for `print-schema` or `sql` for a query, is `INVALID_ARGS`.
+
 ---
 
 ## Output Formats

@@ -123,11 +123,13 @@ export const sqlQueryCommand = defineCommand({
       type: 'string',
       description: 'SQL query to execute (required unless using a subcommand)',
     },
+    // A string, not an enum: print-schema takes its own formats, and citty
+    // would reject them here before the subcommand runs
     output: {
-      type: 'enum',
+      type: 'string',
       alias: 'o',
-      description: 'Output format: json or csv',
-      options: ['json', 'csv'],
+      description:
+        'Output format: json or csv (print-schema: json, text or sql)',
       default: 'json',
     },
     limit: {
@@ -155,9 +157,12 @@ export const sqlQueryCommand = defineCommand({
         )
       }
 
+      // Flags before the subcommand count too (tg sql -o sql print-schema)
       const idx = rawArgs?.indexOf('print-schema') ?? -1
       const remainingArgs =
-        idx >= 0 ? rawArgs.slice(idx + 1) : (rawArgs?.slice(1) ?? [])
+        idx >= 0
+          ? rawArgs.filter((_, i) => i !== idx)
+          : (rawArgs?.slice(1) ?? [])
       await runCommand(printSchemaCommand, { rawArgs: remainingArgs })
       return
     }
