@@ -130,6 +130,8 @@ with several accounts: see [per-account caches](docs/configuration.md#upgrading-
 | `TELEGRAM_API_HASH` | Your Telegram API hash |
 | `TELEGRAM_PROXY` | Optional proxy URL for CLI and daemon connections |
 | `TELEGRAM_SYNC_CLI_DATA_DIR` | Override the data directory (default `~/.telegram-sync-cli`) |
+| `TELEGRAM_SYNC_CLI_TELEMETRY` | `0` turns [usage stats](#usage-stats) off |
+| `DO_NOT_TRACK` | `1` turns usage stats off |
 | `MTCUTE_LOG_LEVEL` | mtcute log level |
 | `VERBOSE` | Verbose logging (`1`) |
 
@@ -159,6 +161,27 @@ Reference: [CLI commands](docs/cli-commands.md), [authentication](docs/auth.md),
 - `tg status` reports each account's cache size (`--sizes` adds each table's); `tg db vacuum`
   prunes old bookkeeping rows and gives free space back to the disk, and works while the
   daemon runs on a cache this version created.
+
+## Usage stats
+
+tg sends usage stats to its author: how often it runs, which commands run (the command name,
+such as `chats list`, never its arguments), which errors come up, the tg version, how it was
+installed, the OS and CPU, and whether a terminal, a script, an AI agent or the daemon runs it,
+tied to a random install ID. A Telegram error is sent by its name only (`FLOOD_WAIT`); an error
+reading the config file or a cache also carries its message, with your home folder and user name
+taken out. tg never sends messages, chat or contact names, phone numbers, account, chat or user
+IDs, search queries or any other argument.
+
+Nothing is sent until tg has shown you a one-line notice (in a terminal, or to an AI agent that
+runs it), and nothing from CI, tests or a source checkout. The daemon sends each event at most
+once a day. Events go through usage.sergeybaus.com to PostHog, which stores them in its US
+Cloud as the author's processor and sees your IP address.
+
+Turn it off with `tg telemetry off` (it also deletes the install ID),
+`TELEGRAM_SYNC_CLI_TELEMETRY=0` or `DO_NOT_TRACK=1`. `tg telemetry status` shows whether it's
+on, why, and the install ID. Everything that is sent:
+[usage.sergeybaus.com](https://usage.sergeybaus.com); details in
+[configuration](docs/configuration.md#usage-stats).
 
 ## Contributing
 

@@ -10,6 +10,7 @@ import {
   isCacheUnavailableError,
 } from '../db'
 import type { CacheUnavailableReason } from '../db/cache-layout'
+import { reportLocalError } from '../telemetry'
 import { type Account, ErrorCodes } from '../types'
 import { resolveAccount } from './account-selector'
 import { error } from './output'
@@ -32,6 +33,8 @@ export function cacheUnavailableSuggestion(reason: string): string {
 
 /** Report a cache that can't be opened, or rethrow another error */
 export function reportCacheError(err: unknown, accountId?: number): never {
+  // A file or database error: its type and scrubbed message go to usage stats
+  reportLocalError(err)
   if (isCacheUnavailableError(err)) {
     error(
       ErrorCodes.CACHE_UNAVAILABLE,

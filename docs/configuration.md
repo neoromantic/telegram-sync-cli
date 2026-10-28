@@ -16,6 +16,8 @@ source of truth for Telegram API credentials.
 | `TELEGRAM_API_HASH` | Telegram API hash |
 | `TELEGRAM_PROXY` | Optional proxy URL for CLI and daemon connections |
 | `TELEGRAM_SYNC_CLI_DATA_DIR` | Override data directory |
+| `TELEGRAM_SYNC_CLI_TELEMETRY` | Usage stats: `0` off, `1` on, `debug` prints them; see [Usage stats](#usage-stats) |
+| `DO_NOT_TRACK` | Any value but `0` or `false` turns usage stats off |
 | `MTCUTE_LOG_LEVEL` | mtcute log level |
 | `VERBOSE` | Verbose logging (`1`) |
 
@@ -50,7 +52,8 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 ├── accounts/<id>/       # One directory per account (mode 0700)
 │   └── cache.db         # The account's cache, sync state, jobs and rate limits
 ├── daemon.pid           # PID file when daemon is running
-└── config.json          # User config
+├── config.json          # User config
+└── telemetry.json       # Usage stats: install ID, on/off, notice seen
 ```
 
 Each account's data lives in its own `accounts/<id>/cache.db`, where `<id>` is the ID that
@@ -197,9 +200,9 @@ tg config set activeAccount 2
 
 ## Runtime Behavior
 
-- At the start of every command except `tg config`, `tg skill` and `tg daemon` (any output
-  format, `-q` included), the CLI checks `config.json` and makes the account `activeAccount`
-  names active, if it exists. While `activeAccount` is set it wins:
+- At the start of every command except `tg config`, `tg skill`, `tg telemetry` and
+  `tg daemon` (any output format, `-q` included), the CLI checks `config.json` and makes the
+  account `activeAccount` names active, if it exists. While `activeAccount` is set it wins:
   `tg accounts switch --id <id>` writes `<id>` to it so the switch lasts, `tg auth login` and
   `tg auth login-qr` write the ID of the account they logged in to, and a hand edit or
   `tg config set activeAccount <id>` takes effect from the next command. Without
@@ -213,14 +216,64 @@ tg config set activeAccount 2
   Make `config.json` writable or remove `activeAccount` from it, then run
   `tg accounts switch --id <id>` to use the new account.
 - An invalid `config.json` (not a JSON object, or a supported key with a wrong value) fails
-  every command except `tg config`, `tg skill` and `tg daemon` with `INVALID_ARGS` and issue
-  details before it runs; `tg config set` can still fix a wrong value. A `config.json` that
+  every command except `tg config`, `tg skill`, `tg telemetry` and `tg daemon` with
+  `INVALID_ARGS` and issue details before it runs; `tg config set` can still fix a wrong value. A `config.json` that
   can't be read fails them with `GENERAL_ERROR` (`details.path`). `tg daemon` reads only
   `cache.retention.*`, non-strictly, once at start, so such a file doesn't stop
   `tg daemon start`, with `--quiet` or without: the daemon logs one warning and uses the
   default for each value it can't read, and the next other command reports the file. A
   change to `cache.retention.*` takes effect when the daemon restarts.
 - Cache-related commands resolve TTLs via `config.json` overrides.
+
+## Usage stats
+
+tg reports how it is used, as the README's [Usage stats](../README.md#usage-stats) says. Each
+run that may send sends `app_started`, `feature_used` with the command path from the
+dispatcher (`chats list`, `daemon start`; a name it doesn't know is sent as `other`) and, when
+the command fails, `error_occurred`. The first event of an install is `app_installed`. Every
+event carries the tg version, the OS and its version, the CPU architecture, the Bun version,
+the channel (`homebrew`, `npm`, `binary` for a downloaded binary, `source`), the mode
+(`interactive`, `agent`, `script` or `daemon`), the AI agent's name when one runs tg, and the
+random install ID. The full list and an example event: <https://usage.sergeybaus.com>.
+
+- **Errors.** A failed command is sent as its error code (`AUTH_REQUIRED`, `INVALID_ARGS`), or
+  for a Telegram error as the RPC error's name without numbers (`FLOOD_WAIT`,
+  `PEER_ID_INVALID`), never with the message: messages can name chats, users or a query. An
+  error reading `config.json` or opening a cache adds its message, with account numbers, the
+  home directory and the user name taken out, cut to 300 characters. The daemon reports its
+  exit (`DAEMON_ALREADY_RUNNING`) and a configuration or main loop error by its type.
+- **The notice.** Nothing is sent until tg has printed its one-line notice to stderr: when
+  stderr is a terminal or an AI agent runs tg, and not with `--quiet` or `-f quiet`. The run that
+  prints it sends nothing. A daemon under launchd or systemd waits until any later `tg` run in a
+  terminal has shown it.
+- **The daemon** sends each event at most once per UTC day, checks in every hour while it runs,
+  and reads `telemetry.json` each time, so `tg telemetry off` stops it without a restart.
+- **Delivery.** One HTTPS request per event to `https://usage.sergeybaus.com/i/v0/e/`, which
+  passes it to PostHog (US Cloud). A request gets 3 seconds and one attempt; nothing is queued
+  on disk. Before it exits tg waits at most 500 ms for requests in flight.
+
+What decides, the first rule that matches:
+
+1. A source checkout (`bun run src/index.ts`, `bun link`) sends nothing unless
+   `TELEGRAM_SYNC_CLI_TELEMETRY` is `1` or `debug`.
+2. `DO_NOT_TRACK` set to anything but empty, `0` or `false`: off.
+3. `TELEGRAM_SYNC_CLI_TELEMETRY`: `0`, `off` or `false` is off; `1`, `on` or `true` is on, even
+   in CI; `debug` prints each event to stderr as `[telemetry] {json}` instead of sending it.
+4. CI (`CI`, `GITHUB_ACTIONS` and the like), a test run (`NODE_ENV=test`) or a development
+   version: off.
+5. `tg telemetry on` or `tg telemetry off`, kept in `telemetry.json`.
+6. Otherwise on.
+
+```bash
+tg telemetry status          # on or off, the rule that decided, the install ID, the state file
+tg telemetry status --json
+tg telemetry off             # off, and the install ID and counters are deleted
+tg telemetry on              # on again, with a new install ID
+```
+
+`tg telemetry` reads no config key and records nothing itself. `telemetry.json` lives in the
+data directory, so `TELEGRAM_SYNC_CLI_DATA_DIR` gives each data directory its own install ID
+and switch. When the directory can't be written, nothing is sent.
 
 ## Validation
 
