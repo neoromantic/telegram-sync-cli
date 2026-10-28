@@ -256,7 +256,8 @@ mimeType, size, kind, chatId, messageId, uniqueFileId, groupedId, cached, resume
   and exits 130.
 
 `tg media clean` removes partial downloads untouched for a day; `--older-than <30d|date>`,
-`--chat <peer>` (a file another chat also holds stays) and `--all` remove complete files too.
+`--chat <peer>` (a file another chat also holds stays, as far as `message_attachments` knows)
+and `--all` remove complete files too.
 It prints `{ accountId, removedFiles, removedPartialFiles, freedBytes, keptFiles, sharedFiles,
 filters }`. The cache layout, protection rules and limits are in [media.md](media.md).
 

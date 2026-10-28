@@ -212,8 +212,8 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `media.e2e.test.ts` — `tg media download` cache hits without credentials (`--out` to a
   directory, a file and stdout, `FILE_EXISTS` and `--overwrite`, `--thumb`), a file the cache
   lacks needing credentials, `NO_MEDIA`, `CONTENT_PROTECTED` from a cached message or a stored
-  check, and `tg media clean` (bare,
-  `--older-than`, `--all`, `--chat`, invalid flags) on made-up files
+  check, and `tg media clean` (bare, `--older-than`, `--all`, `--chat`, invalid flags) on
+  made-up files
 - `send-file.e2e.test.ts` — `tg send --file` argument errors (`INVALID_ARGS`, exit 3) before
   any connection
 - `api.e2e.test.ts` — `tg api` with a fake Telegram client (`helpers/fake-client-cli.ts`, run

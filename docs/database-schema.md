@@ -226,18 +226,20 @@ CREATE INDEX idx_messages_cache_message_id ON messages_cache(message_id);
 
 `message_type` is `text`, `service`, or the kind of media: `photo`, `video`, `document`,
 `sticker`, `voice`, `audio`, `poll`, `contact`, `location`, `venue`, `game`, `invoice`,
-`webpage`, `dice`, and `unknown` for other media, such as stories. Live updates, history pages and
-`tg send` write the same values. Rows that history sync wrote in earlier versions keep theirs
-until the message is fetched again: `document` for every file (voice messages, videos and
-stickers too) and `media` for other media. `has_media` is 1 for the media a Telegram client shows; the file itself is in
-`message_attachments`.
+`webpage`, `dice`, and `unknown` for other media, such as stories. Live updates, history pages
+and `tg send` write the same values. Rows that history sync wrote in earlier versions keep
+theirs until the message is fetched again: `document` for every file (voice messages, videos
+and stickers too) and `media` for other media. `has_media` is 1 for the media a Telegram client
+shows, so 0 for unsupported media, an expired photo or a link preview still pending; rows from
+earlier history syncs may say 1 for those. The file itself is in `message_attachments`.
 
 ### Table: message_attachments
 
 The file of a cached message, one row per message that has one, written in the same transaction
 as the message. A message written again unchanged writes nothing; one that lost its file loses
 its row. Rows exist for messages written by this version and later, an older message fetched
-again included; the other older messages get theirs later ([#89](https://github.com/neoromantic/telegram-sync-cli/issues/89)). `tg messages
+again included; the other older messages get theirs later
+([#89](https://github.com/neoromantic/telegram-sync-cli/issues/89)). `tg messages
 list`/`get`/`search` read the attachment from `raw_json` instead, so they show it for every
 cached message.
 

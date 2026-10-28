@@ -34,7 +34,7 @@ sent is listed on https://usage.sergeybaus.com.
   ID and `uniqueFileId`, or `null`. It is read from `raw_json`, so messages
   cached before have it too. For `tg sql`, the new table
   `message_attachments` holds the same for messages written from now on;
-  older messages get their rows later (#89) (#22).
+  older messages get their rows later (#89, #22).
 - `tg media download --chat <chat> --id <message>` saves a message's file
   into the account's media cache, `accounts/<id>/media`, and prints its path.
   A cached file needs no network and no credentials. Otherwise the message
@@ -59,9 +59,12 @@ sent is listed on https://usage.sergeybaus.com.
 
 ### Changed
 
-- History sync writes the same `message_type` as live updates: `voice`,
-  `video`, `sticker`, `audio` and `dice` instead of `document` or `media`.
-  Messages cached before keep their type until they are fetched again (#22).
+- History sync writes the same `message_type` and `has_media` as live
+  updates: `voice`, `video`, `sticker`, `audio` and `dice` instead of
+  `document` or `media`, and `has_media` 0 for media Telegram apps don't show
+  (unsupported media, an expired photo, a link preview still pending).
+  Messages cached before keep their values until they are fetched again
+  (#22).
 
 ## [0.6.0] - 2026-10-28
 

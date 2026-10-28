@@ -85,8 +85,8 @@ tg media download --chat me --id 42 --thumb              # the file's small prev
 How a run gets the file:
 
 1. **From the cache.** When the message is cached, its file is in the media cache and the cache
-   knows of no content protection, the command needs no network and no Telegram credentials. Each such run marks the file as used
-   now, for `tg media clean --older-than`.
+   knows of no content protection, the command needs no network and no Telegram credentials.
+   Each such run marks the file as used now, for `tg media clean --older-than`.
 2. **From Telegram.** Otherwise, or with `--fresh`, it fetches the message again. That gives a
    fresh file reference and updates the cached message. It checks content protection (below),
    then downloads the file into the cache.
@@ -178,8 +178,11 @@ tg media clean --all                # everything
   and time (`2026-10-01T09:30`). A file counts as used when it was downloaded or served from
   the cache.
 - `--chat` removes the files of that chat's cached messages; a file a message of another chat
-  also holds stays (`sharedFiles`). It combines with `--older-than`. `--all` doesn't combine
-  with either (`INVALID_ARGS`).
+  also holds stays (`sharedFiles`). Both come from `message_attachments`, so messages cached by
+  earlier versions don't count until
+  [#89](https://github.com/neoromantic/telegram-sync-cli/issues/89); a removed file downloads
+  again. It combines with `--older-than`. `--all` doesn't combine with either
+  (`INVALID_ARGS`).
 - A folder whose download is running is skipped. The command never writes `cache.db` and opens
   no connection, unless `--chat` names a chat the cache doesn't know.
 

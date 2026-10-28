@@ -57,7 +57,7 @@ export const cleanMediaCommand = defineCommand({
     },
     chat: {
       type: 'string',
-      description: `Remove the files of this chat's messages; a file another chat's message also holds stays. ${CHAT_ARG_DESCRIPTION}`,
+      description: `Remove the files of this chat's messages; a file another chat's message also holds stays (messages cached by earlier versions aren't known yet). ${CHAT_ARG_DESCRIPTION}`,
     },
     all: {
       type: 'boolean',
