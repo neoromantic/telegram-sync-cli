@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { Long } from '@mtcute/bun'
 
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { toRawJson } from '../utils/raw-json'
@@ -16,9 +17,6 @@ describe('toRawJson', () => {
     const raw = JSON.parse(toRawJson(message))
 
     const { photo } = message.media
-    expect(fromBase64(raw.media.photo.fileReference)).toEqual(
-      photo.fileReference,
-    )
     expect(fromBase64(raw.media.photo.sizes[0].bytes)).toEqual(
       fakeBytes(1_000, 2),
     )
@@ -57,6 +55,36 @@ describe('toRawJson', () => {
     expect(toRawJson({ a: [1, 'x', null, true], b: undefined })).toBe(
       '{"a":[1,"x",null,true]}',
     )
+  })
+
+  it('writes Long values as decimal strings, signed unless unsigned (#108)', () => {
+    const message = photoMessage({ _: 'peerUser', userId: 10 }, 1)
+
+    const raw = JSON.parse(toRawJson(message))
+
+    expect(raw.media.photo.id).toBe('5000000000000000001')
+    expect(raw.media.photo.accessHash).toBe('-4000000000000000002')
+    expect(
+      JSON.parse(
+        toRawJson({ hash: Long.fromString('18446744073709551615', true) }),
+      ),
+    ).toEqual({ hash: '18446744073709551615' })
+  })
+
+  it('leaves out every fileReference and keeps the stripped thumbnail (#95)', () => {
+    const message = photoMessage({ _: 'peerUser', userId: 10 }, 1)
+    const nested = {
+      _: 'message',
+      media: {
+        _: 'messageMediaWebPage',
+        webpage: { _: 'webPage', photo: message.media.photo },
+      },
+    }
+
+    const raw = toRawJson(nested)
+
+    expect(raw).not.toContain('fileReference')
+    expect(JSON.parse(raw).media.webpage.photo.sizes[0].bytes).toBeString()
   })
 
   it('is what a fetched message stores', () => {
