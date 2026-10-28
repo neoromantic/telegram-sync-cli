@@ -362,18 +362,21 @@ describe('extractAttachment', () => {
       })
     })
 
-    it('reads raw_json written by toRawJson: base64 bytes, Long objects', () => {
+    it('reads raw_json written by toRawJson: Long values as decimal strings', () => {
       const rawJson = toRawJson(message)
-      expect(JSON.parse(rawJson).media.document.fileReference).toBeString()
-      expect(JSON.parse(rawJson).groupedId).toHaveProperty('high')
+      expect(JSON.parse(rawJson).media.document).not.toHaveProperty(
+        'fileReference',
+      )
+      expect(JSON.parse(rawJson).groupedId).toBe('-8000000000000000001')
       expect(extractAttachment(rawJson)).toEqual(expected)
     })
 
-    it('reads raw_json of older rows: bytes as objects with a key per byte', () => {
+    it('reads raw_json of older rows: byte and Long objects', () => {
       const rawJson = JSON.stringify(message)
       expect(JSON.parse(rawJson).media.document.fileReference).toHaveProperty(
         '0',
       )
+      expect(JSON.parse(rawJson).groupedId).toHaveProperty('high')
       expect(extractAttachment(rawJson)).toEqual(expected)
     })
 

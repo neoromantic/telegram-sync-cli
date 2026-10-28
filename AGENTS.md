@@ -132,7 +132,9 @@ CLI mode (tg <cmd>)            Daemon mode (tg daemon start)
 - Always store `raw_json` and a `fetched_at` timestamp on cached entities.
 - Cache-first: return cached data and refresh in the background; `--fresh` bypasses the cache.
   Never block on stale data.
-- Telegram `Long` values (`hash`, `accessHash`) are `BigInt`.
+- Telegram `Long` values (`hash`, `accessHash`, `groupedId`) are objects of the `long` library
+  in mtcute (`{ low, high, unsigned }`), never `BigInt`; `raw_json` stores them as decimal
+  strings (`toRawJson` in `src/utils/raw-json.ts`).
 - Every cache table stores a chat under its marked peer ID (user ID, `-N` for basic groups,
   `-100…` for supergroups and channels). Convert IDs only in `src/utils/telegram-peer-ids.ts`.
 
