@@ -820,3 +820,96 @@ describe('contentless message_search', () => {
     expect(find(db, 'lighthouse')).toEqual([3, 2, 1])
   })
 })
+
+describe('the search update trigger on a cache from 0.5.0', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'tg-sync-schema-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /** The update trigger 0.5.0 created: it re-indexed on every update */
+  const OLD_UPDATE_TRIGGER = `
+    CREATE TRIGGER messages_cache_au
+    AFTER UPDATE ON messages_cache
+    BEGIN
+      DELETE FROM message_search WHERE rowid = old.rowid;
+      INSERT INTO message_search(rowid, text, sender, chat, files)
+      VALUES (new.rowid, COALESCE(new.text, ''), '', '', '');
+    END
+  `
+  const schemaOf = (db: Database) =>
+    db.query('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()
+  const triggerSql = (db: Database) =>
+    (
+      db
+        .query(
+          "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'messages_cache_au'",
+        )
+        .get() as { sql: string }
+    ).sql
+  const find = (db: Database, query: string) =>
+    createMessagesSearch(db)
+      .search(query)
+      .map((row) => row.message_id)
+
+  const harborNotes = {
+    chat_id: 4242,
+    message_id: 7,
+    text: 'harbor notes',
+    message_type: 'text',
+    date: 1_700_000_000,
+    raw_json: '{}',
+  }
+
+  function oldCache(path: string, contentlessSearch: boolean): void {
+    const old = new Database(path)
+    initCacheSchema(old)
+    initSyncSchema(old, { contentlessSearch })
+    old.run('DROP TRIGGER messages_cache_au')
+    old.run(OLD_UPDATE_TRIGGER)
+    createMessagesCache(old).upsert(harborNotes)
+    old.close()
+  }
+
+  for (const contentlessSearch of [true, false]) {
+    it(`gets the new trigger once (${contentlessSearch ? 'contentless' : 'full-content'} index)`, () => {
+      const path = join(dir, 'cache.db')
+      oldCache(path, contentlessSearch)
+
+      const db = new Database(path)
+      initCacheSchema(db)
+      initSyncSchema(db, { contentlessSearch })
+
+      expect(triggerSql(db)).toContain(
+        'AFTER UPDATE OF text, from_id, media_path ON messages_cache',
+      )
+      expect(isContentlessSearch(db)).toBe(contentlessSearch)
+      expect(find(db, 'harbor')).toEqual([7])
+
+      const cache = createMessagesCache(db)
+      const changes = () =>
+        (db.query('SELECT total_changes() AS n').get() as { n: number }).n
+      const before = changes()
+      cache.upsert({ ...harborNotes, raw_json: '{"views":1}' })
+      expect(changes()).toBe(before + 1)
+      cache.updateText(4242, 7, 'lighthouse notes', 1_700_000_100)
+      expect(find(db, 'lighthouse')).toEqual([7])
+      expect(find(db, 'harbor')).toEqual([])
+
+      const schema = schemaOf(db)
+      db.close()
+
+      // A second open has nothing to do, so it only reads
+      const again = new Database(path, { readonly: true })
+      initCacheSchema(again)
+      initSyncSchema(again, { contentlessSearch })
+      expect(schemaOf(again)).toEqual(schema)
+      again.close()
+    })
+  }
+})

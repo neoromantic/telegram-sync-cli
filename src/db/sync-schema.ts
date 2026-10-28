@@ -165,21 +165,63 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
     END;
   `)
 
+  createSearchUpdateTrigger(db)
+}
+
+/**
+ * Re-index a message only when a column the index reads from it changes:
+ * UPDATE OF alone fires whenever the column is in the SET list, and an
+ * upsert sets every column
+ */
+function createSearchUpdateTrigger(db: Database): void {
   db.run(`
     CREATE TRIGGER IF NOT EXISTS messages_cache_au
-    AFTER UPDATE ON messages_cache
+    AFTER UPDATE OF text, from_id, media_path ON messages_cache
+    WHEN old.text IS NOT new.text
+      OR old.from_id IS NOT new.from_id
+      OR old.media_path IS NOT new.media_path
     BEGIN
       DELETE FROM message_search WHERE rowid = old.rowid;
       INSERT INTO message_search(rowid, text, sender, chat, files)
       VALUES (
         new.rowid,
         COALESCE(new.text, ''),
-        ${senderExprNew},
-        ${chatExprNew},
+        ${buildSenderSearchExpr('new')},
+        ${buildChatSearchExpr('new')},
         COALESCE(new.media_path, '')
       );
     END;
   `)
+}
+
+/**
+ * Whether the update trigger is the one of 0.5.0 and older, which re-indexes
+ * a message on every write
+ */
+function hasOldSearchUpdateTrigger(db: Database): boolean {
+  const row = db
+    .query(
+      `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'messages_cache_au'`,
+    )
+    .get() as { sql: string | null } | null
+  return row !== null && !/AFTER\s+UPDATE\s+OF\b/i.test(row.sql ?? '')
+}
+
+/**
+ * Give a cache from 0.5.0 and older the update trigger that re-indexes only
+ * changed messages. One-time work, so it runs under the write lock and is
+ * checked again there; a cache that needs nothing is only read.
+ */
+function upgradeSearchUpdateTrigger(db: Database): void {
+  if (!hasOldSearchUpdateTrigger(db)) return
+
+  withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
+    db.transaction(() => {
+      if (!hasOldSearchUpdateTrigger(db)) return
+      db.run('DROP TRIGGER messages_cache_au')
+      createSearchUpdateTrigger(db)
+    }).immediate()
+  })
 }
 
 /** Fill the search index again from messages_cache, in one transaction */
@@ -448,6 +490,7 @@ export function initSyncSchema(
     createMessageSearchSchema(db, contentless)
     ensureMessageSearchIndex(db, contentless)
   }
+  upgradeSearchUpdateTrigger(db)
 
   // History ranges - the message ID ranges of a chat cached without gaps
   // (src/db/history-ranges.ts); ranges of one chat never touch or overlap

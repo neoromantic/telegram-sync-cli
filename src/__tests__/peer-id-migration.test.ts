@@ -339,7 +339,7 @@ describe('peer ID migration', () => {
       fetched_at: 1_000,
       raw_json: '{}',
     })
-    db.run('UPDATE messages_cache SET text = text')
+    rebuildMessageSearchIndex(db)
     const search = createMessagesSearch(db)
     expect(search.search('Zeller')).toHaveLength(1)
 

@@ -97,6 +97,28 @@ export interface MessagesCache {
 }
 
 /**
+ * The columns a fetched message overwrites. A message fetched again with all
+ * of them unchanged leaves its row, and so its search index row, alone:
+ * fetched_at and updated_at keep the last write that changed something.
+ */
+const UPSERT_COLUMNS = [
+  'from_id',
+  'reply_to_id',
+  'forward_from_id',
+  'text',
+  'message_type',
+  'has_media',
+  'media_path',
+  'is_outgoing',
+  'is_edited',
+  'is_pinned',
+  'is_deleted',
+  'edit_date',
+  'date',
+  'raw_json',
+] as const
+
+/**
  * Create a messages cache service
  */
 export function createMessagesCache(db: Database): MessagesCache {
@@ -115,22 +137,10 @@ export function createMessagesCache(db: Database): MessagesCache {
         $date, $fetched_at, $raw_json, $updated_at
       )
       ON CONFLICT (chat_id, message_id) DO UPDATE SET
-        from_id = excluded.from_id,
-        reply_to_id = excluded.reply_to_id,
-        forward_from_id = excluded.forward_from_id,
-        text = excluded.text,
-        message_type = excluded.message_type,
-        has_media = excluded.has_media,
-        media_path = excluded.media_path,
-        is_outgoing = excluded.is_outgoing,
-        is_edited = excluded.is_edited,
-        is_pinned = excluded.is_pinned,
-        is_deleted = excluded.is_deleted,
-        edit_date = excluded.edit_date,
-        date = excluded.date,
+        ${UPSERT_COLUMNS.map((col) => `${col} = excluded.${col}`).join(',\n')},
         fetched_at = excluded.fetched_at,
-        raw_json = excluded.raw_json,
         updated_at = excluded.updated_at
+      WHERE ${UPSERT_COLUMNS.map((col) => `messages_cache.${col} IS NOT excluded.${col}`).join('\n        OR ')}
     `),
 
     get: db

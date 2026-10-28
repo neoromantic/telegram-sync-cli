@@ -473,6 +473,13 @@ that lacks it. The build reads the whole table under the write lock, so that ope
 other process opening the cache meanwhile, waits up to 60 seconds for the lock instead of 5;
 the process that waited finds the index built. Opens of a cache that has it only read.
 
+The search update trigger `messages_cache_au` of 0.5.0 and older re-indexed a message on every
+update. The first open of such a cache by a newer version replaces it with one that re-indexes
+only a changed text, sender or media path ([search.md](search.md#triggered-indexing)). It finds
+the old trigger by its SQL in `sqlite_master` and replaces it in one `BEGIN IMMEDIATE`
+transaction, waiting up to 60 seconds for the lock and checking again inside; opens that find
+the new trigger only read.
+
 `PRAGMA user_version` records the one-time data migrations of each account's `cache.db`
 (`src/db/peer-id-migration.ts`); they run on every account's file on its first open:
 
