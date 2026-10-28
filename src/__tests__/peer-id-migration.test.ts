@@ -22,6 +22,7 @@ import {
   SyncPriority,
 } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { toRawJson } from '../utils/raw-json'
 import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import {
   initLegacySchema,
@@ -32,6 +33,7 @@ import {
   seedLegacyCache,
 } from './helpers/legacy-cache'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
+import { photoMessage } from './helpers/photo-message'
 
 function userVersion(db: Database): number {
   return (db.query('PRAGMA user_version').get() as { user_version: number })
@@ -305,6 +307,26 @@ describe('peer ID migration', () => {
       [10, 444, 444],
     ])
     expect(userVersion(db)).toBe(PEER_ID_USER_VERSION)
+  })
+
+  it('reads the senders of messages whose byte fields are base64', () => {
+    const team = { _: 'peerChannel', channelId: LEGACY.teamChat.id } as const
+    const channel = { _: 'peerChannel', channelId: 333 } as const
+    const message = photoMessage(team, 1, channel)
+    const row = legacyMessageRow(message)
+    expect(row.raw_json).toBe(toRawJson(message))
+    createMessagesCache(db).upsertBatch([row])
+
+    initSyncSchema(db)
+
+    expect(senderIds(db)).toEqual([
+      {
+        chat_id: toPeerIdFromRawPeer(team),
+        message_id: 1,
+        from_id: -1000000000333,
+        forward_from_id: null,
+      },
+    ])
   })
 
   it('stops indexing a channel sender under the user with its bare ID', () => {

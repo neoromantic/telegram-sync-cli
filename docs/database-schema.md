@@ -84,6 +84,28 @@ channel post.
 `chats_cache.chat_id = CAST(m.chat_id AS TEXT)`, which uses the primary key. All conversions live
 in `src/utils/telegram-peer-ids.ts`.
 
+### raw_json
+
+`users_cache`, `chats_cache` and `messages_cache` keep the Telegram object as mtcute gives it in
+`raw_json`. Every write goes through one serializer, `toRawJson` in `src/utils/raw-json.ts`:
+
+- A byte array (`fileReference`, the stripped thumbnail in
+  `photoStrippedSize.bytes` and others) is a base64 string.
+- A `bigint` is a decimal string. mtcute's 64-bit IDs and hashes (`Long`) stay objects with
+  `low`, `high` and `unsigned`.
+- Everything else is what `JSON.stringify` writes.
+
+Rows written by 0.5.0 and older keep their byte fields as objects with one key per byte
+(`{"0":12,"1":250,…}`) until the row is fetched again. `tg sql` reads a byte field with
+`json_extract`, for example the stripped thumbnails of photo messages:
+
+```sql
+SELECT message_id,
+       json_extract(raw_json, '$.media.photo.sizes[0].bytes') AS stripped_thumb_base64
+FROM messages_cache
+WHERE json_extract(raw_json, '$.media.photo.sizes[0]._') = 'photoStrippedSize';
+```
+
 ### Table: users_cache
 
 ```sql
@@ -562,9 +584,11 @@ bytes per message as `tg status --sizes` reports them (indexes counted with thei
 | Text only, 3–32 words | ~910 B | ~330 B | ~100 B | ~1,020 B (18% smaller) |
 | One in ten with a photo | ~1,740 B | ~320 B | ~100 B | ~1,850 B (11% smaller) |
 
-`raw_json` (the stored TL object) is 43–61% of the file, most of it in media messages: a
-synthetic photo message's `raw_json` is about 7.7 KB, because byte arrays such as
-`fileReference` and the stripped thumbnail serialize as objects with one key per byte.
+`raw_json` (the stored TL object) was 43–61% of the file in this measurement, most of it in
+media messages: byte arrays such as `fileReference` and the stripped thumbnail were stored as
+objects with one key per byte, about 7.7 KB per synthetic photo message. Now they are base64
+([raw_json](#raw_json)): the made-up photo message in the tests takes 1,896 bytes instead of
+10,213.
 
 | Data Type | Records | Est. Size |
 |-----------|---------|-----------|
