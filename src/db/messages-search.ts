@@ -3,9 +3,14 @@
  */
 import type { Database } from 'bun:sqlite'
 
-/** Characters and words that make a query FTS5 syntax rather than plain words */
+/**
+ * What makes a query FTS5 syntax rather than plain words: `"`, `*`, `:`,
+ * parentheses, `^` at the start of a word, `+` standing between phrases, or
+ * an operator in capitals. A `+` or `^` inside a word (`C++`, `2^10`) is
+ * punctuation.
+ */
 const FTS5_SYNTAX =
-  /["*:()^+]|(?<![\p{L}\p{N}_])(?:AND|OR|NOT|NEAR)(?![\p{L}\p{N}_])/u
+  /["*:()]|(?<!\S)\^(?=\S)|(?<![^\s"])\+(?![^\s"])|(?<![\p{L}\p{N}_])(?:AND|OR|NOT|NEAR)(?![\p{L}\p{N}_])/u
 
 /** Whether a query uses FTS5 syntax: phrases, operators, prefixes or column filters */
 export function hasFts5Syntax(query: string): boolean {

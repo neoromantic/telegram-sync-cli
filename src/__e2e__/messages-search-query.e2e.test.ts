@@ -33,6 +33,7 @@ const MESSAGES = [
   [8, BOOK_CLUB_ID, BOB_ID, "don't forget the e-mail", 20 * DAY],
   [9, BOOK_CLUB_ID, BOB_ID, 'function(arg) call', 30 * DAY],
   [10, BOOK_CLUB_ID, BOB_ID, 'deploy deploy deploy', 40 * DAY],
+  [11, BOOK_CLUB_ID, BOB_ID, 'tips for C++ templates', 50 * DAY],
 ] as const
 
 function seed(db: Database): void {
@@ -129,6 +130,7 @@ describe('E2E: messages search query rules', () => {
     expect(await ids("don't")).toEqual([8])
     expect(await ids('e-mail')).toEqual([8])
     expect(await ids('function(arg)', '--phrase')).toEqual([9])
+    expect(await ids('C++ templates')).toEqual([11])
   })
 
   it('returns INVALID_ARGS with a suggestion for a query FTS5 cannot parse', async () => {
@@ -192,6 +194,12 @@ describe('E2E: messages search query rules', () => {
     expect(await invalidArgs('hello', '--until', '2026-02-30')).toBe(
       'INVALID_ARGS',
     )
+    expect(await invalidArgs('hello', '--since', '2026-02-30T09:30')).toBe(
+      'INVALID_ARGS',
+    )
+    expect(
+      await invalidArgs('hello', '--since', '2026-04-31T09:30+03:00'),
+    ).toBe('INVALID_ARGS')
     expect(await invalidArgs('hello', '--since', '1d', '--until', '7d')).toBe(
       'INVALID_ARGS',
     )

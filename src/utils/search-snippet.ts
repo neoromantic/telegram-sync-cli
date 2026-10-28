@@ -17,16 +17,29 @@ const CONTEXT_WORDS = 10
 /** A token as FTS5's unicode61 sees one: letters, digits and marks */
 const TOKEN = /[\p{L}\p{N}\p{Co}\p{M}]+/gu
 
+/** The longest fragment, in UTF-16 code units, for text with long words or none */
+const MAX_SNIPPET_LENGTH = 300
+
 /**
- * A token compared the way unicode61 compares it: case-insensitive, with
- * diacritics taken off Latin letters (`café` is `cafe`; `й` stays `й`)
+ * A token compared the way unicode61 (remove_diacritics=1) compares it:
+ * case-insensitive, and a Latin letter with one diacritic is the bare
+ * letter (`café` is `cafe`). A letter with two keeps them (`ộ` is not `o`),
+ * and other scripts keep theirs (`й` stays `й`).
  */
 function fold(token: string): string {
   return token
     .toLowerCase()
     .normalize('NFD')
-    .replace(/(\p{Script=Latin})\p{M}+/gu, '$1')
+    .replace(/(\p{Script=Latin})(\p{M}+)/gu, (letter, base, marks) =>
+      [...marks].length === 1 ? base : letter,
+    )
     .normalize('NFC')
+}
+
+/** An offset moved off the second half of a surrogate pair, so no emoji is cut */
+function keepPair(text: string, at: number): number {
+  const code = text.charCodeAt(at)
+  return at > 0 && code >= 0xdc00 && code <= 0xdfff ? at - 1 : at
 }
 
 function tokenize(text: string): string[] {
@@ -196,9 +209,10 @@ function matches(word: string, terms: SnippetTerm[]): boolean {
 
 /**
  * A fragment of the text around the first word that matches a term, about
- * ten words on each side, `…` where it is cut, every matching word in `**`.
- * Without such a word (a message found by its sender or chat) it is the
- * start of the text. Whitespace runs read as one space.
+ * ten words on each side and at most MAX_SNIPPET_LENGTH long, `…` where it
+ * is cut, every matching word in `**`. Without such a word (a message found
+ * by its sender or chat) it is the start of the text. Whitespace runs read
+ * as one space.
  */
 export function buildSnippet(
   text: string | null,
@@ -210,16 +224,23 @@ export function buildSnippet(
     end: match.index + match[0].length,
     hit: matches(match[0], terms),
   }))
-  if (words.length === 0) return text.replace(/\s+/g, ' ').trim()
-
   const first = Math.max(
     0,
     words.findIndex((word) => word.hit),
   )
+  const hit = words[first]?.hit ?? false
   const from = first - CONTEXT_WORDS
-  const to = first + CONTEXT_WORDS + (words[first]!.hit ? 0 : CONTEXT_WORDS)
-  const start = from <= 0 ? 0 : words[from]!.start
-  const end = to >= words.length - 1 ? text.length : words[to]!.end
+  const to = first + CONTEXT_WORDS + (hit ? 0 : CONTEXT_WORDS)
+  let start = from <= 0 ? 0 : words[from]!.start
+  let end = to >= words.length - 1 ? text.length : words[to]!.end
+
+  // Long words, or emoji with no words at all, can make ten words a lot of
+  // text: keep the match in view and cut the rest
+  if (end - start > MAX_SNIPPET_LENGTH) {
+    const anchor = hit ? words[first]!.start : start
+    start = keepPair(text, Math.max(start, anchor - MAX_SNIPPET_LENGTH / 2))
+    end = keepPair(text, Math.min(end, start + MAX_SNIPPET_LENGTH))
+  }
 
   let out = ''
   let at = start
