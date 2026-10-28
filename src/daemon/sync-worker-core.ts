@@ -14,6 +14,7 @@ import type { MessageInput, MessagesCache } from '../db/messages-cache'
 import type { RateLimitsService } from '../db/rate-limits'
 import type { SyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
+import { toRawJson } from '../utils/raw-json'
 import {
   type JobOutcome,
   processJobWithHandlers,
@@ -157,7 +158,7 @@ export function telegramMessageToInput(
     is_pinned: msg.pinned ?? false,
     edit_date: msg.editDate ?? null,
     date: msg.date,
-    raw_json: JSON.stringify(msg),
+    raw_json: toRawJson(msg),
   }
 }
 

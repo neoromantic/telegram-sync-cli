@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `raw_json` stores byte fields, such as a photo's `fileReference` and its
+  stripped thumbnail, as base64 strings instead of objects with a key per
+  byte. A made-up photo message's `raw_json` drops from 10,213 to 1,896
+  bytes. Every cached message, chat and user is written this way; rows cached
+  before keep the old form until they are fetched again.
+  `docs/database-schema.md` shows how to read the fields with `json_extract`
+  (#86).
+
 ## [0.5.0] - 2026-10-22
 
 Stop the daemon before you upgrade and start it again after: the first open

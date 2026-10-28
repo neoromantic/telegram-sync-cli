@@ -2,12 +2,12 @@ import type { TelegramClient, tl } from '@mtcute/bun'
 import type { ChatsCache } from '../db/chats-cache'
 import type { MessageInput } from '../db/messages-cache'
 import { toLong } from '../utils/long'
+import { toRawJson } from '../utils/raw-json'
 import {
   toInputPeerFromPeerId,
   toPeerIdFromRawPeer,
   toSenderIdFromRawMessage,
 } from '../utils/telegram-peer-ids'
-import { bigIntReplacer } from './daemon-utils'
 
 const MEDIA_TYPE_MAP: Record<string, string> = {
   messageMediaPhoto: 'photo',
@@ -110,7 +110,7 @@ export function parseRawMessage(
     is_pinned: Boolean(m.pinned),
     edit_date: (m.editDate as number) || null,
     date: m.date as number,
-    raw_json: JSON.stringify(m, bigIntReplacer),
+    raw_json: toRawJson(m),
   }
 }
 

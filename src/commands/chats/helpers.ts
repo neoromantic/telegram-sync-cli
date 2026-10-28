@@ -2,6 +2,7 @@ import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 
 import type { CachedChat, CachedChatInput } from '../../db/chats-cache'
 import type { ChatType } from '../../db/types'
+import { toRawJson } from '../../utils/raw-json'
 import {
   toPeerIdFromRawChat,
   toPeerIdFromRawPeer,
@@ -114,7 +115,7 @@ export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
     last_message_id: dialog.raw.topMessage ?? null,
     last_message_at: lastMessageAt ? lastMessageAt.getTime() : null,
     fetched_at: Date.now(),
-    raw_json: JSON.stringify(dialog.raw),
+    raw_json: toRawJson(dialog.raw),
   }
 }
 
@@ -131,7 +132,7 @@ export function userToPrivateChatCacheInput(user: tl.RawUser): CachedChatInput {
     last_message_id: null,
     last_message_at: null,
     fetched_at: Date.now(),
-    raw_json: JSON.stringify(user),
+    raw_json: toRawJson(user),
   }
 }
 
@@ -185,7 +186,7 @@ export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
     last_message_id: null,
     last_message_at: null,
     fetched_at: Date.now(),
-    raw_json: JSON.stringify(chat),
+    raw_json: toRawJson(chat),
   }
 }
 

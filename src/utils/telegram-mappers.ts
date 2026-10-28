@@ -2,6 +2,7 @@ import type { tl } from '@mtcute/bun'
 
 import type { CachedUser, UserCacheInput } from '../db/users-cache'
 import type { Contact } from '../types'
+import { toRawJson } from './raw-json'
 
 export function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
   return {
@@ -15,7 +16,7 @@ export function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
     is_bot: user.bot ? 1 : 0,
     is_premium: user.premium ? 1 : 0,
     fetched_at: Date.now(),
-    raw_json: JSON.stringify(user),
+    raw_json: toRawJson(user),
   }
 }
 

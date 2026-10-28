@@ -129,7 +129,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         raw_json: {
           description:
-            'Complete Telegram User object as JSON for future-proofing',
+            'Complete Telegram User object as JSON for future-proofing. Byte arrays are base64 strings (rows written by 0.5.0 and older: objects with a key per byte)',
           semanticType: 'json',
           nullable: false,
         },
@@ -221,7 +221,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: false,
         },
         raw_json: {
-          description: 'Complete Telegram Chat object as JSON',
+          description:
+            'Complete Telegram Chat object as JSON. Byte arrays are base64 strings (rows written by 0.5.0 and older: objects with a key per byte)',
           semanticType: 'json',
           nullable: false,
         },
@@ -346,7 +347,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: false,
         },
         raw_json: {
-          description: 'Complete Telegram Message object as JSON',
+          description:
+            'Complete Telegram Message object as JSON. Byte arrays such as fileReference and the stripped thumbnail are base64 strings (rows written by 0.5.0 and older: objects with a key per byte)',
           semanticType: 'json',
           nullable: false,
         },

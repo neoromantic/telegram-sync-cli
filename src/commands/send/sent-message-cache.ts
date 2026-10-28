@@ -1,11 +1,12 @@
 import type { Database } from 'bun:sqlite'
 import type { TelegramClient, tl } from '@mtcute/bun'
 
-import { bigIntReplacer, getErrorMessage } from '../../daemon/daemon-utils'
+import { getErrorMessage } from '../../daemon/daemon-utils'
 import { parseRawMessage } from '../../daemon/sync-worker-real-helpers'
 import type { AccountsDbInterface } from '../../db'
 import { createMessagesCache, type MessageInput } from '../../db/messages-cache'
 import { verbose } from '../../utils/output'
+import { toRawJson } from '../../utils/raw-json'
 import {
   toPeerIdFromInputPeer,
   toPeerIdFromRawPeer,
@@ -52,7 +53,7 @@ function fromShortSentMessage(
   )
   if (!parsed) return null
 
-  return { ...parsed, raw_json: JSON.stringify(result, bigIntReplacer) }
+  return { ...parsed, raw_json: toRawJson(result) }
 }
 
 function fromUpdates(updates: tl.TypeUpdate[]): MessageInput[] {
