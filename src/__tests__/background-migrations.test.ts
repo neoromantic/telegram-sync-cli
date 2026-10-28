@@ -199,6 +199,86 @@ describe('background migrations of a 0.5.0 cache', () => {
   })
 })
 
+describe('message_type of older rows', () => {
+  /** A message 0.5.0 cached with this media, message_type and raw_json */
+  function rowsAfterMigration(
+    rows: Array<{ id: number; type: string; raw: string }>,
+  ) {
+    const db = new Database(':memory:')
+    seedOldFormCache(db, { messages: 0 })
+    const insert = db.query(`
+      INSERT INTO messages_cache (chat_id, message_id, message_type, has_media, date, fetched_at, raw_json)
+      VALUES (${OLD_FORM_CHAT_ID}, $id, $type, 1, 1760000000, 0, $raw)
+    `)
+    for (const row of rows) {
+      insert.run({ $id: row.id, $type: row.type, $raw: row.raw })
+    }
+    db.run('DELETE FROM cache_migrations')
+    registerBackgroundMigrations(db)
+    return db
+  }
+
+  const message = (id: number, media: unknown) =>
+    JSON.stringify({
+      _: 'message',
+      id,
+      peerId: { _: 'peerUser', userId: OLD_FORM_CHAT_ID },
+      date: 1_760_000_000,
+      message: '',
+      media,
+    })
+
+  it('gives media a Telegram client shows no file the type a new write gives', async () => {
+    const db = rowsAfterMigration([
+      {
+        id: 1,
+        type: 'media',
+        raw: message(1, {
+          _: 'messageMediaWebPage',
+          webpage: { _: 'webPagePending', id: '9', date: 1 },
+        }),
+      },
+      {
+        id: 2,
+        type: 'photo',
+        raw: message(2, { _: 'messageMediaPhoto', ttlSeconds: 10 }),
+      },
+      {
+        id: 3,
+        type: 'media',
+        raw: message(3, { _: 'messageMediaUnsupported' }),
+      },
+      { id: 4, type: 'photo', raw: '{}' },
+      { id: 5, type: 'photo', raw: '{broken' },
+      { id: 6, type: 'document', raw: JSON.stringify({ id: 6, date: 1 }) },
+    ])
+
+    await migrateAll(db)
+
+    const rows = db
+      .query(
+        'SELECT message_id, message_type, raw_json FROM messages_cache ORDER BY message_id',
+      )
+      .all() as { message_id: number; message_type: string; raw_json: string }[]
+    for (const row of rows.slice(0, 3)) {
+      expect(row.message_type).toBe(
+        resolveRawMessageType(JSON.parse(row.raw_json)).messageType,
+      )
+      expect(row.message_type).toBe('text')
+    }
+    // Rows that hold no TL message keep their type and their raw_json
+    expect(rows.slice(3)).toEqual([
+      { message_id: 4, message_type: 'photo', raw_json: '{}' },
+      { message_id: 5, message_type: 'photo', raw_json: '{broken' },
+      {
+        message_id: 6,
+        message_type: 'document',
+        raw_json: JSON.stringify({ id: 6, date: 1 }),
+      },
+    ])
+  })
+})
+
 describe('stops and resumes', () => {
   let dir: string
   let reference: ReturnType<typeof snapshot>

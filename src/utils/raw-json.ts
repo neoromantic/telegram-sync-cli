@@ -39,8 +39,9 @@ type JsonObject = Record<string, unknown>
 
 /**
  * A byte array as plain JSON.stringify writes it, which tg 0.5.0 and older
- * stored: keys "0".."n-1" in order, each an integer 0..255, and no `_`.
- * An empty array (`{}`) can't be told from an empty object and is kept.
+ * stored: keys "0".."n-1" in order, each an integer 0..255 (never -0), and
+ * nothing else. An empty array (`{}`) can't be told from an empty object
+ * and is kept; any other object is not a byte array.
  */
 function bytesOfByteObject(value: JsonObject): Uint8Array | null {
   const keys = Object.keys(value)
@@ -53,7 +54,8 @@ function bytesOfByteObject(value: JsonObject): Uint8Array | null {
       typeof byte !== 'number' ||
       !Number.isInteger(byte) ||
       byte < 0 ||
-      byte > 255
+      byte > 255 ||
+      Object.is(byte, -0)
     ) {
       return null
     }
@@ -62,16 +64,28 @@ function bytesOfByteObject(value: JsonObject): Uint8Array | null {
   return bytes
 }
 
+/** A 32-bit word of a `long` object: an integer in [-2^31, 2^31 - 1] */
+function isInt32(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= -0x8000_0000 &&
+    value <= 0x7fff_ffff &&
+    !Object.is(value, -0)
+  )
+}
+
 /**
  * A TL Long as JSON.stringify writes a `long` object: exactly `low`, `high`
- * and `unsigned`. Signed 64-bit unless `unsigned` is true.
+ * and `unsigned`, the words int32 and `unsigned` a boolean. Signed 64-bit
+ * unless `unsigned` is true. Any other object is not a Long and is kept.
  */
 function decimalOfLongObject(value: JsonObject): string | null {
   const keys = Object.keys(value)
   if (
     keys.length !== 3 ||
-    !Number.isInteger(value.low) ||
-    !Number.isInteger(value.high) ||
+    !isInt32(value.low) ||
+    !isInt32(value.high) ||
     typeof value.unsigned !== 'boolean'
   ) {
     return null
