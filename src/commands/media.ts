@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty'
 
 import { cleanMediaCommand } from './media/clean'
+import { downloadMediaCommand } from './media/download'
 
 /**
  * Media subcommand group: the account's cache of message files,
@@ -12,8 +13,9 @@ export const mediaCommand = defineCommand({
     description: "Files of messages, kept in the account's media cache",
   },
   subCommands: {
+    download: downloadMediaCommand,
     clean: cleanMediaCommand,
   },
 })
 
-export { cleanMediaCommand }
+export { cleanMediaCommand, downloadMediaCommand }

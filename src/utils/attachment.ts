@@ -174,7 +174,7 @@ function toMessage(input: unknown): RawObject | null {
   return null
 }
 
-type PickedMedia =
+export type PickedMedia =
   | { file: 'photo'; raw: RawObject; source: AttachmentSource }
   | { file: 'document'; raw: RawObject; source: AttachmentSource }
 
@@ -365,6 +365,15 @@ function documentAttachment(
     uniqueFileId: uniqueFileIdOf(2, BigInt(id)),
     groupedId,
   }
+}
+
+/**
+ * The raw photo or document object extractAttachment reads, for a download
+ * of exactly that file. Null where extractAttachment finds no file.
+ */
+export function attachmentMedia(input: unknown): PickedMedia | null {
+  const message = toMessage(input)
+  return message ? pickMedia(message) : null
 }
 
 /**
