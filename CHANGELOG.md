@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-29
+
 Privacy change: tg now sends usage stats to its author, on by default: how often it runs, which
 commands run (`chats list`, never their arguments), the error codes they end with, the version,
 how it was installed and the OS, tied to a random install ID. It never sends messages, chat or
@@ -660,7 +662,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.4.0...v0.4.1
