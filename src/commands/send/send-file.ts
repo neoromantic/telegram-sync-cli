@@ -76,6 +76,10 @@ export async function sendFile(
   const kind = chooseSendKind(mimeType, size, request.forceDocument)
 
   const upload = deps.upload ?? uploadFile
+  // uploadFile reads the account's premium flag from the session, which only
+  // a prepared client has loaded; `--to me` resolves offline, so no call has
+  // prepared it yet
+  await client.prepare()
   // A stream, not the BunFile: mtcute would send a BunFile's full local
   // path as the file name
   const uploaded = await upload(transferClient(client), {

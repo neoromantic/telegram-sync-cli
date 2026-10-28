@@ -83,10 +83,20 @@ function sentUpdates(made: { id: number }): tl.TypeUpdates {
 
 /** A client whose call() answers messages.sendMedia with `response` */
 function fakeClient(response: tl.TypeUpdates) {
-  const call = mock(async (request: { _: string }, _options?: unknown) =>
-    request._ === 'messages.sendMedia' ? response : true,
-  )
-  return { client: { call } as unknown as TelegramClient, call }
+  // Every prepare and call, in order
+  const events: string[] = []
+  const call = mock(async (request: { _: string }, _options?: unknown) => {
+    events.push(request._)
+    return request._ === 'messages.sendMedia' ? response : true
+  })
+  const prepare = mock(async () => {
+    events.push('prepare')
+  })
+  return {
+    client: { call, prepare } as unknown as TelegramClient,
+    call,
+    events,
+  }
 }
 
 function sendMediaRequest(
@@ -202,6 +212,30 @@ describe('sendFile', () => {
       },
     })
     expect(request.randomId).toBeDefined()
+  })
+
+  it('prepares the client before the upload reads its session', async () => {
+    const path = place('report.pdf', 100)
+    const { client, events } = fakeClient(sentUpdates(photoMessage(SELF, 42)))
+    const { upload } = fakeUpload()
+
+    await sendFile(
+      client,
+      {
+        peer: { _: 'inputPeerSelf' },
+        path,
+        caption: '',
+        silent: false,
+        forceDocument: false,
+      },
+      { upload },
+    )
+
+    expect(events).toEqual([
+      'prepare',
+      'upload.saveFilePart',
+      'messages.sendMedia',
+    ])
   })
 
   it('uploads through the transfer facade of the client', async () => {
