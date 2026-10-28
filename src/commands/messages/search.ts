@@ -1,6 +1,9 @@
 import { defineCommand } from 'citty'
 
-import { createMessagesSearch } from '../../db/messages-search'
+import {
+  createMessagesSearch,
+  isFts5QueryError,
+} from '../../db/messages-search'
 import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
@@ -26,13 +29,20 @@ function parseIdentifier(
 export const searchMessagesCommand = defineCommand({
   meta: {
     name: 'search',
-    description: 'Search cached messages using full-text search',
+    description:
+      'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
   },
   args: {
     query: {
       type: 'string',
-      description: 'FTS query (e.g., "hello" or "sender:alice")',
+      description:
+        'Words to find (all of them, any order), or an FTS5 query: error OR timeout, "exact phrase", sender:alice, chat:team, word*',
       required: true,
+    },
+    phrase: {
+      type: 'boolean',
+      description: 'Match the whole query as one exact phrase',
+      default: false,
     },
     limit: {
       type: 'string',
@@ -90,6 +100,7 @@ export const searchMessagesCommand = defineCommand({
         limit,
         offset,
         includeDeleted: args.includeDeleted ?? false,
+        phrase: args.phrase ?? false,
         chatId: chatFilter?.id,
         chatUsername: chatFilter?.username,
         senderId: senderFilter?.id,
@@ -102,6 +113,7 @@ export const searchMessagesCommand = defineCommand({
           chat: args.chat ?? null,
           sender: args.sender ?? null,
           includeDeleted: args.includeDeleted ?? false,
+          phrase: args.phrase ?? false,
         },
         results: results.map(messageRowToItem),
         total: results.length,
@@ -111,8 +123,16 @@ export const searchMessagesCommand = defineCommand({
         stale: false,
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      error(ErrorCodes.TELEGRAM_ERROR, `Search failed: ${message}`)
+      const message = err instanceof Error ? err.message : String(err)
+      if (isFts5QueryError(err)) {
+        error(
+          ErrorCodes.INVALID_ARGS,
+          `Invalid search query: ${message}`,
+          { query },
+          'Quote words with punctuation ("e-mail", "10:30"), or pass --phrase to match the query as written',
+        )
+      }
+      error(ErrorCodes.GENERAL_ERROR, `Search failed: ${message}`, { query })
     }
   },
 })

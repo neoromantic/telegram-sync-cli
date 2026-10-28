@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The cache no longer keeps an index on `messages_cache.fetched_at`: no query
   used it, and it took space for every message. The first open of an
   existing cache drops it; `tg db vacuum` gives the space back (#87).
+- `tg messages search` reads a query the way FTS5 does. `hello world` now
+  finds messages with both words anywhere in them, not only the exact phrase;
+  pass `--phrase` for the old behaviour. Operators, phrases, column filters and
+  prefixes work as `--help` and `docs/search.md` describe them: `error OR
+  timeout`, `"exact phrase"`, `sender:alice`, `chat:team`, and `квартир*` for
+  every form of a word. A query FTS5 can't parse returns `INVALID_ARGS` with a
+  suggestion instead of `TELEGRAM_ERROR` (#84).
 
 ## [0.5.0] - 2026-10-22
 
