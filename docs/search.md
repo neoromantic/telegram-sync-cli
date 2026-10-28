@@ -27,11 +27,13 @@ CREATE TABLE IF NOT EXISTS search_meta (
 and chat: a contentless FTS5 table (`content=''`) stores the tokens and the rowid, and
 `contentless_delete=1` lets the triggers below delete and replace rows on an edit or a delete.
 Search never reads the table's columns: the query joins `messages_cache` by rowid and returns
-the text from there, and nothing uses `snippet()`, `highlight()` or `bm25()`. So results are
+the text from there. `bm25()` and `rank` work on a contentless table; `snippet()` and
+`highlight()` don't, so `--snippet` is computed in tg. So results are
 the same as with the full-content table of 0.4 and older, column filters (`sender:alice`)
 included, while the index takes about a third of the space (see
 [database-schema.md](database-schema.md#capacity-planning-approx)). Selecting a column of
-`message_search` itself (`tg sql`) returns `NULL`.
+`message_search` itself (`tg sql`) returns `NULL`; query the view
+[`message_search_text`](#sql-the-message_search_text-view) for the text instead.
 
 `contentless_delete` needs SQLite 3.43.0 or newer (`sqlite_version()`). On macOS Bun uses the
 system libsqlite3, so this depends on the macOS version; on Linux and Windows Bun's bundled
@@ -279,6 +281,7 @@ name), returns `INVALID_ARGS` (exit 3) with a suggestion: quote the words with p
 - `--sort date|relevance`: `date` (default) is newest first; `relevance` is best match first,
   by FTS5's bm25 rank over the text, sender and chat, with ties newest first
 - `--count`: also count every message that matches the query and the filters, in `count`
+- `--snippet`: add a highlighted fragment of the text to each result ([Snippets](#snippets))
 - `--limit`, `--offset`
 
 `--since` keeps messages sent at or after its time, `--until` those sent before it. Each takes:
@@ -323,6 +326,50 @@ is a second query, so it is opt-in. Page with `--offset` until `results` is empt
 The `files` column is empty for now: tg doesn't store attachment names yet, so `files:` finds
 nothing.
 
+### Snippets
+
+`--snippet` adds `snippet` to each result: the message text around the first word the query
+matched, about ten words on each side, `…` where the text is cut, and every matched word in
+`**` (Markdown bold, so `--format pretty` and a Markdown viewer show it emphasized):
+
+```json
+{ "messageId": 1200, "text": "…", "snippet": "…after the release the **deploy** failed twice, so we rolled back and…" }
+```
+
+The words come from the query's free text: column filters other than `text` (`sender:`,
+`chat:`) and `NOT` terms are left out. They match the way the index does: case-insensitively,
+Latin diacritics folded, and a prefix (`hel*`) matches every word that starts with it, in Latin
+and Cyrillic. A message the query found only by its sender or chat gets the start of its text,
+nothing highlighted; a message without text gets `""`. FTS5's `snippet()` can't run on the
+contentless index, so tg builds the fragment from `messages_cache.text`.
+
+## SQL: the `message_search_text` view
+
+`message_search_text` joins the index with `messages_cache`, the chat and the sender, so
+`tg sql` gets matches with their text without writing the join. It stores nothing. Its column
+named like the view is the index itself: filter with `MATCH` (the same FTS5 syntax as
+`--query`, without the plain-word quoting) and order with `rank` (bm25, lower is better).
+SQLite flattens the view and gives the `MATCH` to FTS5, so the query reads only the matches:
+
+```sql
+SELECT chat_title, sender_username, message_id, date, text
+FROM message_search_text
+WHERE message_search_text MATCH 'deploy OR release'
+  AND is_deleted = 0
+  AND date >= unixepoch('now', '-7 days')   -- date is in Unix seconds
+ORDER BY rank
+LIMIT 20;
+```
+
+The other columns are `rank`, `rowid` and the columns of a search row (`chat_id`,
+`message_id`, `from_id`, `text`, `message_type`, `has_media`, `media_path`, `is_outgoing`,
+`is_edited`, `is_pinned`, `is_deleted`, `reply_to_id`, `forward_from_id`, `edit_date`, `date`,
+`fetched_at`, `chat_title`, `chat_username`, `chat_type`, `sender_username`,
+`sender_first_name`, `sender_last_name`). `snippet()` and `highlight()` don't work on it; use
+`tg messages search --snippet`. The view is created after the index and outlives a rebuild that
+drops and recreates `message_search`. `tg sql print-schema --table=message_search_text`
+describes each column.
+
 ## Behavior Notes
 
 - Search is cache-only. Results depend on what the daemon has synced.
@@ -335,5 +382,4 @@ nothing.
 
 - URL extraction and link search
 - Topic/forum metadata for threaded chats
-- Ranking (bm25) + highlights/snippets
-- Media filename extraction
+- Attachment file names in the `files` column, so `files:pdf` finds documents

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'bun:test'
 
 import { CHAT_TYPE_VALUES } from '../commands/chats/helpers'
 import { applyQueryLimit, isReadOnlyQuery } from '../commands/sql/helpers'
+import { formatSchemaAsSql } from '../commands/sql/schema-text'
 import { initCacheSchema } from '../db/schema'
 import {
   getColumnAnnotation,
@@ -218,6 +219,26 @@ describe('SQL Command', () => {
       db.close()
 
       expect(getColumnNames('history_ranges').sort()).toEqual(columns.sort())
+    })
+
+    it('describes every column of the message_search_text view, in order', () => {
+      const db = new Database(':memory:')
+      initCacheSchema(db)
+      initSyncSchema(db)
+      const columns = (
+        db.query('PRAGMA table_info(message_search_text)').all() as Array<{
+          name: string
+        }>
+      ).map((column) => column.name)
+      const sql = formatSchemaAsSql(
+        'message_search_text',
+        getTableAnnotation('message_search_text')!,
+        db,
+      )
+      db.close()
+
+      expect(getColumnNames('message_search_text')).toEqual(columns)
+      expect(sql).toContain('CREATE VIEW message_search_text (')
     })
 
     it('returns column names for table', () => {

@@ -32,6 +32,5 @@ The list is in priority order.
 
 - [`tg status --sizes`: cache size per chat](https://github.com/neoromantic/telegram-sync-cli/issues/90)
 - [Search: re-index older messages after a person or chat is renamed](https://github.com/neoromantic/telegram-sync-cli/issues/93)
-- [Snippets and text from the search index in `tg sql`](https://github.com/neoromantic/telegram-sync-cli/issues/81)
 - [Pretty output for every command](https://github.com/neoromantic/telegram-sync-cli/issues/2)
 - [Replace qrcode-terminal](https://github.com/neoromantic/telegram-sync-cli/issues/10)

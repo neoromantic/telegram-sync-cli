@@ -79,6 +79,34 @@ export const MESSAGE_ROW_JOINS = `
   LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT)
   LEFT JOIN users_cache u ON u.user_id = CAST(m.from_id AS TEXT)`
 
+/**
+ * The view message_search_text: the search index joined with each message,
+ * its chat and its sender, so `tg sql` reads a match's text without writing
+ * the join. Its column named like the view is the index's own column, so
+ * `WHERE message_search_text MATCH ?` and `ORDER BY rank` go to FTS5. A
+ * view outlives `DROP TABLE message_search` and reads the new table once it
+ * is back, so a rebuilt index needs no new view. Created once, so opening a
+ * cache that has it never waits for the write lock.
+ */
+export function createMessageSearchTextView(db: Database): void {
+  const exists = db
+    .query(
+      `SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = 'message_search_text'`,
+    )
+    .get()
+  if (exists) return
+
+  db.run(`
+    CREATE VIEW IF NOT EXISTS message_search_text AS
+    SELECT
+      message_search.message_search AS message_search_text,
+      message_search.rank AS rank,
+      m.rowid AS rowid,${MESSAGE_ROW_COLUMNS}
+    FROM message_search
+    JOIN messages_cache m ON m.rowid = message_search.rowid${MESSAGE_ROW_JOINS}
+  `)
+}
+
 export interface MessageSearchOptions {
   limit?: number
   offset?: number

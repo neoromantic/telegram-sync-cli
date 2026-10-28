@@ -11,7 +11,7 @@ import {
   toFts5Query,
 } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
+import { initSyncSchema, isContentlessSearch } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 
 describe('MessagesSearch', () => {
@@ -510,6 +510,54 @@ describe('MessagesSearch on a contentless and a regular index', () => {
           .map((row) => row.message_id),
       ).toEqual([3])
     }
+  })
+
+  it('reads matches with their text from the message_search_text view', () => {
+    for (const contentlessSearch of [true, false]) {
+      const db = buildCache(contentlessSearch)
+      const sql = `SELECT message_id, text, chat_title, sender_username, rank
+        FROM message_search_text
+        WHERE message_search_text MATCH ? AND is_deleted = 0
+        ORDER BY rank`
+      const rows = db.query(sql).all('hello') as Array<{
+        message_id: number
+        text: string
+        chat_title: string
+        sender_username: string
+        rank: number
+      }>
+
+      expect(rows.map((row) => row.message_id).sort()).toEqual([1, 3])
+      expect(rows.find((row) => row.message_id === 1)).toMatchObject({
+        text: 'hello team, the plan is ready',
+        chat_title: 'Team Chat',
+        sender_username: 'alice',
+      })
+      expect(rows[0]!.rank).toBeLessThanOrEqual(rows[1]!.rank)
+      // SQLite flattens the view and gives the MATCH to FTS5
+      const plan = (
+        db.query(`EXPLAIN QUERY PLAN ${sql}`).all('hello') as Array<{
+          detail: string
+        }>
+      ).map((row) => row.detail)
+      expect(plan.some((step) => /VIRTUAL TABLE INDEX \d+:M/.test(step))).toBe(
+        true,
+      )
+    }
+  })
+
+  it('keeps the view working when the index table is rebuilt', () => {
+    const db = buildCache(false)
+    // A newer SQLite drops the full-content table and builds a contentless one
+    initSyncSchema(db, { contentlessSearch: true })
+    expect(isContentlessSearch(db)).toBe(true)
+
+    const rows = db
+      .query(
+        `SELECT message_id FROM message_search_text WHERE message_search_text MATCH 'привет'`,
+      )
+      .all() as Array<{ message_id: number }>
+    expect(rows.map((row) => row.message_id)).toEqual([2])
   })
 
   it('matches only the new text of an edited message', () => {

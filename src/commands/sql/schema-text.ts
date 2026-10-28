@@ -203,6 +203,7 @@ function formatCreateTable(
   tableName: string,
   columns: ColumnInfo[],
   annotation: TableAnnotation,
+  kind: 'TABLE' | 'VIEW',
 ): string[] {
   const lines: string[] = []
 
@@ -211,7 +212,7 @@ function formatCreateTable(
   if (annotation.ttl) {
     lines.push(`-- TTL: ${annotation.ttl}`)
   }
-  lines.push(`CREATE TABLE ${tableName} (`)
+  lines.push(`CREATE ${kind} ${tableName} (`)
 
   // Determine primary key columns
   const pkCols = columns.filter((c) => c.pk > 0).sort((a, b) => a.pk - b.pk)
@@ -296,8 +297,19 @@ export function formatSchemaAsSql(
     .query(`PRAGMA table_info(${tableName})`)
     .all() as ColumnInfo[]
 
-  // Format CREATE TABLE
-  lines.push(...formatCreateTable(tableName, columns, annotation))
+  const view = db
+    .query(`SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = ?`)
+    .get(tableName)
+
+  // Format CREATE TABLE, or CREATE VIEW with the view's columns
+  lines.push(
+    ...formatCreateTable(
+      tableName,
+      columns,
+      annotation,
+      view ? 'VIEW' : 'TABLE',
+    ),
+  )
   lines.push('')
 
   // Format indexes
