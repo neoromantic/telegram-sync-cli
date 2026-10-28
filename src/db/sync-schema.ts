@@ -470,6 +470,33 @@ export function createMessageAttachmentsSchema(db: Database): void {
   }).immediate()
 }
 
+/**
+ * chat_content_protection: what the last online check of `tg media
+ * download` found about a chat's content protection (src/db/chat-protection.ts).
+ * No cached row holds it (a dialog has no flags, a DM's live in userFull),
+ * so a protection seen online once also refuses cached files offline.
+ * Created once, so opening a cache that has it never waits for the write lock.
+ */
+export function createChatContentProtectionSchema(db: Database): void {
+  const exists = db
+    .query(
+      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_content_protection'`,
+    )
+    .get()
+  if (exists) return
+
+  db.transaction(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS chat_content_protection (
+        chat_id    INTEGER PRIMARY KEY,
+        protected  INTEGER NOT NULL,
+        reason     TEXT,
+        fetched_at INTEGER NOT NULL
+      )
+    `)
+  }).immediate()
+}
+
 export interface SyncSchemaOptions {
   /**
    * Keep message_search as a contentless table; defaults to whether this
@@ -539,6 +566,7 @@ export function initSyncSchema(
   ensureIndex(db, 'idx_messages_cache_message_id', 'messages_cache(message_id)')
 
   createMessageAttachmentsSchema(db)
+  createChatContentProtectionSchema(db)
 
   // Checked first: an older SQLite can't even inspect a contentless table
   if (!disableUnsupportedSearch(db, contentless)) {

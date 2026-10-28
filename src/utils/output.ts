@@ -62,6 +62,15 @@ export function raw(text: string): void {
 }
 
 /**
+ * Write a file's bytes to stdout as they are, without JSON (`tg media
+ * download --out -`). Exits in production, as success() does.
+ */
+export async function rawFile(path: string): Promise<void> {
+  await Bun.write(Bun.stdout, Bun.file(path))
+  exitAfterSuccess()
+}
+
+/**
  * In production mode, exit to close any active connections (e.g., mtcute TelegramClient)
  * This prevents the process from hanging when the event loop is kept alive by open sockets.
  * The exit waits up to 500 ms for usage stats in flight.
@@ -138,6 +147,11 @@ export function getExitCode(code: ErrorCode): number {
     SQL_SYNTAX_ERROR: 1,
     SQL_TABLE_NOT_FOUND: 1,
     SQL_OPERATION_BLOCKED: 1,
+    NO_MEDIA: 1,
+    MESSAGE_NOT_FOUND: 1,
+    CONTENT_PROTECTED: 1,
+    MEDIA_UNSUPPORTED: 1,
+    FILE_EXISTS: 1,
   }
 
   return exitCodes[code] ?? 1

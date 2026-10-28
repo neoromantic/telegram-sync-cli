@@ -425,6 +425,29 @@ function printCacheSizeSection(status: StatusSnapshot): void {
   }
 }
 
+/** With --sizes, each account's media cache: files and partial downloads */
+function printMediaCacheSection(status: StatusSnapshot): void {
+  const sized = status.accounts.accounts.filter((acc) => acc.media)
+  if (sized.length === 0) return
+
+  printHeader('Media Cache')
+  for (const acc of sized) {
+    const media = acc.media!
+    const parts = [
+      c.value(formatBytes(media.bytes)),
+      `${c.number(media.files.toLocaleString())} ${media.files === 1 ? 'file' : 'files'}`,
+    ]
+    if (media.partial_files > 0) {
+      parts.push(
+        c.dim(
+          `${media.partial_files} partial ${formatBytes(media.partial_bytes)}`,
+        ),
+      )
+    }
+    printRow(`Account #${acc.id}`, parts.join(c.dim(' · ')))
+  }
+}
+
 /**
  * Shared caches of an older version that were set aside, and a move that
  * waits; shown only when there is one
@@ -484,6 +507,7 @@ export function printPrettyStatus(status: StatusSnapshot): void {
   printRateLimitsSection(status)
   printAccountsSection(status)
   printCacheSizeSection(status)
+  printMediaCacheSection(status)
   printStorageSection(status)
 
   console.log()

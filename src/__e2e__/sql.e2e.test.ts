@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { photoMessage } from '../__tests__/helpers/photo-message'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
+import { createChatProtectionStore } from '../db/chat-protection'
 import { createMessagesCache } from '../db/messages-cache'
 import { extractAttachment } from '../utils/attachment'
 import { runCliFailure, runCliSuccess } from './helpers/cli'
@@ -242,6 +243,58 @@ describe('E2E: SQL Command', () => {
           description: 'Find the messages that hold a cached file',
         }),
       )
+    })
+  })
+
+  describe('chat_content_protection', () => {
+    beforeEach(() => {
+      createChatProtectionStore(env.openCacheDb(1)).record(
+        -1001234567890,
+        { protected: true, reason: 'chat' },
+        1_760_000_000_000,
+      )
+    })
+
+    it('reads its rows on the read-only connection', async () => {
+      const result = await runCliSuccess(
+        ['sql', '--query', 'SELECT * FROM chat_content_protection'],
+        env.getCliOptions(),
+      )
+
+      expect(result.json).toMatchObject({
+        data: {
+          rows: [
+            {
+              chat_id: -1001234567890,
+              protected: 1,
+              reason: 'chat',
+              fetched_at: 1_760_000_000_000,
+            },
+          ],
+        },
+      })
+    })
+
+    it('prints its schema with descriptions', async () => {
+      const result = await runCliSuccess(
+        ['sql', 'print-schema', '--table', 'chat_content_protection'],
+        env.getCliOptions(),
+      )
+      const data = (
+        result.json as {
+          data: { columns: Array<{ name: string; description: string }> }
+        }
+      ).data
+
+      expect(data.columns.map((column) => column.name)).toEqual([
+        'chat_id',
+        'protected',
+        'reason',
+        'fetched_at',
+      ])
+      for (const column of data.columns) {
+        expect(column.description).not.toBe('')
+      }
     })
   })
 

@@ -132,6 +132,39 @@ const MESSAGE_ATTACHMENTS_ANNOTATION: TableAnnotation = {
 }
 
 // =============================================================================
+// Content protection (#22): the last online check of a chat's protection
+// =============================================================================
+
+const CHAT_CONTENT_PROTECTION_ANNOTATION: TableAnnotation = {
+  description:
+    "What the last online check of tg media download found about a chat's content protection. A protected chat's cached files are refused offline too, until an online check (--fresh) finds the protection off. Written only by tg media download.",
+  primaryKey: 'chat_id',
+  columns: {
+    chat_id: {
+      description: 'Marked peer ID of the chat, as in messages_cache',
+      nullable: false,
+    },
+    protected: {
+      description: 'Whether that check found content protection',
+      nullable: false,
+      semanticType: 'boolean_int',
+    },
+    reason: {
+      description:
+        'chat: the group or channel protects its content; private_chat: a private chat with protection on; null when not protected',
+      nullable: true,
+      semanticType: 'enum',
+      enumValues: ['chat', 'private_chat'],
+    },
+    fetched_at: {
+      description: 'When that check ran',
+      nullable: false,
+      semanticType: 'timestamp',
+    },
+  },
+}
+
+// =============================================================================
 // Schema Registry
 // =============================================================================
 
@@ -454,6 +487,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     },
 
     message_attachments: MESSAGE_ATTACHMENTS_ANNOTATION,
+    chat_content_protection: CHAT_CONTENT_PROTECTION_ANNOTATION,
 
     // -------------------------------------------------------------------------
     // History Ranges Table

@@ -69,6 +69,10 @@ const DEFAULT_FLOOD_WAITER_OPTIONS: FloodWaiterOptions = {
       'messages.getDialogs',
       'messages.getHistory',
       'contacts.getContacts',
+      // File transfers sleep through short waits part by part
+      'upload.getFile',
+      'upload.saveFilePart',
+      'upload.saveBigFilePart',
     ]
     if (!quietMethods.includes(method)) {
       console.error(`[flood-wait] ${method}: waiting ${seconds}s before retry`)

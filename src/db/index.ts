@@ -12,6 +12,7 @@ import { info } from '../utils/output'
 import {
   accountCachePath,
   accountDirPath,
+  accountMediaPath,
   type CacheLayoutMode,
   type CacheLayoutResult,
   createCacheLayoutGuard,
@@ -445,6 +446,11 @@ export function getAccountDir(accountId: number): string {
 /** `<dataDir>/accounts/<id>/cache.db` */
 export function getAccountCachePath(accountId: number): string {
   return accountCachePath(DATA_DIR, accountId)
+}
+
+/** `<dataDir>/accounts/<id>/media`: the account's downloaded files */
+export function getAccountMediaDir(accountId: number): string {
+  return accountMediaPath(DATA_DIR, accountId)
 }
 
 /** The shared cache of 0.3 and older, `<dataDir>/cache.db` */

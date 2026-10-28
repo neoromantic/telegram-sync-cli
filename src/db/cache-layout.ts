@@ -107,6 +107,8 @@ export const UPGRADE_DOCS_URL =
 
 export const ACCOUNTS_DIR = 'accounts'
 export const CACHE_FILE = 'cache.db'
+/** The account's downloaded files, `accounts/<id>/media` (src/utils/media-cache.ts) */
+export const MEDIA_DIR = 'media'
 const SHARED_CACHE_BASENAME = 'shared-cache'
 const SIDECARS = ['-wal', '-shm'] as const
 
@@ -131,6 +133,10 @@ export function accountDirPath(dataDir: string, accountId: number): string {
 
 export function accountCachePath(dataDir: string, accountId: number): string {
   return join(accountDirPath(dataDir, accountId), CACHE_FILE)
+}
+
+export function accountMediaPath(dataDir: string, accountId: number): string {
+  return join(accountDirPath(dataDir, accountId), MEDIA_DIR)
 }
 
 /** The shared cache of 0.3 and older */

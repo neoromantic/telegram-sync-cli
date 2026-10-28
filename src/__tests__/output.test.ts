@@ -176,6 +176,18 @@ describe('Output Utilities', () => {
       expect(getExitCode(ErrorCodes.GENERAL_ERROR)).toBe(1)
     })
 
+    it('should return 1 for the media error codes', () => {
+      for (const code of [
+        ErrorCodes.NO_MEDIA,
+        ErrorCodes.MESSAGE_NOT_FOUND,
+        ErrorCodes.CONTENT_PROTECTED,
+        ErrorCodes.MEDIA_UNSUPPORTED,
+        ErrorCodes.FILE_EXISTS,
+      ]) {
+        expect(getExitCode(code)).toBe(1)
+      }
+    })
+
     it('should return 1 for unknown error codes', () => {
       expect(getExitCode('UNKNOWN_ERROR' as ErrorCode)).toBe(1)
     })
