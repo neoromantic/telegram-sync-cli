@@ -3,6 +3,14 @@
  */
 import { describe, expect, it } from 'bun:test'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
+import {
+  gifMessage,
+  pdfDocumentMessage,
+  roundMessage,
+  stickerMessage,
+  videoMessage,
+  voiceMessage,
+} from './helpers/media-messages'
 
 describe('sync-worker-real parseRawMessage', () => {
   it('maps forward_from_id for all peer types', () => {
@@ -120,12 +128,16 @@ describe('sync-worker-real parseRawMessage', () => {
         _: 'message',
         id: 30,
         date: 1700000200,
-        media: { _: 'messageMediaGeoLive' },
+        media: {
+          _: 'messageMediaGeoLive',
+          geo: { _: 'geoPoint', long: 13.4, lat: 52.5, accessHash: 0 },
+          period: 900,
+        },
       },
       9,
     )
 
-    const unknown = parseRawMessage(
+    const unsupported = parseRawMessage(
       {
         _: 'message',
         id: 31,
@@ -137,7 +149,45 @@ describe('sync-worker-real parseRawMessage', () => {
 
     expect(location?.message_type).toBe('location')
     expect(location?.has_media).toBe(true)
-    expect(unknown?.message_type).toBe('media')
-    expect(unknown?.has_media).toBe(true)
+    // mtcute gives live updates no media for these, so they store text
+    expect(unsupported?.message_type).toBe('text')
+    expect(unsupported?.has_media).toBe(false)
+  })
+
+  it('types files as live updates do', () => {
+    const peer = { _: 'peerUser' as const, userId: 9 }
+    const types = [
+      voiceMessage(peer, 32),
+      videoMessage(peer, 33),
+      roundMessage(peer, 34),
+      gifMessage(peer, 35),
+      stickerMessage(peer, 36),
+      pdfDocumentMessage(peer, 37),
+    ].map((raw) => {
+      const parsed = parseRawMessage(raw, 9)
+      return [parsed?.message_type, parsed?.has_media]
+    })
+
+    expect(types).toEqual([
+      ['voice', true],
+      ['video', true],
+      ['video', true],
+      ['video', true],
+      ['sticker', true],
+      ['document', true],
+    ])
+  })
+
+  it('types a dice as live updates do', () => {
+    const dice = parseRawMessage(
+      {
+        _: 'message',
+        id: 38,
+        date: 1700000202,
+        media: { _: 'messageMediaDice', value: 3, emoticon: '🎲' },
+      },
+      9,
+    )
+    expect(dice).toMatchObject({ message_type: 'dice', has_media: true })
   })
 })

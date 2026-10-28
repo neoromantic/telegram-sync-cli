@@ -16,7 +16,7 @@ import {
 import { error, success } from '../../utils/output'
 import { buildSnippet, snippetTerms } from '../../utils/search-snippet'
 import { parseTimeBound } from '../../utils/time-bounds'
-import { messageRowToItem } from './helpers'
+import { messageItemReader } from './helpers'
 
 /** A --since/--until value as Unix seconds; INVALID_ARGS when it is none */
 function parseBound(
@@ -180,6 +180,7 @@ export const searchMessagesCommand = defineCommand({
       const terms = args.snippet
         ? snippetTerms(query, { phrase: options.phrase })
         : []
+      const toItem = messageItemReader(cacheDb)
 
       success({
         query,
@@ -192,14 +193,12 @@ export const searchMessagesCommand = defineCommand({
           until: args.until ?? null,
         },
         sort,
-        results: results.map((row) =>
-          args.snippet
-            ? {
-                ...messageRowToItem(row),
-                snippet: buildSnippet(row.text, terms),
-              }
-            : messageRowToItem(row),
-        ),
+        results: results.map((row) => {
+          const item = toItem(row)
+          return args.snippet
+            ? { ...item, snippet: buildSnippet(row.text, terms) }
+            : item
+        }),
         total: results.length,
         count,
         limit,

@@ -17,7 +17,9 @@ import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
 import { LEGACY } from '../__tests__/helpers/legacy-cache'
+import { videoMessage } from '../__tests__/helpers/media-messages'
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
+import { photoMessage } from '../__tests__/helpers/photo-message'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
@@ -27,6 +29,7 @@ import { createMessagesCache } from '../db/messages-cache'
 import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
 import { createUsersCache } from '../db/users-cache'
 import type { MessageSearchItem } from '../types'
+import { extractAttachment } from '../utils/attachment'
 import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import { NO_CREDENTIALS, runCli, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
@@ -884,6 +887,122 @@ describe('E2E: Messages Get', () => {
     )
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain('Missing required argument')
+  })
+})
+
+const LAKE_CLUB_RAW_ID = 1_555_000_001
+const LAKE_CLUB_ID = -1_001_555_000_001
+
+describe('E2E: Message attachments', () => {
+  const peerId = { _: 'peerChannel' as const, channelId: LAKE_CLUB_RAW_ID }
+  const text = {
+    _: 'message',
+    id: 1,
+    peerId,
+    date: 1_760_000_001,
+    message: 'welcome to the lake club',
+  }
+  const photo = photoMessage(peerId, 2)
+  const video = { ...videoMessage(peerId, 3), message: 'the lake at dawn' }
+  let env: TestEnvironment
+
+  beforeAll(() => {
+    env = createTestEnvironment('messages-attachments')
+    env.initDatabase()
+    env.seedAccounts([
+      { phone: '+15550000000', user_id: SELF_ID, is_active: true },
+    ])
+    const db = env.openCacheDb(1)
+    createChatsCache(db).upsertMany([
+      dialogToCacheInput(
+        fakeDialog({
+          kind: 'supergroup',
+          id: LAKE_CLUB_RAW_ID,
+          title: 'Lake Club',
+          username: 'lakeclub',
+        }),
+      ),
+    ])
+    const [textInput, photoInput, videoInput] = [text, photo, video].map(
+      (raw) => parseRawMessage(raw, LAKE_CLUB_ID)!,
+    )
+    createMessagesCache(db).upsertBatch([
+      textInput!,
+      photoInput!,
+      // A row an older version wrote: bytes as objects with a key per byte,
+      // the old history type, and no message_attachments row
+      {
+        ...videoInput!,
+        message_type: 'document',
+        raw_json: JSON.stringify(video),
+      },
+    ])
+    db.run('DELETE FROM message_attachments WHERE message_id = 3')
+    createHistoryRanges(db).add(LAKE_CLUB_ID, { low: 1, high: 3 })
+  })
+
+  afterAll(() => {
+    env.cleanup()
+  })
+
+  const options = () => ({
+    env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+  })
+
+  it('gives every listed message its attachment, older rows included', async () => {
+    const result = await runCliSuccess(
+      ['messages', 'list', '--chat', '@lakeclub'],
+      options(),
+    )
+    const { items, source } = (result.json as { data: ListData }).data
+
+    expect(source).toBe('cache')
+    expect(items.map((item) => [item.messageId, item.attachment])).toEqual([
+      [3, extractAttachment(video)],
+      [2, extractAttachment(photo)],
+      [1, null],
+    ])
+    expect(items[0]?.attachment).toMatchObject({
+      kind: 'video',
+      fileName: 'example-lake.mp4',
+      mimeType: 'video/mp4',
+      size: 4_000_000,
+      duration: 12.5,
+      width: 1280,
+      height: 720,
+    })
+  })
+
+  it('gives the message tg messages get prints its attachment', async () => {
+    const result = await runCliSuccess(
+      ['messages', 'get', '--chat', '@lakeclub', '--id', '2', '--context', '1'],
+      options(),
+    )
+    const data = (result.json as { data: GetData }).data
+
+    expect(data.message.attachment).toEqual(extractAttachment(photo))
+    expect(data.newer[0]?.attachment).toEqual(extractAttachment(video))
+    expect(data.older[0]?.attachment).toBeNull()
+  })
+
+  it('gives every search hit its attachment', async () => {
+    const result = await runCliSuccess(
+      ['messages', 'search', '--query', 'lake', '--chat', '@lakeclub'],
+      options(),
+    )
+    const { results } = (
+      result.json as { data: { results: MessageSearchItem[] } }
+    ).data
+
+    expect(
+      results
+        .map((item) => [item.messageId, item.attachment?.kind ?? null])
+        .sort(),
+    ).toEqual([
+      [1, null],
+      [2, 'photo'],
+      [3, 'video'],
+    ])
   })
 })
 

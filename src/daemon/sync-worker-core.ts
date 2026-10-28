@@ -14,6 +14,7 @@ import type { MessageInput, MessagesCache } from '../db/messages-cache'
 import type { RateLimitsService } from '../db/rate-limits'
 import type { SyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
+import { resolveRawMessageType } from '../utils/message-type'
 import { toRawJson } from '../utils/raw-json'
 import {
   type JobOutcome,
@@ -142,7 +143,7 @@ export function telegramMessageToInput(
   chatId: number,
   msg: TelegramMessage,
 ): MessageInput {
-  const hasMedia = msg.media !== undefined && msg.media !== null
+  const { messageType, hasMedia } = resolveRawMessageType(msg)
 
   return {
     chat_id: chatId,
@@ -151,7 +152,7 @@ export function telegramMessageToInput(
     reply_to_id: msg.replyTo?.replyToMsgId ?? null,
     forward_from_id: msg.fwdFrom?.fromId?.userId ?? null,
     text: msg.message ?? null,
-    message_type: hasMedia ? 'media' : 'text',
+    message_type: messageType,
     has_media: hasMedia,
     is_outgoing: msg.out ?? false,
     is_edited: msg.editDate !== undefined,

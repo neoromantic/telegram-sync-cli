@@ -431,6 +431,45 @@ function ensureIndex(db: Database, name: string, definition: string): void {
   })
 }
 
+/**
+ * message_attachments: one row per cached message that has a file (#22),
+ * written with the message (messages-cache.ts). Rows exist for messages
+ * written by this version on; older ones are filled by a later backfill.
+ * Created once, so opening a cache that has it never waits for the write lock.
+ */
+export function createMessageAttachmentsSchema(db: Database): void {
+  const exists = db
+    .query(
+      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_attachments'`,
+    )
+    .get()
+  if (exists) return
+
+  db.transaction(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS message_attachments (
+        chat_id        INTEGER NOT NULL,
+        message_id     INTEGER NOT NULL,
+        kind           TEXT NOT NULL,
+        source         TEXT NOT NULL DEFAULT 'message',
+        file_name      TEXT,
+        mime_type      TEXT,
+        file_size      INTEGER,
+        duration       REAL,
+        width          INTEGER,
+        height         INTEGER,
+        unique_file_id TEXT NOT NULL,
+        grouped_id     TEXT,
+        PRIMARY KEY (chat_id, message_id)
+      )
+    `)
+    db.run(`
+      CREATE INDEX IF NOT EXISTS idx_message_attachments_unique_file_id
+      ON message_attachments(unique_file_id)
+    `)
+  }).immediate()
+}
+
 export interface SyncSchemaOptions {
   /**
    * Keep message_search as a contentless table; defaults to whether this
@@ -498,6 +537,8 @@ export function initSyncSchema(
   `)
   // A delete without chat context names only message IDs (#7)
   ensureIndex(db, 'idx_messages_cache_message_id', 'messages_cache(message_id)')
+
+  createMessageAttachmentsSchema(db)
 
   // Checked first: an older SQLite can't even inspect a contentless table
   if (!disableUnsupportedSearch(db, contentless)) {

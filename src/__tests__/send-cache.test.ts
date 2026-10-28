@@ -174,13 +174,33 @@ describe('buildSentMessageInputs', () => {
         shortSent({
           media: {
             _: 'messageMediaWebPage',
-            webpage: { _: 'webPageEmpty', id: toLong(9) },
+            webpage: {
+              _: 'webPage',
+              id: toLong(9),
+              url: 'https://example.com',
+              displayUrl: 'example.com',
+              hash: 0,
+            },
           },
         }),
         { ...selfRequest, text: 'see https://example.com' },
         SELF_ID,
       )
       expect(input).toMatchObject({ message_type: 'webpage', has_media: true })
+    })
+
+    it('records an empty link preview as text, as live updates do', () => {
+      const [input] = buildSentMessageInputs(
+        shortSent({
+          media: {
+            _: 'messageMediaWebPage',
+            webpage: { _: 'webPageEmpty', id: toLong(9) },
+          },
+        }),
+        { ...selfRequest, text: 'see https://example.com' },
+        SELF_ID,
+      )
+      expect(input).toMatchObject({ message_type: 'text', has_media: false })
     })
 
     it('stores nothing without the own user ID', () => {

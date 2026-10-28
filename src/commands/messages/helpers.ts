@@ -1,3 +1,4 @@
+import type { Database } from 'bun:sqlite'
 import type { TelegramClient } from '@mtcute/bun'
 
 import { ConfigError } from '../../config'
@@ -7,6 +8,7 @@ import type { MessageSearchRow } from '../../db/messages-search'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
 import { ErrorCodes, type MessageSearchItem } from '../../types'
+import { type AttachmentInfo, extractAttachment } from '../../utils/attachment'
 import { error } from '../../utils/output'
 import {
   isRateLimitError,
@@ -19,7 +21,10 @@ import {
 } from '../send/peer-resolver'
 
 /** The JSON item for a message row, shared by every `tg messages` command */
-export function messageRowToItem(row: MessageSearchRow): MessageSearchItem {
+export function messageRowToItem(
+  row: MessageSearchRow,
+  attachment: AttachmentInfo | null,
+): MessageSearchItem {
   return {
     chatId: row.chat_id,
     messageId: row.message_id,
@@ -28,6 +33,7 @@ export function messageRowToItem(row: MessageSearchRow): MessageSearchItem {
     messageType: row.message_type,
     hasMedia: row.has_media === 1,
     mediaPath: row.media_path,
+    attachment,
     isOutgoing: row.is_outgoing === 1,
     isEdited: row.is_edited === 1,
     isPinned: row.is_pinned === 1,
@@ -49,6 +55,32 @@ export function messageRowToItem(row: MessageSearchRow): MessageSearchItem {
       lastName: row.sender_last_name,
     },
   }
+}
+
+/**
+ * A function that makes the item for a row, with the attachment read from
+ * its raw_json (null for has_media = 0). Every cached message has raw_json,
+ * so this works for rows cached before message_attachments existed too.
+ */
+export function messageItemReader(
+  db: Database,
+): (row: MessageSearchRow) => MessageSearchItem {
+  const rawJson = db.query<{ raw_json: string }, [number, number]>(
+    'SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?',
+  )
+  return (row) => {
+    const raw =
+      row.has_media === 1 ? rawJson.get(row.chat_id, row.message_id) : null
+    return messageRowToItem(row, raw ? extractAttachment(raw.raw_json) : null)
+  }
+}
+
+/** Items for rows, each with its attachment (see messageItemReader) */
+export function messageRowsToItems(
+  db: Database,
+  rows: MessageSearchRow[],
+): MessageSearchItem[] {
+  return rows.map(messageItemReader(db))
 }
 
 /**

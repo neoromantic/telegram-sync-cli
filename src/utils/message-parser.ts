@@ -4,6 +4,7 @@
  */
 
 import type { NewMessageData } from '../daemon/handlers'
+import { resolveRawMessageType } from './message-type'
 import {
   toPeerIdFromRawPeer,
   toSenderIdFromRawMessage,
@@ -74,9 +75,10 @@ export interface RawMessage {
     _: 'messageReplyHeader'
     replyToMsgId?: number
   }
-  /** Media content */
+  /** Media content: a raw TL MessageMedia */
   media?: {
     _: string
+    [field: string]: unknown
   }
   /** Whether message is pinned */
   pinned?: boolean
@@ -101,35 +103,11 @@ export function extractForwardFromId(
 }
 
 /**
- * Determine message type from raw message
+ * Determine message type from raw message, as live updates store it
  */
 export function determineMessageType(message: RawMessage): string {
-  if (message._ === 'messageService') return 'service'
   if (message._ === 'messageEmpty') return 'empty'
-
-  let messageType = 'text'
-  if (message.media) {
-    const mediaType = message.media._
-    const mediaMap: Record<string, string> = {
-      messageMediaPhoto: 'photo',
-      messageMediaDocument: 'document',
-      messageMediaVideo: 'video',
-      messageMediaAudio: 'audio',
-      messageMediaVoice: 'voice',
-      messageMediaVideoNote: 'video_note',
-      messageMediaSticker: 'sticker',
-      messageMediaGeo: 'location',
-      messageMediaGeoLive: 'location',
-      messageMediaContact: 'contact',
-      messageMediaPoll: 'poll',
-      messageMediaDice: 'dice',
-      messageMediaWebPage: 'webpage',
-    }
-
-    messageType = mediaMap[mediaType] ?? 'unknown'
-  }
-
-  return messageType
+  return resolveRawMessageType(message).messageType
 }
 
 /**
@@ -140,6 +118,10 @@ export function parseRawMessage(
   raw: RawMessage,
   chatId: number,
 ): NewMessageData {
+  const { messageType, hasMedia } =
+    raw._ === 'messageEmpty'
+      ? { messageType: 'empty', hasMedia: false }
+      : resolveRawMessageType(raw)
   return {
     chatId,
     messageId: raw.id,
@@ -149,8 +131,8 @@ export function parseRawMessage(
     isOutgoing: raw.out ?? false,
     replyToId: raw.replyTo?.replyToMsgId,
     forwardFromId: extractForwardFromId(raw.fwdFrom),
-    messageType: determineMessageType(raw),
-    hasMedia: !!raw.media,
+    messageType,
+    hasMedia,
     isPinned: raw.pinned,
   }
 }

@@ -3,7 +3,9 @@
  * Provides typed access to the messages_cache table
  */
 import type { Database } from 'bun:sqlite'
+import { extractAttachment } from '../utils/attachment'
 import { sharesAccountMessageIds } from '../utils/telegram-peer-ids'
+import { createMessageAttachmentsStore } from './message-attachments'
 import { MessageCacheRow } from './sync-schema'
 
 /**
@@ -206,38 +208,56 @@ export function createMessagesCache(db: Database): MessagesCache {
     `),
   }
 
+  const attachments = createMessageAttachmentsStore(db)
+
+  // The message and its attachment row change together. Each statement
+  // writes only what changed, so a message fetched again unchanged writes
+  // nothing.
+  function writeMessage(message: MessageInput): void {
+    const now = Date.now()
+    stmts.upsert.run({
+      $chat_id: message.chat_id,
+      $message_id: message.message_id,
+      $from_id: message.from_id ?? null,
+      $reply_to_id: message.reply_to_id ?? null,
+      $forward_from_id: message.forward_from_id ?? null,
+      $text: message.text ?? null,
+      $message_type: message.message_type,
+      $has_media: message.has_media ? 1 : 0,
+      $media_path: message.media_path ?? null,
+      $is_outgoing: message.is_outgoing ? 1 : 0,
+      $is_edited: message.is_edited ? 1 : 0,
+      $is_pinned: message.is_pinned ? 1 : 0,
+      $is_deleted: message.is_deleted ? 1 : 0,
+      $edit_date: message.edit_date ?? null,
+      $date: message.date,
+      $fetched_at: now,
+      $raw_json: message.raw_json,
+      $updated_at: now,
+    })
+    // A message without media has no file: skip parsing its raw_json
+    attachments.sync(
+      message.chat_id,
+      message.message_id,
+      message.has_media ? extractAttachment(message.raw_json) : null,
+    )
+  }
+
+  // Inside a caller's transaction these run as savepoints
+  const upsertOne = db.transaction(writeMessage)
+  const upsertMany = db.transaction((messages: MessageInput[]) => {
+    for (const message of messages) {
+      writeMessage(message)
+    }
+  })
+
   return {
     upsert(message: MessageInput): void {
-      const now = Date.now()
-      stmts.upsert.run({
-        $chat_id: message.chat_id,
-        $message_id: message.message_id,
-        $from_id: message.from_id ?? null,
-        $reply_to_id: message.reply_to_id ?? null,
-        $forward_from_id: message.forward_from_id ?? null,
-        $text: message.text ?? null,
-        $message_type: message.message_type,
-        $has_media: message.has_media ? 1 : 0,
-        $media_path: message.media_path ?? null,
-        $is_outgoing: message.is_outgoing ? 1 : 0,
-        $is_edited: message.is_edited ? 1 : 0,
-        $is_pinned: message.is_pinned ? 1 : 0,
-        $is_deleted: message.is_deleted ? 1 : 0,
-        $edit_date: message.edit_date ?? null,
-        $date: message.date,
-        $fetched_at: now,
-        $raw_json: message.raw_json,
-        $updated_at: now,
-      })
+      upsertOne(message)
     },
 
     upsertBatch(messages: MessageInput[]): void {
-      const transaction = db.transaction(() => {
-        for (const msg of messages) {
-          this.upsert(msg)
-        }
-      })
-      transaction()
+      upsertMany(messages)
     },
 
     get(chatId: number, messageId: number): MessageCacheRow | null {

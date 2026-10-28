@@ -46,6 +46,8 @@ import {
   SyncJobType,
   SyncPriority,
 } from '../db/sync-schema'
+import { extractAttachment } from '../utils/attachment'
+import { photoMessage } from './helpers/photo-message'
 
 describe('SyncWorker', () => {
   let db: Database
@@ -206,6 +208,22 @@ describe('SyncWorker', () => {
     })
 
     it('handles messages with media', () => {
+      const raw = photoMessage({ _: 'peerUser', userId: 100 }, 1)
+      const msg: TelegramMessage = {
+        id: 1,
+        message: 'Photo caption',
+        date: 1700000000,
+        media: raw.media,
+      }
+
+      const input = telegramMessageToInput(100, msg)
+
+      expect(input.message_type).toBe('photo')
+      expect(input.has_media).toBe(true)
+      expect(extractAttachment(input.raw_json)).toEqual(extractAttachment(raw))
+    })
+
+    it('stores media not in raw TL form as text, without an attachment', () => {
       const msg: TelegramMessage = {
         id: 1,
         message: 'Photo caption',
@@ -215,8 +233,9 @@ describe('SyncWorker', () => {
 
       const input = telegramMessageToInput(100, msg)
 
-      expect(input.message_type).toBe('media')
-      expect(input.has_media).toBe(true)
+      expect(input.message_type).toBe('text')
+      expect(input.has_media).toBe(false)
+      expect(extractAttachment(input.raw_json)).toBeNull()
     })
 
     it('handles reply messages', () => {
