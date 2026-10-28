@@ -1,8 +1,10 @@
+import type { Database } from 'bun:sqlite'
 import { defineCommand, runCommand } from 'citty'
 
+import { openReadOnlyAccountCacheDb } from '../../db'
 import { getTableNames } from '../../db/schema-annotations'
 import { ErrorCodes } from '../../types'
-import { openAccountCache } from '../../utils/account-cache'
+import { openAccountCache, reportCacheError } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { stringify as stringifyCsv } from '../../utils/csv'
 import { error, success } from '../../utils/output'
@@ -65,6 +67,15 @@ function validateQueryArgs(
 }
 
 function formatSqlError(message: string, query: string): never {
+  // The read-only connection refused a write the check above let through
+  if (/readonly database|read-only/i.test(message)) {
+    error(
+      ErrorCodes.SQL_WRITE_NOT_ALLOWED,
+      'Write operations are not allowed: the cache is opened read-only.',
+      { query },
+    )
+  }
+
   if (message.includes('no such table')) {
     const match = message.match(/no such table: (\w+)/)
     const tableName = match?.[1] ?? 'unknown'
@@ -149,8 +160,16 @@ export const sqlQueryCommand = defineCommand({
     validateQueryArgs(query, output, limit, limitStr)
 
     // Each account has its own cache; ATTACH stays blocked, so a query never
-    // reads two accounts
-    const { db } = openAccountCache(sqlArgs.account)
+    // reads two accounts. openAccountCache creates and migrates the cache;
+    // the query then runs on a read-only connection, since the keyword check
+    // lets PRAGMA writes (user_version, journal_mode) through
+    const { account } = openAccountCache(sqlArgs.account)
+    let db: Database
+    try {
+      db = openReadOnlyAccountCacheDb(account.id)
+    } catch (err) {
+      reportCacheError(err, account.id)
+    }
 
     try {
       const finalQuery = applyQueryLimit(query!, limit)

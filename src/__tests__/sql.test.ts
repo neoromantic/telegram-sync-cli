@@ -56,6 +56,13 @@ describe('SQL Command', () => {
       ).toBe(true)
     })
 
+    it('refuses setting a pragma', () => {
+      expect(isReadOnlyQuery('PRAGMA user_version = 0')).toBe(false)
+      expect(isReadOnlyQuery('pragma main.journal_mode=DELETE')).toBe(false)
+      expect(isReadOnlyQuery('PRAGMA query_only = OFF')).toBe(false)
+      expect(isReadOnlyQuery('PRAGMA user_version')).toBe(true)
+    })
+
     it('allows PRAGMA statements', () => {
       expect(isReadOnlyQuery('PRAGMA table_info(users_cache)')).toBe(true)
     })

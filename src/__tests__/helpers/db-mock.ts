@@ -120,6 +120,7 @@ export function mockDbModule(options: {
     accountsDb,
     getAccountCacheDb: requireAccount,
     openExistingAccountCacheDb: requireAccount,
+    openReadOnlyAccountCacheDb: requireAccount,
     closeAccountCacheDbs: () => {},
     ensureCacheLayout: () => ({ state: 'none' as const }),
     createSchemaOnlyDb: () => {

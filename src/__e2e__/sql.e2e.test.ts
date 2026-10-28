@@ -5,6 +5,7 @@
  * tests of the run() function bypass.
  */
 
+import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -141,6 +142,67 @@ describe('E2E: SQL Command', () => {
           { message_id: 1, text: 'the deploy failed' },
         ],
       },
+    })
+  })
+
+  describe('on a read-only connection', () => {
+    function userVersion(): number {
+      const db = new Database(env.cachePath(1), { readonly: true })
+      try {
+        return (
+          db.query('PRAGMA user_version').get() as { user_version: number }
+        ).user_version
+      } finally {
+        db.close()
+      }
+    }
+
+    beforeEach(async () => {
+      // The first command creates and migrates the cache
+      await runCliSuccess(['sql', 'SELECT 1'], env.getCliOptions())
+    })
+
+    it('refuses PRAGMA writes and leaves the file unchanged', async () => {
+      const before = userVersion()
+      expect(before).toBeGreaterThan(0)
+
+      for (const query of [
+        'PRAGMA user_version = 0',
+        'PRAGMA user_version=0;',
+        'PRAGMA user_version(0)',
+        'PRAGMA wal_checkpoint(TRUNCATE)',
+        'PRAGMA incremental_vacuum',
+      ]) {
+        const result = await runCliFailure(
+          ['sql', '--query', query],
+          1,
+          env.getCliOptions(),
+        )
+        expect(result.json).toMatchObject({
+          success: false,
+          error: { code: 'SQL_WRITE_NOT_ALLOWED' },
+        })
+      }
+      expect(userVersion()).toBe(before)
+    })
+
+    it('still reads pragmas', async () => {
+      const version = await runCliSuccess(
+        ['sql', 'PRAGMA user_version'],
+        env.getCliOptions(),
+      )
+      expect(version.json).toMatchObject({
+        success: true,
+        data: { rows: [{ user_version: userVersion() }] },
+      })
+
+      const columns = await runCliSuccess(
+        ['sql', 'PRAGMA table_info(messages_cache)'],
+        env.getCliOptions(),
+      )
+      const rows = (columns.json as { data: { rows: Array<{ name: string }> } })
+        .data.rows
+      expect(rows.map((row) => row.name)).toContain('text')
     })
   })
 })

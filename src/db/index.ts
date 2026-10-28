@@ -494,6 +494,20 @@ export function getAccountCacheDb(accountId: number): Database {
 }
 
 /**
+ * A read-only connection to an account's cache, with query_only on too, so
+ * no statement on it changes the file: PRAGMA writes such as user_version
+ * or journal_mode included (`tg sql`). Open the cache with getAccountCacheDb
+ * first, which creates and migrates it; that connection stays open, so the
+ * WAL files a reader needs exist.
+ */
+export function openReadOnlyAccountCacheDb(accountId: number): Database {
+  const db = new Database(getAccountCachePath(accountId), { readonly: true })
+  db.run('PRAGMA busy_timeout = 5000')
+  db.run('PRAGMA query_only = ON')
+  return db
+}
+
+/**
  * The account's cache if its file exists, else null; never creates one.
  * Call ensureCacheLayout first.
  */

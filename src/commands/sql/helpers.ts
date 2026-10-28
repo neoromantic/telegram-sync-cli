@@ -13,6 +13,12 @@ export function isReadOnlyQuery(query: string): boolean {
     return false
   }
 
+  // Setting a pragma (PRAGMA user_version = 0) writes or changes the file;
+  // reading one (PRAGMA user_version, PRAGMA table_info(t)) is fine
+  if (/^PRAGMA [\w.]+ ?=/.test(normalized)) {
+    return false
+  }
+
   return !WRITE_KEYWORDS.test(normalized)
 }
 
@@ -23,6 +29,8 @@ export function applyQueryLimit(query: string, limit: number): string {
     : trimmed
 
   if (limit <= 0) return withoutSemicolon
+  // A pragma takes no LIMIT clause, and returns few rows
+  if (/^PRAGMA\b/i.test(withoutSemicolon)) return withoutSemicolon
   if (/\bLIMIT\b/i.test(withoutSemicolon)) return withoutSemicolon
 
   return `${withoutSemicolon} LIMIT ${limit}`
