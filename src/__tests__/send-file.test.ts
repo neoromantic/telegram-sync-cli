@@ -265,9 +265,42 @@ describe('sendFile', () => {
       attributes: [
         { _: 'documentAttributeFilename', fileName: 'example-report.pdf' },
       ],
-      forceFile: undefined,
+      forceFile: true,
     })
   })
+
+  for (const { name, mimeType } of [
+    { name: 'example-loop.gif', mimeType: 'image/gif' },
+    { name: 'example-clip.mp4', mimeType: 'video/mp4' },
+  ]) {
+    it(`sends ${name} as a plain file without forceDocument`, async () => {
+      const path = place(name, 100)
+      const { client, call } = fakeClient(
+        sentUpdates(pdfDocumentMessage(SELF, 46)),
+      )
+      const { upload } = fakeUpload()
+
+      const sent = await sendFile(
+        client,
+        {
+          peer: { _: 'inputPeerSelf' },
+          path,
+          caption: '',
+          silent: false,
+          forceDocument: false,
+        },
+        { upload },
+      )
+
+      expect(sent).toMatchObject({ kind: 'document', mimeType })
+      expect(sendMediaRequest(call).media).toMatchObject({
+        _: 'inputMediaUploadedDocument',
+        mimeType,
+        forceFile: true,
+        attributes: [{ _: 'documentAttributeFilename', fileName: name }],
+      })
+    })
+  }
 
   it('sends an image as a file with forceDocument', async () => {
     const path = place('lake.jpg', 100)

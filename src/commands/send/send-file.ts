@@ -94,7 +94,8 @@ export async function sendFile(
           file: uploaded.inputFile,
           mimeType: uploaded.mime,
           attributes: [{ _: 'documentAttributeFilename', fileName }],
-          forceFile: request.forceDocument || undefined,
+          // Else Telegram turns a GIF into an animation and a video into a video
+          forceFile: true,
         }
 
   const sendRequest: tl.messages.RawSendMediaRequest = {
