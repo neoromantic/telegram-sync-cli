@@ -243,8 +243,9 @@ in any order. Each word is quoted before it goes to FTS5, so punctuation inside 
 (`don't`, `e-mail`, `че-нить`) is never read as syntax.
 
 A query with FTS5 syntax goes to FTS5 as written. FTS5 syntax is any of `"`, `*`, `:`, `(`,
-`)`, `^`, `+`, or one of the words `AND`, `OR`, `NOT`, `NEAR` in capitals (lowercase `and` is
-a plain word):
+`)`, `^` at the start of a word, `+` standing between phrases, or one of the words `AND`, `OR`,
+`NOT`, `NEAR` in capitals. Lowercase `and` is a plain word, and so are `C++` and `2^10`: a `+`
+or `^` inside a word is punctuation:
 
 | Query | Finds |
 |-------|-------|
@@ -330,7 +331,9 @@ nothing.
 
 `--snippet` adds `snippet` to each result: the message text around the first word the query
 matched, about ten words on each side, `…` where the text is cut, and every matched word in
-`**` (Markdown bold, so `--format pretty` and a Markdown viewer show it emphasized):
+`**`. The markers are plain characters: `--format pretty` prints them as they are, and a
+Markdown viewer shows the words in bold. A text with long words or no spaces (a run of emoji)
+is cut to at most 300 characters around the match, never inside an emoji:
 
 ```json
 { "messageId": 1200, "text": "…", "snippet": "…after the release the **deploy** failed twice, so we rolled back and…" }
@@ -338,7 +341,8 @@ matched, about ten words on each side, `…` where the text is cut, and every ma
 
 The words come from the query's free text: column filters other than `text` (`sender:`,
 `chat:`) and `NOT` terms are left out. They match the way the index does: case-insensitively,
-Latin diacritics folded, and a prefix (`hel*`) matches every word that starts with it, in Latin
+a Latin letter with one diacritic read as the bare letter (`cafe` finds `café`, `o` doesn't find
+`ộ`), and a prefix (`hel*`) matches every word that starts with it, in Latin
 and Cyrillic. A message the query found only by its sender or chat gets the start of its text,
 nothing highlighted; a message without text gets `""`. FTS5's `snippet()` can't run on the
 contentless index, so tg builds the fragment from `messages_cache.text`.

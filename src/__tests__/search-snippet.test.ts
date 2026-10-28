@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite'
 import { describe, expect, it } from 'bun:test'
 
 import { buildSnippet, snippetTerms } from '../utils/search-snippet'
@@ -93,5 +94,59 @@ describe('buildSnippet', () => {
     )
     expect(buildSnippet(null, snippetTerms('x'))).toBe('')
     expect(buildSnippet('👍', snippetTerms('x'))).toBe('👍')
+  })
+
+  it('folds diacritics the way FTS5 unicode61 does', () => {
+    const db = new Database(':memory:')
+    db.run("CREATE VIRTUAL TABLE t USING fts5(x, tokenize='unicode61')")
+    const pairs = [
+      ['o', 'ộ'],
+      ['o', 'ő'],
+      ['u', 'ǖ'],
+      ['e', 'ḗ'],
+      ['a', 'ẫ'],
+      ['cafe', 'café'],
+      ['angstrom', 'Ångström'],
+      ['naive', 'naïve'],
+      ['n', 'ñ'],
+      ['и', 'й'],
+      ['е', 'ё'],
+    ]
+    for (const [query, word] of pairs) {
+      db.run('DELETE FROM t')
+      db.run('INSERT INTO t(x) VALUES (?)', [word!])
+      const found = db
+        .query('SELECT COUNT(*) AS n FROM t WHERE t MATCH ?')
+        .get(`"${query}"`) as { n: number }
+      const highlighted = buildSnippet(word!, snippetTerms(query!)).includes(
+        '**',
+      )
+      expect([query, word, highlighted]).toEqual([query, word, found.n === 1])
+    }
+    db.close()
+  })
+
+  it('cuts text without spaces to a short fragment, never inside an emoji', () => {
+    const emoji = '😀'.repeat(4000)
+    const alone = buildSnippet(emoji, snippetTerms('sender:alice'))
+    expect(alone.length).toBeLessThanOrEqual(301)
+    expect(alone.endsWith('…')).toBe(true)
+    expect(alone.isWellFormed()).toBe(true)
+
+    const around = buildSnippet(
+      `${'😀'.repeat(500)} deploy ${'x'.repeat(2000)}`,
+      snippetTerms('deploy'),
+    )
+    expect(around).toContain('**deploy**')
+    expect(around.length).toBeLessThanOrEqual(310)
+    expect(around.isWellFormed()).toBe(true)
+
+    for (let shift = 0; shift < 4; shift++) {
+      const odd = buildSnippet(
+        `${'a'.repeat(shift)}${'😀'.repeat(400)}`,
+        snippetTerms('zzz'),
+      )
+      expect(odd.isWellFormed()).toBe(true)
+    }
   })
 })

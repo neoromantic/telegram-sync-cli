@@ -356,6 +356,16 @@ describe('toFts5Query', () => {
     expect(toFts5Query('NOTES ORдер')).toBe('"NOTES" "ORдер"')
   })
 
+  it('reads + and ^ inside a word as punctuation', () => {
+    expect(toFts5Query('C++')).toBe('"C++"')
+    expect(toFts5Query('learn c++ fast')).toBe('"learn" "c++" "fast"')
+    expect(toFts5Query('2^10 a+b')).toBe('"2^10" "a+b"')
+    // Between phrases and at the start of a word they stay FTS5 syntax
+    expect(toFts5Query('hel* + world')).toBe('hel* + world')
+    expect(toFts5Query('"a"+"b"')).toBe('"a"+"b"')
+    expect(toFts5Query('x ^start')).toBe('x ^start')
+  })
+
   it('makes the whole query one phrase with phrase', () => {
     expect(toFts5Query('say "hi" now', { phrase: true })).toBe(
       '"say ""hi"" now"',
