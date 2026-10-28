@@ -37,11 +37,26 @@ const CAN_RUN_DAEMON = SHOULD_RUN && process.env.TELEGRAM_API_REPLAY !== '1'
 
 const API_TIMEOUT_MS = 30_000
 const DAEMON_TEST_TIMEOUT_MS = 420_000
+// Two 512 KB download parts, the second one short
+const SMOKE_FILE_SIZE = 700_000
 
 type Envelope<T> = { success: boolean; data: T }
 
 function uniqueMarker(): string {
   return `tgsmoke${Date.now()}${Math.random().toString(36).slice(2, 8)}`
+}
+
+/** Made-up bytes without a short period, so a misplaced part shows */
+function smokeBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length)
+  let state = 0x2545f491
+  for (let i = 0; i < length; i++) {
+    state ^= state << 13
+    state ^= state >>> 17
+    state ^= state << 5
+    bytes[i] = state & 0xff
+  }
+  return bytes
 }
 
 /** Keep draining a stream so a chatty child never blocks on a full pipe */
@@ -351,6 +366,107 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
       ).toBe(true)
     },
     API_TIMEOUT_MS * 6,
+  )
+
+  it(
+    'send --file uploads to Saved Messages and media download brings it back',
+    async () => {
+      const marker = uniqueMarker()
+      const fileName = `tg-smoke-${marker}.bin`
+      const source = join(env.dataDir, fileName)
+      const bytes = smokeBytes(SMOKE_FILE_SIZE)
+      await Bun.write(source, bytes)
+
+      const sent = await runCliSuccess(
+        [
+          'send',
+          '--to',
+          'me',
+          '--file',
+          source,
+          '--caption',
+          `tg smoke test ${marker}`,
+          '--silent',
+        ],
+        cli(),
+      )
+      const sentData = (
+        sent.json as Envelope<{
+          sent: boolean
+          messageId: number
+          file: { name: string; size: number; sentAs: string }
+          attachment: { uniqueFileId: string } | null
+        }>
+      ).data
+      expect(typeof sentData.messageId).toBe('number')
+      sentMessageIds.push(sentData.messageId)
+      expect(sentData.sent).toBe(true)
+      expect(sentData.file).toMatchObject({
+        name: fileName,
+        size: SMOKE_FILE_SIZE,
+        sentAs: 'document',
+      })
+      const uniqueFileId = sentData.attachment?.uniqueFileId
+      expect(uniqueFileId).toEqual(expect.any(String))
+
+      type DownloadData = {
+        path: string
+        fileName: string
+        size: number
+        kind: string
+        messageId: number
+        uniqueFileId: string
+        cached: boolean
+        resumedFrom: number | null
+      }
+      const download = async () =>
+        (
+          (
+            await runCliSuccess(
+              [
+                'media',
+                'download',
+                '--chat',
+                'me',
+                '--id',
+                String(sentData.messageId),
+              ],
+              cli(),
+            )
+          ).json as Envelope<DownloadData>
+        ).data
+
+      const fresh = await download()
+      expect(fresh).toMatchObject({
+        path: join(
+          env.dataDir,
+          'accounts',
+          String(env.accountId),
+          'media',
+          uniqueFileId!,
+          fileName,
+        ),
+        fileName,
+        size: SMOKE_FILE_SIZE,
+        kind: 'document',
+        messageId: sentData.messageId,
+        uniqueFileId,
+        cached: false,
+        resumedFrom: null,
+      })
+      const downloaded = new Uint8Array(
+        await Bun.file(fresh.path).arrayBuffer(),
+      )
+      expect(Buffer.compare(downloaded, bytes)).toBe(0)
+
+      const cached = await download()
+      expect(cached).toMatchObject({
+        path: fresh.path,
+        size: SMOKE_FILE_SIZE,
+        cached: true,
+      })
+    },
+    API_TIMEOUT_MS * 4,
   )
 
   it.skipIf(!CAN_RUN_DAEMON)(
