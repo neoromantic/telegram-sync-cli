@@ -206,8 +206,8 @@ CREATE TABLE messages_cache (
   is_edited INTEGER DEFAULT 0,
   is_pinned INTEGER DEFAULT 0,
   is_deleted INTEGER DEFAULT 0,
-  edit_date INTEGER,
-  date INTEGER NOT NULL,
+  edit_date INTEGER,               -- Unix seconds, as Telegram sends it
+  date INTEGER NOT NULL,           -- Unix seconds, as Telegram sends it
   fetched_at INTEGER NOT NULL,
   raw_json TEXT NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),

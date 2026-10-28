@@ -332,13 +332,14 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           defaultValue: 0,
         },
         edit_date: {
-          description: 'When the message was last edited',
-          semanticType: 'timestamp',
+          description: 'When the message was last edited, in Unix seconds',
+          semanticType: 'timestamp_sec',
           nullable: true,
         },
         date: {
-          description: 'When the message was originally sent',
-          semanticType: 'timestamp',
+          description:
+            "When the message was originally sent, in Unix seconds (Telegram's own unit): date >= unixepoch('now', '-7 days')",
+          semanticType: 'timestamp_sec',
           nullable: false,
         },
         fetched_at: {

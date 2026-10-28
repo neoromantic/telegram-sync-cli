@@ -487,6 +487,31 @@ describe('MessagesSearch on a contentless and a regular index', () => {
     ])
   })
 
+  it('ranks, counts and limits by date the same way on both indexes', () => {
+    const ranked = [true, false].map((contentlessSearch) =>
+      createMessagesSearch(buildCache(contentlessSearch))
+        .search('hello', { sort: 'relevance', includeDeleted: true })
+        .map((row) => row.message_id),
+    )
+    expect(ranked[0]).toEqual(ranked[1]!)
+    // Message 3 says hello in the shortest text, so bm25 ranks it first
+    expect(ranked[0]![0]).toBe(3)
+    expect(ranked[0]).not.toEqual([5, 3, 1])
+
+    for (const contentlessSearch of [true, false]) {
+      const search = createMessagesSearch(buildCache(contentlessSearch))
+
+      expect(search.count('hello')).toBe(2)
+      expect(search.count('hello', { includeDeleted: true })).toBe(3)
+      expect(search.count('hello', { limit: 1 })).toBe(2)
+      expect(
+        search
+          .search('hello', { since: 1_760_000_002, until: 1_760_000_004 })
+          .map((row) => row.message_id),
+      ).toEqual([3])
+    }
+  })
+
   it('matches only the new text of an edited message', () => {
     for (const contentlessSearch of [true, false]) {
       const search = createMessagesSearch(buildCache(contentlessSearch))

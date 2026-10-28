@@ -89,7 +89,16 @@ export interface MessageSearchOptions {
   includeDeleted?: boolean
   /** Match the whole query as one phrase */
   phrase?: boolean
+  /** Messages sent at or after this Unix time, in seconds */
+  since?: number
+  /** Messages sent before this Unix time, in seconds */
+  until?: number
+  /** Newest first (default), or best match first by FTS5 bm25 */
+  sort?: MessageSearchSort
 }
+
+export const MESSAGE_SEARCH_SORTS = ['date', 'relevance'] as const
+export type MessageSearchSort = (typeof MESSAGE_SEARCH_SORTS)[number]
 
 export interface MessageSearchRow {
   chat_id: number
@@ -118,6 +127,60 @@ export interface MessageSearchRow {
 
 export interface MessagesSearchService {
   search(query: string, options?: MessageSearchOptions): MessageSearchRow[]
+  /** How many messages match, with the same filters and no page */
+  count(query: string, options?: MessageSearchOptions): number
+}
+
+/** The FROM and WHERE of a search, and their parameters */
+function searchFilter(
+  query: string,
+  options: MessageSearchOptions,
+): { from: string; params: Array<string | number> } {
+  const conditions: string[] = ['message_search MATCH ?']
+  const params: Array<string | number> = [
+    toFts5Query(query, { phrase: options.phrase }),
+  ]
+
+  if (!(options.includeDeleted ?? false)) {
+    conditions.push('m.is_deleted = 0')
+  }
+
+  if (options.chatId !== undefined) {
+    conditions.push('m.chat_id = ?')
+    params.push(options.chatId)
+  }
+
+  if (options.chatUsername) {
+    conditions.push('c.username = ? COLLATE NOCASE')
+    params.push(options.chatUsername)
+  }
+
+  if (options.senderId !== undefined) {
+    conditions.push('m.from_id = ?')
+    params.push(options.senderId)
+  }
+
+  if (options.senderUsername) {
+    conditions.push('u.username = ? COLLATE NOCASE')
+    params.push(options.senderUsername)
+  }
+
+  if (options.since !== undefined) {
+    conditions.push('m.date >= ?')
+    params.push(options.since)
+  }
+
+  if (options.until !== undefined) {
+    conditions.push('m.date < ?')
+    params.push(options.until)
+  }
+
+  const from = `
+    FROM message_search
+    JOIN messages_cache m ON m.rowid = message_search.rowid
+    ${MESSAGE_ROW_JOINS}
+    WHERE ${conditions.join(' AND ')}`
+  return { from, params }
 }
 
 export function createMessagesSearch(db: Database): MessagesSearchService {
@@ -126,52 +189,35 @@ export function createMessagesSearch(db: Database): MessagesSearchService {
       query: string,
       options: MessageSearchOptions = {},
     ): MessageSearchRow[] {
-      const limit = options.limit ?? 50
-      const offset = options.offset ?? 0
-      const includeDeleted = options.includeDeleted ?? false
-
-      const conditions: string[] = ['message_search MATCH ?']
-      const params: Array<string | number> = [
-        toFts5Query(query, { phrase: options.phrase }),
-      ]
-
-      if (!includeDeleted) {
-        conditions.push('m.is_deleted = 0')
-      }
-
-      if (options.chatId !== undefined) {
-        conditions.push('m.chat_id = ?')
-        params.push(options.chatId)
-      }
-
-      if (options.chatUsername) {
-        conditions.push('c.username = ? COLLATE NOCASE')
-        params.push(options.chatUsername)
-      }
-
-      if (options.senderId !== undefined) {
-        conditions.push('m.from_id = ?')
-        params.push(options.senderId)
-      }
-
-      if (options.senderUsername) {
-        conditions.push('u.username = ? COLLATE NOCASE')
-        params.push(options.senderUsername)
-      }
-
-      params.push(limit, offset)
+      const { from, params } = searchFilter(query, options)
+      // bm25 rank: lower is a better match
+      const order =
+        options.sort === 'relevance'
+          ? 'message_search.rank, m.date DESC'
+          : 'm.date DESC'
 
       const sql = `
         SELECT ${MESSAGE_ROW_COLUMNS}
-        FROM message_search
-        JOIN messages_cache m ON m.rowid = message_search.rowid
-        ${MESSAGE_ROW_JOINS}
-        WHERE ${conditions.join(' AND ')}
-        ORDER BY m.date DESC
+        ${from}
+        ORDER BY ${order}
         LIMIT ? OFFSET ?
       `
 
-      return db.query(sql).all(...params) as MessageSearchRow[]
+      return db
+        .query(sql)
+        .all(
+          ...params,
+          options.limit ?? 50,
+          options.offset ?? 0,
+        ) as MessageSearchRow[]
+    },
+
+    count(query: string, options: MessageSearchOptions = {}): number {
+      const { from, params } = searchFilter(query, options)
+      const row = db.query(`SELECT COUNT(*) AS n ${from}`).get(...params) as {
+        n: number
+      }
+      return row.n
     },
   }
 }

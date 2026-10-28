@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg messages search` filters by date and ranks by relevance. `--since` and
+  `--until` take a date, a date and time, or a duration back from now (`7d`,
+  `24h`); `--sort relevance` puts the best matches first; `--count` also
+  returns how many messages match over all pages, as `count`. `total` is
+  still the number of results on the page (#85).
+
 ### Changed
 
 - `raw_json` stores byte fields, such as a photo's `fileReference` and its
