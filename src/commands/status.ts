@@ -18,6 +18,10 @@ import {
   listSharedCaches,
   openExistingAccountCacheDb,
 } from '../db'
+import {
+  type MigrationStatus,
+  readMigrationStatus,
+} from '../db/background-migrations'
 import { accountMediaPath } from '../db/cache-layout'
 import { type CacheSize, readCacheSize } from '../db/cache-maintenance'
 import { createChatSyncStateService } from '../db/chat-sync-state'
@@ -174,6 +178,8 @@ export interface AccountStatusSnapshot {
   }
   /** The media cache's size; only with --sizes, else null */
   media: MediaUsage | null
+  /** The cache's background migrations (#89), finished ones included */
+  migrations: MigrationStatus[]
   daemon: DaemonInfo | null
   sync: {
     pending_jobs: number
@@ -206,6 +212,7 @@ function emptyAccountSnapshot(accountId: number): AccountStatusSnapshot {
     accountId,
     cache: { status: 'missing', size: null },
     media: null,
+    migrations: [],
     daemon: null,
     sync: {
       pending_jobs: 0,
@@ -290,6 +297,7 @@ function readOpenAccountStatus(
   }
 
   snapshot.daemon = createDaemonStatusService(cacheDb).getDaemonInfo()
+  snapshot.migrations = readMigrationStatus(cacheDb)
 
   // Sync jobs
   const syncService = createSyncJobsService(cacheDb)
@@ -481,6 +489,7 @@ function accountBreakdown(
   return {
     cache: snapshot.cache,
     media: snapshot.media,
+    migrations: snapshot.migrations,
     connection: liveConnection(snapshot, livePid),
     sync: {
       pending_jobs: snapshot.sync.pending_jobs,
@@ -668,11 +677,20 @@ export async function collectStatus(
     })),
   }
 
+  // Unfinished background migrations, by account; finished ones are under
+  // each account
+  const migrationsStatus = snapshots.flatMap((s) =>
+    s.migrations
+      .filter((migration) => migration.state !== 'done')
+      .map((migration) => ({ account_id: s.accountId, ...migration })),
+  )
+
   return {
     /** The account the figures cover; null for every account */
     account_id: options.accountId ?? null,
     daemon: daemonStatus,
     sync: syncStatus,
+    migrations: migrationsStatus,
     progress: progressStatus,
     rate_limits: rateLimitsStatus,
     accounts: accountsStatus,

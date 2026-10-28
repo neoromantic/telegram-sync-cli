@@ -7,11 +7,9 @@ The list is in priority order.
 ## Reliability
 
 - [Storage north star: bounded size, big caches, offloading, SQLite alternatives](https://github.com/neoromantic/telegram-sync-cli/issues/80)
-- [Background, resumable migrations for big caches](https://github.com/neoromantic/telegram-sync-cli/issues/89)
 - [`tg db check` and `tg db backup`](https://github.com/neoromantic/telegram-sync-cli/issues/91)
 - [A soft cache size budget per account](https://github.com/neoromantic/telegram-sync-cli/issues/98)
 - [Option to cache live messages only in synced chats](https://github.com/neoromantic/telegram-sync-cli/issues/100)
-- [`raw_json`: stop storing fileReference](https://github.com/neoromantic/telegram-sync-cli/issues/95)
 - [`raw_json`: measure zstd with a trained dictionary](https://github.com/neoromantic/telegram-sync-cli/issues/97)
 - [Archive old messages into separate files](https://github.com/neoromantic/telegram-sync-cli/issues/101)
 

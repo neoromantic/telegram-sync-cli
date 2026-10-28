@@ -7,6 +7,7 @@
  * limit windows and finished sync jobs. Database only, no CLI or daemon.
  */
 import type { Database } from 'bun:sqlite'
+import { restartUnfinishedMigrations } from './background-migrations'
 import { RATE_WINDOW_SECONDS } from './rate-limits'
 import {
   INDEX_BUILD_BUSY_TIMEOUT_MS,
@@ -355,6 +356,9 @@ export function vacuumCache(
     db.run('PRAGMA auto_vacuum = INCREMENTAL')
     withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => db.run('VACUUM'))
     rebuilt_search = rebuildSearchIfRowidsMoved(db, before)
+    // A background migration's cursor is a rowid, which the VACUUM may have
+    // moved in any table: unfinished ones start over
+    restartUnfinishedMigrations(db)
   }
 
   const checkpointed = checkpoint(db, { wait: !options.daemonRunning })

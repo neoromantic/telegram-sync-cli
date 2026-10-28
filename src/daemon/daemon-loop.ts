@@ -2,6 +2,7 @@ import { SyncJobStatus } from '../db/sync-schema'
 import { attemptReconnect, scheduleReconnect } from './daemon-accounts'
 import { maybeSyncContacts } from './daemon-contacts'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
+import { runMigrationsTick } from './daemon-migrations'
 import {
   cleanupOldJobs,
   refreshAllQueues,
@@ -163,6 +164,9 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     if (loopIteration % cleanupInterval === 0) {
       cleanupOldJobs(ctx)
     }
+
+    // Last and lowest: a few batches of each cache's background migrations
+    await runMigrationsTick(ctx)
 
     await sleepUnlessStopped(1000, ctx.runtime.shutdown.signal)
   }

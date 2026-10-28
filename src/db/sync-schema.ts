@@ -7,7 +7,7 @@
  * - daemon_status: Daemon status key-value store
  */
 import type { Database } from 'bun:sqlite'
-
+import { registerBackgroundMigrations } from './background-migrations'
 import { createMessageSearchTextView } from './messages-search'
 import { migratePeerIds } from './peer-id-migration'
 
@@ -687,6 +687,9 @@ export function initSyncSchema(
   // Caches from 0.2.0 and older keep groups and channels in chats_cache
   // under bare IDs (#18)
   migratePeerIds(db, rebuildMessageSearchIndex)
+
+  // Rewrites of every row run later, in batches (src/db/background-migrations.ts)
+  registerBackgroundMigrations(db)
 }
 
 // Row class types for typed queries

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Background migrations: a rewrite of every row of a big cache now runs in
+  small batches, each a short write, and resumes where it stopped. The
+  daemon runs them a little each second, after its sync work; live updates
+  and sync jobs wait for one batch at most. `tg db migrate [--account]`
+  finishes them in the foreground, with or without the daemon. `tg status`
+  lists each unfinished one with its progress (`migrations`, and
+  `accounts.accounts[].migrations`) and suggests `tg db vacuum` for the
+  space they free (#89).
+- The first background migrations rewrite what older versions cached:
+  `raw_json` of messages, users and chats into the current form, a
+  `message_attachments` row for every older media message, and the
+  `message_type` of older history messages (a video is `video`, no longer
+  `document`). Reads give the same answers while they run (#89, #22).
+
+### Changed
+
+- `raw_json` stores 64-bit values (`id`, `accessHash`, `groupedId` and
+  others) as decimal strings, as it did `bigint`s, instead of objects with
+  `low`, `high` and `unsigned`: `json_extract(raw_json, '$.accessHash')` in
+  `tg sql` gives the hash (#108).
+- `raw_json` no longer stores `fileReference`: Telegram's file references
+  expire, and `tg media download` fetches the message again for a fresh
+  one. A made-up photo message takes 1,776 bytes instead of 1,898 (#95).
+
 ### Fixed
 
 - `tg sql print-schema --output=sql` and `--output=text` print the schema

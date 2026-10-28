@@ -223,6 +223,21 @@ users are never pruned. The retention is read at start: restart the daemon after
 
 Key file: `src/db/cache-maintenance.ts`
 
+### Background migrations
+
+After the sync work of each tick, the daemon runs the pending
+[background migrations](database-schema.md#background-migrations) of every account's cache,
+one account after the other, for up to 250 ms a tick. Each batch is a short write of at most
+500 rows or 50 ms, and the event loop is free between batches, so live updates and sync jobs
+wait for one batch at most. A stop (`tg daemon stop`) starts no new batch; the next start goes
+on from where it stopped. A failed batch rolls back, is logged as a warning and recorded in
+`cache_migrations.last_error`, and that account's migrations wait a minute before the next try.
+When a migration finishes, the daemon logs `[Account <id>] Migration <name> done: <rows> rows`.
+Once an account has none left, the daemon doesn't look again until it restarts. `tg status`
+shows the progress; `tg db migrate` finishes them in the foreground, also while the daemon runs.
+
+Key files: `src/db/background-migrations.ts`, `src/daemon/daemon-migrations.ts`
+
 ---
 
 ## Status Output
@@ -262,6 +277,10 @@ the running daemon is another version: `daemon.version_mismatch` in JSON, and a 
 the advice in `--format pretty`. `tg daemon status` doesn't report it. A daemon of 0.3 or older
 writes nothing to the per-account caches, so it shows up instead as the shared-cache move that
 waits for it (`storage.migration`, `shared_cache_in_use`) in both status commands.
+
+A daemon of an older version left running after an upgrade keeps writing rows in the
+`raw_json` form of its version, and no background migration goes back to them; every reader
+takes both forms, and the row gets the current form when the message is fetched again.
 
 ---
 

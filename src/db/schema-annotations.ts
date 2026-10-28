@@ -61,7 +61,7 @@ export interface SchemaRegistry {
 
 const MESSAGE_ATTACHMENTS_ANNOTATION: TableAnnotation = {
   description:
-    'The file of a cached message (photo, video, voice…), one row per message, written with the message. Messages cached before this table existed have no row yet; tg messages list/get/search read the attachment from raw_json for every message. Join messages_cache USING (chat_id, message_id).',
+    'The file of a cached message (photo, video, voice…), one row per message, written with the message. Messages cached before this table existed get their row from the background migration messages_raw_json_v2 (see cache_migrations); tg messages list/get/search read the attachment from raw_json for every message. Join messages_cache USING (chat_id, message_id).',
   primaryKey: ['chat_id', 'message_id'],
   columns: {
     chat_id: {
@@ -165,11 +165,69 @@ const CHAT_CONTENT_PROTECTION_ANNOTATION: TableAnnotation = {
 }
 
 // =============================================================================
+// Background migrations (#89): rewrites of every row, done in batches
+// =============================================================================
+
+const CACHE_MIGRATIONS_ANNOTATION: TableAnnotation = {
+  description:
+    'The progress of each background migration: a rewrite of every row of a table that the daemon or tg db migrate does in short batches, resuming from cursor. tg status shows the unfinished ones.',
+  primaryKey: 'name',
+  columns: {
+    name: {
+      description:
+        'The migration: messages_raw_json_v2, users_raw_json_v2, chats_raw_json_v2',
+      nullable: false,
+    },
+    state: {
+      description:
+        'pending before it starts, running once it has, done when every row is',
+      nullable: false,
+      semanticType: 'enum',
+      enumValues: ['pending', 'running', 'done'],
+    },
+    cursor: {
+      description: 'rowid of the last row done',
+      nullable: false,
+    },
+    end_rowid: {
+      description:
+        'The largest rowid of the table when the migration started; later rows are written in the new form',
+      nullable: true,
+    },
+    done: { description: 'Rows done so far', nullable: false },
+    total: {
+      description: 'Rows up to end_rowid when it started; null until then',
+      nullable: true,
+    },
+    started_at: {
+      description: 'When it started',
+      nullable: true,
+      semanticType: 'timestamp',
+    },
+    updated_at: {
+      description: 'When the last batch ran',
+      nullable: true,
+      semanticType: 'timestamp',
+    },
+    finished_at: {
+      description: 'When it finished',
+      nullable: true,
+      semanticType: 'timestamp',
+    },
+    last_error: {
+      description:
+        'The error of the last failed batch, which rolled back; cleared by the next batch that commits',
+      nullable: true,
+    },
+  },
+}
+
+// =============================================================================
 // Schema Registry
 // =============================================================================
 
 export const SCHEMA_REGISTRY: SchemaRegistry = {
-  version: 4,
+  version: 5,
   tables: {
     // -------------------------------------------------------------------------
     // Users Cache Table
@@ -238,7 +296,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         raw_json: {
           description:
-            'Complete Telegram User object as JSON for future-proofing. Byte arrays are base64 strings (rows written by 0.5.0 and older: objects with a key per byte)',
+            'Complete Telegram User object as JSON for future-proofing. Byte arrays are base64 strings and 64-bit values (accessHash…) decimal strings; rows of older versions keep objects until the background migration users_raw_json_v2 reaches them',
           semanticType: 'json',
           nullable: false,
         },
@@ -331,7 +389,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         raw_json: {
           description:
-            'Complete Telegram Chat object as JSON. Byte arrays are base64 strings (rows written by 0.5.0 and older: objects with a key per byte)',
+            'Complete Telegram Chat object as JSON. Byte arrays are base64 strings and 64-bit values (accessHash…) decimal strings; rows of older versions keep objects until the background migration chats_raw_json_v2 reaches them',
           semanticType: 'json',
           nullable: false,
         },
@@ -389,7 +447,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         message_type: {
           description:
-            'Type of message content, as live updates and history sync both write it. Rows history sync wrote in earlier versions say document for every file (voice, video, sticker…) and media for other media, until the message is fetched again',
+            'Type of message content, as live updates and history sync both write it. Rows history sync wrote in earlier versions say document for every file (voice, video, sticker…) until the background migration messages_raw_json_v2 reaches them',
           enumValues: [
             'text',
             'photo',
@@ -462,7 +520,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         raw_json: {
           description:
-            'Complete Telegram Message object as JSON. Byte arrays such as fileReference and the stripped thumbnail are base64 strings (rows written by 0.5.0 and older: objects with a key per byte)',
+            'Complete Telegram Message object as JSON, without fileReference. Byte arrays such as the stripped thumbnail are base64 strings and 64-bit values (id, groupedId…) decimal strings; rows of older versions keep objects and fileReference until the background migration messages_raw_json_v2 reaches them',
           semanticType: 'json',
           nullable: false,
         },
@@ -488,6 +546,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
 
     message_attachments: MESSAGE_ATTACHMENTS_ANNOTATION,
     chat_content_protection: CHAT_CONTENT_PROTECTION_ANNOTATION,
+    cache_migrations: CACHE_MIGRATIONS_ANNOTATION,
 
     // -------------------------------------------------------------------------
     // History Ranges Table
