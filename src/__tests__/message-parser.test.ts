@@ -12,6 +12,14 @@ import {
   type RawMessageFwdHeader,
   type RawPeer,
 } from '../utils/message-parser'
+import {
+  pdfDocumentMessage,
+  stickerMessage,
+  videoMessage,
+  voiceMessage,
+  webpageMessage,
+} from './helpers/media-messages'
+import { photoMessage } from './helpers/photo-message'
 
 describe('extractPeerId', () => {
   it('extracts userId from peerUser', () => {
@@ -109,47 +117,38 @@ describe('determineMessageType', () => {
   })
 
   it('returns "photo" for photo messages', () => {
-    const msg: RawMessage = {
-      _: 'message',
-      id: 1,
-      peerId: { _: 'peerUser', userId: 123 },
-      date: Date.now(),
-      media: { _: 'messageMediaPhoto' },
-    }
+    const msg: RawMessage = photoMessage({ _: 'peerUser', userId: 123 }, 1)
     expect(determineMessageType(msg)).toBe('photo')
   })
 
   it('returns "document" for document messages', () => {
-    const msg: RawMessage = {
-      _: 'message',
-      id: 1,
-      peerId: { _: 'peerUser', userId: 123 },
-      date: Date.now(),
-      media: { _: 'messageMediaDocument' },
-    }
+    const msg: RawMessage = pdfDocumentMessage(
+      { _: 'peerUser', userId: 123 },
+      1,
+    )
     expect(determineMessageType(msg)).toBe('document')
   })
 
-  it('returns "sticker" for sticker messages', () => {
+  it('returns the kind of file for voice, video and sticker messages', () => {
+    const peer = { _: 'peerUser' as const, userId: 123 }
+    expect(determineMessageType(voiceMessage(peer, 1))).toBe('voice')
+    expect(determineMessageType(videoMessage(peer, 2))).toBe('video')
+    expect(determineMessageType(stickerMessage(peer, 3))).toBe('sticker')
+  })
+
+  it('returns "text" for media without its photo or document', () => {
     const msg: RawMessage = {
       _: 'message',
       id: 1,
       peerId: { _: 'peerUser', userId: 123 },
       date: Date.now(),
-      media: { _: 'messageMediaSticker' },
+      media: { _: 'messageMediaDocument', ttlSeconds: 10 },
     }
-    expect(determineMessageType(msg)).toBe('sticker')
+    expect(determineMessageType(msg)).toBe('text')
   })
 
   it('returns "webpage" for web page messages', () => {
-    const msg: RawMessage = {
-      _: 'message',
-      id: 1,
-      peerId: { _: 'peerUser', userId: 123 },
-      message: 'Check this out: https://example.com',
-      date: Date.now(),
-      media: { _: 'messageMediaWebPage' },
-    }
+    const msg: RawMessage = webpageMessage({ _: 'peerUser', userId: 123 }, 1)
     expect(determineMessageType(msg)).toBe('webpage')
   })
 
@@ -159,7 +158,10 @@ describe('determineMessageType', () => {
       id: 1,
       peerId: { _: 'peerUser', userId: 123 },
       date: Date.now(),
-      media: { _: 'messageMediaGeo' },
+      media: {
+        _: 'messageMediaGeo',
+        geo: { _: 'geoPoint', long: 13.4, lat: 52.5, accessHash: 0 },
+      },
     }
     expect(determineMessageType(msg)).toBe('location')
   })
@@ -288,7 +290,7 @@ describe('parseRawMessage', () => {
       message: 'Photo caption',
       date: 1700000500,
       out: false,
-      media: { _: 'messageMediaPhoto' },
+      media: photoMessage({ _: 'peerChannel', channelId: 888 }, 600).media,
       pinned: true,
     }
 

@@ -2,28 +2,13 @@ import type { TelegramClient, tl } from '@mtcute/bun'
 import type { ChatsCache } from '../db/chats-cache'
 import type { MessageInput } from '../db/messages-cache'
 import { toLong } from '../utils/long'
+import { resolveRawMessageType } from '../utils/message-type'
 import { toRawJson } from '../utils/raw-json'
 import {
   toInputPeerFromPeerId,
   toPeerIdFromRawPeer,
   toSenderIdFromRawMessage,
 } from '../utils/telegram-peer-ids'
-
-const MEDIA_TYPE_MAP: Record<string, string> = {
-  messageMediaPhoto: 'photo',
-  messageMediaDocument: 'document',
-  messageMediaVideo: 'video',
-  messageMediaAudio: 'audio',
-  messageMediaGeo: 'location',
-  messageMediaGeoLive: 'location',
-  messageMediaContact: 'contact',
-  messageMediaPoll: 'poll',
-  messageMediaWebPage: 'webpage',
-  messageMediaVenue: 'venue',
-  messageMediaGame: 'game',
-  messageMediaInvoice: 'invoice',
-  messageMediaSticker: 'sticker',
-}
 
 /**
  * The InputPeer for a marked chat ID, with the access hash chats_cache holds
@@ -39,26 +24,6 @@ export function buildInputPeer(
 
   const peer = toInputPeerFromPeerId(chatId, null)
   return peer?._ === 'inputPeerChannel' ? null : peer
-}
-
-function resolveMessageType(message: Record<string, unknown>): {
-  messageType: string
-  hasMedia: boolean
-} {
-  if (message.media) {
-    const mediaObj = message.media as Record<string, unknown>
-    const mediaType = String(mediaObj._ ?? '')
-    return {
-      messageType: MEDIA_TYPE_MAP[mediaType] ?? 'media',
-      hasMedia: true,
-    }
-  }
-
-  if (message._ === 'messageService') {
-    return { messageType: 'service', hasMedia: false }
-  }
-
-  return { messageType: 'text', hasMedia: false }
 }
 
 function extractReplyToId(message: Record<string, unknown>): number | null {
@@ -87,7 +52,7 @@ export function parseRawMessage(
     return null
   }
 
-  const { messageType, hasMedia } = resolveMessageType(m)
+  const { messageType, hasMedia } = resolveRawMessageType(m)
   // A channel or group that posts as itself gets its marked ID, like chats.
   // Without fromId the chat is the sender, as live updates store it
   const fromId = toSenderIdFromRawMessage(

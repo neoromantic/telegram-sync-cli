@@ -56,11 +56,87 @@ export interface SchemaRegistry {
 }
 
 // =============================================================================
+// Attachments (#22): the file of a cached message, one row per message
+// =============================================================================
+
+const MESSAGE_ATTACHMENTS_ANNOTATION: TableAnnotation = {
+  description:
+    'The file of a cached message (photo, video, voice…), one row per message, written with the message. Messages cached before this table existed have no row yet; tg messages list/get/search read the attachment from raw_json for every message. Join messages_cache USING (chat_id, message_id).',
+  primaryKey: ['chat_id', 'message_id'],
+  columns: {
+    chat_id: {
+      description: 'Marked peer ID of the chat, as in messages_cache',
+      nullable: false,
+    },
+    message_id: {
+      description: 'Message ID within the chat',
+      nullable: false,
+    },
+    kind: {
+      description: 'What the file is',
+      nullable: false,
+      semanticType: 'enum',
+      enumValues: [
+        'photo',
+        'video',
+        'round',
+        'animation',
+        'voice',
+        'audio',
+        'sticker',
+        'document',
+      ],
+    },
+    source: {
+      description:
+        'message: the message media; webpage: the photo or file of its link preview',
+      nullable: false,
+      semanticType: 'enum',
+      enumValues: ['message', 'webpage'],
+      defaultValue: 'message',
+    },
+    file_name: {
+      description:
+        'File name the sender gave (documents); null for photos and unnamed files',
+      nullable: true,
+    },
+    mime_type: {
+      description: 'MIME type (image/jpeg for photos)',
+      nullable: true,
+    },
+    file_size: { description: 'Size in bytes', nullable: true },
+    duration: {
+      description: 'Length in seconds (video, round, animation, voice, audio)',
+      nullable: true,
+    },
+    width: {
+      description: 'Width in pixels (photo: largest size)',
+      nullable: true,
+    },
+    height: { description: 'Height in pixels', nullable: true },
+    unique_file_id: {
+      description:
+        'Telegram unique file ID (same for the same file in any chat); the folder name in the media cache',
+      nullable: false,
+    },
+    grouped_id: {
+      description: 'Album ID: messages sent as one album share it',
+      nullable: true,
+      semanticType: 'bigint_string',
+    },
+  },
+  indexes: {
+    idx_message_attachments_unique_file_id:
+      'Find the messages that hold a cached file',
+  },
+}
+
+// =============================================================================
 // Schema Registry
 // =============================================================================
 
 export const SCHEMA_REGISTRY: SchemaRegistry = {
-  version: 3,
+  version: 4,
   tables: {
     // -------------------------------------------------------------------------
     // Users Cache Table
@@ -279,7 +355,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         message_type: {
-          description: 'Type of message content',
+          description:
+            'Type of message content, as live updates and history sync both write it. Rows history sync wrote before 0.7 say document for every file (voice, video, sticker…) and media for other media',
           enumValues: [
             'text',
             'photo',
@@ -288,22 +365,24 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
             'sticker',
             'voice',
             'audio',
-            'video_note',
-            'animation',
             'poll',
             'contact',
             'location',
             'venue',
             'game',
             'invoice',
+            'webpage',
+            'dice',
             'service',
             'unknown',
+            'media',
           ],
           semanticType: 'enum',
           defaultValue: 'text',
         },
         has_media: {
-          description: 'Whether message contains downloadable media',
+          description:
+            'Whether the message has media Telegram clients show (a photo, file, poll, location, link preview…); 0 for text, service messages and media the client cannot show',
           semanticType: 'boolean_int',
           defaultValue: 0,
         },
@@ -373,6 +452,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           'Find the chat of a message ID that a delete without chat context names',
       },
     },
+
+    message_attachments: MESSAGE_ATTACHMENTS_ANNOTATION,
 
     // -------------------------------------------------------------------------
     // History Ranges Table

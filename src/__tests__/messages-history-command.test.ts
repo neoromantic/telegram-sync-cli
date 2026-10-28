@@ -50,6 +50,7 @@ import { initCacheSchema } from '../db/schema'
 import { initSyncSchema, SyncPriority } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
+import { extractAttachment } from '../utils/attachment'
 import { toLong } from '../utils/long'
 import {
   RateLimitError,
@@ -61,6 +62,7 @@ import {
   range,
   rawMessage,
 } from './helpers/fake-history'
+import { photoMessage } from './helpers/photo-message'
 
 const SELF_ID = 999
 const ALICE_ID = 10
@@ -196,7 +198,7 @@ function expectAliceCached(
 ) {
   expect(rows.length).toBeGreaterThan(0)
   for (const row of rows) {
-    expect(messageRowToItem(row).sender).toMatchObject({
+    expect(messageRowToItem(row, null).sender).toMatchObject({
       id: ALICE_ID,
       username: 'alice',
       firstName: 'Alice',
@@ -683,6 +685,32 @@ describe('listHistory', () => {
     })
     expect(messageIds(result.items)).toEqual([4, 3])
     expect(create).not.toHaveBeenCalled()
+  })
+
+  it('gives each item the attachment its raw_json holds', async () => {
+    const peerId = { _: 'peerChannel' as const, channelId: TEAM_CHAT_RAW_ID }
+    const photo = photoMessage(peerId, 2)
+    const call = mock(async () => ({
+      _: 'messages.channelMessages',
+      messages: [
+        photo,
+        { _: 'message', id: 1, peerId, date: DATE, message: 'just text' },
+      ],
+      users: [],
+      chats: [],
+      count: 2,
+    }))
+
+    const result = await list({ call } as unknown as CallClient, { limit: 5 })
+
+    expect(result.items.map((item) => item.attachment)).toEqual([
+      extractAttachment(photo),
+      null,
+    ])
+    expect(result.items[0]?.attachment).toMatchObject({
+      kind: 'photo',
+      size: 60_000,
+    })
   })
 
   it('asks Telegram for a window the cache does not hold, then caches it', async () => {

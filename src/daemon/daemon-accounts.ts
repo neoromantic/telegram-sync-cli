@@ -13,6 +13,7 @@ import {
   extractForwardFromId,
   type RawMessageFwdHeader,
 } from '../utils/message-parser'
+import { messageTypeOfMediaType } from '../utils/message-type'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
 import {
   handleContactRawUpdate,
@@ -33,24 +34,6 @@ import {
 } from './handlers'
 import type { AccountConnectionState, AccountEventHandlers } from './types'
 
-const MEDIA_TYPE_MAP: Record<string, string> = {
-  photo: 'photo',
-  video: 'video',
-  document: 'document',
-  sticker: 'sticker',
-  voice: 'voice',
-  audio: 'audio',
-  poll: 'poll',
-  contact: 'contact',
-  location: 'location',
-  live_location: 'location',
-  venue: 'venue',
-  game: 'game',
-  invoice: 'invoice',
-  webpage: 'webpage',
-  dice: 'dice',
-}
-
 export function resolveRealtimeMessageType(msg: {
   isService?: boolean
   media?: { type?: string } | null
@@ -63,15 +46,7 @@ export function resolveRealtimeMessageType(msg: {
     return { messageType: 'text', hasMedia: false }
   }
 
-  const mediaType = msg.media.type
-  if (!mediaType) {
-    return { messageType: 'unknown', hasMedia: true }
-  }
-
-  return {
-    messageType: MEDIA_TYPE_MAP[mediaType] ?? 'unknown',
-    hasMedia: true,
-  }
+  return { messageType: messageTypeOfMediaType(msg.media.type), hasMedia: true }
 }
 
 export function resolveSyncChatType(

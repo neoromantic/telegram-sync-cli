@@ -1,6 +1,7 @@
 /**
  * Type definitions for telegram-sync-cli
  */
+import type { AttachmentInfo } from '../utils/attachment'
 
 /** Account stored in database */
 export interface Account {
@@ -67,6 +68,8 @@ export interface MessageSearchItem {
   messageType: string
   hasMedia: boolean
   mediaPath: string | null
+  /** The message's file, read from its raw_json; null when it has none */
+  attachment: AttachmentInfo | null
   isOutgoing: boolean
   isEdited: boolean
   isPinned: boolean

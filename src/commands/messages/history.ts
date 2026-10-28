@@ -31,7 +31,8 @@ import { resolveSelfId } from '../send/sent-message-cache'
 import {
   type HistoryClient,
   MessageNotFoundError,
-  messageRowToItem,
+  messageItemReader,
+  messageRowsToItems,
 } from './helpers'
 
 type CallClient = Pick<TelegramClient, 'call'>
@@ -314,7 +315,7 @@ export async function listHistory(
 
   return {
     chatId: chat.chatId,
-    items: rows.map(messageRowToItem),
+    items: messageRowsToItems(options.cacheDb, rows),
     limit: window.limit,
     before: window.before ?? null,
     after: window.after ?? null,
@@ -515,12 +516,13 @@ export async function getMessageWithContext(
   options: GetMessageOptions,
 ): Promise<GetMessageResult> {
   const { around, source } = await readAround(options)
+  const toItem = messageItemReader(options.cacheDb)
 
   return {
     chatId: options.chat.chatId,
-    message: messageRowToItem(around.message),
-    newer: around.newer.map(messageRowToItem),
-    older: around.older.map(messageRowToItem),
+    message: toItem(around.message),
+    newer: around.newer.map(toItem),
+    older: around.older.map(toItem),
     source,
     stale: false,
   }

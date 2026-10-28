@@ -254,6 +254,41 @@ describe('SQL Command', () => {
       expect(getColumnNames('history_ranges').sort()).toEqual(columns.sort())
     })
 
+    it('describes every column of message_attachments, with its index', () => {
+      const db = new Database(':memory:')
+      initCacheSchema(db)
+      initSyncSchema(db)
+      const columns = (
+        db.query('PRAGMA table_info(message_attachments)').all() as Array<{
+          name: string
+        }>
+      ).map((column) => column.name)
+      const indexes = (
+        db.query('PRAGMA index_list(message_attachments)').all() as Array<{
+          name: string
+        }>
+      )
+        .map((index) => index.name)
+        .filter((name) => !name.startsWith('sqlite_'))
+      const sql = formatSchemaAsSql(
+        'message_attachments',
+        getTableAnnotation('message_attachments')!,
+        db,
+      )
+      db.close()
+
+      expect(sql).toContain('CREATE TABLE message_attachments')
+      expect(sql).toContain('idx_message_attachments_unique_file_id')
+      expect(getTableNames()).toContain('message_attachments')
+      expect(getColumnNames('message_attachments')).toEqual(columns)
+      expect(
+        Object.keys(getTableAnnotation('message_attachments')?.indexes ?? {}),
+      ).toEqual(indexes)
+      expect(
+        getColumnAnnotation('message_attachments', 'kind')?.enumValues,
+      ).toContain('round')
+    })
+
     it('describes every column of the message_search_text view, in order', () => {
       const db = new Database(':memory:')
       initCacheSchema(db)

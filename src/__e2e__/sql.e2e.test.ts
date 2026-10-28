@@ -10,8 +10,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { photoMessage } from '../__tests__/helpers/photo-message'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
+import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createMessagesCache } from '../db/messages-cache'
+import { extractAttachment } from '../utils/attachment'
 import { runCliFailure, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
@@ -142,6 +145,103 @@ describe('E2E: SQL Command', () => {
           { message_id: 1, text: 'the deploy failed' },
         ],
       },
+    })
+  })
+
+  describe('message_attachments', () => {
+    const photo = photoMessage({ _: 'peerUser', userId: 10 }, 1)
+
+    beforeEach(() => {
+      createMessagesCache(env.openCacheDb(1)).upsert(
+        parseRawMessage(photo, 10)!,
+      )
+    })
+
+    it('reads the attachment rows on the read-only connection', async () => {
+      const result = await runCliSuccess(
+        [
+          'sql',
+          '--query',
+          'SELECT a.kind, a.mime_type, a.file_size, a.unique_file_id, m.text FROM message_attachments a JOIN messages_cache m USING (chat_id, message_id)',
+        ],
+        env.getCliOptions(),
+      )
+
+      expect(result.json).toEqual({
+        success: true,
+        data: {
+          columns: ['kind', 'mime_type', 'file_size', 'unique_file_id', 'text'],
+          rows: [
+            {
+              kind: 'photo',
+              mime_type: 'image/jpeg',
+              file_size: 60_000,
+              unique_file_id: extractAttachment(photo)!.uniqueFileId,
+              text: 'A photo of the example lake',
+            },
+          ],
+          rowCount: 1,
+        },
+      })
+    })
+
+    it('refuses writes to it', async () => {
+      const result = await runCliFailure(
+        ['sql', '--query', 'DELETE FROM message_attachments'],
+        1,
+        env.getCliOptions(),
+      )
+      expect(result.json).toMatchObject({
+        success: false,
+        error: { code: 'SQL_WRITE_NOT_ALLOWED' },
+      })
+
+      const count = await runCliSuccess(
+        ['sql', 'SELECT COUNT(*) AS n FROM message_attachments'],
+        env.getCliOptions(),
+      )
+      expect(count.json).toMatchObject({ data: { rows: [{ n: 1 }] } })
+    })
+
+    it('prints its schema with descriptions', async () => {
+      const result = await runCliSuccess(
+        ['sql', 'print-schema', '--table', 'message_attachments'],
+        env.getCliOptions(),
+      )
+      const data = (
+        result.json as {
+          data: {
+            primaryKey: string[]
+            columns: Array<{ name: string; description: string }>
+            indexes: Array<{ name: string; description?: string }>
+          }
+        }
+      ).data
+
+      expect(data.primaryKey).toEqual(['chat_id', 'message_id'])
+      expect(data.columns.map((column) => column.name)).toEqual([
+        'chat_id',
+        'message_id',
+        'kind',
+        'source',
+        'file_name',
+        'mime_type',
+        'file_size',
+        'duration',
+        'width',
+        'height',
+        'unique_file_id',
+        'grouped_id',
+      ])
+      for (const column of data.columns) {
+        expect(column.description).not.toBe('')
+      }
+      expect(data.indexes).toContainEqual(
+        expect.objectContaining({
+          name: 'idx_message_attachments_unique_file_id',
+          description: 'Find the messages that hold a cached file',
+        }),
+      )
     })
   })
 
