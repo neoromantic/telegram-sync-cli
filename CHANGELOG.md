@@ -58,7 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tg sql` can no longer change the cache with a pragma. It let
   `PRAGMA user_version = 0` through, which made the next start run the
   one-time migrations again. Queries now run on a read-only connection and
-  such a statement returns `SQL_WRITE_NOT_ALLOWED`. Reading pragmas such as
+  such a statement, in either form (`PRAGMA writable_schema(1)` too), returns
+  `SQL_WRITE_NOT_ALLOWED`. A query with more than one statement returns
+  `SQL_OPERATION_BLOCKED` instead of running only the first. Reading pragmas such as
   `PRAGMA table_info(messages_cache)` works, and no longer fails with a
   syntax error from the row limit (#88).
 

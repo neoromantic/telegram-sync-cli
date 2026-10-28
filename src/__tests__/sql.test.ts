@@ -5,7 +5,11 @@ import { Database } from 'bun:sqlite'
 import { describe, expect, it } from 'bun:test'
 
 import { CHAT_TYPE_VALUES } from '../commands/chats/helpers'
-import { applyQueryLimit, isReadOnlyQuery } from '../commands/sql/helpers'
+import {
+  applyQueryLimit,
+  hasSeveralStatements,
+  isReadOnlyQuery,
+} from '../commands/sql/helpers'
 import { formatSchemaAsSql } from '../commands/sql/schema-text'
 import { initCacheSchema } from '../db/schema'
 import {
@@ -61,6 +65,28 @@ describe('SQL Command', () => {
       expect(isReadOnlyQuery('pragma main.journal_mode=DELETE')).toBe(false)
       expect(isReadOnlyQuery('PRAGMA query_only = OFF')).toBe(false)
       expect(isReadOnlyQuery('PRAGMA user_version')).toBe(true)
+    })
+
+    it('refuses a pragma that sets a value with an argument', () => {
+      expect(isReadOnlyQuery('PRAGMA writable_schema(1)')).toBe(false)
+      expect(isReadOnlyQuery('PRAGMA journal_mode(OFF)')).toBe(false)
+      expect(isReadOnlyQuery('PRAGMA main.user_version (0)')).toBe(false)
+      expect(isReadOnlyQuery('PRAGMA table_info(messages_cache)')).toBe(true)
+      expect(isReadOnlyQuery('pragma main.index_list(messages_cache)')).toBe(
+        true,
+      )
+      expect(isReadOnlyQuery('PRAGMA integrity_check(10)')).toBe(true)
+    })
+
+    it('finds a second statement outside strings and comments', () => {
+      expect(hasSeveralStatements('SELECT 1; PRAGMA user_version = 0')).toBe(
+        true,
+      )
+      expect(hasSeveralStatements('SELECT 1;SELECT 2')).toBe(true)
+      expect(hasSeveralStatements('SELECT 1;')).toBe(false)
+      expect(hasSeveralStatements('SELECT 1; -- done')).toBe(false)
+      expect(hasSeveralStatements('SELECT \'a; b\', "c;d" FROM t')).toBe(false)
+      expect(hasSeveralStatements("SELECT 'it''s; ok' /* ; */")).toBe(false)
     })
 
     it('allows PRAGMA statements', () => {
