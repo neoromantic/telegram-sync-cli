@@ -69,25 +69,47 @@ function chatObjectProtected(chat: RawObject | null): boolean {
   )
 }
 
+/** The chat's chats_cache row: its raw_json and when it was fetched, ms */
+export interface CachedChatState {
+  raw_json: string
+  fetched_at: number
+}
+
+/**
+ * The chat's protection as the cache knows it: a positive answer of the
+ * last online check (it holds until an online check finds protection off),
+ * else the chat's noforwards when its chats_cache raw_json is a raw chat or
+ * channel (dialog rows don't carry it) fetched after that check
+ */
+export function knownChatProtection(
+  chat: CachedChatState | null,
+  stored: ChatProtectionRow | null,
+): ProtectionResult {
+  if (stored?.protected === 1) {
+    return { protected: true, reason: stored.reason ?? 'chat' }
+  }
+  if (!chat || !chatObjectProtected(parseJson(chat.raw_json))) {
+    return NOT_PROTECTED
+  }
+  // The online check that found protection off is newer
+  if (stored !== null && chat.fetched_at <= stored.fetched_at) {
+    return NOT_PROTECTED
+  }
+  return { protected: true, reason: 'chat' }
+}
+
 /**
  * Protection known without Telegram: the message's flags in its raw_json,
- * the last online check of the chat, and the chat's noforwards when its
- * chats_cache raw_json is a raw chat or channel (dialog rows don't carry it)
+ * then the chat's (knownChatProtection)
  */
 export function checkCachedProtection(
   messageRawJson: string,
-  chatRawJson: string | null,
+  chat: CachedChatState | null,
   stored: ChatProtectionRow | null,
 ): ProtectionResult {
   const message = messageProtection(parseJson(messageRawJson))
   if (message.protected) return message
-  if (stored?.protected === 1) {
-    return { protected: true, reason: stored.reason ?? 'chat' }
-  }
-  if (chatObjectProtected(parseJson(chatRawJson))) {
-    return { protected: true, reason: 'chat' }
-  }
-  return NOT_PROTECTED
+  return knownChatProtection(chat, stored)
 }
 
 export interface OnlineProtection {

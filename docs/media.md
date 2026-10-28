@@ -138,8 +138,10 @@ media from protected chats and messages. `tg media download` refuses with `CONTE
 A refused run downloads nothing. A file already cached stays in the cache, but the command
 won't serve it either. A protection found online is kept: the message's in its cached row, the
 chat's in `chat_content_protection`. Later runs refuse those files offline too, until an online
-check (`--fresh`, or a download of a file the cache lacks) finds the protection turned off. A
-protection turned on after the last online check isn't known offline; `--fresh` checks again.
+check (`--fresh`, or a download of a file the cache lacks) finds the protection turned off. When
+Telegram sends the message without its chat, the protection last known holds. A chat object the
+cache got after the last online check, from `tg chats get` or the daemon, counts too. A
+protection turned on after that and never seen isn't known offline; `--fresh` checks again.
 
 ## Media cache
 
