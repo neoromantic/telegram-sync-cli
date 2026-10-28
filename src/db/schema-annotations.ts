@@ -389,7 +389,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         message_type: {
           description:
-            'Type of message content, as live updates and history sync both write it. Rows history sync wrote before 0.7 say document for every file (voice, video, sticker…) and media for other media',
+            'Type of message content, as live updates and history sync both write it. Rows history sync wrote in earlier versions say document for every file (voice, video, sticker…) and media for other media, until the message is fetched again',
           enumValues: [
             'text',
             'photo',
