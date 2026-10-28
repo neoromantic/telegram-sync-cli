@@ -104,6 +104,13 @@ describe('sanitizeFileName', () => {
     expect(sanitizeFileName('what?*:<>|".txt')).toBe('what_______.txt')
   })
 
+  it('replaces bidi controls that would hide the real extension', () => {
+    expect(sanitizeFileName('report\u202efdp.exe')).toBe('report_fdp.exe')
+    expect(sanitizeFileName('a\u2066b\u2069\u200e\u200f\u061c.txt')).toBe(
+      'a_b____.txt',
+    )
+  })
+
   it('prefixes Windows device names', () => {
     expect(sanitizeFileName('CON.txt')).toBe('_CON.txt')
     expect(sanitizeFileName('lpt1')).toBe('_lpt1')

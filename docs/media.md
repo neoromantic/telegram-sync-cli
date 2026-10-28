@@ -157,7 +157,7 @@ accounts/<id>/media/
     └── .lock                # a download is running: its pid, refreshed while it runs
 ```
 
-The file keeps the sender's name, made safe for every file system (no folders, control
+The file keeps the sender's name, made safe for every file system (no folders, control or bidi
 characters or reserved names, at most 200 bytes). A file without a name is `<kind>.<ext>`:
 `photo.jpg`, `voice.ogg`, `file.pdf`, or `.bin` for a type `tg` doesn't know. The media cache
 is counted apart from `cache.db`; `tg status --sizes` shows each account's
