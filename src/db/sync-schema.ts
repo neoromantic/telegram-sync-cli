@@ -195,31 +195,48 @@ function createSearchUpdateTrigger(db: Database): void {
 }
 
 /**
- * Whether the update trigger is the one of 0.5.0 and older, which re-indexes
- * a message on every write
+ * What a cache from 0.5.0 and older needs: its update trigger re-indexes a
+ * message on every write, and it has an index on fetched_at that no query
+ * reads
  */
-function hasOldSearchUpdateTrigger(db: Database): boolean {
-  const row = db
+function messagesCacheWritesWork(db: Database): {
+  trigger: boolean
+  index: boolean
+} {
+  const rows = db
     .query(
-      `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'messages_cache_au'`,
+      `SELECT type, sql FROM sqlite_master
+       WHERE (type = 'trigger' AND name = 'messages_cache_au')
+          OR (type = 'index' AND name = 'idx_messages_cache_fetched')`,
     )
-    .get() as { sql: string | null } | null
-  return row !== null && !/AFTER\s+UPDATE\s+OF\b/i.test(row.sql ?? '')
+    .all() as Array<{ type: string; sql: string | null }>
+  const trigger = rows.find((row) => row.type === 'trigger')
+  return {
+    trigger:
+      trigger !== undefined &&
+      !/AFTER\s+UPDATE\s+OF\b/i.test(trigger.sql ?? ''),
+    index: rows.some((row) => row.type === 'index'),
+  }
 }
 
 /**
  * Give a cache from 0.5.0 and older the update trigger that re-indexes only
- * changed messages. One-time work, so it runs under the write lock and is
- * checked again there; a cache that needs nothing is only read.
+ * changed messages, and drop its fetched_at index. One-time work, so it runs
+ * under the write lock and is checked again there; a cache that needs
+ * nothing is only read.
  */
-function upgradeSearchUpdateTrigger(db: Database): void {
-  if (!hasOldSearchUpdateTrigger(db)) return
+function upgradeMessagesCacheWrites(db: Database): void {
+  const pending = messagesCacheWritesWork(db)
+  if (!pending.trigger && !pending.index) return
 
   withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
     db.transaction(() => {
-      if (!hasOldSearchUpdateTrigger(db)) return
-      db.run('DROP TRIGGER messages_cache_au')
-      createSearchUpdateTrigger(db)
+      const work = messagesCacheWritesWork(db)
+      if (work.trigger) {
+        db.run('DROP TRIGGER messages_cache_au')
+        createSearchUpdateTrigger(db)
+      }
+      if (work.index) db.run('DROP INDEX IF EXISTS idx_messages_cache_fetched')
     }).immediate()
   })
 }
@@ -478,10 +495,6 @@ export function initSyncSchema(
     CREATE INDEX IF NOT EXISTS idx_messages_cache_pinned
     ON messages_cache(chat_id) WHERE is_pinned = 1
   `)
-  db.run(`
-    CREATE INDEX IF NOT EXISTS idx_messages_cache_fetched
-    ON messages_cache(fetched_at)
-  `)
   // A delete without chat context names only message IDs (#7)
   ensureIndex(db, 'idx_messages_cache_message_id', 'messages_cache(message_id)')
 
@@ -490,7 +503,7 @@ export function initSyncSchema(
     createMessageSearchSchema(db, contentless)
     ensureMessageSearchIndex(db, contentless)
   }
-  upgradeSearchUpdateTrigger(db)
+  upgradeMessagesCacheWrites(db)
 
   // History ranges - the message ID ranges of a chat cached without gaps
   // (src/db/history-ranges.ts); ranges of one chat never touch or overlap

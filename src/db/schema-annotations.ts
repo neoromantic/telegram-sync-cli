@@ -368,7 +368,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         idx_messages_cache_reply: 'Find reply chains',
         idx_messages_cache_type: 'Filter by media type',
         idx_messages_cache_pinned: 'Find pinned messages',
-        idx_messages_cache_fetched: 'Track sync progress',
         idx_messages_cache_message_id:
           'Find the chat of a message ID that a delete without chat context names',
       },

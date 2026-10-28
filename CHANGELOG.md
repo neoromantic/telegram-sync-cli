@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the new name only in messages indexed after the rename. Results still show
   the current names (#93 tracks re-indexing after a rename). The first open of
   an existing cache replaces its search trigger (#87).
+- The cache no longer keeps an index on `messages_cache.fetched_at`: no query
+  used it, and it took space for every message. The first open of an
+  existing cache drops it; `tg db vacuum` gives the space back (#87).
 
 ## [0.5.0] - 2026-10-22
 
