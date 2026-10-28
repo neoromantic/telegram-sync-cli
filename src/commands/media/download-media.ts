@@ -38,6 +38,7 @@ import {
 import {
   acquireDownloadLock,
   cachedFileName,
+  DownloadLockTimeoutError,
   findCachedFile,
   type MediaCachePaths,
   mediaPaths,
@@ -100,6 +101,8 @@ export interface DownloadDeps {
   download?: typeof downloadAsIterable
   /** Where flood waits of the transfer are recorded; cacheDb's by default */
   rateLimits?: RateLimitsService
+  /** How long to wait for another process's download of the file */
+  lockWaitMs?: number
 }
 
 export interface DownloadRequest {
@@ -247,6 +250,20 @@ function contentProtected(
     `${PROTECTION_MESSAGES[reason]}: Telegram doesn't allow saving its media`,
     { chatId, messageId, reason },
     suggestion,
+  )
+}
+
+function lockTimeout(err: DownloadLockTimeoutError): MediaError {
+  const holder = err.holder === null ? '' : ` (pid ${err.holder})`
+  return new MediaError(
+    ErrorCodes.GENERAL_ERROR,
+    `Another tg process${holder} is still downloading this file after ${Math.round(err.waitedMs / 1000)}s`,
+    {
+      lock: err.lockPath,
+      pid: err.holder,
+      waited_seconds: Math.round(err.waitedMs / 1000),
+    },
+    'run the command again when the other download ends',
   )
 }
 
@@ -610,6 +627,9 @@ async function downloadOnline(
 
     const release = await acquireDownloadLock(target.paths.lock, {
       signal: deps.signal,
+      waitMs: deps.lockWaitMs,
+    }).catch((err: unknown) => {
+      throw err instanceof DownloadLockTimeoutError ? lockTimeout(err) : err
     })
     try {
       // Another process may have finished it meanwhile

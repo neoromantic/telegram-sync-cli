@@ -104,7 +104,10 @@ How a run gets the file:
   with no JSON.
 - Progress goes to stderr, only when stderr is a terminal.
 - Two runs that download the same file, such as a file and a forwarded copy, don't write it
-  together: the second waits, then serves the finished file from the cache.
+  together: the second waits, then serves the finished file from the cache. It waits up to 10
+  minutes, then ends with `GENERAL_ERROR`, `details: { lock, pid, waited_seconds }`. A running
+  download refreshes its lock; a lock whose process is gone, or that nobody refreshed for a
+  minute (a crashed run), is taken over.
 
 ### `--out`
 
@@ -151,7 +154,7 @@ accounts/<id>/media/
     ├── report.pdf           # the file: one copy per file per account
     ├── .report.pdf.part     # a partial download, continued by the next run
     ├── thumb-m.jpg          # a --thumb preview
-    └── .lock                # a download is running: the pid of the process
+    └── .lock                # a download is running: its pid, refreshed while it runs
 ```
 
 The file keeps the sender's name, made safe for every file system (no folders, control

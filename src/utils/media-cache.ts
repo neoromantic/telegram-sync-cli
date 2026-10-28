@@ -5,18 +5,22 @@
  *   <uniqueFileId>/<name>              the file, one copy per uniqueFileId
  *   <uniqueFileId>/.<name>.part        partial download, resumed next run
  *   <uniqueFileId>/thumb-<type>.jpg    --thumb preview (.webp for stickers)
- *   <uniqueFileId>/.lock               download in progress: holder pid
+ *   <uniqueFileId>/.lock               download in progress: holder pid,
+ *                                      refreshed while it runs
  *
  * A cached name never starts with a dot, so `.part` and `.lock` files
  * can't be mistaken for a file someone sent.
  */
+import { randomUUID } from 'node:crypto'
 import {
   closeSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmdirSync,
   rmSync,
   type Stats,
@@ -41,6 +45,15 @@ const PARTIAL_SUFFIX = '.part'
 const LOCK_POLL_MS = 250
 /** A lock file this young may still be empty: its holder is writing the pid */
 const LOCK_WRITE_GRACE_MS = 5_000
+/** How often a running download refreshes its lock's mtime */
+export const LOCK_REFRESH_MS = 10_000
+/**
+ * A lock not refreshed for this long is stale even when a process has its
+ * pid: after a crash or a reboot the pid may be another program's
+ */
+export const LOCK_STALE_MS = 60_000
+/** How long a download waits for another process's download of the file */
+export const LOCK_WAIT_MS = 10 * 60 * 1000
 /** Longest cached name; the extension is kept when it is cut */
 const MAX_NAME_BYTES = 200
 /** An extension starts at the last dot within this many final characters */
@@ -200,11 +213,15 @@ function processAlive(pid: number): boolean {
   }
 }
 
-/**
- * Who holds a lock: its pid, `pending` while a new lock is still empty, or
- * null for no lock or a broken one
- */
-function readLockHolder(lockPath: string): number | 'pending' | null {
+interface LockState {
+  /** The holder's pid, or `pending` while a new lock is still empty */
+  holder: number | 'pending'
+  /** When the holder last refreshed it */
+  mtimeMs: number
+}
+
+/** A lock's holder and age; null for no lock or a broken one */
+function readLock(lockPath: string): LockState | null {
   let content: string
   let stats: Stats
   try {
@@ -214,33 +231,100 @@ function readLockHolder(lockPath: string): number | 'pending' | null {
     return null
   }
   if (content === '') {
-    return Date.now() - stats.mtimeMs < LOCK_WRITE_GRACE_MS ? 'pending' : null
+    return Date.now() - stats.mtimeMs < LOCK_WRITE_GRACE_MS
+      ? { holder: 'pending', mtimeMs: stats.mtimeMs }
+      : null
   }
   const pid = Number(content)
-  return Number.isSafeInteger(pid) && pid > 0 ? pid : null
+  return Number.isSafeInteger(pid) && pid > 0
+    ? { holder: pid, mtimeMs: stats.mtimeMs }
+    : null
 }
 
 type IsAlive = (pid: number) => boolean
 
+/** Whether a lock holds its folder: its holder runs and keeps refreshing it */
+function isLive(lock: LockState | null, isAlive: IsAlive): boolean {
+  if (lock === null) return false
+  if (Date.now() - lock.mtimeMs >= LOCK_STALE_MS) return false
+  return lock.holder === 'pending' || isAlive(lock.holder)
+}
+
 function lockIsLive(lockPath: string, isAlive: IsAlive): boolean {
-  const holder = readLockHolder(lockPath)
-  if (holder === null) return false
-  return holder === 'pending' || isAlive(holder)
+  return isLive(readLock(lockPath), isAlive)
+}
+
+/**
+ * Remove a stale lock, but never a live one another process took
+ * meanwhile: the lock is renamed away first, so only one process gets it,
+ * checked again there, and put back when it turned out live. The moved
+ * name is a partial download's, so a run that dies in between leaves
+ * nothing `tg media clean` misses.
+ */
+function removeStaleLock(lockPath: string, isAlive: IsAlive): void {
+  const moved = join(
+    dirname(lockPath),
+    `${LOCK_FILE}-${process.pid}-${randomUUID()}${PARTIAL_SUFFIX}`,
+  )
+  try {
+    renameSync(lockPath, moved)
+  } catch (err) {
+    if (errorCode(err) === 'ENOENT') return
+    throw err
+  }
+  if (lockIsLive(moved, isAlive)) {
+    try {
+      linkSync(moved, lockPath)
+    } catch {
+      // A newer lock took its place
+    }
+  }
+  rmSync(moved, { force: true })
+}
+
+/** Another process held a file's download lock for longer than the wait */
+export class DownloadLockTimeoutError extends Error {
+  readonly lockPath: string
+  /** The holder's pid, when the lock names one */
+  readonly holder: number | null
+  readonly waitedMs: number
+
+  constructor(lockPath: string, holder: number | null, waitedMs: number) {
+    super(`Waited ${waitedMs} ms for the download lock ${lockPath}`)
+    this.name = 'DownloadLockTimeoutError'
+    this.lockPath = lockPath
+    this.holder = holder
+    this.waitedMs = waitedMs
+  }
+}
+
+export interface DownloadLockOptions {
+  signal?: AbortSignal
+  isAlive?: IsAlive
+  pollMs?: number
+  /** LOCK_WAIT_MS by default */
+  waitMs?: number
+  /** LOCK_REFRESH_MS by default */
+  refreshMs?: number
 }
 
 /**
  * Take the folder's download lock: two processes never write one partial
- * download together. Waits while a live process holds it, takes over the
- * lock of a dead one, and throws the signal's reason on abort. Returns the
- * release, which removes the lock only while it is still this process's.
+ * download together. Waits while a live process holds it, up to `waitMs`
+ * (then DownloadLockTimeoutError); takes over a lock whose holder is gone
+ * or stopped refreshing it; throws the signal's reason on abort. The lock
+ * is refreshed until the release, which removes it only while it is still
+ * this process's.
  */
 export async function acquireDownloadLock(
   lockPath: string,
-  options: { signal?: AbortSignal; isAlive?: IsAlive; pollMs?: number } = {},
+  options: DownloadLockOptions = {},
 ): Promise<() => void> {
   const isAlive = options.isAlive ?? processAlive
   const pollMs = options.pollMs ?? LOCK_POLL_MS
+  const waitMs = options.waitMs ?? LOCK_WAIT_MS
   const { signal } = options
+  const started = Date.now()
   mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 })
 
   for (;;) {
@@ -257,19 +341,29 @@ export async function acquireDownloadLock(
       } finally {
         closeSync(fd)
       }
+      const ours = () => readLock(lockPath)?.holder === process.pid
+      const refresh = setInterval(() => {
+        if (ours()) touch(lockPath)
+      }, options.refreshMs ?? LOCK_REFRESH_MS)
+      refresh.unref()
       let released = false
       return () => {
         if (released) return
         released = true
-        if (readLockHolder(lockPath) === process.pid) {
-          rmSync(lockPath, { force: true })
-        }
+        clearInterval(refresh)
+        if (ours()) rmSync(lockPath, { force: true })
       }
     }
 
-    if (!lockIsLive(lockPath, isAlive)) {
-      rmSync(lockPath, { force: true })
+    const lock = readLock(lockPath)
+    if (!isLive(lock, isAlive)) {
+      removeStaleLock(lockPath, isAlive)
       continue
+    }
+    const waited = Date.now() - started
+    if (waited >= waitMs) {
+      const holder = typeof lock?.holder === 'number' ? lock.holder : null
+      throw new DownloadLockTimeoutError(lockPath, holder, waited)
     }
     try {
       await delay(pollMs, undefined, { signal })
@@ -398,8 +492,9 @@ export interface CleanResult {
  * complete file goes, only stale partial downloads; with several filters a
  * file goes when it matches them all. Every run removes partial downloads
  * not written to for `partialMaxAgeMs` (with `all`, every one), skips a
- * folder whose download lock a live process holds, removes the lock of a
- * dead one, and removes folders left empty.
+ * folder whose download lock a live process holds, removes a stale lock
+ * (its holder gone or no longer refreshing it), and removes folders left
+ * empty.
  */
 export function cleanMedia(
   mediaDir: string,
@@ -476,7 +571,7 @@ export function cleanMedia(
 
     // Checked again: a download may have taken the dead holder's lock meanwhile
     if (hasLock && !lockIsLive(lockPath, isAlive)) {
-      rmSync(lockPath, { force: true })
+      removeStaleLock(lockPath, isAlive)
     }
     try {
       rmdirSync(dir)
