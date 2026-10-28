@@ -110,6 +110,8 @@ export function thumbPaths(
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
 // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it replaces
 const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f/\\:*?"<>|]/g
+/** Bidi controls: `report\u202efdp.exe` would show as `reportexe.pdf` */
+const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
 
 /** Cut a name to `maxBytes` of UTF-8 without splitting a character */
 function cutToBytes(text: string, maxBytes: number): string {
@@ -127,7 +129,7 @@ function cutToBytes(text: string, maxBytes: number): string {
 
 /**
  * A file name that is safe to create in any of the file systems tg runs
- * on: no folders, no control or reserved characters, no leading dot, no
+ * on: no folders, no control, bidi or reserved characters, no leading dot, no
  * Windows device name, at most 200 bytes with the extension kept. Null when
  * nothing usable is left.
  */
@@ -135,6 +137,7 @@ export function sanitizeFileName(name: string): string | null {
   let result = (name.split(/[/\\]/).pop() ?? '')
     .normalize('NFC')
     .replace(UNSAFE_CHARS, '_')
+    .replace(BIDI_CONTROLS, '_')
     .replace(/^[.\s]+/, '')
     .replace(/[.\s]+$/, '')
   if (result === '') return null
