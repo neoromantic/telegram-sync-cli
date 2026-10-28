@@ -21,8 +21,8 @@ sent is listed on https://usage.sergeybaus.com.
   path as `feature_used` and, when it fails, the error code or Telegram's RPC error name
   (`FLOOD_WAIT`) as `error_occurred`; an error reading `config.json` or a cache also sends its
   message, without account numbers, a data directory set by `TELEGRAM_SYNC_CLI_DATA_DIR`, the
-  home folder or the user name. The daemon sends each event at most once a day and checks in
-  hourly while it runs. Every exit waits at most 500 ms for the requests in flight. Details:
+  home folder or the user name. The daemon and runs from a script send each event at most once
+  a day, and the daemon checks in hourly while it runs. Every exit waits at most 500 ms for the requests in flight. Details:
   README "Usage stats" and `docs/configuration.md#usage-stats`.
 - `tg telemetry status [--json]`, `tg telemetry on` and `tg telemetry off`: whether usage stats
   are on and which rule decided, the install ID and the state file (`telemetry.json` in the

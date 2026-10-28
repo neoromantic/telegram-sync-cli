@@ -396,7 +396,7 @@ export function createTelemetry(options: TelemetryOptions): Telemetry {
   const stateDir = options.stateDir
   const stateFile = stateDir ? join(stateDir, 'telemetry.json') : ''
   const features = new Set(options.features ?? [])
-  const throttled = ['scheduled', 'daemon', 'plugin'].includes(r.mode)
+  const throttled = ['scheduled', 'daemon', 'plugin', 'script'].includes(r.mode)
   const inflight = new Set<Promise<void>>()
   const off = options.offCommand || `${options.product} telemetry off`
   const notice = `${options.product} shares usage stats with its author: how often it runs, which features are used, errors, version and OS, tied to a random install ID. It never sends your files, arguments or account names. Nothing has been sent yet. Turn it off with \`${off}\` or \`DO_NOT_TRACK=1\`. Details: ${NOTICE_URL}`

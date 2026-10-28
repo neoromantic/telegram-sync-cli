@@ -252,6 +252,8 @@ random install ID. The full list and an example event: <https://usage.sergeybaus
   terminal has shown it.
 - **The daemon** sends each event at most once per UTC day, checks in every hour while it runs,
   and reads `telemetry.json` each time, so `tg telemetry off` stops it without a restart.
+- **Scripts.** A run with no terminal and no AI agent, such as a cron job or a status bar that
+  runs tg every minute, also sends each event at most once per UTC day.
 - **Delivery.** One HTTPS request per event to `https://usage.sergeybaus.com/i/v0/e/`, which
   passes it to PostHog (US Cloud). A request gets 3 seconds and one attempt; nothing is queued
   on disk. Before it exits tg waits at most 500 ms for requests in flight.
