@@ -9,14 +9,14 @@
  * - An error is sent as its type: the error code, or Telegram's RPC error
  *   (`FLOOD_WAIT`). Messages can name chats, users or a query, so only the
  *   local errors passed to reportLocalError (config file, cache database) add
- *   their message, without account numbers; the client scrubs it of the home
- *   directory and user name.
+ *   their message, without account numbers or a data directory the user set;
+ *   the client scrubs it of the home directory and user name.
  * - A source checkout sends nothing unless TELEGRAM_SYNC_CLI_TELEMETRY is on.
  * - Every exit waits up to 500 ms for the events in flight.
  */
 import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, normalize, resolve } from 'node:path'
 import { VERSION } from '../version'
 import {
   type Channel,
@@ -301,18 +301,46 @@ export function withoutAccountIds(message: string): string {
     .replace(/\b(account) \d+/gi, '$1 <id>')
 }
 
+const quoteRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * A local error's message with the data directory that
+ * TELEGRAM_SYNC_CLI_DATA_DIR sets as `<data-dir>`: its folder names are the
+ * user's. The default one is in the home directory, which the client turns
+ * into `~`.
+ */
+export function withoutDataDir(
+  message: string,
+  env: Env = process.env,
+): string {
+  const dir = env.TELEGRAM_SYNC_CLI_DATA_DIR
+  if (!dir) return message
+  // As given, as join() writes it and absolute; longest first
+  const forms = [dir, normalize(dir), resolve(dir)]
+    .map((p) => p.replace(/(?<=.)[\\/]+$/, ''))
+    .filter((p) => p.length > 1 && p !== '..')
+    .sort((a, b) => b.length - a.length)
+  if (forms.length === 0) return message
+  const alternatives = [...new Set(forms)].map(quoteRe).join('|')
+  const re = new RegExp(`(?<![\\w.-])(?:${alternatives})(?![\\w.-])`, 'g')
+  return message.replace(re, '<data-dir>')
+}
+
 /**
  * A local error (config file, cache database) whose message names no chat,
  * user or query: sent as its type and its message, without account numbers
- * and scrubbed of the home directory and user name by the client. Call it
- * before error().
+ * or a data directory the user set, and scrubbed of the home directory and
+ * user name by the client. Call it before error().
  */
 export function reportLocalError(err: unknown): void {
   if (err instanceof ExitPending) return
   const message = (err as { message?: unknown } | null)?.message
   report(
     typeof message === 'string'
-      ? { code: errorType(err), message: withoutAccountIds(message) }
+      ? {
+          code: errorType(err),
+          message: withoutAccountIds(withoutDataDir(message)),
+        }
       : errorType(err),
   )
 }

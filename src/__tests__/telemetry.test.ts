@@ -16,6 +16,7 @@ import {
   errorType,
   rpcErrorType,
   withoutAccountIds,
+  withoutDataDir,
 } from '../telemetry'
 
 const run = () => {}
@@ -183,6 +184,42 @@ describe('withoutAccountIds', () => {
     )
     expect(withoutAccountIds('session_4.db is locked')).toBe(
       'session_<id>.db is locked',
+    )
+  })
+})
+
+describe('withoutDataDir', () => {
+  it('drops a data directory the user set, wherever its path appears', () => {
+    const env = { TELEGRAM_SYNC_CLI_DATA_DIR: '/Volumes/Work/Acme Corp/tg/' }
+    expect(
+      withoutDataDir(
+        "EACCES: permission denied, open '/Volumes/Work/Acme Corp/tg/config.json'",
+        env,
+      ),
+    ).toBe("EACCES: permission denied, open '<data-dir>/config.json'")
+    expect(
+      withoutDataDir(
+        'Could not read /Volumes/Work/Acme Corp/tg/config.json: EACCES',
+        env,
+      ),
+    ).toBe('Could not read <data-dir>/config.json: EACCES')
+  })
+
+  it('matches a relative directory as join() writes it, not inside a word', () => {
+    const env = { TELEGRAM_SYNC_CLI_DATA_DIR: './acme-tg' }
+    expect(withoutDataDir('Could not read acme-tg/config.json', env)).toBe(
+      'Could not read <data-dir>/config.json',
+    )
+    expect(withoutDataDir('open old-acme-tg/config.json', env)).toBe(
+      'open old-acme-tg/config.json',
+    )
+  })
+
+  it('leaves the message alone without TELEGRAM_SYNC_CLI_DATA_DIR', () => {
+    const message = 'Could not read /home/user/.telegram-sync-cli/config.json'
+    expect(withoutDataDir(message, {})).toBe(message)
+    expect(withoutDataDir(message, { TELEGRAM_SYNC_CLI_DATA_DIR: '/' })).toBe(
+      message,
     )
   })
 })

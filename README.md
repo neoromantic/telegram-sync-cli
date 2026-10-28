@@ -168,9 +168,9 @@ tg sends usage stats to its author: how often it runs, which commands run (the c
 such as `chats list`, never its arguments), which errors come up, the tg version, how it was
 installed, the OS and CPU, and whether a terminal, a script, an AI agent or the daemon runs it,
 tied to a random install ID. A Telegram error is sent by its name only (`FLOOD_WAIT`); an error
-reading the config file or a cache also carries its message, with your home folder and user name
-taken out. tg never sends messages, chat or contact names, phone numbers, account, chat or user
-IDs, search queries or any other argument.
+reading the config file or a cache also carries its message, with your home folder, a data
+directory you set and your user name taken out. tg never sends messages, chat or contact names,
+phone numbers, account, chat or user IDs, search queries or any other argument.
 
 Nothing is sent until tg has shown you a one-line notice (in a terminal, or to an AI agent that
 runs it), and nothing from CI, tests or a source checkout. The daemon sends each event at most

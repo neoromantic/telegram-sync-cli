@@ -10,20 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Privacy change: tg now sends usage stats to its author, on by default: how often it runs, which
 commands run (`chats list`, never their arguments), the error codes they end with, the version,
 how it was installed and the OS, tied to a random install ID. It never sends messages, chat or
-contact names, phone numbers, account, chat or user IDs or queries. Nothing is sent until tg has shown a one-line
-notice, or from CI, tests or a source checkout. Turn it off with `tg telemetry off`,
-`TELEGRAM_SYNC_CLI_TELEMETRY=0` or `DO_NOT_TRACK=1`; everything that is sent is listed on
-https://usage.sergeybaus.com.
+contact names, phone numbers, account, chat or user IDs or queries. Nothing is sent until tg
+has shown a one-line notice, or from CI, tests or a source checkout. Turn it off with
+`tg telemetry off`, `TELEGRAM_SYNC_CLI_TELEMETRY=0` or `DO_NOT_TRACK=1`; everything that is
+sent is listed on https://usage.sergeybaus.com.
 
 ### Added
 
 - Usage stats, through usage.sergeybaus.com to PostHog. A run sends `app_started`, the command
   path as `feature_used` and, when it fails, the error code or Telegram's RPC error name
   (`FLOOD_WAIT`) as `error_occurred`; an error reading `config.json` or a cache also sends its
-  message, without account numbers, the home folder or the user name. The daemon sends each
-  event at most once a day and checks in hourly while it runs. Every exit waits at most 500 ms
-  for the requests in flight. Details: README "Usage stats" and
-  `docs/configuration.md#usage-stats`.
+  message, without account numbers, a data directory set by `TELEGRAM_SYNC_CLI_DATA_DIR`, the
+  home folder or the user name. The daemon sends each event at most once a day and checks in
+  hourly while it runs. Every exit waits at most 500 ms for the requests in flight. Details:
+  README "Usage stats" and `docs/configuration.md#usage-stats`.
 - `tg telemetry status [--json]`, `tg telemetry on` and `tg telemetry off`: whether usage stats
   are on and which rule decided, the install ID and the state file (`telemetry.json` in the
   data directory); `off` also deletes the install ID.

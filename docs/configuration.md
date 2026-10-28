@@ -217,12 +217,12 @@ tg config set activeAccount 2
   `tg accounts switch --id <id>` to use the new account.
 - An invalid `config.json` (not a JSON object, or a supported key with a wrong value) fails
   every command except `tg config`, `tg skill`, `tg telemetry` and `tg daemon` with
-  `INVALID_ARGS` and issue details before it runs; `tg config set` can still fix a wrong value. A `config.json` that
-  can't be read fails them with `GENERAL_ERROR` (`details.path`). `tg daemon` reads only
-  `cache.retention.*`, non-strictly, once at start, so such a file doesn't stop
-  `tg daemon start`, with `--quiet` or without: the daemon logs one warning and uses the
-  default for each value it can't read, and the next other command reports the file. A
-  change to `cache.retention.*` takes effect when the daemon restarts.
+  `INVALID_ARGS` and issue details before it runs; `tg config set` can still fix a wrong
+  value. A `config.json` that can't be read fails them with `GENERAL_ERROR` (`details.path`).
+  `tg daemon` reads only `cache.retention.*`, non-strictly, once at start, so such a file
+  doesn't stop `tg daemon start`, with `--quiet` or without: the daemon logs one warning and
+  uses the default for each value it can't read, and the next other command reports the file.
+  A change to `cache.retention.*` takes effect when the daemon restarts.
 - Cache-related commands resolve TTLs via `config.json` overrides.
 
 ## Usage stats
@@ -239,9 +239,10 @@ random install ID. The full list and an example event: <https://usage.sergeybaus
 - **Errors.** A failed command is sent as its error code (`AUTH_REQUIRED`, `INVALID_ARGS`), or
   for a Telegram error as the RPC error's name without numbers (`FLOOD_WAIT`,
   `PEER_ID_INVALID`), never with the message: messages can name chats, users or a query. An
-  error reading `config.json` or opening a cache adds its message, with account numbers, the
-  home directory and the user name taken out, cut to 300 characters. The daemon reports its
-  exit (`DAEMON_ALREADY_RUNNING`) and a configuration or main loop error by its type.
+  error reading `config.json` or opening a cache adds its message, with account numbers, a data
+  directory set by `TELEGRAM_SYNC_CLI_DATA_DIR` (as `<data-dir>`), the home directory and the
+  user name taken out, cut to 300 characters. The daemon reports its exit
+  (`DAEMON_ALREADY_RUNNING`) and a configuration or main loop error by its type.
 - **The notice.** Nothing is sent until tg has printed its one-line notice to stderr: when
   stderr is a terminal or an AI agent runs tg, and not with `--quiet` or `-f quiet`. The run that
   prints it sends nothing. A daemon under launchd or systemd waits until any later `tg` run in a
