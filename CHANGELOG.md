@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tg sql print-schema --output=sql` and `--output=text` print the schema
+  again: `tg sql` rejected every format but `json` and `csv` before
+  `print-schema` ran. An unknown `--output` now returns `INVALID_ARGS` in the
+  JSON error schema, and `--output` may also come before the subcommand
+  (`tg sql -o sql print-schema`) (#109).
+
 ## [0.7.0] - 2026-10-29
 
 Privacy change: tg now sends usage stats to its author, on by default: how often it runs, which
