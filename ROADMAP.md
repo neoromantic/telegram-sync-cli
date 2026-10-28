@@ -7,6 +7,13 @@ The list is in priority order.
 ## Reliability
 
 - [Storage north star: bounded size, big caches, offloading, SQLite alternatives](https://github.com/neoromantic/telegram-sync-cli/issues/80)
+- [Background, resumable migrations for big caches](https://github.com/neoromantic/telegram-sync-cli/issues/89)
+- [`tg db check` and `tg db backup`](https://github.com/neoromantic/telegram-sync-cli/issues/91)
+- [A soft cache size budget per account](https://github.com/neoromantic/telegram-sync-cli/issues/98)
+- [Option to cache live messages only in synced chats](https://github.com/neoromantic/telegram-sync-cli/issues/100)
+- [`raw_json`: stop storing fileReference](https://github.com/neoromantic/telegram-sync-cli/issues/95)
+- [`raw_json`: measure zstd with a trained dictionary](https://github.com/neoromantic/telegram-sync-cli/issues/97)
+- [Archive old messages into separate files](https://github.com/neoromantic/telegram-sync-cli/issues/101)
 
 ## Features
 
@@ -16,10 +23,15 @@ The list is in priority order.
 - [Edit, delete, forward and pin messages](https://github.com/neoromantic/telegram-sync-cli/issues/23)
 - [Read-only mode and a chat allowlist for agents](https://github.com/neoromantic/telegram-sync-cli/issues/26)
 - [Semantic search over messages](https://github.com/neoromantic/telegram-sync-cli/issues/82)
+- [Search: find other word forms without a manual prefix](https://github.com/neoromantic/telegram-sync-cli/issues/92)
+- [Search attachment names, kinds and text derived from attachments](https://github.com/neoromantic/telegram-sync-cli/issues/94)
+- [Keep earlier versions of edited messages](https://github.com/neoromantic/telegram-sync-cli/issues/96)
 - [AI integration (skills)](https://github.com/neoromantic/telegram-sync-cli/issues/3)
 
 ## Polish
 
+- [`tg status --sizes`: cache size per chat](https://github.com/neoromantic/telegram-sync-cli/issues/90)
+- [Search: re-index older messages after a person or chat is renamed](https://github.com/neoromantic/telegram-sync-cli/issues/93)
 - [Snippets and text from the search index in `tg sql`](https://github.com/neoromantic/telegram-sync-cli/issues/81)
 - [Pretty output for every command](https://github.com/neoromantic/telegram-sync-cli/issues/2)
 - [Replace qrcode-terminal](https://github.com/neoromantic/telegram-sync-cli/issues/10)
