@@ -132,3 +132,24 @@ export function spacedFlagValues(
   }
   return values
 }
+
+/**
+ * Every value of a flag given more than once (`--name a --name=b`), up to a
+ * bare `--`. citty keeps only the last value of a repeated string flag.
+ */
+export function flagValues(rawArgs: string[], name: string): string[] {
+  const flag = `--${name}`
+  const values: string[] = []
+  for (let i = 0; i < rawArgs.length; i++) {
+    const arg = rawArgs[i]!
+    if (arg === '--') break
+    if (arg === flag) {
+      // A string flag takes the next argument whatever it is, as citty does
+      values.push(rawArgs[i + 1] ?? '')
+      i++
+    } else if (arg.startsWith(`${flag}=`)) {
+      values.push(arg.slice(flag.length + 1))
+    }
+  }
+  return values
+}

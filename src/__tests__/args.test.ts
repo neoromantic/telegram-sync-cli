@@ -1,11 +1,13 @@
 /**
- * Tests for reading `tg api` method arguments written as `--name value`
+ * Tests for reading `tg api` method arguments written as `--name value`,
+ * and every value of a repeated flag (`tg send --file`)
  */
 import { describe, expect, it } from 'bun:test'
 import { type ArgsDef, parseArgs } from 'citty'
 
 import { apiCommand } from '../commands/api'
-import { spacedFlagValues } from '../utils/args'
+import { sendCommand } from '../commands/send'
+import { flagValues, spacedFlagValues } from '../utils/args'
 
 /** The values spacedFlagValues pairs for `tg api <argv>`, from citty's own parse */
 function spaced(...argv: string[]): Record<string, string> {
@@ -79,5 +81,41 @@ describe('spacedFlagValues', () => {
         'myuser',
       ),
     ).toEqual({})
+  })
+})
+
+describe('flagValues', () => {
+  it('collects --name value and --name=value', () => {
+    expect(
+      flagValues(
+        ['--to', 'me', '--file', 'a.pdf', '--caption', 'x', '--file=b.png'],
+        'file',
+      ),
+    ).toEqual(['a.pdf', 'b.png'])
+  })
+
+  it('stops at a bare --', () => {
+    expect(
+      flagValues(['--file', 'a.pdf', '--', '--file', 'b'], 'file'),
+    ).toEqual(['a.pdf'])
+  })
+
+  it('takes the next argument as the value, and counts a flag without one', () => {
+    expect(flagValues(['--file', '--file'], 'file')).toEqual(['--file'])
+    expect(flagValues(['--to', 'me', '--file'], 'file')).toEqual([''])
+  })
+
+  it('ignores other flags with the same prefix', () => {
+    expect(flagValues(['--files', 'a', '--file-name=b'], 'file')).toEqual([])
+  })
+
+  it('finds the values citty drops: it keeps only the last one', () => {
+    const argv = ['--to', 'me', '--file', 'a.pdf', '--file', 'b.png']
+    const args = parseArgs(argv, sendCommand.args as ArgsDef) as Record<
+      string,
+      unknown
+    >
+    expect(args.file).toBe('b.png')
+    expect(flagValues(argv, 'file')).toEqual(['a.pdf', 'b.png'])
   })
 })

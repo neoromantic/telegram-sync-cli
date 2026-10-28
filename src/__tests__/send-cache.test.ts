@@ -14,13 +14,16 @@ import {
 } from '../commands/send/sent-message-cache'
 import { createTestDatabase } from '../db'
 import { createChatsCache } from '../db/chats-cache'
+import { createMessageAttachmentsStore } from '../db/message-attachments'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
+import { extractAttachment } from '../utils/attachment'
 import { toLong } from '../utils/long'
 import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
 import { fakeDialog } from './helpers/fake-dialogs'
+import { pdfDocumentMessage } from './helpers/media-messages'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 const SELF_ID = 5550001
@@ -406,6 +409,42 @@ describe('cacheSentMessage', () => {
     // The search index has the chat title too
     expect(createMessagesSearch(db).search('Example Team')).toHaveLength(1)
     assertPeerIdInvariants(db)
+  })
+
+  it('caches a file sent with messages.sendMedia with its attachment row', async () => {
+    const message = {
+      ...pdfDocumentMessage({ _: 'peerUser', userId: SELF_ID }, 42),
+      out: true,
+      message: 'Quarterly numbers',
+    }
+    const cached = await cacheSentMessage(
+      { cacheDb: db, getSelfId: async () => SELF_ID },
+      updatesWith([
+        { _: 'updateMessageID', id: 42, randomId: toLong(1) },
+        {
+          _: 'updateNewMessage',
+          message: message as unknown as tl.RawMessage,
+          pts: 1,
+          ptsCount: 1,
+        },
+      ]),
+      { ...selfRequest, text: 'Quarterly numbers' },
+    )
+
+    expect(cached).toBe(1)
+    expect(createMessagesCache(db).get(SELF_ID, 42)).toMatchObject({
+      text: 'Quarterly numbers',
+      message_type: 'document',
+      has_media: 1,
+    })
+    expect(createMessageAttachmentsStore(db).get(SELF_ID, 42)).toMatchObject({
+      kind: 'document',
+      source: 'message',
+      file_name: 'example-report.pdf',
+      mime_type: 'application/pdf',
+      file_size: 120_000,
+      unique_file_id: extractAttachment(message)?.uniqueFileId,
+    })
   })
 
   it('swallows a failing cache write', async () => {
