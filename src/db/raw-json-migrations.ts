@@ -19,14 +19,16 @@ import type {
 import { createMessageAttachmentsStore } from './message-attachments'
 
 /**
- * The message_type a history page stores for this raw message, when it is
- * a message with media; null to keep the stored one. Older versions stored
- * videos, voices, stickers, audio and GIFs as `document`.
+ * The message_type a history page stores for this raw message: `text` for
+ * a link preview still pending, an expired photo or unsupported media, as
+ * the write path gives it. Null to keep the stored one, for raw_json that
+ * isn't a TL message (`{}`, the abstract sync worker's). Older versions
+ * stored videos, voices, stickers, audio and GIFs as `document`.
  */
-function rawMediaMessageType(raw: unknown): string | null {
-  if ((raw as { _?: unknown } | null)?._ !== 'message') return null
-  const { messageType, hasMedia } = resolveRawMessageType(raw)
-  return hasMedia ? messageType : null
+function rawMessageType(raw: unknown): string | null {
+  const kind = (raw as { _?: unknown } | null)?._
+  if (kind !== 'message' && kind !== 'messageService') return null
+  return resolveRawMessageType(raw).messageType
 }
 
 const messagesMigration: BackgroundMigration = {
@@ -48,9 +50,8 @@ const messagesMigration: BackgroundMigration = {
       const hasMedia = row.has_media === 1
       const { value, changed } = reencodeRawJson(rawJson)
 
-      let messageType = row.message_type as string
+      const messageType = rawMessageType(value) ?? (row.message_type as string)
       if (hasMedia && value !== null) {
-        messageType = rawMediaMessageType(value) ?? messageType
         // extractAttachment reads either form; this one is parsed already
         attachments.sync(
           row.chat_id as number,

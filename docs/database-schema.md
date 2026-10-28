@@ -238,10 +238,12 @@ CREATE INDEX idx_messages_cache_message_id ON messages_cache(message_id);
 `sticker`, `voice`, `audio`, `poll`, `contact`, `location`, `venue`, `game`, `invoice`,
 `webpage`, `dice`, and `unknown` for other media, such as stories. Live updates, history pages
 and `tg send` write the same values. Rows that history sync wrote in earlier versions said
-`document` for every file (voice messages, videos and stickers too); a
-[background migration](#background-migrations) gives each media message the value above. `has_media` is 1 for the media a Telegram client
-shows, so 0 for unsupported media, an expired photo or a link preview still pending; rows from
-earlier history syncs may say 1 for those. The file itself is in `message_attachments`.
+`document` for every file (voice messages, videos and stickers too) and `media` for other
+media; a [background migration](#background-migrations) gives each message whose `raw_json`
+is a TL message the value above, `text` included for unsupported media, an expired photo or a
+link preview still pending. Rows whose `raw_json` is `{}` or no message keep theirs. `has_media`
+is 1 for the media a Telegram client shows, so 0 for those three; rows from earlier history
+syncs may still say 1 for them. The file itself is in `message_attachments`.
 
 ### Table: message_attachments
 
@@ -648,7 +650,7 @@ The first migrations ([raw_json](#raw_json)):
 
 | Name | Table | Rewrites |
 |------|-------|----------|
-| `messages_raw_json_v2` | `messages_cache` | `raw_json` into the current form; the `message_attachments` row of each media message; `message_type` of each media message, as a history page writes it now |
+| `messages_raw_json_v2` | `messages_cache` | `raw_json` into the current form; the `message_attachments` row of each media message; `message_type` of each message whose `raw_json` is a TL message, as a history page writes it now |
 | `users_raw_json_v2` | `users_cache` | `raw_json` into the current form |
 | `chats_raw_json_v2` | `chats_cache` | `raw_json` into the current form |
 
