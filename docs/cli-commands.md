@@ -21,6 +21,7 @@
 | `daemon` | start/stop/status |
 | `db` | vacuum: prune an account's cache and give its free space back to the disk |
 | `sql` | read-only cache queries |
+| `telemetry` | status, on, off: [usage stats](configuration.md#usage-stats) |
 
 ## Global Flags
 
@@ -443,6 +444,35 @@ Output:
 or `disk_full` when the disk filled up (free space first). The VACUUM is rolled back and the
 messages are intact, but the prune commits as it goes, so rows past their retention may already
 be gone; `details.pruned` has the counts, or `null` when the prune itself failed.
+
+### Usage stats
+
+```bash
+tg telemetry status [--json]   # on or off, the rule that decided, the install ID, the state file
+tg telemetry off               # off, and the install ID is deleted
+tg telemetry on                # on, and the notice counts as seen
+```
+
+`tg telemetry` needs no credentials, reads no config key and is not itself recorded. `status`
+prints a summary with `--format pretty`, else JSON:
+
+```json
+{
+  "enabled": false,
+  "debug": false,
+  "reason": "state",
+  "id": null,
+  "stateFile": "/home/user/.telegram-sync-cli/telemetry.json",
+  "endpoint": "https://usage.sergeybaus.com/i/v0/e/",
+  "channel": "homebrew"
+}
+```
+
+`reason` is the rule that decided: `no-endpoint` (a source checkout), `do-not-track`, `env`
+(`TELEGRAM_SYNC_CLI_TELEMETRY`), `ci`, `test`, `dev-version`, `state` (`tg telemetry on|off`)
+or `default`. `on` and `off` print the same object after the change, and fail with
+`GENERAL_ERROR` when the data directory can't be written. What is sent and when:
+[configuration.md](configuration.md#usage-stats).
 
 ## Output Shape
 

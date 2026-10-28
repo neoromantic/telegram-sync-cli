@@ -43,7 +43,9 @@ Unit tests run without network access using mocked dependencies.
 
 `test-setup.ts`, preloaded for every `bun test` run, points `TELEGRAM_SYNC_CLI_DATA_DIR` at
 `.tmp/test-data-<pid>` even if the shell or `.env` sets it, so tests that use the file-backed
-cache database never touch a real data dir.
+cache database never touch a real data dir. It also sets `TELEGRAM_SYNC_CLI_TELEMETRY=0`, so no
+test and no CLI a test spawns sends usage stats; `src/__e2e__/telemetry.e2e.test.ts` sets it to
+`debug`, which prints each event to stderr instead of sending it.
 
 The test scripts pass `--isolate`, so each file gets a fresh module registry. `mock.module()`
 replaces a module for the whole process and `mock.restore()` doesn't undo it, so without

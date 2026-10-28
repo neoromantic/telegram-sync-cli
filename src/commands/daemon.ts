@@ -14,6 +14,7 @@ import { createDaemon, createPidFile, DaemonExitCode } from '../daemon'
 import { createLogger } from '../daemon/daemon-logger'
 import { accountsDb, getDataDir } from '../db'
 import { summarizeDaemonStatus } from '../db/daemon-status'
+import { exitAfterFlush, reportDaemonExit } from '../telemetry'
 import { ErrorCodes } from '../types'
 import { error, info, success } from '../utils/output'
 import { formatDuration } from '../utils/time'
@@ -54,7 +55,8 @@ const startCommand = defineCommand({
     const daemon = createDaemon({ verbosity, retention })
     const exitCode = await daemon.start()
 
-    process.exit(exitCode)
+    reportDaemonExit(exitCode, DaemonExitCode[exitCode])
+    await exitAfterFlush(exitCode)
   },
 })
 

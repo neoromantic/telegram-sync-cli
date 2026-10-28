@@ -17,6 +17,11 @@ const testDataDir = join(process.cwd(), '.tmp', `test-data-${process.pid}`)
 process.env.TELEGRAM_SYNC_CLI_DATA_DIR = testDataDir
 mkdirSync(testDataDir, { recursive: true })
 
+// Usage stats off, for this process and every CLI a test spawns, even if the
+// shell turns them on. A test that checks them sets the variable to debug,
+// which prints each event instead of sending it.
+process.env.TELEGRAM_SYNC_CLI_TELEMETRY = '0'
+
 // Always use dummy Telegram API credentials. Bun auto-loads the developer's
 // .env before this preload runs, so overwrite (never fall back to) real values
 // to keep tests deterministic and offline. The real values are stashed for the

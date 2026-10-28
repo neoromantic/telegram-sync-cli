@@ -107,6 +107,12 @@ Steps: [docs/releasing.md](docs/releasing.md).
 - **Credentials are read lazily.** `--help`, `--version` and cache-only commands must work
   without `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`. Only commands that connect call
   `requireDefaultConfig()` in `src/services/telegram.ts`.
+- **Usage stats never carry user content.** `src/telemetry/client.ts` is devkit's client
+  (managed, never edited here); `src/telemetry/index.ts` decides what tg passes to it. Features
+  are command paths from the dispatcher, never arguments. `error()` reports only its code or
+  Telegram's RPC error name; pass a message (`reportLocalError`) only for config and cache file
+  errors, never one that can hold message text, chat, contact or user names, or a query. Every
+  exit goes through `exitAfterFlush` (at most 500 ms), never a bare `process.exit`.
 - Output is JSON by default with a stable error schema
   (`{ success: false, error: { code, message, details?, suggestion? } }`) and documented exit
   codes. Don't change codes or shapes without updating the docs.
@@ -172,7 +178,8 @@ not direct dependencies (and `@mtcute/tl` no longer exists since mtcute 0.29).
   `TELEGRAM_API_HASH` with dummies, because Bun auto-loads the developer's `.env` first. Real
   values are stashed as `TELEGRAM_TEST_API_ID`/`TELEGRAM_TEST_API_HASH` for the integration
   suite. CI has no Telegram secrets. It also always points `TELEGRAM_SYNC_CLI_DATA_DIR` at
-  `.tmp/test-data-<pid>`, even if the shell or `.env` sets it.
+  `.tmp/test-data-<pid>`, even if the shell or `.env` sets it, and sets
+  `TELEGRAM_SYNC_CLI_TELEMETRY=0` (usage stats off).
 - Unit tests mock the mtcute client and use `createTestDatabase()` for in-memory databases.
 - E2E tests spawn the CLI with `bun --no-env-file` and an isolated
   `TELEGRAM_SYNC_CLI_DATA_DIR`:

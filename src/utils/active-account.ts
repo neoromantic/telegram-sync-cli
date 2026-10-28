@@ -4,6 +4,7 @@ import {
   getConfigValue,
   setConfigValue,
 } from '../config'
+import { reportLocalError } from '../telemetry'
 import { ErrorCodes } from '../types'
 import { error } from './output'
 
@@ -41,6 +42,7 @@ export async function keepActiveAccountInConfig(
         ...details,
       })
     }
+    reportLocalError(err)
     const path = getConfigPath(dataDir)
     const failure = `write activeAccount to ${path}: ${(err as Error).message}`
     error(

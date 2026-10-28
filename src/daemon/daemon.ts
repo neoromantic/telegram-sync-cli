@@ -16,6 +16,7 @@ import {
 import { createDaemonStatusService } from '../db/daemon-status'
 import { getDefaultRetentionConfig } from '../db/types'
 import { requireDefaultConfig } from '../services/telegram'
+import { exitAfterFlush, reportErrorType } from '../telemetry'
 import { VERSION } from '../version'
 import {
   connectAccount,
@@ -186,7 +187,7 @@ async function cleanupWithTimeout(
         `Shutdown timeout (${ctx.shutdownTimeoutMs}ms) exceeded - forcing exit`,
       )
       ctx.pidFile.release()
-      process.exit(1)
+      await exitAfterFlush(1)
     }
     throw err
   }
@@ -234,6 +235,7 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
       requireDefaultConfig()
     } catch (err) {
       ctx.logger.error(`Configuration error: ${formatError(err)}`)
+      reportErrorType(err)
       exitCode = DaemonExitCode.Error
     }
   }
@@ -305,6 +307,7 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
     await mainLoop(ctx)
   } catch (err) {
     ctx.logger.error(`Main loop error: ${formatError(err)}`)
+    reportErrorType(err)
   }
 
   await performCleanup(ctx)

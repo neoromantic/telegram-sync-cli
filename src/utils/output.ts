@@ -1,6 +1,12 @@
 /**
  * Output utilities for consistent CLI output
  */
+import {
+  ExitPending,
+  exitAfterFlush,
+  isExiting,
+  reportCliError,
+} from '../telemetry'
 import type { ErrorCode, Output, OutputFormat } from '../types'
 
 /** Current output format (can be overridden per-command) */
@@ -26,6 +32,8 @@ export function getOutputFormat(): OutputFormat {
  * In test mode, this just logs and returns.
  */
 export function success<T>(data: T): void {
+  // An exit is under way: the run already printed its result
+  if (isExiting()) return
   const result: Output<T> = { success: true, data }
 
   switch (currentFormat) {
@@ -48,17 +56,19 @@ export function success<T>(data: T): void {
  * (`tg api --raw`). Exits in production, as success() does.
  */
 export function raw(text: string): void {
+  if (isExiting()) return
   console.log(text)
   exitAfterSuccess()
 }
 
 /**
  * In production mode, exit to close any active connections (e.g., mtcute TelegramClient)
- * This prevents the process from hanging when the event loop is kept alive by open sockets
+ * This prevents the process from hanging when the event loop is kept alive by open sockets.
+ * The exit waits up to 500 ms for usage stats in flight.
  */
 function exitAfterSuccess(): void {
   if (process.env.BUN_ENV !== 'test' && process.env.NODE_ENV !== 'test') {
-    process.exit(0)
+    void exitAfterFlush(0)
   }
 }
 
@@ -72,6 +82,8 @@ export function error(
   details?: Record<string, unknown>,
   suggestion?: string,
 ): never {
+  // An exit is under way: the run already reported its outcome
+  if (isExiting()) throw new ExitPending()
   const result: Output<never> = {
     success: false,
     error: { code, message, details, suggestion },
@@ -92,9 +104,13 @@ export function error(
     throw err
   }
 
-  // Map error codes to exit codes
-  const exitCode = getExitCode(code)
-  process.exit(exitCode)
+  // The code (or Telegram's RPC error name) only: messages can name chats,
+  // users or a query
+  reportCliError(code, message)
+  // Exits at once, or after up to 500 ms of sending usage stats. Then the
+  // throw ends the command, and src/index.ts holds it until the exit.
+  void exitAfterFlush(getExitCode(code))
+  throw new ExitPending()
 }
 
 /**
@@ -140,7 +156,7 @@ export function verbose(message: string): void {
  * Log info message (not in quiet mode)
  */
 export function info(message: string): void {
-  if (currentFormat !== 'quiet') {
+  if (currentFormat !== 'quiet' && !isExiting()) {
     console.error(message)
   }
 }

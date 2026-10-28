@@ -23,6 +23,7 @@ import {
   VacuumNeedsStoppedDaemonError,
   vacuumCache,
 } from '../db/cache-maintenance'
+import { reportLocalError } from '../telemetry'
 import { ErrorCodes } from '../types'
 import { reportCacheError } from '../utils/account-cache'
 import {
@@ -41,6 +42,9 @@ async function loadRetention() {
   try {
     return (await getResolvedCacheConfig()).retention
   } catch (err) {
+    if (err instanceof ConfigError || err instanceof ConfigReadError) {
+      reportLocalError(err)
+    }
     if (err instanceof ConfigError) {
       error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
     }
@@ -137,6 +141,7 @@ const vacuumCommand = defineCommand({
       if (err instanceof VacuumNeedsStoppedDaemonError) {
         needsStoppedDaemon(account.id)
       }
+      reportLocalError(err)
       const code = sqliteCode(err)
       const message = err instanceof Error ? err.message : String(err)
       if (code.startsWith('SQLITE_BUSY')) {

@@ -56,8 +56,19 @@ class Tg < Formula
     bin.install Dir["tg-*"].first => "tg"
   end
 
+  def caveats
+    <<~EOS
+      tg shares usage stats with its author: how often it runs, which features are used,
+      errors, version and OS, tied to a random install ID. It never sends your files,
+      arguments or account names. Turn it off with "tg telemetry off" or DO_NOT_TRACK=1.
+      Details: https://usage.sergeybaus.com
+    EOS
+  end
+
   test do
+    ENV["TELEGRAM_SYNC_CLI_TELEMETRY"] = "0"
     assert_equal version.to_s, shell_output("#{bin}/tg --version").strip
+    assert_match '"enabled": false', shell_output("#{bin}/tg telemetry status --json")
   end
 end
 RUBY
