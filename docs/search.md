@@ -65,7 +65,28 @@ message again, those cached in between too.
 
 ## Triggered Indexing
 
-The FTS index is kept in sync with `messages_cache` via triggers.
+The FTS index is kept in sync with `messages_cache` via triggers. An update re-indexes a
+message only when its text, sender or media path changes: an edit, a sender fixed by a
+migration. `UPDATE OF` alone fires whenever a column is in the `SET` list, and the upsert sets
+every column, hence the `WHEN` clause. The rest leaves the index alone:
+
+- A message fetched again unchanged (catch-up after a restart fetches again the messages that
+  arrived live) is not written at all: the upsert updates the row only when a column other
+  than `fetched_at` and `updated_at` differs, so both keep the time of the last real change.
+- A changed `raw_json` alone (a channel post's views or reactions) rewrites the row but not
+  its index row.
+- Marking a message deleted sets `is_deleted` and keeps its index row; search filters on
+  `is_deleted`.
+
+The `sender` and `chat` columns copy names from `users_cache` and `chats_cache` when a message
+is indexed. Up to 0.5.0 every re-fetch re-indexed the message and so refreshed them; now a
+renamed user or chat shows its new name in the index only for messages indexed after the
+rename, or whose text or sender changes. Results still show the current names, which search
+reads from those tables. Re-indexing after a rename is tracked in
+[#93](https://github.com/neoromantic/telegram-sync-cli/issues/93).
+
+A cache created by 0.5.0 or older gets the new `messages_cache_au` on its first open by a newer
+version ([database-schema.md](database-schema.md#migrations)).
 
 ```sql
 CREATE TRIGGER IF NOT EXISTS messages_cache_ai
@@ -106,7 +127,10 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS messages_cache_au
-AFTER UPDATE ON messages_cache
+AFTER UPDATE OF text, from_id, media_path ON messages_cache
+WHEN old.text IS NOT new.text
+  OR old.from_id IS NOT new.from_id
+  OR old.media_path IS NOT new.media_path
 BEGIN
   DELETE FROM message_search WHERE rowid = old.rowid;
   INSERT INTO message_search(rowid, text, sender, chat, files)

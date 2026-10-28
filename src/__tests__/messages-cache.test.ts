@@ -2,14 +2,23 @@
  * Tests for messages cache service
  */
 import { Database } from 'bun:sqlite'
-import { beforeEach, describe, expect, it } from 'bun:test'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  setSystemTime,
+} from 'bun:test'
 import {
   createMessagesCache,
   type MessageInput,
   type MessagesCache,
 } from '../db/messages-cache'
+import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
+import { createUsersCache } from '../db/users-cache'
 
 describe('MessagesCache', () => {
   let db: Database
@@ -725,5 +734,120 @@ describe('MessagesCache', () => {
       expect(cache.countByChatId(100)).toBe(3)
       expect(cache.get(100, 2)?.text).toBe('Two')
     })
+  })
+})
+
+describe('MessagesCache writes and the search index', () => {
+  let db: Database
+  let cache: MessagesCache
+
+  const message: MessageInput = {
+    chat_id: 100,
+    message_id: 1,
+    from_id: 123,
+    text: 'harbor notes',
+    message_type: 'text',
+    date: 1_700_000_000,
+    raw_json: '{"_":"message","views":10}',
+  }
+
+  /** Rows written since the connection opened, search index rows included */
+  const totalChanges = () =>
+    (db.query('SELECT total_changes() AS n').get() as { n: number }).n
+  const find = (query: string) =>
+    createMessagesSearch(db)
+      .search(query, { includeDeleted: true })
+      .map((row) => row.message_id)
+  /** Rename the sender without touching the message's index row */
+  const renameSender = (lastName: string) =>
+    createUsersCache(db).upsert({
+      user_id: '123',
+      first_name: 'Ann',
+      last_name: lastName,
+      fetched_at: 1_000,
+      raw_json: '{}',
+    })
+
+  beforeEach(() => {
+    setSystemTime(new Date('2026-01-01T00:00:00Z'))
+    db = new Database(':memory:')
+    initCacheSchema(db)
+    initSyncSchema(db)
+    cache = createMessagesCache(db)
+    renameSender('Archer')
+    cache.upsert(message)
+  })
+
+  afterEach(() => {
+    setSystemTime()
+    db.close()
+  })
+
+  it('leaves an unchanged message fetched again and its index row alone', () => {
+    const before = cache.get(100, 1)
+    renameSender('Baker')
+    const changes = totalChanges()
+
+    setSystemTime(new Date('2026-01-02T00:00:00Z'))
+    cache.upsert(message)
+    cache.upsertBatch([message])
+
+    expect(totalChanges()).toBe(changes)
+    expect(cache.get(100, 1)).toEqual(before)
+    expect(find('Archer')).toEqual([1])
+    expect(find('Baker')).toEqual([])
+  })
+
+  it('updates a message whose raw_json changed without re-indexing it', () => {
+    renameSender('Baker')
+    const changes = totalChanges()
+
+    setSystemTime(new Date('2026-01-02T00:00:00Z'))
+    cache.upsert({ ...message, raw_json: '{"_":"message","views":11}' })
+
+    expect(totalChanges()).toBe(changes + 1)
+    expect(cache.get(100, 1)).toMatchObject({
+      raw_json: '{"_":"message","views":11}',
+      updated_at: Date.parse('2026-01-02T00:00:00Z'),
+      fetched_at: Date.parse('2026-01-02T00:00:00Z'),
+    })
+    expect(find('Archer')).toEqual([1])
+    expect(find('Baker')).toEqual([])
+  })
+
+  it('re-indexes an edited message', () => {
+    renameSender('Baker')
+
+    cache.upsert({ ...message, text: 'lighthouse notes', is_edited: true })
+
+    expect(find('lighthouse')).toEqual([1])
+    expect(find('harbor')).toEqual([])
+    expect(find('Baker')).toEqual([1])
+  })
+
+  it('re-indexes a message whose sender changed', () => {
+    cache.upsert({ ...message, from_id: 456 })
+
+    expect(find('Archer')).toEqual([])
+    expect(find('456')).toEqual([1])
+  })
+
+  it('re-indexes a message edited live', () => {
+    cache.updateText(100, 1, 'lighthouse notes', 1_700_000_100)
+
+    expect(find('lighthouse')).toEqual([1])
+    expect(find('harbor')).toEqual([])
+  })
+
+  it('does not re-index a message marked deleted', () => {
+    renameSender('Baker')
+    const changes = totalChanges()
+
+    cache.markDeleted(100, [1])
+
+    expect(totalChanges()).toBe(changes + 1)
+    expect(cache.get(100, 1)?.is_deleted).toBe(1)
+    expect(find('Archer')).toEqual([1])
+    expect(find('Baker')).toEqual([])
   })
 })

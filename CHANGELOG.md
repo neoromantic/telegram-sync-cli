@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before keep the old form until they are fetched again.
   `docs/database-schema.md` shows how to read the fields with `json_extract`
   (#86).
+- A message fetched again with nothing changed is no longer written again,
+  and its search index entry is left alone. Catch-up after every daemon
+  restart or reconnect fetches again the messages that arrived live, so each
+  of them used to cost a row rewrite and a re-index. A message is re-indexed
+  only when its text, sender or media path changes; a change only in
+  `raw_json`, such as a channel post's views, updates the row but not the
+  index, and marking a message deleted no longer re-indexes it. A side effect
+  of the old re-indexing goes away: a re-fetch no longer refreshes the sender
+  and chat names stored in the index, so a renamed user or chat is found by
+  the new name only in messages indexed after the rename. Results still show
+  the current names (#93 tracks re-indexing after a rename). The first open of
+  an existing cache replaces its search trigger (#87).
 
 ## [0.5.0] - 2026-10-22
 

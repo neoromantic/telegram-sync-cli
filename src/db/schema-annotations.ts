@@ -342,7 +342,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: false,
         },
         fetched_at: {
-          description: 'When this message was fetched from API',
+          description:
+            'When this message was last fetched with a change. Fetching it again unchanged writes nothing, so this keeps the earlier time',
           semanticType: 'timestamp',
           nullable: false,
         },
@@ -357,7 +358,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           semanticType: 'timestamp',
         },
         updated_at: {
-          description: 'When this cache entry was last updated',
+          description: 'When this cache entry last changed',
           semanticType: 'timestamp',
         },
       },
