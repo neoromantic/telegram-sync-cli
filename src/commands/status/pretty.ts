@@ -373,6 +373,15 @@ function accountSummary(acc: StatusAccount): string {
 
 /** Free pages above this share of the file earn a `tg db vacuum` hint */
 const VACUUM_HINT_FREE_SHARE = 0.1
+/** After a background migration rewrote rows, a smaller share does */
+const VACUUM_HINT_MIGRATED_FREE_SHARE = 0.01
+
+/** Whether a finished background migration rewrote rows of the cache */
+function migrationRewroteRows(acc: StatusAccount): boolean {
+  return acc.migrations.some(
+    (migration) => migration.state === 'done' && migration.done > 0,
+  )
+}
 
 /**
  * Each account's cache size: the file, its WAL and the free pages inside
@@ -401,10 +410,10 @@ function printCacheSizeSection(status: StatusSnapshot): void {
     }
     printRow(`Account #${acc.id}`, parts.join(c.dim(' · ')))
 
-    if (
-      size.file_bytes > 0 &&
-      size.free_bytes > size.file_bytes * VACUUM_HINT_FREE_SHARE
-    ) {
+    const freeShare = migrationRewroteRows(acc)
+      ? VACUUM_HINT_MIGRATED_FREE_SHARE
+      : VACUUM_HINT_FREE_SHARE
+    if (size.file_bytes > 0 && size.free_bytes > size.file_bytes * freeShare) {
       const vacuum = `tg db vacuum --account ${acc.id}`
       // A cache without auto_vacuum needs a full vacuum, with the daemon stopped
       vacuumHints.push(
@@ -418,10 +427,48 @@ function printCacheSizeSection(status: StatusSnapshot): void {
     console.log()
     console.log(
       c.dim(
-        '  Over 10% of the cache is free pages; to give them back to the disk:',
+        '  The cache has free pages (over 10%, or left by a background migration); to give them back to the disk:',
       ),
     )
     for (const command of vacuumHints) console.log(`    ${c.value(command)}`)
+  }
+}
+
+/**
+ * Background migrations not finished yet (#89), with their progress; shown
+ * only when there is one
+ */
+function printMigrationsSection(status: StatusSnapshot): void {
+  if (status.migrations.length === 0) return
+
+  printHeader('Migrations')
+  for (const migration of status.migrations) {
+    const total = migration.total
+    const progress =
+      total === null
+        ? c.dim('not started')
+        : `${c.number(total > 0 ? `${Math.floor((Math.min(migration.done, total) / total) * 100)}%` : '100%')} ${c.dim(`${migration.done.toLocaleString()} / ${total.toLocaleString()} rows`)}`
+    printRow(
+      `Account #${migration.account_id}`,
+      `${c.value(migration.name)} ${progress}`,
+    )
+    if (migration.last_error) {
+      console.log(`    ${c.red(migration.last_error)}`)
+    }
+  }
+  console.log()
+  console.log(
+    c.dim(
+      status.daemon.status === 'running'
+        ? '  The daemon runs them in the background; reads work meanwhile.'
+        : '  The daemon runs them in the background; without it, run:',
+    ),
+  )
+  if (status.daemon.status !== 'running') {
+    const accounts = [...new Set(status.migrations.map((m) => m.account_id))]
+    for (const id of accounts) {
+      console.log(`    ${c.value(`tg db migrate --account ${id}`)}`)
+    }
   }
 }
 
@@ -506,6 +553,7 @@ export function printPrettyStatus(status: StatusSnapshot): void {
   printSyncProgressSection(status)
   printRateLimitsSection(status)
   printAccountsSection(status)
+  printMigrationsSection(status)
   printCacheSizeSection(status)
   printMediaCacheSection(status)
   printStorageSection(status)

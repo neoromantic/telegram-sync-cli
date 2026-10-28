@@ -2,6 +2,10 @@ import type { Database } from 'bun:sqlite'
 import type { AccountsDbInterface } from '../db'
 import type { DaemonStatusService } from '../db/daemon-status'
 import { type CacheRetentionConfig, getDefaultCacheConfig } from '../db/types'
+import {
+  createMigrationsState,
+  type MigrationsState,
+} from './daemon-migrations'
 import { DaemonStopError } from './daemon-utils'
 import type { PidFile } from './pid-file'
 import type { SyncScheduler } from './scheduler'
@@ -47,6 +51,8 @@ export interface DaemonRuntime {
   shutdown: AbortController
   /** The background contacts sync of every account (#8) */
   contacts: ContactsSyncState
+  /** The background migrations of every account's cache (#89) */
+  migrations: MigrationsState
 }
 
 export interface ContactsSyncState {
@@ -94,6 +100,7 @@ export function createDaemonRuntime(): DaemonRuntime {
       retryAt: new Map(),
       checkAt: new Map(),
     },
+    migrations: createMigrationsState(),
   }
 }
 

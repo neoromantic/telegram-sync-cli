@@ -2,7 +2,8 @@
  * Database maintenance commands
  *
  * Usage:
- *   tg db vacuum [--account <selector>]  Prune and compact an account's cache
+ *   tg db vacuum [--account <selector>]   Prune and compact an account's cache
+ *   tg db migrate [--account <selector>]  Finish an account's background migrations
  */
 
 import type { Database } from 'bun:sqlite'
@@ -17,6 +18,10 @@ import {
   openExistingAccountCacheDb,
 } from '../db'
 import {
+  readMigrationStatus,
+  runPendingMigrations,
+} from '../db/background-migrations'
+import {
   type PruneResult,
   pruneCache,
   readAutoVacuum,
@@ -30,7 +35,7 @@ import {
   ACCOUNT_SELECTOR_DESCRIPTION,
   resolveAccount,
 } from '../utils/account-selector'
-import { error, success } from '../utils/output'
+import { error, getOutputFormat, success } from '../utils/output'
 
 function sqliteCode(err: unknown): string {
   const code = (err as { code?: unknown } | null)?.code
@@ -169,6 +174,76 @@ const vacuumCommand = defineCommand({
   },
 })
 
+/**
+ * A line on stderr per batch, `messages_raw_json_v2 42% 12000 / 28571 rows`,
+ * for a person at a terminal; undefined when nobody watches
+ */
+function migrationProgress():
+  | ((name: string, done: number, total: number | null) => void)
+  | undefined {
+  const stream = process.stderr
+  if (!stream.isTTY || getOutputFormat() === 'quiet') return undefined
+  return (name, done, total) => {
+    const share =
+      total && total > 0
+        ? ` ${Math.floor((Math.min(done, total) / total) * 100)}%`
+        : ''
+    stream.write(`\r${name}${share} ${done} / ${total ?? '?'} rows\x1b[K`)
+    if (total !== null && done >= total) stream.write('\n')
+  }
+}
+
+const migrateCommand = defineCommand({
+  meta: {
+    name: 'migrate',
+    description:
+      "Finish an account's background migrations now, in the foreground (the daemon runs them on its own)",
+  },
+  args: {
+    account: {
+      type: 'string',
+      description: ACCOUNT_SELECTOR_DESCRIPTION,
+    },
+  },
+  async run({ args }) {
+    const account = resolveAccount(args.account)
+    const db = openCache(account.id)
+    if (!db) {
+      success({ account_id: account.id, rows: 0, migrations: [] })
+      return
+    }
+
+    const progress = migrationProgress()
+    try {
+      const rows = await runPendingMigrations(db, {
+        onBatch: (migration, status) =>
+          progress?.(migration.name, status.done, status.total),
+      })
+      success({
+        account_id: account.id,
+        rows,
+        migrations: readMigrationStatus(db),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (sqliteCode(err).startsWith('SQLITE_BUSY')) {
+        error(
+          ErrorCodes.GENERAL_ERROR,
+          `The cache of account ${account.id} is busy: ${message}`,
+          { account_id: account.id, reason: 'cache_busy' },
+          'Another tg process holds the cache; run tg db migrate again, it resumes where it stopped',
+        )
+      }
+      error(
+        ErrorCodes.GENERAL_ERROR,
+        `A background migration of account ${account.id} failed: ${message}`,
+        { account_id: account.id, migrations: readMigrationStatus(db) },
+        'Run tg db migrate again; it resumes where it stopped',
+      )
+    }
+  },
+})
+
 export const dbCommand = defineCommand({
   meta: {
     name: 'db',
@@ -176,5 +251,6 @@ export const dbCommand = defineCommand({
   },
   subCommands: {
     vacuum: vacuumCommand,
+    migrate: migrateCommand,
   },
 })

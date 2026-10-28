@@ -38,8 +38,9 @@ older versions have it too. Polls, locations, contacts and dice have no file:
 `attachment: null`.
 
 For `tg sql`, the table `message_attachments` has one row per cached message with a file,
-written with the message. It holds messages written by this version and later; older ones get
-their rows later ([#89](https://github.com/neoromantic/telegram-sync-cli/issues/89)). Columns:
+written with the message. Messages cached by 0.6.0 and older get theirs from a
+[background migration](database-schema.md#background-migrations), which the daemon or
+`tg db migrate` runs. Columns:
 [database-schema.md](database-schema.md#table-message_attachments).
 
 ## Download
@@ -179,9 +180,8 @@ tg media clean --all                # everything
   the cache.
 - `--chat` removes the files of that chat's cached messages; a file a message of another chat
   also holds stays (`sharedFiles`). Both come from `message_attachments`, so messages cached by
-  earlier versions don't count until
-  [#89](https://github.com/neoromantic/telegram-sync-cli/issues/89); a removed file downloads
-  again. It combines with `--older-than`. `--all` doesn't combine with either
+  0.6.0 and older count once their background migration has reached them (`tg db migrate`
+  finishes it); a removed file downloads again. It combines with `--older-than`. `--all` doesn't combine with either
   (`INVALID_ARGS`).
 - A folder whose download is running is skipped. The command never writes `cache.db` and opens
   no connection, unless `--chat` names a chat the cache doesn't know.

@@ -90,17 +90,27 @@ in `src/utils/telegram-peer-ids.ts`.
 `users_cache`, `chats_cache` and `messages_cache` keep the Telegram object as mtcute gives it in
 `raw_json`. Every write goes through one serializer, `toRawJson` in `src/utils/raw-json.ts`:
 
-- A byte array (`fileReference`, the stripped thumbnail in
-  `photoStrippedSize.bytes` and others) is a base64 string.
-- A `bigint` is a decimal string. mtcute's 64-bit IDs and hashes (`Long`) stay objects with
-  `low`, `high` and `unsigned`.
+- A byte array (the stripped thumbnail in `photoStrippedSize.bytes`, a voice message's
+  waveform and others) is a base64 string.
+- A 64-bit value is a decimal string: a `bigint`, and mtcute's `Long` objects (`id`,
+  `accessHash`, `groupedId`, a document's `size` and others), signed unless the value is
+  unsigned ([#108](https://github.com/neoromantic/telegram-sync-cli/issues/108)).
+- `fileReference` fields are left out. Telegram's file references expire, and a download
+  fetches the message again for a fresh one
+  ([#95](https://github.com/neoromantic/telegram-sync-cli/issues/95)).
 - Everything else is what `JSON.stringify` writes.
 
-Rows written by 0.5.0 and older keep their byte fields as objects with one key per byte
-(`{"0":12,"1":250,…}`) until the row is fetched again. `tg sql` reads a byte field with
-`json_extract`, for example the stripped thumbnails of photo messages:
+Rows written by older versions are rewritten into this form by a
+[background migration](#background-migrations): byte fields stored as objects with one key per
+byte (`{"0":12,"1":250,…}`, 0.5.0 and older) and `Long` values stored as `{"low":…,"high":…,
+"unsigned":…}` (0.7.0 and older). Until it reaches a row, the row keeps the old form; every
+reader takes both. `tg sql` reads these fields with `json_extract`, for example an access hash
+or the stripped thumbnails of photo messages:
 
 ```sql
+SELECT user_id, json_extract(raw_json, '$.accessHash') AS access_hash  -- '-7000000000000000001'
+FROM users_cache;
+
 SELECT message_id,
        json_extract(raw_json, '$.media.photo.sizes[0].bytes') AS stripped_thumb_base64
 FROM messages_cache
@@ -227,9 +237,9 @@ CREATE INDEX idx_messages_cache_message_id ON messages_cache(message_id);
 `message_type` is `text`, `service`, or the kind of media: `photo`, `video`, `document`,
 `sticker`, `voice`, `audio`, `poll`, `contact`, `location`, `venue`, `game`, `invoice`,
 `webpage`, `dice`, and `unknown` for other media, such as stories. Live updates, history pages
-and `tg send` write the same values. Rows that history sync wrote in earlier versions keep
-theirs until the message is fetched again: `document` for every file (voice messages, videos
-and stickers too) and `media` for other media. `has_media` is 1 for the media a Telegram client
+and `tg send` write the same values. Rows that history sync wrote in earlier versions said
+`document` for every file (voice messages, videos and stickers too); a
+[background migration](#background-migrations) gives each media message the value above. `has_media` is 1 for the media a Telegram client
 shows, so 0 for unsupported media, an expired photo or a link preview still pending; rows from
 earlier history syncs may say 1 for those. The file itself is in `message_attachments`.
 
@@ -237,11 +247,9 @@ earlier history syncs may say 1 for those. The file itself is in `message_attach
 
 The file of a cached message, one row per message that has one, written in the same transaction
 as the message. A message written again unchanged writes nothing; one that lost its file loses
-its row. Rows exist for messages written by this version and later, an older message fetched
-again included; the other older messages get theirs later
-([#89](https://github.com/neoromantic/telegram-sync-cli/issues/89)). `tg messages
-list`/`get`/`search` read the attachment from `raw_json` instead, so they show it for every
-cached message.
+its row. Messages cached by 0.6.0 and older get theirs from a
+[background migration](#background-migrations). `tg messages list`/`get`/`search` read the
+attachment from `raw_json` instead, so they show it for every cached message, migrated or not.
 
 ```sql
 CREATE TABLE message_attachments (
@@ -265,6 +273,26 @@ CREATE INDEX idx_message_attachments_unique_file_id ON message_attachments(uniqu
 
 Join it with `messages_cache USING (chat_id, message_id)`. A soft-deleted message keeps its
 row. The table has no `raw_json` of its own: it is derived from the message's.
+
+### Table: cache_migrations
+
+The progress of each [background migration](#background-migrations), one row per migration
+this version knows.
+
+```sql
+CREATE TABLE cache_migrations (
+  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, users_raw_json_v2, chats_raw_json_v2
+  state       TEXT NOT NULL DEFAULT 'pending',  -- pending, running, done
+  cursor      INTEGER NOT NULL DEFAULT 0,       -- rowid of the last row done
+  end_rowid   INTEGER,           -- the table's largest rowid when it started
+  done        INTEGER NOT NULL DEFAULT 0,       -- rows done
+  total       INTEGER,           -- rows up to end_rowid when it started
+  started_at  INTEGER,           -- ms
+  updated_at  INTEGER,
+  finished_at INTEGER,
+  last_error  TEXT               -- the last failed batch's error; cleared by the next one
+);
+```
 
 ### Table: chat_content_protection
 
@@ -589,6 +617,47 @@ upgrading and start it again after, so the old daemon neither loses writes to th
 nor stores new messages without a sender. Opens with nothing to do only read. Going back to an older version after the migration is not supported: it would not
 find groups and channels in `chats_cache`.
 
+### Background migrations
+
+A rewrite of every row of a big table runs in the background, in small batches, instead of in
+one transaction on open ([#89](https://github.com/neoromantic/telegram-sync-cli/issues/89);
+`src/db/background-migrations.ts`). Each batch is its own short write transaction: it reads the
+migration's cursor (the last `rowid` done) from `cache_migrations`, rewrites the next rows, at
+most 500 or until 50 ms have passed, and moves the cursor in the same transaction. So:
+
+- a stop at any point (`tg daemon stop`, a crash, Ctrl-C) loses at most the batch in progress,
+  which rolls back, and the next run goes on from the cursor;
+- the daemon and `tg db migrate` can run at once: each batch reads the cursor under the write
+  lock, so they take turns and never do a row twice;
+- another process's write waits for one batch at most, well inside the daemon's 5-second
+  `busy_timeout`.
+
+A migration covers the rows up to the table's largest `rowid` when it starts; rows written later
+are already in the new form. Each rewrite is idempotent: a row done twice ends the same. A full
+`VACUUM` may renumber rowids, so `tg db vacuum` starts unfinished migrations over. The first open
+of a cache by a version that brings a migration records it as `pending`, or as `done` when its
+table is empty (a new cache); opens that find every migration recorded only read.
+
+The daemon runs pending migrations after the sync work of each one-second tick, for up to 250 ms
+a tick, with the event loop free between batches ([daemon.md](daemon.md#background-migrations)).
+`tg db migrate` runs them in the foreground ([cli-commands.md](cli-commands.md#tg-db-migrate)),
+and `tg status` shows each unfinished one with its progress. Reads give the same answers while a
+migration is half done: every reader takes rows in the old and the new form.
+
+The first migrations ([raw_json](#raw_json)):
+
+| Name | Table | Rewrites |
+|------|-------|----------|
+| `messages_raw_json_v2` | `messages_cache` | `raw_json` into the current form; the `message_attachments` row of each media message; `message_type` of each media message, as a history page writes it now |
+| `users_raw_json_v2` | `users_cache` | `raw_json` into the current form |
+| `chats_raw_json_v2` | `chats_cache` | `raw_json` into the current form |
+
+`messages_raw_json_v2` parses each message's `raw_json` once for all three. It writes neither
+`text`, `from_id` nor `media_path`, so the search index is untouched, and it leaves
+`updated_at` alone. Rewriting shrinks media messages: a made-up photo message written by 0.5.0
+goes from 10,215 to 1,776 bytes, one written by 0.6.0 or 0.7.0 from 1,898. The space shows up as
+free pages; `tg status` suggests `tg db vacuum` to give it back to the disk.
+
 ### From the shared cache of 0.3 and older
 
 Up to 0.3 every account shared one `<dataDir>/cache.db`. Its rows have no account column, so
@@ -669,8 +738,8 @@ bytes per message as `tg status --sizes` reports them (indexes counted with thei
 `raw_json` (the stored TL object) was 43–61% of the file in this measurement, most of it in
 media messages: byte arrays such as `fileReference` and the stripped thumbnail were stored as
 objects with one key per byte, about 7.7 KB per synthetic photo message. Now they are base64
-([raw_json](#raw_json)): the made-up photo message in the tests takes 1,896 bytes instead of
-10,213.
+([raw_json](#raw_json)): the made-up photo message in the tests takes 1,776 bytes instead of
+10,215.
 
 | Data Type | Records | Est. Size |
 |-----------|---------|-----------|

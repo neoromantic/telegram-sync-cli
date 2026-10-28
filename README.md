@@ -166,6 +166,9 @@ Reference: [CLI commands](docs/cli-commands.md), [authentication](docs/auth.md),
 - `tg status` reports each account's cache size (`--sizes` adds each table's and the media
   cache's); `tg db vacuum` prunes old bookkeeping rows and gives free space back to the disk,
   and works while the daemon runs on a cache this version created.
+- After an upgrade that changes how rows are stored, the daemon rewrites the older rows in the
+  background, a little each second; `tg db migrate` finishes that without it, and `tg status`
+  shows the progress. Reads work the same meanwhile.
 
 ## Usage stats
 

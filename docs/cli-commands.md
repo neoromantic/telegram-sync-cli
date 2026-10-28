@@ -20,7 +20,7 @@
 | `user` | user lookup |
 | `status` | system status |
 | `daemon` | start/stop/status |
-| `db` | vacuum: prune an account's cache and give its free space back to the disk |
+| `db` | vacuum: prune an account's cache and give its free space back to the disk; migrate: finish its background migrations |
 | `sql` | read-only cache queries |
 | `telemetry` | status, on, off: [usage stats](configuration.md#usage-stats) |
 
@@ -359,9 +359,17 @@ part counts the daemon's sync jobs and lists some of them:
   read cold from disk takes a while, so plain `tg status` leaves it out. Pretty output shows a
   Cache Size section with a line per account (the total, the WAL, the free space and, with
   `--sizes`, the three largest tables) and the `tg db vacuum --account <id>` command for each
-  account whose free pages are over 10% of its file. For a cache without auto_vacuum while the
-  daemon runs, the command stops the daemon first:
-  `tg daemon stop && tg db vacuum --account <id> && tg daemon start`.
+  account whose free pages are over 10% of its file, or over 1% once a background migration
+  has rewritten its rows. For a cache without auto_vacuum while the daemon runs, the command
+  stops the daemon first: `tg daemon stop && tg db vacuum --account <id> && tg daemon start`.
+- `migrations` lists the unfinished [background migrations](database-schema.md#background-migrations)
+  of the accounts in scope, each with `account_id`, `name`, `description`, `state` (`pending`
+  before it starts, `running` once it has), `done` and `total` rows (`total` is `null` until it
+  starts), `started_at`, `updated_at`, `finished_at` and `last_error`, the error of its last
+  failed batch. `accounts.accounts[].migrations` lists every migration of the account, finished
+  ones (`done`) included. Pretty output shows a Migrations section while one is unfinished, with
+  its progress, and `tg db migrate --account <id>` for each such account when the daemon isn't
+  running.
 - `--account <selector>` scopes the totals, the lists and `accounts.accounts` to one account;
   `account_id` says which (`null` without the flag). The `daemon` section always covers the
   whole daemon, and `accounts.total` and the `active_*` fields stay those of every account.
@@ -498,6 +506,52 @@ Output:
 or `disk_full` when the disk filled up (free space first). The VACUUM is rolled back and the
 messages are intact, but the prune commits as it goes, so rows past their retention may already
 be gone; `details.pruned` has the counts, or `null` when the prune itself failed.
+
+### tg db migrate
+
+```bash
+tg db migrate                   # the active account's cache
+tg db migrate --account 2
+```
+
+Some upgrades rewrite every row of a table: re-encoding `raw_json`, filling
+`message_attachments`. Those run as [background migrations](database-schema.md#background-migrations):
+in small batches, each a short write, resuming where the last one stopped. The daemon runs
+them on its own, a little each second ([daemon.md](daemon.md#background-migrations)).
+`tg db migrate` runs the pending ones of one account's cache (`--account`, else the active
+account, else the only one) in the foreground until they are done, and needs no Telegram
+credentials. It works while the daemon runs too: the two take turns batch by batch. Stopping it
+(Ctrl-C) loses nothing; the next run, or the daemon, goes on from there. Reads give the same
+answers before, during and after.
+
+On a terminal, stderr shows a line per batch, `messages_raw_json_v2 42% 12000 / 28571 rows`.
+Output, after which `migrations` holds every migration of the cache:
+
+```json
+{
+  "account_id": 1,
+  "rows": 28576,
+  "migrations": [
+    {
+      "name": "messages_raw_json_v2",
+      "description": "Re-encode raw_json of cached messages, fill their attachments and message types",
+      "state": "done",
+      "done": 28571,
+      "total": 28571,
+      "started_at": "2026-10-29T10:00:00.000Z",
+      "updated_at": "2026-10-29T10:00:02.000Z",
+      "finished_at": "2026-10-29T10:00:02.000Z",
+      "last_error": null
+    }
+  ]
+}
+```
+
+`rows` counts the rows this run did, 0 when nothing was pending. An account with no cache file
+yet returns `rows: 0` and no migrations; none is created. Errors: `GENERAL_ERROR` with
+`details.reason` `cache_busy` when another process held the write lock for over 5 seconds, or
+with `details.migrations` when a batch failed; the batch rolled back, and running the command
+again resumes. A migration frees space inside the file; `tg db vacuum` gives it back to the disk.
 
 ### Usage stats
 
