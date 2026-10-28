@@ -220,7 +220,6 @@ CREATE INDEX idx_messages_cache_from ON messages_cache(from_id) WHERE from_id IS
 CREATE INDEX idx_messages_cache_reply ON messages_cache(chat_id, reply_to_id) WHERE reply_to_id IS NOT NULL;
 CREATE INDEX idx_messages_cache_type ON messages_cache(chat_id, message_type) WHERE has_media = 1;
 CREATE INDEX idx_messages_cache_pinned ON messages_cache(chat_id) WHERE is_pinned = 1;
-CREATE INDEX idx_messages_cache_fetched ON messages_cache(fetched_at);
 CREATE INDEX idx_messages_cache_message_id ON messages_cache(message_id);
 ```
 
@@ -474,11 +473,13 @@ other process opening the cache meanwhile, waits up to 60 seconds for the lock i
 the process that waited finds the index built. Opens of a cache that has it only read.
 
 The search update trigger `messages_cache_au` of 0.5.0 and older re-indexed a message on every
-update. The first open of such a cache by a newer version replaces it with one that re-indexes
-only a changed text, sender or media path ([search.md](search.md#triggered-indexing)). It finds
-the old trigger by its SQL in `sqlite_master` and replaces it in one `BEGIN IMMEDIATE`
-transaction, waiting up to 60 seconds for the lock and checking again inside; opens that find
-the new trigger only read.
+update, and `idx_messages_cache_fetched` (`messages_cache(fetched_at)`) served no query. The
+first open of such a cache by a newer version replaces the trigger with one that re-indexes
+only a changed text, sender or media path ([search.md](search.md#triggered-indexing)) and drops
+the index. It finds the old trigger by its SQL in `sqlite_master` and does both in one
+`BEGIN IMMEDIATE` transaction, waiting up to 60 seconds for the lock and checking again inside;
+opens that find the new trigger and no such index only read. The index's pages stay in the
+file as free pages until `tg db vacuum`.
 
 `PRAGMA user_version` records the one-time data migrations of each account's `cache.db`
 (`src/db/peer-id-migration.ts`); they run on every account's file on its first open:

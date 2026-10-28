@@ -821,7 +821,7 @@ describe('contentless message_search', () => {
   })
 })
 
-describe('the search update trigger on a cache from 0.5.0', () => {
+describe('messages_cache writes on a cache from 0.5.0', () => {
   let dir: string
 
   beforeEach(() => {
@@ -852,6 +852,12 @@ describe('the search update trigger on a cache from 0.5.0', () => {
         )
         .get() as { sql: string }
     ).sql
+  const hasFetchedIndex = (db: Database) =>
+    db
+      .query(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_cache_fetched'",
+      )
+      .get() !== null
   const find = (db: Database, query: string) =>
     createMessagesSearch(db)
       .search(query)
@@ -872,12 +878,15 @@ describe('the search update trigger on a cache from 0.5.0', () => {
     initSyncSchema(old, { contentlessSearch })
     old.run('DROP TRIGGER messages_cache_au')
     old.run(OLD_UPDATE_TRIGGER)
+    old.run(
+      'CREATE INDEX idx_messages_cache_fetched ON messages_cache(fetched_at)',
+    )
     createMessagesCache(old).upsert(harborNotes)
     old.close()
   }
 
   for (const contentlessSearch of [true, false]) {
-    it(`gets the new trigger once (${contentlessSearch ? 'contentless' : 'full-content'} index)`, () => {
+    it(`gets the new trigger and loses the fetched_at index once (${contentlessSearch ? 'contentless' : 'full-content'} index)`, () => {
       const path = join(dir, 'cache.db')
       oldCache(path, contentlessSearch)
 
@@ -888,6 +897,7 @@ describe('the search update trigger on a cache from 0.5.0', () => {
       expect(triggerSql(db)).toContain(
         'AFTER UPDATE OF text, from_id, media_path ON messages_cache',
       )
+      expect(hasFetchedIndex(db)).toBe(false)
       expect(isContentlessSearch(db)).toBe(contentlessSearch)
       expect(find(db, 'harbor')).toEqual([7])
 
