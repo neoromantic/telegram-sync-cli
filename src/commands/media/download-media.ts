@@ -62,6 +62,7 @@ import {
 import {
   checkCachedProtection,
   checkOnlineProtection,
+  knownChatProtection,
   type ProtectionReason,
 } from './protection'
 
@@ -278,7 +279,7 @@ function readFromCache(
 
   const verdict = checkCachedProtection(
     row.raw_json,
-    deps.history.chatsCache.getById(String(chatId))?.raw_json ?? null,
+    deps.history.chatsCache.getById(String(chatId)),
     createChatProtectionStore(deps.cacheDb).get(chatId),
   )
   if (verdict.protected) {
@@ -583,6 +584,16 @@ async function downloadOnline(
     }
     if (verdict.chat?.protected && verdict.chat.reason) {
       throw contentProtected(chatId, messageId, verdict.chat.reason)
+    }
+    if (!verdict.chat) {
+      // Telegram sent no chat object: the protection last known holds
+      const known = knownChatProtection(
+        deps.history.chatsCache.getById(String(chatId)),
+        protection.get(chatId),
+      )
+      if (known.protected) {
+        throw contentProtected(chatId, messageId, known.reason)
+      }
     }
 
     const target = downloadTarget(deps.mediaDir, info, thumb)

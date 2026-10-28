@@ -479,6 +479,36 @@ describe('downloadMedia: content protection known to the cache', () => {
     )
     expect(err.details).toMatchObject({ reason: 'chat' })
   })
+
+  it('lets a newer online check that found protection off clear a raw chat flag', async () => {
+    const video = videoMessage(TEAM, 8)
+    cacheMessage(TEAM_CHAT_ID, video)
+    const { file } = pathsOf(video)
+    place(file, fakeBytes(1_000_000))
+    const setRawChat = (noforwards: boolean, fetchedAt: number) =>
+      db
+        .query(
+          'UPDATE chats_cache SET raw_json = ?, fetched_at = ? WHERE chat_id = ?',
+        )
+        .run(
+          JSON.stringify(teamChannel(noforwards)),
+          fetchedAt,
+          String(TEAM_CHAT_ID),
+        )
+    const protection = createChatProtectionStore(db)
+    setRawChat(true, NOW - 60_000)
+    protection.record(TEAM_CHAT_ID, { protected: false, reason: null }, NOW)
+
+    const hit = await downloadMedia(deps(), request(String(TEAM_CHAT_ID), 8))
+    expect(hit).toMatchObject({ cached: true, path: file })
+
+    // The chat object fetched after that check has the flag again
+    setRawChat(true, NOW + 60_000)
+    const err = await mediaError(
+      downloadMedia(deps(), request(String(TEAM_CHAT_ID), 8)),
+    )
+    expect(err.details).toMatchObject({ reason: 'chat' })
+  })
 })
 
 // --- Online ---
@@ -820,6 +850,88 @@ describe('downloadMedia: protection found online, then offline', () => {
 
       const again = await downloadMedia(deps(), request(testCase.chat, 8))
       expect(again).toMatchObject({ cached: true, path: file })
+    })
+  }
+
+  it('serves the file offline after --fresh finds an old raw chat flag off', async () => {
+    const video = videoMessage(TEAM, 8)
+    cacheMessage(TEAM_CHAT_ID, video)
+    const { file } = pathsOf(video)
+    place(file, fakeBytes(1_000_000))
+    db.query(
+      'UPDATE chats_cache SET raw_json = ?, fetched_at = ? WHERE chat_id = ?',
+    ).run(JSON.stringify(teamChannel(true)), NOW - 60_000, String(TEAM_CHAT_ID))
+
+    const before = await mediaError(
+      downloadMedia(deps(), request(String(TEAM_CHAT_ID), 8)),
+    )
+    expect(before.details).toMatchObject({ reason: 'chat' })
+
+    const telegram = fakeTelegram({
+      message: () => video,
+      chats: [teamChannel(false)],
+    })
+    const fresh = await downloadMedia(
+      deps({ getClient: () => telegram.client }),
+      request(String(TEAM_CHAT_ID), 8, { fresh: true }),
+    )
+    expect(fresh.cached).toBe(true)
+
+    const offline = await downloadMedia(
+      deps(),
+      request(String(TEAM_CHAT_ID), 8),
+    )
+    expect(offline).toMatchObject({ cached: true, path: file })
+  })
+
+  const noChatObject = [
+    { name: 'no chat object', chats: [] },
+    {
+      name: 'a forbidden channel',
+      chats: [
+        {
+          _: 'channelForbidden',
+          id: TEAM_RAW_ID,
+          accessHash: Long.fromString('7000000000000000005'),
+          title: 'Example Team',
+        },
+      ],
+    },
+  ]
+  for (const answer of noChatObject) {
+    it(`keeps a known protection when --fresh gets ${answer.name}`, async () => {
+      const video = videoMessage(TEAM, 8)
+      cacheMessage(TEAM_CHAT_ID, video)
+      createChatProtectionStore(db).record(
+        TEAM_CHAT_ID,
+        { protected: true, reason: 'chat' },
+        NOW - 60_000,
+      )
+      const telegram = fakeTelegram({
+        message: () => video,
+        chats: answer.chats,
+      })
+      const transfer = fakeTransfer(async function* () {
+        yield fakeBytes(1_000_000)
+      })
+
+      const err = await mediaError(
+        downloadMedia(
+          deps({
+            getClient: () => telegram.client,
+            download: transfer.download,
+          }),
+          request(String(TEAM_CHAT_ID), 8, { fresh: true }),
+        ),
+      )
+      expect(err.code).toBe(ErrorCodes.CONTENT_PROTECTED)
+      expect(err.details).toMatchObject({ reason: 'chat' })
+      expect(transfer.runs).toHaveLength(0)
+      expect(existsSync(pathsOf(video).part)).toBe(false)
+      expect(createChatProtectionStore(db).get(TEAM_CHAT_ID)).toMatchObject({
+        protected: 1,
+        fetched_at: NOW - 60_000,
+      })
     })
   }
 
