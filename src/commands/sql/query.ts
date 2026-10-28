@@ -8,7 +8,11 @@ import { openAccountCache, reportCacheError } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { stringify as stringifyCsv } from '../../utils/csv'
 import { error, success } from '../../utils/output'
-import { applyQueryLimit, isReadOnlyQuery } from './helpers'
+import {
+  applyQueryLimit,
+  hasSeveralStatements,
+  isReadOnlyQuery,
+} from './helpers'
 import { printSchemaCommand } from './print-schema'
 
 type QueryArgs = {
@@ -54,6 +58,15 @@ function validateQueryArgs(
     error(
       ErrorCodes.INVALID_ARGS,
       `Invalid limit: ${limitStr}. Use a non-negative integer.`,
+    )
+  }
+
+  if (hasSeveralStatements(query)) {
+    error(
+      ErrorCodes.SQL_OPERATION_BLOCKED,
+      'Only one statement per query: tg sql runs the first and would drop the rest.',
+      { query },
+      'Run each statement with its own tg sql',
     )
   }
 

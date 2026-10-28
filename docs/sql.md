@@ -244,11 +244,16 @@ tg sql --query="DELETE FROM users_cache"
 ```
 
 Two layers enforce it. A keyword check refuses statements that don't start with `SELECT`,
-`WITH` or `PRAGMA`, those with a write keyword, and pragma assignments (`PRAGMA user_version =
-0`), with a clear message. Then tg opens and migrates the cache as usual and runs the query on a
+`WITH` or `PRAGMA`, those with a write keyword, and pragmas that set a value, in either form
+(`PRAGMA user_version = 0`, `PRAGMA writable_schema(1)`), with a clear message. A pragma with an
+argument is allowed only when the argument names what to read: `table_info`, `table_xinfo`,
+`table_list`, `index_list`, `index_info`, `index_xinfo`, `foreign_key_list`,
+`foreign_key_check`, `integrity_check`, `quick_check`. A query holds one statement: with more
+(`SELECT 1; PRAGMA user_version = 0`) it returns `SQL_OPERATION_BLOCKED`, since only the first
+would run; a `;` at the end is fine. Then tg opens and migrates the cache as usual and runs the query on a
 second connection opened read-only, with `PRAGMA query_only = ON`, so nothing that passes the
-check can change the file either: a write such as `PRAGMA user_version(0)` or
-`PRAGMA wal_checkpoint(TRUNCATE)` also returns `SQL_WRITE_NOT_ALLOWED`. Reading pragmas works:
+check can change the file either: a write such as `PRAGMA optimize` or
+`PRAGMA incremental_vacuum` also returns `SQL_WRITE_NOT_ALLOWED`. Reading pragmas works:
 `PRAGMA user_version`, `PRAGMA table_info(messages_cache)`. A pragma gets no `LIMIT`.
 
 ### Blocked Operations
@@ -257,7 +262,8 @@ check can change the file either: a write such as `PRAGMA user_version(0)` or
 - `DROP`, `ALTER`, `CREATE`, `TRUNCATE`
 - `ATTACH`, `DETACH`
 - `VACUUM`, `REINDEX`
-- Setting a pragma: `PRAGMA <name> = <value>`
+- Setting a pragma: `PRAGMA <name> = <value>` or `PRAGMA <name>(<value>)`
+- More than one statement per query (`SQL_OPERATION_BLOCKED`)
 
 ---
 
@@ -316,7 +322,7 @@ tg sql --query="SELECT first_name, last_name, username, phone FROM users_cache W
 | `SQL_SYNTAX_ERROR` | Invalid SQL syntax |
 | `SQL_TABLE_NOT_FOUND` | Table doesn't exist |
 | `SQL_WRITE_NOT_ALLOWED` | Write operation attempted |
-| `SQL_OPERATION_BLOCKED` | Blocked operation (ATTACH, etc.) |
+| `SQL_OPERATION_BLOCKED` | More than one statement in a query |
 | `AUTH_REQUIRED` | No account: log in with `tg auth login` (exit 2) |
 | `NO_ACTIVE_ACCOUNT` | Several accounts and none active: pass `--account` (exit 1) |
 | `ACCOUNT_NOT_FOUND` | `--account` matches no account (exit 6) |

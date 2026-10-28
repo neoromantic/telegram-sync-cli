@@ -170,6 +170,8 @@ describe('E2E: SQL Command', () => {
         'PRAGMA user_version = 0',
         'PRAGMA user_version=0;',
         'PRAGMA user_version(0)',
+        'PRAGMA writable_schema(1)',
+        'PRAGMA journal_mode(OFF)',
         'PRAGMA wal_checkpoint(TRUNCATE)',
         'PRAGMA incremental_vacuum',
       ]) {
@@ -203,6 +205,30 @@ describe('E2E: SQL Command', () => {
       const rows = (columns.json as { data: { rows: Array<{ name: string }> } })
         .data.rows
       expect(rows.map((row) => row.name)).toContain('text')
+
+      const indexes = await runCliSuccess(
+        ['sql', 'PRAGMA index_list(messages_cache)'],
+        env.getCliOptions(),
+      )
+      expect(
+        (indexes.json as { data: { rowCount: number } }).data.rowCount,
+      ).toBeGreaterThan(0)
+    })
+
+    it('refuses a query with more than one statement', async () => {
+      const before = userVersion()
+      const result = await runCliFailure(
+        ['sql', '--query', 'SELECT 1; PRAGMA user_version = 0'],
+        1,
+        env.getCliOptions(),
+      )
+      expect(result.json).toMatchObject({
+        success: false,
+        error: { code: 'SQL_OPERATION_BLOCKED' },
+      })
+      expect(userVersion()).toBe(before)
+
+      await runCliSuccess(['sql', 'SELECT 1;'], env.getCliOptions())
     })
   })
 })
