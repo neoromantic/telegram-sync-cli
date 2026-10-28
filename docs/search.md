@@ -275,7 +275,50 @@ name), returns `INVALID_ARGS` (exit 3) with a suggestion: quote the words with p
   such as `-1001234567890`)
 - `--includeDeleted` (alias: `--include-deleted`)
 - `--phrase`: the whole query as one phrase
+- `--since`, `--until`: the date range, on the date a message was sent (see below)
+- `--sort date|relevance`: `date` (default) is newest first; `relevance` is best match first,
+  by FTS5's bm25 rank over the text, sender and chat, with ties newest first
+- `--count`: also count every message that matches the query and the filters, in `count`
 - `--limit`, `--offset`
+
+`--since` keeps messages sent at or after its time, `--until` those sent before it. Each takes:
+
+| Value | Means |
+|-------|-------|
+| `30m`, `24h`, `7d`, `2w` | that long before now |
+| `2026-10-01` | local midnight that day; for `--until`, the midnight after it, so the day counts |
+| `2026-10-01T09:30` | local time; add `Z` or an offset (`2026-10-01T09:30+03:00`) for another zone |
+
+A value in another form, or `--since` that isn't earlier than `--until`, is `INVALID_ARGS`.
+
+```bash
+tg messages search --query "invoice" --since 7d
+tg messages search --query "deploy" --since 2026-10-01 --until 2026-10-07 --sort relevance
+tg messages search --query "hello world" --limit 10 --count
+```
+
+### Output
+
+```json
+{
+  "query": "hello world",
+  "filters": { "chat": null, "sender": null, "includeDeleted": false, "phrase": false,
+               "since": "7d", "until": null },
+  "sort": "date",
+  "results": [ … ],
+  "total": 10,
+  "count": 42,
+  "limit": 10,
+  "offset": 0,
+  "source": "cache",
+  "stale": false
+}
+```
+
+`total` is the number of results on this page, at most `--limit`. `count` is the number of
+messages that match with the same filters, over every page, and is `null` without `--count`: it
+is a second query, so it is opt-in. Page with `--offset` until `results` is empty, or until
+`offset + total` reaches `count`.
 
 The `files` column is empty for now: tg doesn't store attachment names yet, so `files:` finds
 nothing.
@@ -284,7 +327,7 @@ nothing.
 
 - Search is cache-only. Results depend on what the daemon has synced.
 - Deleted messages are excluded unless `--includeDeleted` (or `--include-deleted`) is set.
-- Results are ordered by message date (descending).
+- Results are ordered by message date (descending), or by relevance with `--sort relevance`.
 - Read a hit in context with `tg messages get --chat <chatId> --id <messageId> --context 5`;
   `chatId` and `messageId` come from the result.
 

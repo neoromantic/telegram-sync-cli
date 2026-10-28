@@ -204,6 +204,8 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - `sql.e2e.test.ts` — `tg sql` queries through the real argument parser
 - `messages.e2e.test.ts` — `tg messages search`, `list` and `get` on a seeded cache, without
   credentials; chat titles and IDs in search results, and the first run on a 0.2.0 cache
+- `messages-search-query.e2e.test.ts` — the query rules of `tg messages search` (plain words,
+  FTS5 syntax, `--phrase`, query errors), `--since`/`--until`, `--sort` and `--count`
 - `chats-sync.e2e.test.ts` — `tg chats sync` against a seeded cache, without credentials
 - `api.e2e.test.ts` — `tg api` with a fake Telegram client (`helpers/fake-client-cli.ts`, run
   as runCli's `entry`), which keeps the process alive even after it is closed, as a connected

@@ -109,7 +109,7 @@ tg chats list --limit 20
 tg chats sync @examplenews          # also sync a large group or channel
 tg messages list --chat @username --limit 20
 tg messages get --chat @username --id 42 --context 3
-tg messages search --query "hello"
+tg messages search --query "hello world" --since 7d   # both words, any order
 tg send --to @username --message "Hi there"
 tg api account.checkUsername --username=myuser
 tg sql --query "SELECT * FROM users_cache LIMIT 10"

@@ -32,6 +32,7 @@ const MESSAGES = [
   [7, TEAM_CHAT_ID, ALICE_ID, 'квартира свободна', 6 * DAY],
   [8, BOOK_CLUB_ID, BOB_ID, "don't forget the e-mail", 20 * DAY],
   [9, BOOK_CLUB_ID, BOB_ID, 'function(arg) call', 30 * DAY],
+  [10, BOOK_CLUB_ID, BOB_ID, 'deploy deploy deploy', 40 * DAY],
 ] as const
 
 function seed(db: Database): void {
@@ -144,5 +145,78 @@ describe('E2E: messages search query rules', () => {
       expect(json.error.code).toBe('INVALID_ARGS')
       expect(json.error.suggestion).toContain('--phrase')
     }
+  })
+
+  async function searchData(...args: string[]) {
+    const result = await runCliSuccess(
+      ['messages', 'search', '--query', ...args],
+      env.getCliOptions(),
+    )
+    return (
+      result.json as {
+        data: {
+          results: MessageSearchItem[]
+          total: number
+          count: number | null
+          sort: string
+        }
+      }
+    ).data
+  }
+
+  async function invalidArgs(...args: string[]): Promise<string> {
+    const result = await runCli(
+      ['messages', 'search', '--query', ...args],
+      env.getCliOptions(),
+    )
+    expect(result.exitCode).toBe(3)
+    return (result.json as { error: { code: string } }).error.code
+  }
+
+  it('limits matches to a date range', async () => {
+    expect(await ids('hello world', '--since', '7d')).toEqual([3, 4])
+    expect(await ids('hello world', '--until', '7d')).toEqual([5])
+    expect(await ids('hello world', '--since', '7d', '--until', '1d')).toEqual([
+      4,
+    ])
+    const dayAgo = new Date(Date.now() - DAY * 1000).toISOString()
+    expect(await ids('hello world', '--since', dayAgo)).toEqual([3])
+    expect(await ids('hello world', '--since', '2000-01-01')).toEqual([3, 4, 5])
+    expect(await ids('hello world', '--until', '2000-01-01')).toEqual([])
+  })
+
+  it('rejects a date it cannot read, and an empty range', async () => {
+    expect(await invalidArgs('hello', '--since', 'yesterday')).toBe(
+      'INVALID_ARGS',
+    )
+    expect(await invalidArgs('hello', '--until', '2026-02-30')).toBe(
+      'INVALID_ARGS',
+    )
+    expect(await invalidArgs('hello', '--since', '1d', '--until', '7d')).toBe(
+      'INVALID_ARGS',
+    )
+  })
+
+  it('orders by date by default and by bm25 with --sort relevance', async () => {
+    const byDate = await searchData('deploy')
+    expect(byDate.sort).toBe('date')
+    expect(byDate.results.map((item) => item.messageId)).toEqual([1, 10])
+
+    const byRelevance = await searchData('deploy', '--sort', 'relevance')
+    expect(byRelevance.sort).toBe('relevance')
+    expect(byRelevance.results.map((item) => item.messageId)).toEqual([10, 1])
+
+    expect(await invalidArgs('deploy', '--sort', 'size')).toBe('INVALID_ARGS')
+  })
+
+  it('counts every match with --count, while total is the page size', async () => {
+    const page = await searchData('hello world', '--limit', '1', '--count')
+    expect(page.total).toBe(1)
+    expect(page.count).toBe(3)
+
+    const filtered = await searchData('hello world', '--since', '7d', '--count')
+    expect(filtered.count).toBe(2)
+
+    expect((await searchData('hello world')).count).toBeNull()
   })
 })
