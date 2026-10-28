@@ -122,6 +122,12 @@ describe('error types', () => {
     expect(
       rpcErrorType('Telegram API error 400: FILE_REFERENCE_0_EXPIRED'),
     ).toBe('FILE_REFERENCE_EXPIRED')
+    expect(
+      rpcErrorType(
+        'Failed to list messages: Telegram API error 400: PEER_ID_INVALID (run tg chats list --fresh or pass the @username)',
+      ),
+    ).toBe('PEER_ID_INVALID')
+    expect(rpcErrorType('Telegram API error 400: Peer_invalid')).toBeNull()
     expect(rpcErrorType('Chat "Weekend Crew" not found')).toBeNull()
   })
 

@@ -248,9 +248,14 @@ export function startTelemetry(
   }
 }
 
-/** Telegram's error name from an mtcute message, numbers dropped: FLOOD_WAIT */
+/**
+ * Telegram's error name from an mtcute message, numbers dropped: FLOOD_WAIT.
+ * tg may add a hint after it (`PEER_ID_INVALID (run tg chats list …)`).
+ */
 export function rpcErrorType(message: string): string | null {
-  const text = /Telegram API error -?\d+: ([A-Z0-9_%]+)\s*$/.exec(message)?.[1]
+  const text = /Telegram API error -?\d+: ([A-Z0-9_%]+)(?![\w%])/.exec(
+    message,
+  )?.[1]
   return text ? text.replace(/_(?:%d|\d+)(?=_|$)/g, '') : null
 }
 
