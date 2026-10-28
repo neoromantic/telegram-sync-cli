@@ -1075,6 +1075,30 @@ describe('downloadMedia: partial downloads', () => {
     expect(existsSync(paths.part)).toBe(false)
   })
 
+  it("ends with GENERAL_ERROR when another process's download outlasts the wait", async () => {
+    const paths = pathsOf(pdf)
+    place(paths.lock, new TextEncoder().encode(String(process.pid)))
+    const telegram = fakeTelegram({ message: () => pdf })
+    const transfer = fakeTransfer(async function* () {
+      yield fakeBytes(PDF_SIZE)
+    })
+
+    const err = await mediaError(
+      downloadMedia(
+        deps({
+          getClient: () => telegram.client,
+          download: transfer.download,
+          lockWaitMs: 0,
+        }),
+        request('me', 5),
+      ),
+    )
+    expect(err.code).toBe(ErrorCodes.GENERAL_ERROR)
+    expect(err.details).toMatchObject({ lock: paths.lock, pid: process.pid })
+    expect(transfer.runs).toHaveLength(0)
+    expect(existsSync(paths.lock)).toBe(true)
+  })
+
   it('drops a download that ends short with NETWORK_ERROR', async () => {
     const paths = pathsOf(pdf)
     const transfer = fakeTransfer(async function* () {
