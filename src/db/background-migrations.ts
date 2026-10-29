@@ -355,6 +355,42 @@ export interface RunOptions {
 }
 
 /**
+ * The pause between `tg db migrate`'s batches while the daemon runs. A write
+ * that waits for the lock sleeps in SQLite's busy handler between tries, 1,
+ * 2, 5 … 50 ms and then 100 ms at most; batches back to back leave gaps of
+ * microseconds, which such a write in another process misses until its
+ * busy_timeout runs out. A pause longer than the longest sleep, with room for
+ * timers that fire late, always has a try inside it, and the write takes the
+ * lock.
+ */
+export const OTHER_PROCESS_PAUSE_MS = 150
+
+/**
+ * `tg db migrate`'s batches while the daemon runs: about 50 ms each, as the
+ * daemon's, rather than 500 rows, so the pause after each costs a fixed
+ * share of the time: the migration works 50 ms of every 200. 2,500 rows take
+ * about that long at the rates of docs/storage.md; a batch reads its rows
+ * before it starts, so a larger cap only reads rows left for the next one.
+ */
+export const SHARED_BATCH_LIMITS: BatchLimits = { maxRows: 2_500, maxMs: 50 }
+
+/**
+ * How a foreground run (`tg db migrate`) paces its batches. With the daemon
+ * running: SHARED_BATCH_LIMITS and an OTHER_PROCESS_PAUSE_MS pause after
+ * each batch, so a daemon write waits for one batch at most. Alone: the
+ * default batches back to back.
+ */
+export function foregroundPacing(
+  daemonRunning: boolean,
+): Pick<RunOptions, 'limits' | 'yieldBetweenBatches'> {
+  if (!daemonRunning) return {}
+  return {
+    limits: SHARED_BATCH_LIMITS,
+    yieldBetweenBatches: () => Bun.sleep(OTHER_PROCESS_PAUSE_MS),
+  }
+}
+
+/**
  * Run pending migrations in registry order until each is done or
  * `shouldStop` says so. Returns the rows done.
  */

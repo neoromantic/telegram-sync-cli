@@ -468,39 +468,52 @@ describe('a new cache', () => {
   })
 })
 
+/** Each batch of the migration in the child holds the write lock this long */
+const SLOW_BATCH_MS = 100
+
 /**
- * Runs every pending migration of MIGRATE_PATH, in batches of at most 20 ms.
- * After the first batch of messages_raw_json_v2 it holds, without the write
- * lock, until the writer has seen it running and created MIGRATE_GATE: a
- * writer waiting in SQLite's busy handler can otherwise miss every 1 ms gap
- * between batches and first look after the migration is done. It gives up
- * after 4 s, so a writer that never looks fails the test instead of hanging.
+ * Runs every pending migration of MIGRATE_PATH as `tg db migrate` does with
+ * the daemon running, in batches of 10 rows. A messages batch sleeps
+ * SLOW_BATCH_MS inside its transaction, so the migration holds the lock for
+ * 700 ms or more in all, longer than the writer's busy_timeout. Without the
+ * pause between batches the writer is refused with the SQLite Bun bundles on
+ * Linux; macOS's system SQLite lets it in between batches anyway. Prints the
+ * longest batch, from its start to its commit.
  */
 const MIGRATE_SCRIPT = `
   import { Database } from 'bun:sqlite'
-  const { runPendingMigrations } = await import(process.env.MIGRATE_MODULE)
+  const { foregroundPacing, runPendingMigrations } = await import(process.env.MIGRATE_MODULE)
+  const { BACKGROUND_MIGRATIONS } = await import(process.env.MIGRATIONS_MODULE)
+  const [messages, ...others] = BACKGROUND_MIGRATIONS
+  let batchStarted = 0
+  let longestBatchMs = 0
+  const slowMessages = {
+    ...messages,
+    prepare(db) {
+      batchStarted = performance.now()
+      Bun.sleepSync(${SLOW_BATCH_MS})
+      return messages.prepare(db)
+    },
+  }
   const db = new Database(process.env.MIGRATE_PATH)
-  const gate = Bun.file(process.env.MIGRATE_GATE)
   db.run('PRAGMA busy_timeout = 5000')
-  let messagesStarted = false
-  await runPendingMigrations(db, {
-    limits: { maxRows: 500, maxMs: 20 },
-    onBatch: (migration) => {
-      if (migration.name === 'messages_raw_json_v2') messagesStarted = true
+  await runPendingMigrations(
+    db,
+    {
+      ...foregroundPacing(true),
+      limits: { maxRows: 10, maxMs: 1_000 },
+      onBatch: (migration) => {
+        if (migration.name !== messages.name) return
+        longestBatchMs = Math.max(longestBatchMs, performance.now() - batchStarted)
+      },
     },
-    yieldBetweenBatches: async () => {
-      const deadline = Date.now() + 4_000
-      while (messagesStarted && !(await gate.exists())) {
-        if (Date.now() > deadline) process.exit(3)
-        await Bun.sleep(1)
-      }
-      await Bun.sleep(1)
-    },
-  })
+    [slowMessages, ...others],
+  )
   db.close()
+  console.log(JSON.stringify({ longestBatchMs }))
 `
 
-describe('a writer next to a running migration', () => {
+describe('a writer in another process next to tg db migrate', () => {
   let dir: string
 
   beforeEach(() => {
@@ -511,21 +524,25 @@ describe('a writer next to a running migration', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('is never refused with a short busy_timeout', async () => {
+  it('is never refused: it gets in after the batch it ran into', async () => {
     const path = join(dir, 'cache.db')
     const seed = new Database(path)
     seed.run('PRAGMA journal_mode = WAL')
-    seedOldFormCache(seed, { messages: 4_000 })
+    // 7 batches or more: 700 ms of the write lock
+    seedOldFormCache(seed, { messages: 70 })
     seed.close()
-    const gate = join(dir, 'writer-saw-running')
 
     const child = Bun.spawn(['bun', '--no-env-file', '-e', MIGRATE_SCRIPT], {
       env: {
         ...process.env,
         MIGRATE_PATH: path,
-        MIGRATE_GATE: gate,
         MIGRATE_MODULE: join(import.meta.dir, '../db/background-migrations.ts'),
+        MIGRATIONS_MODULE: join(
+          import.meta.dir,
+          '../db/raw-json-migrations.ts',
+        ),
       },
+      stdout: 'pipe',
       stderr: 'pipe',
     })
     let exited = false
@@ -533,43 +550,50 @@ describe('a writer next to a running migration', () => {
       exited = true
     })
 
-    // A daemon's write waits 5 s; this one gives up after 1 s
+    // A daemon's write waits 5 s; this one gives up after 500 ms
     const writer = new Database(path)
-    writer.run('PRAGMA busy_timeout = 1000')
+    writer.run('PRAGMA busy_timeout = 500')
     const messages = createMessagesCache(writer)
     let writes = 0
+    let refused = 0
     let duringMigration = 0
-    let longestMs = 0
     while (!exited) {
-      const started = performance.now()
-      messages.upsert({
-        chat_id: OLD_FORM_CHAT_ID,
-        message_id: 100_000 + writes,
-        text: 'Example live message',
-        message_type: 'text',
-        has_media: false,
-        date: 1_760_000_000,
-        raw_json: '{}',
-      })
-      longestMs = Math.max(longestMs, performance.now() - started)
-      writes += 1
-      const state = statusByName(writer).messages_raw_json_v2?.state
-      if (state === 'running') {
-        duringMigration += 1
-        // Let the migration go on: the rest of it runs next to these writes
-        if (duringMigration === 1) await Bun.write(gate, '')
+      try {
+        messages.upsert({
+          chat_id: OLD_FORM_CHAT_ID,
+          message_id: 100_000,
+          text: `Example live message ${writes}`,
+          message_type: 'text',
+          has_media: false,
+          date: 1_760_000_000,
+          raw_json: '{}',
+        })
+        writes += 1
+      } catch {
+        refused += 1
       }
+      const state = statusByName(writer).messages_raw_json_v2?.state
+      if (state === 'running') duringMigration += 1
       await Bun.sleep(1)
     }
 
     expect(await child.exited).toBe(0)
+    const { longestBatchMs } = JSON.parse(
+      await new Response(child.stdout).text(),
+    ) as { longestBatchMs: number }
+    expect(longestBatchMs).toBeGreaterThanOrEqual(SLOW_BATCH_MS)
+    // The migration held the lock for 700 ms or more, and no write gave up
+    // after 500 ms: each got in during a pause. Its wait is the rest of the
+    // batch it ran into and the busy handler's sleep over the batch's end,
+    // 50 to 100 ms by then; the margin covers a writer a busy machine keeps
+    // off the CPU for a whole pause.
+    expect(refused).toBe(0)
     expect(duringMigration).toBeGreaterThan(0)
-    expect(longestMs).toBeLessThan(1_000)
-    // Messages written before it started count too
+    // The live message counts too when it came before the start
     const status = statusByName(writer).messages_raw_json_v2!
     expect(status.state).toBe('done')
     expect(status.done).toBe(status.total!)
-    expect(status.done).toBeGreaterThanOrEqual(4_000)
+    expect(status.done).toBeGreaterThanOrEqual(70)
     writer.close()
   })
 })

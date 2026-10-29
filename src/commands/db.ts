@@ -18,6 +18,7 @@ import {
   openExistingAccountCacheDb,
 } from '../db'
 import {
+  foregroundPacing,
   readMigrationStatus,
   runPendingMigrations,
 } from '../db/background-migrations'
@@ -207,6 +208,9 @@ const migrateCommand = defineCommand({
   },
   async run({ args }) {
     const account = resolveAccount(args.account)
+    const daemonRunning = createPidFile(
+      join(getDataDir(), 'daemon.pid'),
+    ).isRunning()
     const db = openCache(account.id)
     if (!db) {
       success({ account_id: account.id, rows: 0, migrations: [] })
@@ -216,6 +220,7 @@ const migrateCommand = defineCommand({
     const progress = migrationProgress()
     try {
       const rows = await runPendingMigrations(db, {
+        ...foregroundPacing(daemonRunning),
         onBatch: (migration, status) =>
           progress?.(migration.name, status.done, status.total),
       })
