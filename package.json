@@ -29,6 +29,7 @@
     "test:coverage": "bun test --isolate --coverage",
     "test:build": "bun run scripts/test-build.ts",
     "test:install": "bun run scripts/test-install.ts",
+    "bench:storage": "bun run scripts/bench-storage.ts",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",

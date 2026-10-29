@@ -67,6 +67,7 @@ bun run build                    # compile dist/tg for this platform
 bun run build:all                # cross-compile every target
 bun run test:integration         # real Telegram API, opt-in (see Testing)
 bun run lint:fix                 # Biome autofix (also the pre-commit hook)
+bun run bench:storage            # storage benchmark on made-up data, opt-in (docs/storage.md)
 ```
 
 - `bin/tg.js` is a 3-line ESM shim (`#!/usr/bin/env bun`) that runs `src/index.ts`. The npm
