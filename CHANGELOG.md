@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `print-schema` ran. An unknown `--output` now returns `INVALID_ARGS` in the
   JSON error schema, and `--output` may also come before the subcommand
   (`tg sql -o sql print-schema`) (#109).
+- `tg db migrate` next to a running daemon no longer locks the daemon's
+  writes out: it ran its batches back to back, and on a big cache a daemon
+  write could give up with `database is locked`. With the daemon running it
+  now pauses 150 ms after each batch of at most 50 ms, so a daemon write
+  waits for one batch at most; the run takes four to five times as long as
+  with the daemon stopped (#89).
 
 ## [0.7.0] - 2026-10-29
 

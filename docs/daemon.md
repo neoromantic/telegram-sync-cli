@@ -229,12 +229,17 @@ After the sync work of each tick, the daemon runs the pending
 [background migrations](database-schema.md#background-migrations) of every account's cache,
 one account after the other, for up to 250 ms a tick. Each batch is a short write of at most
 500 rows or 50 ms, and the event loop is free between batches, so live updates and sync jobs
-wait for one batch at most. A stop (`tg daemon stop`) starts no new batch; the next start goes
-on from where it stopped. A failed batch rolls back, is logged as a warning and recorded in
-`cache_migrations.last_error`, and that account's migrations wait a minute before the next try.
+wait for one batch at most. Then the loop sleeps for a second, so a write of another process
+(another `tg` command, 5 seconds of `busy_timeout`) waits for the tick's 250 ms at most. A stop
+(`tg daemon stop`) starts no new batch; the next start goes on from where it stopped. A failed
+batch rolls back, is logged as a warning and recorded in `cache_migrations.last_error`, and that
+account's migrations wait a minute before the next try.
 When a migration finishes, the daemon logs `[Account <id>] Migration <name> done: <rows> rows`.
 Once an account has none left, the daemon doesn't look again until it restarts. `tg status`
-shows the progress; `tg db migrate` finishes them in the foreground, also while the daemon runs.
+shows the progress; `tg db migrate` finishes them in the foreground, also while the daemon runs:
+then it pauses 150 ms after each batch, longer than SQLite's busy handler sleeps between tries,
+so a daemon write that waits for the lock gets it after one batch
+([tg db migrate](cli-commands.md#tg-db-migrate)).
 
 Key files: `src/db/background-migrations.ts`, `src/daemon/daemon-migrations.ts`
 
