@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-29
+
+After the upgrade the daemon rewrites what older versions cached, a little each
+second, in the background (#89): `raw_json` gets smaller and older media messages
+get their attachment rows. `tg status` shows the progress; without the daemon,
+`tg db migrate` does it in the foreground. When it is done, `tg db vacuum` gives
+the freed space back to the disk.
+
 ### Added
 
 - Background migrations: a rewrite of every row of a big cache now runs in
@@ -706,7 +714,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.4.1...v0.5.0
