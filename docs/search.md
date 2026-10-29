@@ -31,7 +31,7 @@ the text from there. `bm25()` and `rank` work on a contentless table; `snippet()
 `highlight()` don't, so `--snippet` is computed in tg. So results are
 the same as with the full-content table of 0.4 and older, column filters (`sender:alice`)
 included, while the index takes about a third of the space (see
-[database-schema.md](database-schema.md#capacity-planning-approx)). Selecting a column of
+[database-schema.md](database-schema.md#capacity-planning)). Selecting a column of
 `message_search` itself (`tg sql`) returns `NULL`; query the view
 [`message_search_text`](#sql-the-message_search_text-view) for the text instead.
 

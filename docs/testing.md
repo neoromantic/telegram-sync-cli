@@ -344,6 +344,15 @@ By default fixtures are stored under:
 
 CI has no Telegram secrets; integration tests never run there.
 
+## Storage Benchmark
+
+`bun run bench:storage` builds a made-up account cache through tg's own write paths and
+measures its size, write rates, query times, `tg db vacuum` and a search index rebuild;
+`--old-form` times `tg db migrate` on rows in the form 0.5.0 and older wrote. It is
+not part of `test` or CI, needs no Telegram credentials and works in a temp folder under
+`$TMPDIR` that it removes at the end. Options, method and the numbers:
+[storage.md](storage.md#re-running-the-benchmark).
+
 ## Troubleshooting
 
 ### Tests Hanging

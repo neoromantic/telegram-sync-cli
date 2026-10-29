@@ -148,9 +148,9 @@ For a proxy, set `TELEGRAM_PROXY=socks5://127.0.0.1:1080`. Supports `socks4://`,
 Reference: [CLI commands](docs/cli-commands.md), [authentication](docs/auth.md),
 [configuration](docs/configuration.md), [architecture](docs/architecture.md),
 [daemon](docs/daemon.md), [sync strategy](docs/sync-strategy.md), [caching](docs/caching.md),
-[database schema](docs/database-schema.md), [SQL](docs/sql.md), [search](docs/search.md),
-[media](docs/media.md), [rate limiting](docs/rate-limiting.md). Known gaps are tracked in
-[issues](https://github.com/neoromantic/telegram-sync-cli/issues).
+[database schema](docs/database-schema.md), [storage](docs/storage.md), [SQL](docs/sql.md),
+[search](docs/search.md), [media](docs/media.md), [rate limiting](docs/rate-limiting.md).
+Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-cli/issues).
 
 ## For AI agents
 

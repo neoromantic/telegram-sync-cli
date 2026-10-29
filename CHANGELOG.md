@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `message_attachments` row for every older media message, and the
   `message_type` of older history messages (a video is `video`, no longer
   `document`). Reads give the same answers while they run (#89, #22).
+- `bun run bench:storage`: a storage benchmark that builds a made-up cache of any size through
+  tg's own write paths and reports bytes per message by table, write rates, query times,
+  `tg db migrate` on old-form rows, `tg db vacuum` and a search index rebuild. `docs/storage.md`
+  gives the numbers for 100,000, 1M and 10M messages and the storage decisions they back (#80).
 
 ### Changed
 
