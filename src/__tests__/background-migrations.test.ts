@@ -468,15 +468,34 @@ describe('a new cache', () => {
   })
 })
 
-/** Runs every pending migration of MIGRATE_PATH, in batches of at most 20 ms */
+/**
+ * Runs every pending migration of MIGRATE_PATH, in batches of at most 20 ms.
+ * After the first batch of messages_raw_json_v2 it holds, without the write
+ * lock, until the writer has seen it running and created MIGRATE_GATE: a
+ * writer waiting in SQLite's busy handler can otherwise miss every 1 ms gap
+ * between batches and first look after the migration is done. It gives up
+ * after 4 s, so a writer that never looks fails the test instead of hanging.
+ */
 const MIGRATE_SCRIPT = `
   import { Database } from 'bun:sqlite'
   const { runPendingMigrations } = await import(process.env.MIGRATE_MODULE)
   const db = new Database(process.env.MIGRATE_PATH)
+  const gate = Bun.file(process.env.MIGRATE_GATE)
   db.run('PRAGMA busy_timeout = 5000')
+  let messagesStarted = false
   await runPendingMigrations(db, {
     limits: { maxRows: 500, maxMs: 20 },
-    yieldBetweenBatches: () => new Promise((resolve) => setTimeout(resolve, 1)),
+    onBatch: (migration) => {
+      if (migration.name === 'messages_raw_json_v2') messagesStarted = true
+    },
+    yieldBetweenBatches: async () => {
+      const deadline = Date.now() + 4_000
+      while (messagesStarted && !(await gate.exists())) {
+        if (Date.now() > deadline) process.exit(3)
+        await Bun.sleep(1)
+      }
+      await Bun.sleep(1)
+    },
   })
   db.close()
 `
@@ -498,11 +517,13 @@ describe('a writer next to a running migration', () => {
     seed.run('PRAGMA journal_mode = WAL')
     seedOldFormCache(seed, { messages: 4_000 })
     seed.close()
+    const gate = join(dir, 'writer-saw-running')
 
     const child = Bun.spawn(['bun', '--no-env-file', '-e', MIGRATE_SCRIPT], {
       env: {
         ...process.env,
         MIGRATE_PATH: path,
+        MIGRATE_GATE: gate,
         MIGRATE_MODULE: join(import.meta.dir, '../db/background-migrations.ts'),
       },
       stderr: 'pipe',
@@ -533,7 +554,11 @@ describe('a writer next to a running migration', () => {
       longestMs = Math.max(longestMs, performance.now() - started)
       writes += 1
       const state = statusByName(writer).messages_raw_json_v2?.state
-      if (state === 'running') duringMigration += 1
+      if (state === 'running') {
+        duringMigration += 1
+        // Let the migration go on: the rest of it runs next to these writes
+        if (duringMigration === 1) await Bun.write(gate, '')
+      }
       await Bun.sleep(1)
     }
 
