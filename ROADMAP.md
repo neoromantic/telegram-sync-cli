@@ -6,7 +6,6 @@ The list is in priority order.
 
 ## Reliability
 
-- [Storage north star: bounded size, big caches, offloading, SQLite alternatives](https://github.com/neoromantic/telegram-sync-cli/issues/80)
 - [`tg db check` and `tg db backup`](https://github.com/neoromantic/telegram-sync-cli/issues/91)
 - [A soft cache size budget per account](https://github.com/neoromantic/telegram-sync-cli/issues/98)
 - [Option to cache live messages only in synced chats](https://github.com/neoromantic/telegram-sync-cli/issues/100)

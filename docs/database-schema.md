@@ -727,29 +727,25 @@ supported: it would start an empty shared cache.
   `cache.retention.*` ([daemon.md](daemon.md#cache-pruning)); messages are never pruned.
 - **Message search** — FTS5 index maintained via triggers on `messages_cache`.
 
-## Capacity Planning (Approx.)
+## Capacity Planning
 
-Measured on 20,000 made-up messages written through `upsertBatch` (SQLite 3.54.0, 4 KB pages),
-bytes per message as `tg status --sizes` reports them (indexes counted with their table):
+Measured with `bun run bench:storage` on made-up messages (a few big chats and many small ones,
+1 in 10 a photo); the method, every number and the decisions they back are in
+[storage.md](storage.md). Bytes per message, indexes counted with their table as `tg status
+--sizes` reports them:
 
-| Messages | `messages_cache` | `message_search` full-content | `message_search` contentless | File, contentless |
-|----------|------------------|-------------------------------|------------------------------|-------------------|
-| Text only, 3–32 words | ~910 B | ~330 B | ~100 B | ~1,020 B (18% smaller) |
-| One in ten with a photo | ~1,740 B | ~320 B | ~100 B | ~1,850 B (11% smaller) |
+| Messages | File | `messages_cache` | of it `raw_json` | `message_search` | `message_attachments` |
+|----------|------|------------------|------------------|------------------|-----------------------|
+| 100,000 | 157 MB, 1,564 B | 1,420 B | 849 B | 116 B | 21 B |
+| 1M | 1.56 GB, 1,553 B | 1,424 B | 849 B | 102 B | 22 B |
+| 10M | 15.55 GB, 1,555 B | 1,427 B | 849 B | 101 B | 22 B |
 
-`raw_json` (the stored TL object) was 43–61% of the file in this measurement, most of it in
-media messages: byte arrays such as `fileReference` and the stripped thumbnail were stored as
-objects with one key per byte, about 7.7 KB per synthetic photo message. Now they are base64
-([raw_json](#raw_json)): the made-up photo message in the tests takes 1,776 bytes instead of
-10,215.
-
-| Data Type | Records | Est. Size |
-|-----------|---------|-----------|
-| users_cache | 500 | ~0.5 MB |
-| chats_cache | 200 | ~0.2 MB |
-| messages_cache + message_search (per chat) | 10,000 | ~10–20 MB |
-| messages_cache + message_search (50 synced chats) | 500,000 | ~0.5–1 GB |
-| api_activity (7 days) | 10,000 | ~5 MB |
+So 1 GB holds about 640,000 such messages; more photos, links and long texts cost more. A cache
+written by 0.5.0 and older takes about 2.2 KB per message until the background migrations
+([Background migrations](#background-migrations)) and a `tg db vacuum` bring it to the sizes
+above ([storage.md](storage.md#1-raw_json)). `tg db vacuum` needs about twice the file's size
+in free disk while it runs. In the measurement for 0.5.0 the contentless search index took
+about 100 bytes per message, the full-content one about 330.
 
 ## Future Enhancements
 
