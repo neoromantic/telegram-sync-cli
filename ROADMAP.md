@@ -6,7 +6,9 @@ The list is in priority order.
 
 ## Reliability
 
+- [Search for a common word takes seconds on a big cache](https://github.com/neoromantic/telegram-sync-cli/issues/118)
 - [`tg db check` and `tg db backup`](https://github.com/neoromantic/telegram-sync-cli/issues/91)
+- [`tg db vacuum`: check free disk before a full VACUUM](https://github.com/neoromantic/telegram-sync-cli/issues/119)
 - [A soft cache size budget per account](https://github.com/neoromantic/telegram-sync-cli/issues/98)
 - [Option to cache live messages only in synced chats](https://github.com/neoromantic/telegram-sync-cli/issues/100)
 - [`raw_json`: measure zstd with a trained dictionary](https://github.com/neoromantic/telegram-sync-cli/issues/97)
