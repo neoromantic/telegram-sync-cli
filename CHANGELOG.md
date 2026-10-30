@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A channel with sync off now has its newest post cached: Telegram may push
+  few live posts of a channel, or none, and mtcute can't fetch the ones it
+  missed, so every dialog pass (on start, after a reconnect and after a wake)
+  caches the newest message of each chat with sync off. The docs now say which
+  messages arrive live (#125).
 - The daemon catches up after mtcute reconnects on its own (a network drop)
   and after the computer wakes from sleep, not only after its own reconnect:
   it watches the connection state and the wall clock, runs the dialog pass on

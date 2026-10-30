@@ -72,7 +72,13 @@ changing the mode, pass the current one: `--auto` for a chat that follows the po
 for one turned on.
 
 The mode and the policy control catch-up, first pages and history only. While the daemon runs,
-it caches messages that arrive live in every chat, including one that is off.
+it caches every message that arrives live, in any chat, including one that is off. For a
+channel that is off, few posts may arrive live: Telegram may send fewer updates for a channel,
+or none, and mtcute can fetch what it missed only for a channel whose update state (`pts`) it
+already has. So every dialog pass (on start, after a reconnect and after a wake) also caches
+the newest message of each chat that is off, which the dialog list carries anyway: such a chat
+always has its newest message as of the last pass, and older ones come with `tg chats sync`.
+See [real-time.md](real-time.md#channels).
 
 Telegram often leaves the member count out of a supergroup's dialog, and such a group may have
 thousands of members, so a group without a count is treated as large. The dialog pass keeps the

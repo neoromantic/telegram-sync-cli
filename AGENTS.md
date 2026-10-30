@@ -147,8 +147,9 @@ whose newest message (`top_message_id`, from the dialog pass on start and after 
 above the forward cursor, never as polling. Priorities: real-time first; DMs
 and groups under 20 members get full history; groups of 20–100 get the newest 100 messages,
 then history after the small chats; groups of unknown size or over 100 members and channels
-get catch-up and history only on request (`tg chats sync`). Live messages are cached in every
-chat. Details: [docs/sync-strategy.md](docs/sync-strategy.md).
+get catch-up and history only on request (`tg chats sync`). Every message that arrives live is
+cached, in any chat; Telegram may push few posts of channels, so each dialog pass also caches
+the newest message of every chat with sync off. Details: [docs/sync-strategy.md](docs/sync-strategy.md).
 
 ### Bun-native APIs
 

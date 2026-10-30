@@ -31,6 +31,27 @@ so the chat's first page can build an InputPeer with its access hash before the 
 pass. A "min" user or channel is skipped: its access hash works only in the update that carried
 it.
 
+### Channels
+
+The handlers cache every message mtcute delivers, in a chat with sync off too, and never move
+its cursor. What mtcute delivers for a channel depends on Telegram and on mtcute's update
+state:
+
+- Telegram "will usually send passive updates" for the channels and supergroups you are in,
+  but "may stop sending updates (or send fewer updates) for some" of them, and clients are
+  expected to poll `updates.getChannelDifference` only for the few channels a user has open
+  ([Telegram's updates docs](https://core.telegram.org/api/updates)). The daemon has no
+  channel open.
+- When Telegram signals a channel gap (`updateChannelTooLong`, or a gap in `pts`), mtcute
+  fetches the channel's difference only from a `pts` it already has: one from an earlier update
+  of that channel, or the one the signal carries. For a channel it never got an update from,
+  it has none and skips the gap; with the signal's own `pts` the difference starts at the
+  channel's current state. Either way the posts in between are not delivered.
+
+So a channel with sync off may get none of its posts live. Each dialog pass (on start, after a
+reconnect and after a wake) caches the newest message of every chat with sync off, from the
+dialog list it reads anyway. Older posts of such a channel come only with `tg chats sync`.
+
 ### Message Type Mapping
 
 Media types are normalized to `message_type` values such as:

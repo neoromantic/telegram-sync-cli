@@ -163,6 +163,45 @@ describe('bootstrapDialogs', () => {
     })
   })
 
+  it('keeps the newest post of each chat with sync off, and only theirs (#125)', async () => {
+    // A synced DM, turned off; a channel turned on with tg chats sync
+    seedSynced(1001, 10, 10)
+    chatSyncState.setSyncMode(1001, 'off')
+    chatSyncState.upsert({
+      chat_id: -1_000_000_002_003,
+      chat_type: 'channel',
+      sync_priority: SyncPriority.Low,
+      sync_enabled: false,
+    })
+    chatSyncState.setSyncMode(-1_000_000_002_003, 'on')
+
+    await runPass([
+      // A channel is off by the policy: no catch-up for it
+      {
+        kind: 'channel',
+        id: 2002,
+        topMessage: 15,
+        lastMessage: { id: 15, text: 'Example post' },
+      },
+      { kind: 'user', id: 1001, topMessage: 12, lastMessage: { id: 12 } },
+      { kind: 'channel', id: 2003, topMessage: 7, lastMessage: { id: 7 } },
+      { kind: 'user', id: 1004, topMessage: 3, lastMessage: { id: 3 } },
+    ])
+
+    const messages = createMessagesCache(testCacheDb)
+    expect(messages.get(-1_000_000_002_002, 15)).toMatchObject({
+      text: 'Example post',
+      // A channel post is sent by the channel
+      from_id: -1_000_000_002_002,
+    })
+    expect(messages.get(1001, 12)).not.toBeNull()
+    // Synced chats get their messages from the sync jobs
+    expect(messages.get(-1_000_000_002_003, 7)).toBeNull()
+    expect(messages.get(1004, 3)).toBeNull()
+    // The cursor still means every message up to it is cached
+    expect(chatSyncState.get(-1_000_000_002_002)?.forward_cursor).toBeNull()
+  })
+
   it('lists archived dialogs too', async () => {
     const fake = await runPass([{ kind: 'user', id: 1001, topMessage: 5 }])
 

@@ -23,6 +23,8 @@ export interface FakeDialogInput {
   membersCount?: number | null
   topMessage?: number
   archived?: boolean
+  /** The dialog's newest message, as the dialog list carries it */
+  lastMessage?: { id: number; text?: string; date?: number }
 }
 
 export function fakeDialog(input: FakeDialogInput): Dialog {
@@ -58,10 +60,22 @@ export function fakeDialog(input: FakeDialogInput): Dialog {
           isAdmin: false,
         }
 
+  const last = input.lastMessage
   return {
     raw: { _: 'dialog', peer: rawPeer, topMessage: input.topMessage ?? 0 },
     peer,
-    lastMessage: null,
+    lastMessage: last
+      ? {
+          raw: {
+            _: 'message',
+            id: last.id,
+            peerId: rawPeer,
+            message: last.text ?? '',
+            date: last.date ?? 1_700_000_000,
+          },
+          date: new Date((last.date ?? 1_700_000_000) * 1000),
+        }
+      : null,
     isArchived: input.archived ?? false,
   } as unknown as Dialog
 }
