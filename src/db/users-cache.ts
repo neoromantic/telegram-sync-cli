@@ -121,6 +121,43 @@ export class UsersCache {
   }
 
   /**
+   * Merge users that a response mentions into the cache. A field the input
+   * leaves undefined keeps the stored value (a new row gets null or 0). An
+   * input without an access hash is an incomplete record: it fills only
+   * the fields it has and keeps the stored raw_json and fetched_at.
+   */
+  mergeMany(users: UserCacheInput[]): void {
+    const transaction = this.db.transaction(() => {
+      for (const user of users) {
+        const stored = this.getById(user.user_id)
+        if (!stored) {
+          this.upsert(user)
+          continue
+        }
+        const given = Object.fromEntries(
+          Object.entries(user).filter(([, value]) => value !== undefined),
+        )
+        const complete = user.access_hash !== undefined
+        this.upsert({
+          user_id: stored.user_id,
+          username: stored.username,
+          first_name: stored.first_name,
+          last_name: stored.last_name,
+          phone: stored.phone,
+          access_hash: stored.access_hash,
+          is_contact: stored.is_contact,
+          is_bot: stored.is_bot,
+          is_premium: stored.is_premium,
+          ...given,
+          fetched_at: complete ? user.fetched_at : stored.fetched_at,
+          raw_json: complete ? user.raw_json : stored.raw_json,
+        })
+      }
+    })
+    transaction()
+  }
+
+  /**
    * Bulk upsert multiple users
    */
   upsertMany(users: UserCacheInput[]): void {

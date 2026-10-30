@@ -5,7 +5,7 @@ import type { UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { resolveRawMessageType } from '../utils/message-type'
 import { toRawJson } from '../utils/raw-json'
-import { apiUserToCacheInput } from '../utils/telegram-mappers'
+import { apiPageUserToCacheInput } from '../utils/telegram-mappers'
 import {
   toInputPeerFromPeerId,
   toPeerIdFromRawPeer,
@@ -156,8 +156,10 @@ export async function fetchMessagesRaw(
 }
 
 /**
- * Cache the senders of a history page. Only full users: a "min" user lacks
- * fields, and its access hash works only in the update that carried it.
+ * Cache the senders of a history page. Not "min" users: such a record lacks
+ * fields, and its access hash works only in the update that carried it. The
+ * others are merged into what is cached: a field the record lacks (an
+ * access hash, a hidden phone, the contact flag) keeps its stored value.
  * Callers write them before the messages, because the search index reads a
  * sender's name when a message row is written.
  */
@@ -168,7 +170,7 @@ export function cachePageUsers(
   const full = users.filter(
     (user): user is tl.RawUser => user._ === 'user' && !user.min,
   )
-  if (full.length > 0) usersCache.upsertMany(full.map(apiUserToCacheInput))
+  if (full.length > 0) usersCache.mergeMany(full.map(apiPageUserToCacheInput))
 }
 
 /**
