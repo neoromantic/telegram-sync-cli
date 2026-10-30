@@ -461,11 +461,23 @@ export function collectStorageStatus(dataDir: string) {
   return { legacy_caches: legacyCaches, migration }
 }
 
+/** The daemon's last dialog pass after a reconnect or a wake (#124) */
+export interface LastCatchUp {
+  at: string
+  reason: string
+  offline_ms: number | null
+  chats: number
+}
+
 /** The live daemon's view of an account, or null without one */
 export function liveConnection(
   snapshot: AccountStatusSnapshot,
   livePid: number | null,
-): { status: string; last_error: string | null } | null {
+): {
+  status: string
+  last_error: string | null
+  last_catch_up: LastCatchUp | null
+} | null {
   const daemon = snapshot.daemon
   if (
     livePid === null ||
@@ -475,9 +487,16 @@ export function liveConnection(
   ) {
     return null
   }
+  const catchUp = daemon.lastCatchUp
   return {
     status: daemon.connectionStatus ?? 'unknown',
     last_error: daemon.lastError,
+    last_catch_up: catchUp && {
+      at: new Date(catchUp.at).toISOString(),
+      reason: catchUp.reason,
+      offline_ms: catchUp.offlineMs,
+      chats: catchUp.chats,
+    },
   }
 }
 

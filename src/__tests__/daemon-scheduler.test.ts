@@ -464,9 +464,7 @@ describe('rebuildSyncWorker dialog pass', () => {
       { kind: 'user', id: 1002, topMessage: 1007 },
     ])
 
-    await expect(
-      rebuildSyncWorker(ctx, 1, fake.client),
-    ).resolves.toBeUndefined()
+    await expect(rebuildSyncWorker(ctx, 1, fake.client)).resolves.toBe(true)
 
     expect(ctx.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Dialog pass after reconnect failed'),
@@ -499,10 +497,8 @@ describe('rebuildSyncWorker dialog pass', () => {
       expect(chatSyncState.get(userId)?.top_message_id).toBe(1000)
     }
     expect(refreshQueues).not.toHaveBeenCalled()
-    // Nothing above debug after the pass starts
-    expect((ctx.logger.info as ReturnType<typeof mock>).mock.calls).toEqual([
-      ['[Account 1] Bootstrapping dialogs...'],
-    ])
+    // Nothing above debug: a pass after a reconnect logs only its summary
+    expect(ctx.logger.info).not.toHaveBeenCalled()
     expect(ctx.logger.warn).not.toHaveBeenCalled()
     expect(ctx.logger.error).not.toHaveBeenCalled()
     expect(ctx.logger.debug).toHaveBeenCalledWith(

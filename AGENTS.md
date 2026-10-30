@@ -143,7 +143,7 @@ CLI mode (tg <cmd>)            Daemon mode (tg daemon start)
 
 Sync uses two cursors per chat: forward (every message up to it is cached; only sync jobs
 move it, never live updates) and backward (history backfill). Catch-up runs only for chats
-whose newest message (`top_message_id`, from the dialog pass on start and after reconnects) is
+whose newest message (`top_message_id`, from the dialog pass on start and after reconnects and wakes) is
 above the forward cursor, never as polling. Priorities: real-time first; DMs
 and groups under 20 members get full history; groups of 20–100 get the newest 100 messages,
 then history after the small chats; groups of unknown size or over 100 members and channels

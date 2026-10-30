@@ -15,6 +15,7 @@ import {
 } from '../utils/message-parser'
 import { messageTypeOfMediaType } from '../utils/message-type'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
+import { createConnectionWatch, noteConnectionState } from './daemon-catch-up'
 import {
   handleContactRawUpdate,
   requestContactsCheckNow,
@@ -273,12 +274,20 @@ export function setupEventHandlers(
     onRawUpdate: (info) => {
       handleContactRawUpdate(ctx, accountId, cacheDb, info, Date.now())
     },
+
+    onConnectionState: (state) => {
+      accountState.watch ??= createConnectionWatch()
+      noteConnectionState(accountState.watch, state, Date.now())
+      ctx.logger.debug(`[Account ${accountId}] Connection: ${state}`)
+    },
   }
 
   client.onNewMessage.add(eventHandlers.onNewMessage)
   client.onEditMessage.add(eventHandlers.onEditMessage)
   client.onDeleteMessage.add(eventHandlers.onDeleteMessage)
   client.onRawUpdate.add(eventHandlers.onRawUpdate)
+  client.onConnectionState.add(eventHandlers.onConnectionState)
+  accountState.watch ??= createConnectionWatch()
 
   accountState.updateHandlers = updateHandlers
   accountState.eventHandlers = eventHandlers
@@ -301,6 +310,7 @@ export function removeEventHandlers(
   client.onEditMessage.remove(eventHandlers.onEditMessage)
   client.onDeleteMessage.remove(eventHandlers.onDeleteMessage)
   client.onRawUpdate.remove(eventHandlers.onRawUpdate)
+  client.onConnectionState.remove(eventHandlers.onConnectionState)
 
   accountState.eventHandlers = undefined
   accountState.updateHandlers = undefined
@@ -574,6 +584,12 @@ export async function attemptReconnect(
     accountState.username = me.username
     ctx.logger.info(`Reconnected account ${accountLabel(accountState)}`)
 
+    // The pass below covers the whole outage: a catch-up the old client's
+    // states asked for is dropped, and the new client starts online
+    const now = Date.now()
+    const offlineSince = accountState.watch?.offlineSince
+    accountState.watch = { online: true, lastCatchUpAt: now }
+
     setupEventHandlers(ctx, accountState)
     await client.startUpdatesLoop()
 
@@ -582,7 +598,10 @@ export async function attemptReconnect(
     accountState.reconnectAttempts = 0
     accountState.lastError = undefined
 
-    void rebuildSyncWorker(ctx, accountState.accountId, client)
+    void rebuildSyncWorker(ctx, accountState.accountId, client, {
+      reason: 'new_client',
+      offlineMs: offlineSince === undefined ? null : now - offlineSince,
+    })
     // Changes made while it was reconnecting aren't replayed (#8)
     requestContactsCheckNow(ctx, accountState.accountId, Date.now())
     ctx.logger.info(

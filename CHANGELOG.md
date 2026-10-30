@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The daemon catches up after mtcute reconnects on its own (a network drop)
+  and after the computer wakes from sleep, not only after its own reconnect:
+  it watches the connection state and the wall clock, runs the dialog pass on
+  the client it has and queues catch-up for the chats that got messages
+  meanwhile, at most once per account in 5 minutes. It logs one line, and
+  `tg status` shows the last one in `accounts.accounts[].connection.last_catch_up`
+  (#124).
 - The daemon log is quieter and keeps personal data out: it names an account
   `#1 (@username)` or by a masked phone, never the full number or name;
   mtcute's warnings show only with `--verbose`, its update gap notes at debug

@@ -2,12 +2,14 @@
  * Daemon types and interfaces
  */
 import type {
+  ConnectionState,
   DeleteMessageUpdate,
   Message,
   RawUpdateInfo,
   TelegramClient,
 } from '@mtcute/bun'
 import type { CacheRetentionConfig } from '../db/types'
+import type { ConnectionWatch } from './daemon-catch-up'
 import type { UpdateHandlers } from './handlers'
 
 /**
@@ -23,6 +25,8 @@ export interface AccountEventHandlers {
   onDeleteMessage: (update: DeleteMessageUpdate) => void
   /** Handler for raw updates: contact changes (#8) */
   onRawUpdate: (info: RawUpdateInfo) => void
+  /** Handler for the client's connection state: catch-up after it is back (#124) */
+  onConnectionState: (state: ConnectionState) => void
 }
 
 /**
@@ -135,6 +139,8 @@ export interface AccountConnectionState {
   updateHandlers?: UpdateHandlers
   /** Event handler references for cleanup */
   eventHandlers?: AccountEventHandlers
+  /** The client's connection, for catch-up after a reconnect or a wake (#124) */
+  watch?: ConnectionWatch
 }
 
 /**

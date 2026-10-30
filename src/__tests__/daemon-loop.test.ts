@@ -32,6 +32,7 @@ function createMockStatusService(
     updateLastUpdate: () => {},
     setMessagesSynced: () => {},
     writeTick: () => {},
+    recordCatchUp: () => {},
     getDaemonInfo: () => ({
       status: 'running',
       pid: null,
@@ -43,6 +44,7 @@ function createMockStatusService(
       messagesSynced: 0,
       pendingJobs: 0,
       runningJobs: 0,
+      lastCatchUp: null,
     }),
   }
   return { ...base, ...overrides }

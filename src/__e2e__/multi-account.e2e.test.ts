@@ -687,8 +687,14 @@ describe('E2E: status per account', () => {
         pendingJobs: 0,
         runningJobs: 0,
       })
+      return status
     }
-    tick(1, 'connected', 3)
+    tick(1, 'connected', 3).recordCatchUp({
+      at: Date.UTC(2026, 0, 2, 3, 4, 5),
+      reason: 'reconnect',
+      offlineMs: 20_000,
+      chats: 2,
+    })
     tick(2, 'reconnecting', 4)
   })
 
@@ -700,7 +706,11 @@ describe('E2E: status per account', () => {
   type StatusAccount = {
     id: number
     cache: { status: string }
-    connection: { status: string; last_error: string | null } | null
+    connection: {
+      status: string
+      last_error: string | null
+      last_catch_up: Record<string, unknown> | null
+    } | null
     sync: Record<string, number>
     progress: Record<string, number>
     rate_limits: Record<string, number>
@@ -721,7 +731,16 @@ describe('E2E: status per account', () => {
       expect.objectContaining({
         id: 1,
         cache: expect.objectContaining({ status: 'ok' }),
-        connection: { status: 'connected', last_error: null },
+        connection: {
+          status: 'connected',
+          last_error: null,
+          last_catch_up: {
+            at: '2026-01-02T03:04:05.000Z',
+            reason: 'reconnect',
+            offline_ms: 20_000,
+            chats: 2,
+          },
+        },
         sync: {
           pending_jobs: 0,
           running_jobs: 0,
@@ -738,7 +757,11 @@ describe('E2E: status per account', () => {
       }),
       expect.objectContaining({
         id: 2,
-        connection: { status: 'reconnecting', last_error: 'connection reset' },
+        connection: {
+          status: 'reconnecting',
+          last_error: 'connection reset',
+          last_catch_up: null,
+        },
         sync: expect.objectContaining({ failed_jobs: 0 }),
         progress: expect.objectContaining({ messages_cached: 1 }),
       }),

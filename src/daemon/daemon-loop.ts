@@ -1,5 +1,6 @@
 import { SyncJobStatus } from '../db/sync-schema'
 import { attemptReconnect, scheduleReconnect } from './daemon-accounts'
+import { detectWake, runDueCatchUps } from './daemon-catch-up'
 import { maybeSyncContacts } from './daemon-contacts'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
 import { accountLabel } from './daemon-logger'
@@ -97,6 +98,8 @@ async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
         )
         accountState.status = 'error'
         accountState.lastError = getErrorMessage(err)
+        // The reconnect's log line and tg status say how long it was down
+        if (accountState.watch) accountState.watch.offlineSince ??= now
         scheduleReconnect(ctx, accountState)
       }
     }
@@ -139,6 +142,11 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     // shutdown waits for the jobs and marks every account stopped.
     if (ctx.state.shutdownRequested) break
 
+    // After a sleep or a reconnect mtcute handled itself, a dialog pass on
+    // the account's client queues catch-up for the chats that moved (#124)
+    detectWake(ctx, now)
+    void runDueCatchUps(ctx, now)
+
     // Contacts: due on start (after the dialog pass) and every 30 ticks
     // after. A due check runs in the background (#8).
     if (
@@ -169,6 +177,7 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     // Last and lowest: a few batches of each cache's background migrations
     await runMigrationsTick(ctx)
 
+    ctx.runtime.sleepStartedAt = Date.now()
     await sleepUnlessStopped(1000, ctx.runtime.shutdown.signal)
   }
 

@@ -131,7 +131,7 @@ Handlers live in:
 The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
 - Forward catchup for chats that are behind: their newest message (`top_message_id`, from the
   dialog pass) is above the forward cursor or unknown. It runs on start, after each reconnect
-  and until a gap is closed, not as polling; a chat that is caught up costs no calls.
+  or wake and until a gap is closed, not as polling; a chat that is caught up costs no calls.
 - A first page (`initial_load`) for chats without a forward cursor
 - Large groups and channels only when turned on with `tg chats sync`; the daemon picks up
   the change at its next refresh
@@ -351,9 +351,20 @@ account's scheduler → its sync_jobs → its worker and client → its messages
   down on its own; a longer `--timeout` waits for it, and with `--force` the
   command kills the daemon instead, which loses the session writes made since
   the last save
-- After a reconnect, a dialog pass runs on the new client in the background
+- mtcute reconnects by itself after a network drop or a sleep, and the health
+  check's `getMe` then succeeds, so the daemon also watches each client's
+  connection state and the wall clock (#124). When an account's connection is
+  back after more than 5 seconds offline, or the loop's 1-second wait took more
+  than 30 seconds (the computer slept), and the connection has stayed up for
+  5 seconds, the daemon runs the dialog pass on the client it has, at most once
+  per account in 5 minutes. See
+  [sync-strategy.md](sync-strategy.md#reconnects-and-wakes)
+- After a reconnect or a wake, a dialog pass runs on the account's client in the background
   (one per account at a time), then the scheduler catches up the chats that got
-  messages while the connection was down. If the pass fails part-way, every
+  messages while the connection was down. It logs one line, such as `[Account 1]
+  Reconnected after 9 h offline: dialog pass, 4 chat(s) to catch up` (`Woke after 7 h
+  asleep` after a sleep, `Reconnected on a new client` after the daemon's own reconnect),
+  and `tg status` shows the last one in `accounts.accounts[].connection.last_catch_up`. If the pass fails part-way, every
   synced chat it didn't list gets one checking page; after a complete pass the
   account's chats it didn't list are marked caught up. A chat turned on with
   `tg chats sync` that it didn't list gets a checking page either way

@@ -968,6 +968,26 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(client.log.mgr.level).toBe(1)
   })
 
+  it("watches the client's connection state for catch-up (#124)", async () => {
+    const ctx = createContext(
+      createAccountsDb([{ id: 1, phone: '+15550000001', user_id: null }]),
+    )
+    const { connectAccount, disconnectAllAccounts } = await import(
+      '../daemon/daemon-accounts'
+    )
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
+    const client = createdClients[0]!
+    const accountState = ctx.state.accounts.get(1)!
+
+    client.onConnectionState.emit('offline')
+    expect(accountState.watch?.online).toBe(false)
+    client.onConnectionState.emit('connected')
+    expect(accountState.watch?.online).toBe(true)
+
+    await disconnectAllAccounts(ctx)
+    expect(client.onConnectionState.handlers).toHaveLength(0)
+  })
+
   it('disconnectAllAccounts closes every client once on shutdown', async () => {
     const accountsDb = createAccountsDb([
       { id: 1, phone: '+15550000001', user_id: null },

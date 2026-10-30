@@ -23,6 +23,22 @@ export interface DaemonInfo {
   messagesSynced: number
   pendingJobs: number
   runningJobs: number
+  /** The daemon's last dialog pass after a reconnect or a wake; null if none */
+  lastCatchUp: CatchUpRecord | null
+}
+
+/** Why the daemon ran a dialog pass and catch-up after the start (#124) */
+export type CatchUpReason = 'reconnect' | 'wake' | 'new_client'
+
+/** A dialog pass after a reconnect or a wake, as `tg status` shows it */
+export interface CatchUpRecord {
+  /** When the pass ended */
+  at: number
+  reason: CatchUpReason
+  /** How long the account was offline or the computer asleep; null if unknown */
+  offlineMs: number | null
+  /** Chats whose newest message was above the forward cursor after it */
+  chats: number
 }
 
 /** One main-loop tick's figures for an account */
@@ -65,6 +81,8 @@ export interface DaemonStatusService {
   setMessagesSynced(count: number): void
   /** Write a tick's figures and last_update in one transaction */
   writeTick(tick: DaemonTick): void
+  /** Record a dialog pass after a reconnect or a wake (#124) */
+  recordCatchUp(record: CatchUpRecord): void
   /** Get all daemon info */
   getDaemonInfo(): DaemonInfo
 }
@@ -121,6 +139,35 @@ export function summarizeDaemonStatus(
     messagesSynced: live.reduce((sum, info) => sum + info.messagesSynced, 0),
     startedAt: startTimes.length > 0 ? Math.min(...startTimes) : null,
     lastUpdate: updates.length > 0 ? Math.max(...updates) : null,
+  }
+}
+
+const CATCH_UP_KEYS = [
+  'last_catch_up_at',
+  'last_catch_up_reason',
+  'last_offline_ms',
+  'last_catch_up_chats',
+] as const
+
+const CATCH_UP_REASONS: readonly string[] = [
+  'reconnect',
+  'wake',
+  'new_client',
+] satisfies CatchUpReason[]
+
+function readCatchUp(
+  read: (key: string) => string | null,
+): CatchUpRecord | null {
+  const at = parseNumber(read('last_catch_up_at'))
+  const reason = read('last_catch_up_reason')
+  if (at === null || reason === null || !CATCH_UP_REASONS.includes(reason)) {
+    return null
+  }
+  return {
+    at,
+    reason: reason as CatchUpReason,
+    offlineMs: parseNumber(read('last_offline_ms')),
+    chats: parseNumber(read('last_catch_up_chats')) ?? 0,
   }
 }
 
@@ -212,6 +259,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         service.delete('last_error')
         service.delete('pending_jobs')
         service.delete('running_jobs')
+        for (const key of CATCH_UP_KEYS) service.delete(key)
         service.set('last_update', now.toString())
       }).immediate()
     },
@@ -254,6 +302,16 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       }).immediate()
     },
 
+    recordCatchUp(record: CatchUpRecord): void {
+      db.transaction(() => {
+        service.set('last_catch_up_at', String(record.at))
+        service.set('last_catch_up_reason', record.reason)
+        if (record.offlineMs === null) service.delete('last_offline_ms')
+        else service.set('last_offline_ms', String(record.offlineMs))
+        service.set('last_catch_up_chats', String(record.chats))
+      }).immediate()
+    },
+
     getDaemonInfo(): DaemonInfo {
       // One query reads every key from one snapshot (WAL), so a daemon that
       // is starting or stopping is never seen half written. The
@@ -276,6 +334,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         messagesSynced: parseNumber(read('messages_synced')) ?? 0,
         pendingJobs: parseNumber(read('pending_jobs')) ?? 0,
         runningJobs: parseNumber(read('running_jobs')) ?? 0,
+        lastCatchUp: readCatchUp(read),
       }
     },
   }
