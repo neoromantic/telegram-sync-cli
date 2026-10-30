@@ -42,6 +42,7 @@ interface SyncResult {
     username: string | null
     mode: string
     syncEnabled: boolean
+    syncReason: string
     historyComplete: boolean
     syncedMessages: number
     changed: boolean
@@ -125,6 +126,7 @@ describe('E2E: chats sync', () => {
           username: 'examplenews',
           mode: 'on',
           syncEnabled: true,
+          syncReason: 'on_by_hand',
           historyComplete: false,
           syncedMessages: 0,
           changed: true,
@@ -223,7 +225,11 @@ describe('E2E: chats sync', () => {
     const channel = await sync('@examplenews', '--auto')
     const group = await sync(String(GROUP_PEER_ID), '--auto')
 
-    expect(channel.data).toMatchObject({ mode: 'auto', syncEnabled: false })
+    expect(channel.data).toMatchObject({
+      mode: 'auto',
+      syncEnabled: false,
+      syncReason: 'channel',
+    })
     expect(stateOf(CHANNEL_PEER_ID)).toMatchObject({
       sync_mode: 'auto',
       sync_enabled: 0,
@@ -234,6 +240,57 @@ describe('E2E: chats sync', () => {
       sync_enabled: 1,
       sync_priority: SyncPriority.Medium,
     })
+  })
+
+  it('shows in tg chats list why each chat syncs or not (#131)', async () => {
+    const bot = fakeDialog({ kind: 'user', id: 5001, title: 'Example Bot' })
+    createChatsCache(cacheDb).upsert(dialogToCacheInput(bot))
+    const chatSyncState = createChatSyncStateService(cacheDb)
+    chatSyncState.upsert({
+      chat_id: 5001,
+      chat_type: 'private',
+      sync_priority: SyncPriority.Medium,
+      sync_enabled: true,
+      sync_policy: 'bot',
+    })
+    chatSyncState.upsert({
+      chat_id: GROUP_PEER_ID,
+      chat_type: 'group',
+      member_count: 50,
+      sync_priority: SyncPriority.Medium,
+      sync_enabled: true,
+      sync_policy: 'medium_group',
+    })
+    await sync('@examplenews')
+
+    const list = await runCliSuccess(['chats', 'list'], options())
+    const items = (
+      list.json as {
+        data: {
+          items: Array<{
+            id: number
+            syncEnabled: boolean
+            syncReason: string | null
+          }>
+        }
+      }
+    ).data.items
+    const syncOf = (id: number) => {
+      const item = items.find((chat) => chat.id === id)
+      return [item?.syncEnabled, item?.syncReason]
+    }
+    expect(syncOf(5001)).toEqual([true, 'bot'])
+    expect(syncOf(GROUP_PEER_ID)).toEqual([true, 'medium_group'])
+    expect(syncOf(CHANNEL_PEER_ID)).toEqual([true, 'on_by_hand'])
+
+    // Turned on by hand, a bot gets its history; --off wins over the policy
+    expect((await sync('5001')).data.syncReason).toBe('on_by_hand')
+    expect((await sync('5001', '--off')).data.syncReason).toBe('off_by_hand')
+    expect((await sync('5001', '--auto')).data).toMatchObject({
+      syncEnabled: true,
+      syncReason: 'bot',
+    })
+    expect(stateOf(5001)?.sync_priority).toBe(SyncPriority.Medium)
   })
 
   it('finds a chat the daemon saw only live', async () => {

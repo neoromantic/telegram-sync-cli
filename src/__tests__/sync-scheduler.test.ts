@@ -188,6 +188,108 @@ describe('SyncScheduler', () => {
     })
   })
 
+  describe('a bot or a deleted account (#131)', () => {
+    const BOT = 7001
+    const DELETED = 7002
+
+    beforeEach(() => {
+      for (const [chatId, reason] of [
+        [BOT, 'bot'],
+        [DELETED, 'deleted_account'],
+      ] as const) {
+        chatSyncState.upsert({
+          chat_id: chatId,
+          chat_type: 'private',
+          sync_priority: SyncPriority.Medium,
+          sync_enabled: true,
+          sync_policy: reason,
+        })
+      }
+    })
+
+    it('gets its first page at the medium tier and catch-up, but no history', () => {
+      scheduler.refreshQueues()
+      expect(
+        jobsService.getPendingJobs().map((job) => [job.chat_id, job.job_type]),
+      ).toEqual([
+        [BOT, SyncJobType.InitialLoad],
+        [DELETED, SyncJobType.InitialLoad],
+      ])
+      expect(jobsService.getPendingJobs()[0]!.priority).toBe(
+        SyncPriority.Medium,
+      )
+
+      for (const chatId of [BOT, DELETED]) {
+        chatSyncState.recordFirstPage(chatId, {
+          forward_cursor: 900,
+          backward_cursor: 801,
+          history_complete: false,
+          new_messages: 100,
+        })
+        chatSyncState.raiseTopMessageId(chatId, 950)
+        // The first page's job asks for history right away
+        scheduler.queueBackwardHistory(chatId)
+      }
+      scheduler.refreshQueues()
+
+      const queued = jobsService
+        .getPendingJobs()
+        .filter((job) => job.job_type !== SyncJobType.InitialLoad)
+        .map((job) => [job.chat_id, job.job_type])
+      expect(queued).toEqual([
+        [BOT, SyncJobType.ForwardCatchup],
+        [DELETED, SyncJobType.ForwardCatchup],
+      ])
+    })
+
+    it('loses the pending history jobs an older version queued', () => {
+      chatSyncState.recordFirstPage(BOT, {
+        forward_cursor: 900,
+        backward_cursor: 801,
+        history_complete: false,
+        new_messages: 100,
+      })
+      chatSyncState.raiseTopMessageId(BOT, 900)
+      jobsService.create({
+        chat_id: BOT,
+        job_type: SyncJobType.BackwardHistory,
+        priority: SyncPriority.High,
+      })
+
+      scheduler.refreshQueues()
+
+      expect(jobsService.getJobsForChat(BOT)).toHaveLength(0)
+    })
+
+    it('gets its history once turned on by hand, and loses it again on --auto', () => {
+      chatSyncState.recordFirstPage(BOT, {
+        forward_cursor: 900,
+        backward_cursor: 801,
+        history_complete: false,
+        new_messages: 100,
+      })
+      chatSyncState.raiseTopMessageId(BOT, 900)
+
+      chatSyncState.setSyncMode(BOT, 'on')
+      scheduler.refreshQueues()
+      expect(chatSyncState.get(BOT)).toMatchObject({
+        sync_priority: SyncPriority.High,
+        sync_policy: 'bot',
+      })
+      expect(jobsService.getJobsForChat(BOT)).toMatchObject([
+        { job_type: SyncJobType.BackwardHistory },
+      ])
+
+      chatSyncState.setSyncMode(BOT, 'auto')
+      scheduler.refreshQueues()
+      expect(chatSyncState.get(BOT)).toMatchObject({
+        sync_priority: SyncPriority.Medium,
+        sync_enabled: 1,
+      })
+      expect(jobsService.getJobsForChat(BOT)).toHaveLength(0)
+    })
+  })
+
   describe('queueBackwardHistory', () => {
     it('queues backward history job for a chat with existing backward_cursor', () => {
       chatSyncState.upsert({

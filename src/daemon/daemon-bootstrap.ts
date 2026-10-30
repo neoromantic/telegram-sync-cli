@@ -10,7 +10,11 @@ import {
 import { createChatsCache } from '../db/chats-cache'
 import type { CatchUpReason } from '../db/daemon-status'
 import { createMessagesCache, type MessageInput } from '../db/messages-cache'
-import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
+import {
+  determineSyncPolicy,
+  rawUserPolicy,
+  type SyncChatType,
+} from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { apiUserToCacheInput } from '../utils/telegram-mappers'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
@@ -39,7 +43,9 @@ function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
  * account's own cache. Every dialog
  * updates `chats_cache`, so the sync jobs can build an InputPeer for it. A
  * dialog also updates the chat's sync state (type, member count, policy and
- * the newest message ID), but the pass creates no state for an archived chat
+ * the newest message ID). A bot or a deleted account gets the newest page
+ * only (#131): its policy moves it there even if an older version gave it
+ * full history. The pass creates no state for an archived chat
  * without one. Such a chat starts syncing when a message arrives in it live,
  * which creates its state like in any other chat, or when `tg chats sync`
  * turns it on.
@@ -143,7 +149,11 @@ export async function syncAccountDialogs(
     // chat from flipping on or off between starts.
     const syncType = chatInput.type as SyncChatType
     const memberCount = chatInput.member_count ?? existing?.member_count ?? null
-    const policy = determineSyncPolicy(syncType, memberCount)
+    const policy = determineSyncPolicy(
+      syncType,
+      memberCount,
+      rawUserPolicy(dialog.peer.raw),
+    )
 
     chatSyncState.upsert({
       chat_id: chatId,
@@ -151,6 +161,7 @@ export async function syncAccountDialogs(
       member_count: memberCount,
       sync_priority: policy.priority,
       sync_enabled: policy.enabled,
+      sync_policy: policy.reason,
     })
 
     const topMessage = dialog.raw?.topMessage

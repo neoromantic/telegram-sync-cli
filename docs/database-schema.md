@@ -388,7 +388,8 @@ CREATE TABLE chat_sync_state (
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
   updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
   top_message_id INTEGER,
-  sync_mode TEXT NOT NULL DEFAULT 'auto'
+  sync_mode TEXT NOT NULL DEFAULT 'auto',
+  sync_policy TEXT                -- 'dm', 'bot', 'deleted_account', 'small_group', …
 );
 
 CREATE INDEX idx_chat_sync_state_enabled
@@ -402,8 +403,13 @@ CREATE INDEX idx_chat_sync_state_incomplete
   updates. `0` means the chat was empty at its first page.
 - `sync_mode`: `auto` follows the sync policy; `on` and `off` are set with `tg chats sync` and
   win over the policy in every dialog pass. `sync_enabled` and `sync_priority` hold the result.
-- `sync_priority`: the chat's tier, 1 (DMs and groups under 20 members), 2 (20–100 members) or
-  3 (not synced unless turned on). It is also the priority of the chat's jobs inside each lane.
+- `sync_policy`: why the policy turns the chat on or off, set by each dialog pass and by the
+  first live message of a new chat: `dm`, `bot`, `deleted_account`, `small_group`,
+  `medium_group`, `large_group`, `unknown_size`, `channel` or `community`. A `bot` or
+  `deleted_account` chat gets its first page and catch-up but no older history, unless
+  `sync_mode` is `on`. `NULL` until a dialog pass classifies the chat.
+- `sync_priority`: the chat's tier, 1 (DMs and groups under 20 members), 2 (20–100 members,
+  bots and deleted accounts) or 3 (not synced unless turned on). It is also the priority of the chat's jobs inside each lane.
 - `top_message_id`: the newest message ID Telegram reported, from the dialog pass or a sync
   page. `NULL` means unknown. Catch-up is due while it is `NULL` or above `forward_cursor`.
 - `total_messages`: the chat's message count on the server, from the newest sync page that gave
@@ -571,9 +577,10 @@ SQLite fails all but one switch with `SQLITE_BUSY` at once, so the others try ag
 
 The schema is created with `CREATE TABLE IF NOT EXISTS` on startup, indexes with
 `CREATE INDEX IF NOT EXISTS`. Columns added after 0.1.4 (`chat_sync_state.top_message_id`,
-`chat_sync_state.sync_mode`, `sync_jobs.attempts`, `sync_jobs.next_run_at`) are added with
-`ALTER TABLE … ADD COLUMN` when missing; a "duplicate column name" error is ignored, because
-the CLI and the daemon can both run the migration on the first start. Older binaries ignore
+`chat_sync_state.sync_mode`, `chat_sync_state.sync_policy`, `sync_jobs.attempts`,
+`sync_jobs.next_run_at`) are added with `ALTER TABLE … ADD COLUMN` when missing; a "duplicate
+column name" error is ignored, because the CLI and the daemon can both run the migration on the
+first start. Older binaries ignore
 the new columns. `idx_messages_cache_message_id` is built on the first open of a cache
 that lacks it. The build reads the whole table under the write lock, so that open, and any
 other process opening the cache meanwhile, waits up to 60 seconds for the lock instead of 5;

@@ -12,7 +12,11 @@ import type {
   MessageInput,
   MessagesCache,
 } from '../db/messages-cache'
-import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
+import {
+  determineSyncPolicy,
+  rawUserPolicy,
+  type SyncChatType,
+} from '../db/sync-schema'
 import { toRawJson } from '../utils/raw-json'
 import { formatError } from './daemon-utils'
 import type { DaemonLogger } from './types'
@@ -158,17 +162,23 @@ function ensureSyncState(
   chatId: number,
   chatType?: SyncChatType,
   memberCount?: number | null,
+  rawChat?: NewMessageData['rawChat'],
 ): void {
   const existing = chatSyncState.get(chatId)
   if (!existing) {
     const resolvedChatType = chatType ?? 'private'
-    const policy = determineSyncPolicy(resolvedChatType, memberCount)
+    const policy = determineSyncPolicy(
+      resolvedChatType,
+      memberCount,
+      rawUserPolicy(rawChat),
+    )
     chatSyncState.upsert({
       chat_id: chatId,
       chat_type: resolvedChatType,
       member_count: memberCount,
       sync_priority: policy.priority,
       sync_enabled: policy.enabled,
+      sync_policy: policy.reason,
     })
   }
 }
@@ -197,6 +207,7 @@ async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
     data.chatId,
     data.chatType,
     data.memberCount,
+    data.rawChat,
   )
   ensureChatCached(deps.chatsCache, data.chatId, data.rawChat)
 

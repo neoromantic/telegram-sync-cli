@@ -18,6 +18,8 @@ import {
   isContentlessSearch,
   MessageCacheRow,
   SyncJobRow,
+  type SyncPolicy,
+  type SyncPolicyReason,
   SyncPriority,
   supportsContentlessSearch,
 } from '../db/sync-schema'
@@ -446,42 +448,69 @@ describe('sync schema', () => {
 })
 
 describe('determineSyncPolicy', () => {
-  const high = { priority: SyncPriority.High, enabled: true }
-  const medium = { priority: SyncPriority.Medium, enabled: true }
-  const off = { priority: SyncPriority.Low, enabled: false }
+  const high = { priority: SyncPriority.High, enabled: true, history: true }
+  const medium = { priority: SyncPriority.Medium, enabled: true, history: true }
+  const firstPageOnly = {
+    priority: SyncPriority.Medium,
+    enabled: true,
+    history: false,
+  }
+  const off = { priority: SyncPriority.Low, enabled: false, history: false }
+  const policy = (
+    tier: Omit<SyncPolicy, 'reason'>,
+    reason: SyncPolicyReason,
+  ): SyncPolicy => ({ ...tier, reason })
 
   it('syncs private chats in full', () => {
-    expect(determineSyncPolicy('private')).toEqual(high)
+    expect(determineSyncPolicy('private')).toEqual(policy(high, 'dm'))
+  })
+
+  it('gives bots and deleted accounts the newest page only (#131)', () => {
+    expect(determineSyncPolicy('private', null, { bot: true })).toEqual(
+      policy(firstPageOnly, 'bot'),
+    )
+    expect(determineSyncPolicy('private', null, { deleted: true })).toEqual(
+      policy(firstPageOnly, 'deleted_account'),
+    )
+    expect(
+      determineSyncPolicy('private', null, { bot: false, deleted: false }),
+    ).toEqual(policy(high, 'dm'))
   })
 
   it('treats a group of unknown size as large', () => {
+    const unknown = policy(off, 'unknown_size')
     for (const type of ['group', 'supergroup'] as const) {
-      expect(determineSyncPolicy(type)).toEqual(off)
-      expect(determineSyncPolicy(type, undefined)).toEqual(off)
-      expect(determineSyncPolicy(type, null)).toEqual(off)
-      expect(determineSyncPolicy(type, 0)).toEqual(off)
+      expect(determineSyncPolicy(type)).toEqual(unknown)
+      expect(determineSyncPolicy(type, undefined)).toEqual(unknown)
+      expect(determineSyncPolicy(type, null)).toEqual(unknown)
+      expect(determineSyncPolicy(type, 0)).toEqual(unknown)
     }
   })
 
   it('syncs groups under 20 members in full', () => {
-    expect(determineSyncPolicy('group', 1)).toEqual(high)
-    expect(determineSyncPolicy('supergroup', 19)).toEqual(high)
+    const small = policy(high, 'small_group')
+    expect(determineSyncPolicy('group', 1)).toEqual(small)
+    expect(determineSyncPolicy('supergroup', 19)).toEqual(small)
   })
 
   it('gives groups of 20 to 100 members the medium tier', () => {
-    expect(determineSyncPolicy('group', 20)).toEqual(medium)
-    expect(determineSyncPolicy('supergroup', 100)).toEqual(medium)
+    const group = policy(medium, 'medium_group')
+    expect(determineSyncPolicy('group', 20)).toEqual(group)
+    expect(determineSyncPolicy('supergroup', 100)).toEqual(group)
   })
 
   it('leaves groups over 100 members and channels off', () => {
-    expect(determineSyncPolicy('supergroup', 101)).toEqual(off)
-    expect(determineSyncPolicy('channel')).toEqual(off)
-    expect(determineSyncPolicy('channel', 10)).toEqual(off)
+    expect(determineSyncPolicy('supergroup', 101)).toEqual(
+      policy(off, 'large_group'),
+    )
+    expect(determineSyncPolicy('channel')).toEqual(policy(off, 'channel'))
+    expect(determineSyncPolicy('channel', 10)).toEqual(policy(off, 'channel'))
   })
 
   it('leaves communities off', () => {
-    expect(determineSyncPolicy('community')).toEqual(off)
-    expect(determineSyncPolicy('community', 10)).toEqual(off)
+    const community = policy(off, 'community')
+    expect(determineSyncPolicy('community')).toEqual(community)
+    expect(determineSyncPolicy('community', 10)).toEqual(community)
   })
 })
 
