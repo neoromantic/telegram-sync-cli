@@ -249,6 +249,21 @@ A chat without either cursor starts at the newest page, not at the oldest cached
 `tg send` caches what it sends and `tg messages list` and `get` cache any page of a chat, all
 without moving the cursors, so the oldest cached message says nothing about how far history got.
 
+### What else a page carries
+
+Every sync page (first page, catch-up and history) also caches the page's senders in
+`users_cache` before its messages are written, as `tg messages list` and `get` do, so the search
+index has the sender's name and `--sender` finds the message. Only full user records are cached:
+a "min" user lacks fields, and its access hash works only in the update that carried it. Chats a
+page names (a forward's source channel, say) are not cached: `chats_cache` lists the account's
+own chats. Messages that older versions synced without their sender keep their index entry
+without the sender's name until they are re-indexed (#93).
+
+A page also gives the chat's message count on the server, which goes to
+`chat_sync_state.total_messages`; the newest count wins. A catch-up page above a cursor gives
+none, because its `min_id` may bound the count. `tg status` compares the counts with the
+messages cached ([cli-commands.md](cli-commands.md)).
+
 ### History ranges
 
 Every page a sync job caches records the message ID range it covers in `history_ranges`, as the

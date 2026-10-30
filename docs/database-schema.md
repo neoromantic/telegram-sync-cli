@@ -406,6 +406,9 @@ CREATE INDEX idx_chat_sync_state_incomplete
   3 (not synced unless turned on). It is also the priority of the chat's jobs inside each lane.
 - `top_message_id`: the newest message ID Telegram reported, from the dialog pass or a sync
   page. `NULL` means unknown. Catch-up is due while it is `NULL` or above `forward_cursor`.
+- `total_messages`: the chat's message count on the server, from the newest sync page that gave
+  one (a first or history page; a catch-up page above a cursor gives none). `NULL` until then.
+  `tg status` compares it with the chat's cached messages.
 
 ### Table: sync_jobs
 

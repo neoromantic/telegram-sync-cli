@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg status` shows how far the history backfill is: `progress.history` gives the messages
+  cached of the counts Telegram gives on sync pages, the messages and chats left, the 5 chats
+  with the most left, and the time left at the pace of the last 15 minutes of history pages
+  (none without a measured pace); each account gets its own figures. Pretty output shows
+  History Cached and History Left (#126).
+
 ### Fixed
 
 - A channel with sync off now has its newest post cached: Telegram may push
@@ -31,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them after the command has exited, so `tg status` takes as long as with
   `DO_NOT_TRACK=1`, even when the network is slow or down. The daemon still sends
   from its own process.
+- The daemon's sync pages now cache their senders, as `tg messages list` does, before the
+  messages, so search shows the sender's name and `--sender` finds their messages in groups.
+  Messages synced before keep their index without the name until they are re-indexed (#93).
+  The pages also store the chat's message count on the server in
+  `chat_sync_state.total_messages`, which stayed empty (#126).
 - `tg status` `rate_limits.api_calls_last_minute` and `calls_by_method` count the last 60
   seconds instead of the current calendar minute, which showed 2 calls while the daemon made
   about 14 a minute (#127).

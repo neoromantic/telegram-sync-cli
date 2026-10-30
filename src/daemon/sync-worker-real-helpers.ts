@@ -1,9 +1,11 @@
 import type { TelegramClient, tl } from '@mtcute/bun'
 import type { ChatsCache } from '../db/chats-cache'
 import type { MessageInput } from '../db/messages-cache'
+import type { UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { resolveRawMessageType } from '../utils/message-type'
 import { toRawJson } from '../utils/raw-json'
+import { apiUserToCacheInput } from '../utils/telegram-mappers'
 import {
   toInputPeerFromPeerId,
   toPeerIdFromRawPeer,
@@ -151,6 +153,38 @@ export async function fetchMessagesRaw(
   const users = 'users' in result ? result.users : []
 
   return { messages, count, users }
+}
+
+/**
+ * Cache the senders of a history page. Only full users: a "min" user lacks
+ * fields, and its access hash works only in the update that carried it.
+ * Callers write them before the messages, because the search index reads a
+ * sender's name when a message row is written.
+ */
+export function cachePageUsers(
+  usersCache: UsersCache,
+  users: tl.TypeUser[],
+): void {
+  const full = users.filter(
+    (user): user is tl.RawUser => user._ === 'user' && !user.min,
+  )
+  if (full.length > 0) usersCache.upsertMany(full.map(apiUserToCacheInput))
+}
+
+/**
+ * How many messages the chat has on the server, from a history page. A
+ * slice carries Telegram's `count`; a page that is the whole history
+ * (messages.messages) has none, and its length is the count. Null for a
+ * page bounded by `minId` or `maxId`, whose count may cover only the
+ * bounds, and for a whole-history answer to a request with an offset.
+ */
+export function historyTotal(
+  page: { messages: unknown[]; count?: number },
+  request: { offsetId?: number; minId?: number; maxId?: number },
+): number | null {
+  if (request.minId || request.maxId) return null
+  if (page.count !== undefined) return page.count
+  return request.offsetId ? null : page.messages.length
 }
 
 export function createMessageInputs(

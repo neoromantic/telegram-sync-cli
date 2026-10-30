@@ -30,6 +30,12 @@ import {
   type DaemonInfo,
   summarizeDaemonStatus,
 } from '../db/daemon-status'
+import {
+  emptyHistoryProgress,
+  type HistoryProgress,
+  type PendingHistoryChat,
+  readHistoryProgress,
+} from '../db/history-progress'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import type { SyncMode } from '../db/sync-schema'
@@ -159,6 +165,14 @@ export interface StatusSampleChat {
   sync_priority: number
 }
 
+/** A chat whose history is pending, with the account whose cache holds it */
+export type StatusPendingChat = PendingHistoryChat & { account_id: number }
+
+/** History progress (#126); see HistoryProgress */
+export type StatusHistoryProgress = Omit<HistoryProgress, 'largest_pending'> & {
+  largest_pending: StatusPendingChat[]
+}
+
 export interface StatusFloodWait {
   account_id: number
   method: string
@@ -199,6 +213,7 @@ export interface AccountStatusSnapshot {
     messages_tracked: number
     messages_cached: number
     sample_chats: StatusSampleChat[]
+    history: StatusHistoryProgress
   }
   rate_limits: {
     api_calls_last_minute: number
@@ -232,6 +247,7 @@ function emptyAccountSnapshot(accountId: number): AccountStatusSnapshot {
       messages_tracked: 0,
       messages_cached: 0,
       sample_chats: [],
+      history: { ...emptyHistoryProgress(), largest_pending: [] },
     },
     rate_limits: {
       api_calls_last_minute: 0,
@@ -402,9 +418,71 @@ function readOpenAccountStatus(
       backward_cursor: row.backward_cursor,
       sync_priority: row.sync_priority,
     })),
+    history: withAccountId(readHistoryProgress(cacheDb), accountId),
   }
 
   return snapshot
+}
+
+function withAccountId(
+  history: HistoryProgress,
+  accountId: number,
+): StatusHistoryProgress {
+  return {
+    ...history,
+    largest_pending: history.largest_pending.map((chat) => ({
+      account_id: accountId,
+      ...chat,
+    })),
+  }
+}
+
+/**
+ * The history progress of several accounts. Their backfills run side by
+ * side, so the time left is the longest one's, and unknown while an
+ * account with messages left has no measured pace.
+ */
+function sumHistoryProgress(
+  histories: StatusHistoryProgress[],
+): StatusHistoryProgress {
+  const total: StatusHistoryProgress = {
+    ...emptyHistoryProgress(),
+    largest_pending: [],
+  }
+  let paced = false
+  let etaKnown = true
+  for (const history of histories) {
+    total.chats_pending += history.chats_pending
+    total.chats_without_count += history.chats_without_count
+    total.messages_cached += history.messages_cached
+    total.messages_known += history.messages_known
+    total.messages_left += history.messages_left
+    if (history.messages_per_minute !== null) {
+      paced = true
+      total.messages_per_minute =
+        (total.messages_per_minute ?? 0) + history.messages_per_minute
+    }
+    if (history.messages_left > 0) {
+      if (history.eta_seconds === null) etaKnown = false
+      else
+        total.eta_seconds = Math.max(
+          total.eta_seconds ?? 0,
+          history.eta_seconds,
+        )
+    }
+  }
+  if (!paced) total.messages_per_minute = null
+  if (!etaKnown) total.eta_seconds = null
+  total.largest_pending = histories
+    .flatMap((history) => history.largest_pending)
+    .sort(
+      (a, b) =>
+        b.messages_left - a.messages_left ||
+        a.account_id - b.account_id ||
+        a.chat_id - b.chat_id,
+    )
+    .slice(0, 5)
+  return total
 }
 
 /** An account's media cache size; null when its folder can't be read */
@@ -500,6 +578,14 @@ export function liveConnection(
   }
 }
 
+/** History progress without the list of chats */
+function historySummary({
+  largest_pending: _list,
+  ...summary
+}: StatusHistoryProgress) {
+  return summary
+}
+
 /** One account's own figures, for its entry under accounts */
 function accountBreakdown(
   snapshot: AccountStatusSnapshot,
@@ -521,6 +607,7 @@ function accountBreakdown(
       chats_history_complete: snapshot.progress.chats_history_complete,
       chats_history_pending: snapshot.progress.chats_history_pending,
       messages_cached: snapshot.progress.messages_cached,
+      history: historySummary(snapshot.progress.history),
     },
     rate_limits: {
       api_calls_last_minute: snapshot.rate_limits.api_calls_last_minute,
@@ -676,6 +763,7 @@ export async function collectStatus(
           a.account_id - b.account_id,
       )
       .slice(0, 5),
+    history: sumHistoryProgress(snapshots.map((s) => s.progress.history)),
   }
 
   const accountsStatus = {

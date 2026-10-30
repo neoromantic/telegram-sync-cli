@@ -820,7 +820,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           defaultValue: 0,
         },
         total_messages: {
-          description: 'Estimated total messages in chat (from Telegram)',
+          description:
+            "The chat's message count on the server, from the newest sync page that gave one (a first or history page). NULL until then. tg status compares it with the cached messages",
           nullable: true,
         },
         synced_messages: {

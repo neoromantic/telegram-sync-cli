@@ -21,10 +21,13 @@ import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
+import { createMessagesSearch } from '../db/messages-search'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { createUsersCache } from '../db/users-cache'
+import { toLong } from '../utils/long'
 import { createFakeHistory, range, rawMessage } from './helpers/fake-history'
 import { waitLikeFloodWait } from './helpers/flood-wait'
 
@@ -47,6 +50,7 @@ describe('sync-worker real jobs', () => {
       jobsService: createSyncJobsService(db),
       rateLimits: createRateLimitsService(db),
       chatsCache: createChatsCache(db),
+      usersCache: createUsersCache(db),
       config: {
         apiMethod: 'messages.getHistory',
         batchSize: 2,
@@ -622,6 +626,7 @@ describe('sync-worker real jobs', () => {
           jobsService: ctx.jobsService,
           rateLimits: ctx.rateLimits,
           chatsCache: ctx.chatsCache,
+          usersCache: ctx.usersCache,
           config: ctx.config,
           signal: shutdown.signal,
         })
@@ -1720,6 +1725,102 @@ describe('sync-worker real jobs', () => {
       expect(history.requests.map((request) => request.offsetId)).toEqual([1])
       expect(result).toMatchObject({ success: true, historyComplete: true })
       expect(state()?.history_complete).toBe(1)
+    })
+  })
+
+  describe('what a page says besides its messages', () => {
+    // A basic group: its InputPeer needs no access hash
+    const chatId = -4242
+    const ALICE_ID = 5550101
+    const BOB_ID = 5550102
+    const alice: tl.RawUser = {
+      _: 'user',
+      id: ALICE_ID,
+      firstName: 'Alice',
+      username: 'alice_example',
+      accessHash: toLong('1111'),
+    }
+    const minBob: tl.RawUser = { _: 'user', id: BOB_ID, min: true }
+
+    function fromAlice(id: number) {
+      return { ...rawMessage(id), fromId: { _: 'peerUser', userId: ALICE_ID } }
+    }
+
+    beforeEach(() => {
+      ctx.config.batchSize = 2
+      ctx.chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: 'group',
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 300,
+        backward_cursor: 201,
+      })
+    })
+
+    function run(jobType: SyncJobType) {
+      const job = ctx.jobsService.create({
+        chat_id: chatId,
+        job_type: jobType,
+        priority: SyncPriority.High,
+      })
+      return processJobReal(ctx, job)
+    }
+
+    it("caches a history page's senders before its messages, so search finds them by name", async () => {
+      ctx.client = {
+        call: mock(async () => ({
+          _: 'messages.messagesSlice',
+          count: 1234,
+          messages: [fromAlice(200), fromAlice(199)],
+          users: [alice, minBob],
+          chats: [],
+        })),
+      } as unknown as TelegramClient
+
+      await run(SyncJobType.BackwardHistory)
+
+      expect(ctx.usersCache.getById(String(ALICE_ID))).toMatchObject({
+        first_name: 'Alice',
+        access_hash: '1111',
+      })
+      expect(ctx.usersCache.getById(String(BOB_ID))).toBeNull()
+      const hits = createMessagesSearch(db).search('Alice')
+      expect(hits.map((hit) => hit.message_id).sort()).toEqual([199, 200])
+      expect(ctx.chatSyncState.get(chatId)?.total_messages).toBe(1234)
+    })
+
+    it('keeps the newest count, and none from a page bounded by minId', async () => {
+      const history = createFakeHistory(range(1, 310))
+      ctx.client = history.client
+
+      await run(SyncJobType.BackwardHistory)
+      expect(ctx.chatSyncState.get(chatId)?.total_messages).toBe(310)
+
+      history.add(311, 312)
+      await run(SyncJobType.BackwardHistory)
+      expect(ctx.chatSyncState.get(chatId)?.total_messages).toBe(312)
+
+      // Catch-up pages above the cursor: the count may cover only them
+      await run(SyncJobType.ForwardCatchup)
+      expect(history.requests.at(-1)?.minId).toBe(300)
+      expect(ctx.chatSyncState.get(chatId)?.total_messages).toBe(312)
+    })
+
+    it("takes a whole history's length as its count", async () => {
+      ctx.chatSyncState.resetSyncState(chatId)
+      ctx.client = {
+        call: mock(async () => ({
+          _: 'messages.messages',
+          messages: [rawMessage(2), rawMessage(1)],
+          users: [],
+          chats: [],
+        })),
+      } as unknown as TelegramClient
+
+      await run(SyncJobType.InitialLoad)
+
+      expect(ctx.chatSyncState.get(chatId)?.total_messages).toBe(2)
     })
   })
 

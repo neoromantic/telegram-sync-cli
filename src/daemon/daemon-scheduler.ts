@@ -9,6 +9,7 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
+import { createUsersCache } from '../db/users-cache'
 import {
   type CatchUpTrigger,
   refreshDialogsAfterReconnect,
@@ -42,6 +43,7 @@ function createAccountSyncWorker(
     jobsService: createSyncJobsService(cacheDb),
     rateLimits: createRateLimitsService(cacheDb),
     chatsCache: createChatsCache(cacheDb),
+    usersCache: createUsersCache(cacheDb),
   })
 }
 

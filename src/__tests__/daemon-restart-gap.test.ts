@@ -30,6 +30,7 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import { createUsersCache } from '../db/users-cache'
 import {
   addAccountRuntime,
   createAccountCacheDb,
@@ -137,6 +138,7 @@ describe('daemon restart with messages missed while stopped', () => {
       jobsService,
       rateLimits,
       chatsCache: createChatsCache(db),
+      usersCache: createUsersCache(db),
     })
     ctx.state.accounts.set(1, {
       accountId: 1,
@@ -235,6 +237,7 @@ describe('daemon restart with messages missed while stopped', () => {
       jobsService: createSyncJobsService(db),
       rateLimits: createRateLimitsService(db),
       chatsCache: createChatsCache(db),
+      usersCache: createUsersCache(db),
     })
 
     await scheduler.initializeForStartup()
@@ -311,6 +314,7 @@ describe('daemon restart with two accounts', () => {
         jobsService,
         rateLimits: createRateLimitsService(db),
         chatsCache: createChatsCache(db),
+        usersCache: createUsersCache(db),
       }),
     })
     ctx.state.accounts.set(accountId, {

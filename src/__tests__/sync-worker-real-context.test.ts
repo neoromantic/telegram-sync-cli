@@ -32,6 +32,7 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema } from '../db/sync-schema'
+import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { communityDialog, fakeDialog } from './helpers/fake-dialogs'
 
@@ -388,6 +389,7 @@ describe('sync-worker real helpers/context', () => {
         jobsService: createSyncJobsService(db),
         rateLimits,
         chatsCache: createChatsCache(db),
+        usersCache: createUsersCache(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -406,6 +408,7 @@ describe('sync-worker real helpers/context', () => {
         jobsService: createSyncJobsService(db),
         rateLimits,
         chatsCache: createChatsCache(db),
+        usersCache: createUsersCache(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -427,6 +430,7 @@ describe('sync-worker real helpers/context', () => {
         jobsService: createSyncJobsService(db),
         rateLimits,
         chatsCache: createChatsCache(db),
+        usersCache: createUsersCache(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -444,6 +448,7 @@ describe('sync-worker real helpers/context', () => {
         jobsService: createSyncJobsService(db),
         rateLimits,
         chatsCache: createChatsCache(db),
+        usersCache: createUsersCache(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -467,6 +472,7 @@ describe('sync-worker real helpers/context', () => {
         jobsService: createSyncJobsService(db),
         rateLimits,
         chatsCache: createChatsCache(db),
+        usersCache: createUsersCache(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -511,6 +517,7 @@ describe('sync-worker real helpers/context', () => {
         jobsService: createSyncJobsService(db),
         rateLimits: createRateLimitsService(db),
         chatsCache,
+        usersCache: createUsersCache(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 

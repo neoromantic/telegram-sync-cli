@@ -30,6 +30,7 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { createUsersCache } from '../db/users-cache'
 import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
 import { addAccountRuntime } from './helpers/daemon-runtime'
 import { fakeDialog } from './helpers/fake-dialogs'
@@ -150,6 +151,7 @@ describe('chats whose sync pages keep failing', () => {
         jobsService,
         rateLimits: createRateLimitsService(db),
         chatsCache,
+        usersCache: createUsersCache(db),
       }),
     })
     ctx.state.accounts.set(1, {
@@ -388,6 +390,7 @@ describe('a chat that fails in one account', () => {
         jobsService,
         rateLimits: createRateLimitsService(db),
         chatsCache: createChatsCache(db),
+        usersCache: createUsersCache(db),
       }),
     })
     ctx.state.accounts.set(accountId, {
