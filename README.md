@@ -182,8 +182,9 @@ phone numbers, account, chat or user IDs, search queries or any other argument.
 
 Nothing is sent until tg has shown you a one-line notice (in a terminal, or to an AI agent that
 runs it), and nothing from CI, tests or a source checkout. The daemon and runs from a script send
-each event at most once a day. Events go through usage.sergeybaus.com to PostHog, which stores
-them in its US Cloud as the author's processor and sees your IP address.
+each event at most once a day. A command never waits for them: as it exits, a background copy
+of tg sends its events and exits within a few seconds. Events go through usage.sergeybaus.com to
+PostHog, which stores them in its US Cloud as the author's processor and sees your IP address.
 
 Turn it off with `tg telemetry off` (it also deletes the install ID),
 `TELEGRAM_SYNC_CLI_TELEMETRY=0` or `DO_NOT_TRACK=1`. `tg telemetry status` shows whether it's

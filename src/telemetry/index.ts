@@ -12,12 +12,22 @@
  *   their message, without account numbers or a data directory the user set;
  *   the client scrubs it of the home directory and user name.
  * - A source checkout sends nothing unless TELEGRAM_SYNC_CLI_TELEMETRY is on.
- * - Every exit waits up to 500 ms for the events in flight.
+ * - A command never waits for them: as it exits, it hands its events to a
+ *   detached copy of tg that sends them (background.ts). The daemon, which
+ *   runs for days, and debug mode send from their own process, and their
+ *   exit waits up to 500 ms for the events in flight.
  */
 import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, normalize, resolve } from 'node:path'
 import { VERSION } from '../version'
+import {
+  type ErrorReport,
+  type Handoff,
+  isCompiled,
+  sendInBackground,
+  sentToday,
+} from './background'
 import {
   type Channel,
   createTelemetry,
@@ -30,6 +40,8 @@ export const PRODUCT = 'telegram-sync-cli'
 export const ENV_PREFIX = 'TELEGRAM_SYNC_CLI'
 export const OFF_COMMAND = 'tg telemetry off'
 export const DETAILS_URL = 'https://usage.sergeybaus.com'
+/** Where a source checkout with usage stats on sends them, for tests */
+export const ENDPOINT_ENV = `${ENV_PREFIX}_TELEMETRY_ENDPOINT`
 const FLUSH_MS = 500
 /** How often a running daemon checks in; the client sends once a UTC day */
 const HEARTBEAT_MS = 60 * 60 * 1000
@@ -55,8 +67,11 @@ export class ExitPending extends Error {
 }
 
 let root: CommandNode | undefined
-/** This run's client while it may send, else null */
+/** The client of a daemon or a debug run while it may send, else null */
 let tracker: Telemetry | null = null
+/** A command's events until its exit hands them over, else null */
+let handoff: Handoff | null = null
+let stateFile = ''
 let exiting = false
 let errorReported = false
 let completed = false
@@ -141,7 +156,7 @@ export function detectChannel(
   modulePath: string = import.meta.path,
   execPath: string = process.execPath,
 ): Channel {
-  if (modulePath.includes('$bunfs') || modulePath.includes('~BUN')) {
+  if (isCompiled(modulePath)) {
     let real = execPath
     try {
       real = realpathSync(execPath)
@@ -159,9 +174,19 @@ function optedIn(env: Env): boolean {
   return ['1', 'on', 'true', 'debug'].includes(value)
 }
 
-/** The client for this tg, for a run (`mode`) or for tg telemetry */
+/**
+ * The client for this tg, for a run (`mode`) or for tg telemetry. The copy
+ * that sends a command's events passes the run's terminal (`tty`) and its
+ * feature.
+ */
 export function createTgTelemetry(
-  options: { mode?: Mode; channel?: Channel; env?: Env } = {},
+  options: {
+    mode?: Mode
+    channel?: Channel
+    env?: Env
+    tty?: boolean
+    features?: string[]
+  } = {},
 ): Telemetry {
   const env = options.env ?? process.env
   const channel = options.channel ?? detectChannel()
@@ -173,11 +198,15 @@ export function createTgTelemetry(
       env.TELEGRAM_SYNC_CLI_DATA_DIR ?? join(homedir(), '.telegram-sync-cli'),
     channel,
     mode: options.mode,
-    features: root ? commandPaths(root) : [],
+    features: options.features ?? (root ? commandPaths(root) : []),
     offCommand: OFF_COMMAND,
     env,
+    tty: options.tty,
     // A checkout runs the maintainer's and contributors' tg: no endpoint
-    ...(channel === 'source' && !optedIn(env) && { endpoint: '' }),
+    // unless usage stats are on, then the default or a test server's
+    ...(channel === 'source' && {
+      endpoint: optedIn(env) ? env[ENDPOINT_ENV] || undefined : '',
+    }),
   })
 }
 
@@ -217,13 +246,14 @@ export function instrumentCommands(cmd: CommandNode): void {
 
 /**
  * The start of a run: the notice once (not in quiet mode), then app_started
- * and the command. The run that shows the notice sends nothing. A daemon
- * that runs for days checks in every hour, and the client sends that once a
- * UTC day.
+ * and the command. The run that shows the notice sends nothing. A command
+ * keeps its events for its exit to hand over; a daemon that runs for days
+ * sends them itself, and checks in every hour, which the client sends once
+ * a UTC day. `env` and `channel` are for tests.
  */
 export function startTelemetry(
   rawArgs: string[],
-  options: { quiet?: boolean } = {},
+  options: { quiet?: boolean; env?: Env; channel?: Channel } = {},
 ): void {
   try {
     if (!root) return
@@ -231,9 +261,27 @@ export function startTelemetry(
     if (path[0] === OWN_COMMAND) return
     const feature = path.join(' ')
     const mode = feature === 'daemon start' ? 'daemon' : undefined
-    const t = createTgTelemetry({ mode })
-    if (!t.status().enabled) return
+    const channel = options.channel ?? detectChannel()
+    const env = options.env ?? process.env
+    const t = createTgTelemetry({ mode, channel, env })
+    const status = t.status()
+    if (!status.enabled) return
     if (!options.quiet && t.showNotice()) return
+    if (mode !== 'daemon' && !status.debug) {
+      // A notice not shown yet (no terminal, -q) means nothing to send
+      if (t.noticeText()) return
+      const known = commandPaths(root).includes(feature)
+      handoff = {
+        channel,
+        tty: !!(process.stdin.isTTY || process.stderr.isTTY),
+        calls: [['started']],
+      }
+      if (feature) handoff.calls.push(['feature', known ? feature : 'other'])
+      stateFile = status.stateFile
+      // Every way out, process.exit or the end of the event loop
+      process.once('exit', () => handOff(env))
+      return
+    }
     tracker = t
     t.started()
     if (feature) t.feature(feature)
@@ -280,10 +328,24 @@ export function errorType(err: unknown): string {
   return err.constructor?.name || 'Error'
 }
 
-function report(err: unknown): void {
-  if (errorReported || !tracker) return
+function report(err: ErrorReport): void {
+  if (errorReported || !(tracker || handoff)) return
   errorReported = true
-  tracker.error(err)
+  if (tracker) tracker.error(err)
+  else handoff?.calls.push(['error', err])
+}
+
+/** Hands a command's events to a copy of tg that sends them, once */
+function handOff(env: Env): void {
+  const events = handoff
+  handoff = null
+  try {
+    if (events && !sentToday(stateFile, events, env)) {
+      sendInBackground(events, env)
+    }
+  } catch {
+    // Usage stats never fail tg
+  }
 }
 
 /** The failure error() prints, as its type */
@@ -357,10 +419,11 @@ export function isExiting(): boolean {
 }
 
 /**
- * Ends the process with `code` once the usage stats in flight are sent, at
- * most 500 ms later. With nothing to send it exits at once, as tg always
- * did. Otherwise it returns, and the caller must stop: error() throws
- * ExitPending, which the root command's cleanup holds (endRun).
+ * Ends the process with `code`. A command exits at once, and its exit hands
+ * its events to the copy of tg that sends them. The daemon and debug mode
+ * exit once the usage stats in flight are sent, at most 500 ms later: then
+ * it returns, and the caller must stop: error() throws ExitPending, which
+ * the root command's cleanup holds (endRun).
  */
 export function exitAfterFlush(code: number): Promise<never> {
   const pending = new Promise<never>(() => {})
@@ -381,9 +444,10 @@ export function exitAfterFlush(code: number): Promise<never> {
 }
 
 /**
- * The root command's cleanup. An exit under way is held until it happens. A
- * command that returned exits after the flush, so a slow request can't keep
- * tg running; after a thrown error citty prints it and exits with 1.
+ * The root command's cleanup. An exit under way is held until it happens.
+ * With a client sending in this process, a command that returned exits after
+ * the flush, so a slow request can't keep tg running; after a thrown error
+ * citty prints it and exits with 1.
  */
 export async function endRun(): Promise<void> {
   if (exiting) return new Promise<never>(() => {})
@@ -399,10 +463,17 @@ export function reportDaemonExit(code: number, name: string | undefined): void {
   report(`DAEMON_${snake.toUpperCase()}`)
 }
 
+/** @internal for tests: the events this run would hand over */
+export function pendingHandoff(): Handoff | null {
+  return handoff
+}
+
 /** @internal for tests: forget this process's run */
 export function resetTelemetryForTests(): void {
   root = undefined
   tracker = null
+  handoff = null
+  stateFile = ''
   exiting = false
   errorReported = false
   completed = false

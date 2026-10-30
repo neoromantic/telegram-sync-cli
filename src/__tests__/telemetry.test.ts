@@ -3,7 +3,7 @@
  * checkout rule. The client itself is devkit's and tested there.
  */
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -14,10 +14,16 @@ import {
   createTgTelemetry,
   detectChannel,
   errorType,
+  instrumentCommands,
+  pendingHandoff,
+  reportCliError,
+  resetTelemetryForTests,
   rpcErrorType,
+  startTelemetry,
   withoutAccountIds,
   withoutDataDir,
 } from '../telemetry'
+import { dailyKey, type Handoff, sentToday } from '../telemetry/background'
 
 const run = () => {}
 const tree: CommandNode = {
@@ -279,5 +285,154 @@ describe('createTgTelemetry', () => {
       env: { ...base, TELEGRAM_SYNC_CLI_TELEMETRY: '0' },
     }).status()
     expect(off).toMatchObject({ enabled: false, reason: 'env' })
+  })
+})
+
+describe('a test endpoint', () => {
+  let dir = ''
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('is used only by a source checkout with usage stats on', () => {
+    dir = mkdtempSync(join(tmpdir(), 'tg-telemetry-'))
+    const env = {
+      TELEGRAM_SYNC_CLI_DATA_DIR: dir,
+      TELEGRAM_SYNC_CLI_TELEMETRY: '1',
+      TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT: 'http://127.0.0.1:9/e/',
+    }
+    const source = createTgTelemetry({ channel: 'source', env }).status()
+    expect(source.endpoint).toBe('http://127.0.0.1:9/e/')
+    const npm = createTgTelemetry({ channel: 'npm', env }).status()
+    expect(npm.endpoint).toBe('https://usage.sergeybaus.com/i/v0/e/')
+  })
+})
+
+describe('the events a command hands over at its exit', () => {
+  const dirs: string[] = []
+  const tempDir = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tg-telemetry-'))
+    dirs.push(dir)
+    return dir
+  }
+  /** Usage stats on, the notice seen, no AI agent */
+  const on = () => {
+    const dir = tempDir()
+    writeFileSync(
+      join(dir, 'telemetry.json'),
+      '{"id":null,"enabled":null,"notice":1,"installed":false,"daily":{}}\n',
+    )
+    return { TELEGRAM_SYNC_CLI_DATA_DIR: dir }
+  }
+  const start = (
+    args: string[],
+    env: Record<string, string>,
+    channel: 'npm' | 'source' = 'npm',
+  ) => {
+    instrumentCommands(tree)
+    startTelemetry(args, { env, channel })
+    return pendingHandoff()
+  }
+
+  afterEach(() => {
+    resetTelemetryForTests()
+    for (const dir of dirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('are app_started, the command and its error', () => {
+    const handoff = start(['chats', 'list', 'Jane Doe'], on())
+    reportCliError('AUTH_REQUIRED', 'Not logged in as Jane Doe')
+    expect(handoff).toMatchObject({
+      channel: 'npm',
+      calls: [
+        ['started'],
+        ['feature', 'chats list'],
+        ['error', 'AUTH_REQUIRED'],
+      ],
+    })
+    expect(start(['chats', 'secret'], on())?.calls).toEqual([
+      ['started'],
+      ['feature', 'other'],
+    ])
+  })
+
+  it('are none when usage stats are off, so no process starts', () => {
+    expect(start(['chats', 'list'], { ...on(), DO_NOT_TRACK: '1' })).toBeNull()
+    expect(
+      start(['chats', 'list'], { ...on(), TELEGRAM_SYNC_CLI_TELEMETRY: '0' }),
+    ).toBeNull()
+    expect(start(['chats', 'list'], { ...on(), CI: 'true' })).toBeNull()
+    expect(start(['chats', 'list'], { ...on(), NODE_ENV: 'test' })).toBeNull()
+    expect(start(['chats', 'list'], on(), 'source')).toBeNull()
+  })
+
+  it('are none before the notice was shown', () => {
+    instrumentCommands(tree)
+    startTelemetry(['chats', 'list'], {
+      quiet: true,
+      env: { TELEGRAM_SYNC_CLI_DATA_DIR: tempDir() },
+      channel: 'npm',
+    })
+    expect(pendingHandoff()).toBeNull()
+  })
+
+  it('stay in the daemon, which sends them itself', () => {
+    // Its requests go to a closed local port
+    const env = {
+      ...on(),
+      TELEGRAM_SYNC_CLI_TELEMETRY: '1',
+      TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT: 'http://127.0.0.1:9/e/',
+    }
+    expect(start(['daemon', 'start'], env, 'source')).toBeNull()
+    expect(start(['chats', 'list'], env, 'source')).not.toBeNull()
+  })
+})
+
+describe('sentToday', () => {
+  let dir = ''
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  const now = new Date('2026-03-04T10:00:00Z')
+  const script: Handoff = {
+    channel: 'npm',
+    tty: false,
+    calls: [['started'], ['feature', 'chats list'], ['error', 'FLOOD_WAIT']],
+  }
+  const state = (installed: boolean, daily: Record<string, string>) => {
+    dir = mkdtempSync(join(tmpdir(), 'tg-telemetry-'))
+    const file = join(dir, 'telemetry.json')
+    writeFileSync(file, JSON.stringify({ notice: 1, installed, daily }))
+    return file
+  }
+  const today = Object.fromEntries(
+    script.calls.map((call) => [dailyKey(call), '2026-03-04']),
+  )
+
+  it('names the keys the client counts once a day', () => {
+    expect(script.calls.map(dailyKey)).toEqual([
+      'app_started',
+      'feature_used:chats list',
+      'error_occurred:FLOOD_WAIT',
+    ])
+    expect(dailyKey(['error', { code: 'ConfigError', message: 'x' }])).toBe(
+      'error_occurred:ConfigError',
+    )
+  })
+
+  it('is true for a script run whose events all went out today', () => {
+    expect(sentToday(state(true, today), script, {}, now)).toBe(true)
+  })
+
+  it('is false when anything may still be sent', () => {
+    const file = state(true, today)
+    expect(sentToday(file, { ...script, tty: true }, {}, now)).toBe(false)
+    expect(sentToday(file, script, { AI_AGENT: 'e2e' }, now)).toBe(false)
+    expect(sentToday(file, script, {}, new Date('2026-03-05T00:00:00Z'))).toBe(
+      false,
+    )
+    expect(sentToday(state(false, today), script, {}, now)).toBe(false)
+    const { 'feature_used:chats list': _, ...rest } = today
+    expect(sentToday(state(true, rest), script, {}, now)).toBe(false)
+    expect(sentToday(join(dir, 'missing.json'), script, {}, now)).toBe(false)
   })
 })

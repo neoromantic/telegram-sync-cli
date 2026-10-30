@@ -73,7 +73,7 @@ export async function rawFile(path: string): Promise<void> {
 /**
  * In production mode, exit to close any active connections (e.g., mtcute TelegramClient)
  * This prevents the process from hanging when the event loop is kept alive by open sockets.
- * The exit waits up to 500 ms for usage stats in flight.
+ * Only the daemon's exit waits for usage stats, up to 500 ms.
  */
 function exitAfterSuccess(): void {
   if (process.env.BUN_ENV !== 'test' && process.env.NODE_ENV !== 'test') {
@@ -116,8 +116,9 @@ export function error(
   // The code (or Telegram's RPC error name) only: messages can name chats,
   // users or a query
   reportCliError(code, message)
-  // Exits at once, or after up to 500 ms of sending usage stats. Then the
-  // throw ends the command, and src/index.ts holds it until the exit.
+  // Exits at once, or in the daemon after up to 500 ms of sending usage
+  // stats. Then the throw ends the command, and src/index.ts holds it until
+  // the exit.
   void exitAfterFlush(getExitCode(code))
   throw new ExitPending()
 }

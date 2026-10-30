@@ -256,7 +256,12 @@ random install ID. The full list and an example event: <https://usage.sergeybaus
   runs tg every minute, also sends each event at most once per UTC day.
 - **Delivery.** One HTTPS request per event to `https://usage.sergeybaus.com/i/v0/e/`, which
   passes it to PostHog (US Cloud). A request gets 3 seconds and one attempt; nothing is queued
-  on disk. Before it exits tg waits at most 500 ms for requests in flight.
+  on disk. A command never waits for them: as it exits, it starts a background copy of tg (the
+  same binary, or Bun for the npm package) with no terminal output, which sends the run's events
+  and exits, after 5 seconds at most. No copy starts when there is nothing to send: usage stats
+  off, the notice not shown yet, or a script run whose events all went out today. The daemon
+  sends from its own process, and so does `TELEGRAM_SYNC_CLI_TELEMETRY=debug`; their exit waits
+  at most 500 ms for requests in flight.
 
 What decides, the first rule that matches:
 

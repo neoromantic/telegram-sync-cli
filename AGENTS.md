@@ -113,7 +113,9 @@ Steps: [docs/releasing.md](docs/releasing.md).
   are command paths from the dispatcher, never arguments. `error()` reports only its code or
   Telegram's RPC error name; pass a message (`reportLocalError`) only for config and cache file
   errors, never one that can hold message text, chat, contact or user names, or a query. Every
-  exit goes through `exitAfterFlush` (at most 500 ms), never a bare `process.exit`.
+  exit goes through `exitAfterFlush`, never a bare `process.exit`: a command exits at once and
+  hands its events to a detached copy of tg that sends them (`src/telemetry/background.ts`,
+  `send.ts`); only the daemon and debug mode send in-process and wait up to 500 ms.
 - Output is JSON by default with a stable error schema
   (`{ success: false, error: { code, message, details?, suggestion? } }`) and documented exit
   codes. Don't change codes or shapes without updating the docs.
