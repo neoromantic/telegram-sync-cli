@@ -15,8 +15,10 @@ import {
 } from 'bun:test'
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -264,14 +266,26 @@ describe('usage stats in the background', () => {
     rmSync(dataDir, { recursive: true, force: true })
   })
 
-  it('never delay a command, and still arrive', async () => {
-    const env = {
-      ...NO_AGENT,
-      AI_AGENT: 'e2e',
-      TELEGRAM_SYNC_CLI_DATA_DIR: dataDir,
-      TELEGRAM_SYNC_CLI_TELEMETRY: '1',
-      TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT: server.url.href,
+  /** Waits for `count` events, then a little longer for any extra one */
+  const arrived = async (count: number) => {
+    const deadline = Date.now() + 5000
+    while (received.length < count && Date.now() < deadline) {
+      await Bun.sleep(20)
     }
+    await Bun.sleep(100)
+    return received.splice(0)
+  }
+
+  const statsOn = (dataDirValue: string) => ({
+    ...NO_AGENT,
+    AI_AGENT: 'e2e',
+    TELEGRAM_SYNC_CLI_DATA_DIR: dataDirValue,
+    TELEGRAM_SYNC_CLI_TELEMETRY: '1',
+    TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT: server.url.href,
+  })
+
+  it('never delay a command, and still arrive', async () => {
+    const env = statsOn(dataDir)
     // Off: nothing is sent, and no process starts to send it
     const off = await runCli(['chats', 'list'], {
       env: { ...env, DO_NOT_TRACK: '1' },
@@ -282,10 +296,8 @@ describe('usage stats in the background', () => {
     // Waiting for the server would take 2 seconds, and tg used to wait 500 ms
     expect(on.duration - off.duration).toBeLessThan(250)
 
-    const deadline = Date.now() + 5000
-    while (received.length < 4 && Date.now() < deadline) await Bun.sleep(20)
-    await Bun.sleep(100)
-    expect(received.map((e) => e.event).sort()).toEqual([
+    const sent = await arrived(4)
+    expect(sent.map((e) => e.event).sort()).toEqual([
       'app_installed',
       'app_started',
       'error_occurred',
@@ -294,15 +306,32 @@ describe('usage stats in the background', () => {
     const state = JSON.parse(
       readFileSync(join(dataDir, 'telemetry.json'), 'utf8'),
     )
-    for (const e of received) {
+    for (const e of sent) {
       expect(e.distinct_id).toBe(state.id)
       expect(e.properties).toMatchObject({ channel: 'source', mode: 'agent' })
     }
     expect(
-      received.find((e) => e.event === 'feature_used')?.properties.feature,
+      sent.find((e) => e.event === 'feature_used')?.properties.feature,
     ).toBe('chats list')
     expect(
-      received.find((e) => e.event === 'error_occurred')?.properties.error_type,
+      sent.find((e) => e.event === 'error_occurred')?.properties.error_type,
     ).toBe('AUTH_REQUIRED')
+  }, 15000)
+
+  it('arrive with a data directory given as a relative path', async () => {
+    // A project folder other than the temp folder the sending copy runs in
+    const project = join(dataDir, 'project')
+    mkdirSync(join(project, 'data'), { recursive: true })
+    renameSync(
+      join(dataDir, 'telemetry.json'),
+      join(project, 'data', 'telemetry.json'),
+    )
+    await runCli(['chats', 'list'], { env: statsOn('data'), cwd: project })
+    const sent = await arrived(4)
+    expect(sent).toHaveLength(4)
+    const state = JSON.parse(
+      readFileSync(join(project, 'data', 'telemetry.json'), 'utf8'),
+    )
+    expect(sent.every((e) => e.distinct_id === state.id)).toBe(true)
   }, 15000)
 })
