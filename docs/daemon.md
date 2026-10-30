@@ -60,9 +60,12 @@ or the name, so a log can be pasted into an issue.
 mtcute's own log goes through the same logger, tagged `[mtcute <tag>]`. Without `--verbose`
 only its errors show; with it, its warnings too (ping timeouts, connection retries), and the
 update manager's gap notes (`pts_before does not match local_pts`, hundreds a day on a busy
-account) show at debug level. An error the client reports (a data center it can't reach, say)
-is one warning line with the error's message, never a stack or source; the same error again
-within 5 minutes is logged at debug level.
+account) show at debug level. A line of mtcute's never carries a stack or a Telegram object:
+an error shows as its message, and an object (such as a late answer that holds users or
+messages) as its type, `<messages.dialogs>`, so no phone number, name or message text gets in.
+An error the client reports (a data center it can't reach, say) is one warning line with the
+error's message, never a stack or source; the same error again within 5 minutes is logged at
+debug level.
 
 ### Daemon PID
 

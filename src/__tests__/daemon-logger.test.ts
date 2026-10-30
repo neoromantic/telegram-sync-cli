@@ -2,7 +2,7 @@
  * Tests for daemon logger verbosity
  */
 import { afterEach, describe, expect, it, mock } from 'bun:test'
-import type { TelegramClient } from '@mtcute/bun'
+import { MemoryStorage, TelegramClient } from '@mtcute/bun'
 import {
   accountLabel,
   createLogger,
@@ -173,9 +173,64 @@ describe('routeClientLogs (#128)', () => {
 })
 
 describe('formatClientLog', () => {
-  it('fills in the format and appends extra arguments', () => {
-    expect(formatClientLog('%s took %d ms', ['ping', 12, { a: 1 }])).toBe(
-      'ping took 12 ms {"a":1}',
-    )
+  it('fills in the format and appends extra arguments, objects by type', () => {
+    expect(
+      formatClientLog('%s took %d ms', ['ping', 12, { _: 'pong' }, { a: 1 }]),
+    ).toBe('ping took 12 ms <pong> <object>')
+  })
+})
+
+describe("routeClientLogs with mtcute's own logger (#128)", () => {
+  it('keeps payloads that may hold phones, names or message text and stacks out of the log', async () => {
+    // A real client, never started: its logger formats %j and %e itself
+    const client = new TelegramClient({
+      apiId: 1,
+      apiHash: 'example',
+      storage: new MemoryStorage(),
+    })
+    const log = {
+      info: mock((_: string) => {}),
+      debug: mock((_: string) => {}),
+      warn: mock((_: string) => {}),
+      error: mock((_: string) => {}),
+    }
+    try {
+      routeClientLogs(client, log, 'verbose', '[Account 1]')
+
+      // A late answer to getDialogs, as mtcute warns about it
+      client.log
+        .create('session')
+        .warn('received rpc_result for unknown message %l: %j', 123, {
+          _: 'messages.dialogs',
+          users: [
+            {
+              _: 'user',
+              id: 42,
+              phone: '15550000001',
+              firstName: 'Example',
+              lastName: 'User',
+            },
+          ],
+          messages: [{ _: 'message', id: 1, message: 'Example text' }],
+        })
+      const err = new Error('Example transport failure')
+      err.stack = `Error: Example transport failure\n    at privateSource (/$bunfs/root/tg:1:2)`
+      client.log.create('client').error('Authorization error: %e', err)
+      client.log.create('session').warn('raw %j then %s', [{ a: 1 }], 'more')
+    } finally {
+      await client.destroy()
+    }
+
+    expect(log.warn.mock.calls).toEqual([
+      [
+        '[Account 1] [mtcute session] received rpc_result for unknown message 123: <messages.dialogs>',
+      ],
+      ['[Account 1] [mtcute session] raw <payload> more'],
+    ])
+    expect(log.error.mock.calls).toEqual([
+      [
+        '[Account 1] [mtcute client] Authorization error: Error: Example transport failure',
+      ],
+    ])
   })
 })

@@ -62,16 +62,39 @@ const MTCUTE_WARN = 2
 /** Same error again within this window: debug level, not another warning */
 const REPEATED_ERROR_WINDOW_MS = 5 * 60 * 1000
 
-/** One line of mtcute's log: its format filled in, an error by its message */
+/**
+ * mtcute fills in `%j` (JSON) and `%e` (an error's stack) before the daemon
+ * sees the line. A payload is a Telegram object that may hold users (phone,
+ * name) or message text: only its type is kept, `<messages.dialogs>`.
+ */
+function stripPayloadsAndStacks(text: string): string {
+  return (
+    text
+      // A stack's frames: "\n    at fn (file:1:2)"
+      .replace(/\n\s*at\s[^\n]*/g, '')
+      // From the first JSON object or array to the end of the line
+      .replace(
+        /(\[\s*)?\{"_":"([\w.]+)"[\s\S]*$/,
+        (_m, _arr, type) => `<${type}>`,
+      )
+      .replace(/\[?\s*[{[]"[\s\S]*$/, '<payload>')
+  )
+}
+
+/**
+ * One line of mtcute's log: its format filled in, an error by its message,
+ * a Telegram object by its type, never a stack or a payload (#128)
+ */
 export function formatClientLog(fmt: string, args: unknown[]): string {
   const rest = [...args]
-  const text = fmt
-    // mtcute adds the account's user ID; the daemon's tag names the account
-    .replace(/^\[USER [^\]]*\] /, '')
-    .replace(/%[sdifo]/gi, () => {
-      if (rest.length === 0) return ''
-      return describeArg(rest.shift())
-    })
+  const text = stripPayloadsAndStacks(
+    fmt
+      // mtcute adds the account's user ID; the daemon's tag names the account
+      .replace(/^\[USER [^\]]*\] /, ''),
+  ).replace(/%[sdifo]/gi, () => {
+    if (rest.length === 0) return ''
+    return describeArg(rest.shift())
+  })
   const extra = rest.map(describeArg).filter((part) => part.length > 0)
   return [text.trim(), ...extra].join(' ').replace(/\s+/g, ' ').trim()
 }
@@ -79,11 +102,8 @@ export function formatClientLog(fmt: string, args: unknown[]): string {
 function describeArg(value: unknown): string {
   if (value instanceof Error) return getErrorMessage(value)
   if (typeof value === 'object' && value !== null) {
-    try {
-      return JSON.stringify(value)
-    } catch {
-      return String(value)
-    }
+    const type = (value as { _?: unknown })._
+    return typeof type === 'string' ? `<${type}>` : '<object>'
   }
   return String(value)
 }
