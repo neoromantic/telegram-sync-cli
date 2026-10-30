@@ -9,11 +9,13 @@ import {
 } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import type { CatchUpReason } from '../db/daemon-status'
+import { createMessagesCache, type MessageInput } from '../db/messages-cache'
 import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { apiUserToCacheInput } from '../utils/telegram-mappers'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
 import { formatError, isDaemonStopError } from './daemon-utils'
+import { parseRawMessage } from './sync-worker-real-helpers'
 
 const DIALOG_BOOTSTRAP_BATCH_SIZE = 200
 
@@ -42,6 +44,11 @@ function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
  * which creates its state like in any other chat, or when `tg chats sync`
  * turns it on.
  *
+ * A chat with sync off gets no catch-up, and Telegram pushes fewer live
+ * updates for channels, or none (#125), so the pass keeps such a chat's
+ * newest message, which the dialog list carries anyway: its cache stays
+ * current to the last pass at no extra request.
+ *
  * Telegram lists joined communities apart from the dialogs, so the pass
  * caches them with one more request (#58). A community has no messages of
  * its own, so it gets no sync state. A failure of that request, a
@@ -65,6 +72,7 @@ export async function syncAccountDialogs(
   const chatsCache = createChatsCache(cacheDb)
   const usersCache = createUsersCache(cacheDb)
   const chatSyncState = createChatSyncStateService(cacheDb)
+  const messagesCache = createMessagesCache(cacheDb)
 
   info(`[Account ${accountId}] Bootstrapping dialogs...`)
   const start = Date.now()
@@ -72,6 +80,7 @@ export async function syncAccountDialogs(
   const visited = new Set<number>()
   const chatsBatch = [] as ReturnType<typeof dialogToCacheInput>[]
   const usersBatch = [] as ReturnType<typeof apiUserToCacheInput>[]
+  const messagesBatch: MessageInput[] = []
   let dialogsCount = 0
   let archivedCount = 0
   let usersCount = 0
@@ -81,6 +90,11 @@ export async function syncAccountDialogs(
   const flushChats = () => {
     if (chatsBatch.length > 0) {
       chatsCache.upsertMany(chatsBatch.splice(0, chatsBatch.length))
+    }
+  }
+  const flushMessages = () => {
+    if (messagesBatch.length > 0) {
+      messagesCache.upsertBatch(messagesBatch.splice(0, messagesBatch.length))
     }
   }
   const flushUsers = () => {
@@ -130,6 +144,20 @@ export async function syncAccountDialogs(
     if (topMessage && topMessage > 0) {
       chatSyncState.raiseTopMessageId(chatId, topMessage)
     }
+
+    // The upsert keeps an explicit on or off; auto follows the policy
+    const mode = existing?.sync_mode ?? 'auto'
+    const syncOn = mode === 'on' || (mode === 'auto' && policy.enabled)
+    if (!syncOn) {
+      const newest = dialog.lastMessage?.raw
+      const input = newest ? parseRawMessage(newest, chatId) : null
+      if (input) {
+        messagesBatch.push(input)
+        if (messagesBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) {
+          flushMessages()
+        }
+      }
+    }
   }
 
   // The stop signal ends a page request at once, a FLOOD_WAIT it waits out
@@ -170,6 +198,7 @@ export async function syncAccountDialogs(
   // Keep what the pass listed before an error, too.
   flushChats()
   flushUsers()
+  flushMessages()
 
   let communitiesCount = 0
   if (!stopped && !ctx.state.shutdownRequested) {

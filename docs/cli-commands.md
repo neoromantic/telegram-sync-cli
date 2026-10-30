@@ -103,7 +103,9 @@ tg chats sync @examplenews --auto # follow the default policy again
 - The choice is stored in `chat_sync_state.sync_mode` and kept across daemon restarts and
   dialog passes.
 - `--off` and the default policy control catch-up, first pages and history. While the daemon
-  runs, it caches messages that arrive live in every chat, including one that is off.
+  runs, it caches every message that arrives live, in any chat, and each dialog pass caches
+  the newest message of a chat that is off; Telegram may push few posts of a channel that is
+  off (see [real-time.md](real-time.md#channels)).
 - `id` and `peerId` are the same marked ID; `peerId` stays for scripts written against 0.2.0,
   where `id` was the bare one. A positive ID is a user's DM first, as in `tg send --to`: the
   bare group or channel ID counts only when the cache doesn't know user N. A bare ID that names

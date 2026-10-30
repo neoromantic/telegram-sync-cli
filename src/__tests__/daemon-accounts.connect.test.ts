@@ -348,6 +348,51 @@ describe('daemon-accounts: connection + event wiring', () => {
     expect(client.onNewMessage.add).toHaveBeenCalled()
   })
 
+  it('stores a live post of a channel turned off, without moving its cursor (#125)', async () => {
+    const ctx = createContext(createAccountsDb([{ id: 1, phone: '+111' }]))
+    const { setupEventHandlers } = await import('../daemon/daemon-accounts')
+    const client = createClient()
+    const accountState: AccountConnectionState = {
+      accountId: 1,
+      phone: '+111',
+      name: null,
+      status: 'connected',
+      client,
+    }
+    setupEventHandlers(ctx, accountState)
+
+    const channelId = -1000000002000
+    const chatSyncState = createChatSyncStateService(testCacheDb)
+    chatSyncState.upsert({
+      chat_id: channelId,
+      chat_type: 'channel',
+      sync_priority: 3,
+      sync_enabled: false,
+      forward_cursor: 40,
+    })
+    chatSyncState.setSyncMode(channelId, 'off')
+
+    accountState.eventHandlers?.onNewMessage(
+      asMessage({
+        id: 50,
+        chat: { id: channelId, type: 'chat', chatType: 'channel' },
+        sender: { id: channelId },
+        text: 'Example post',
+        date: new Date('2024-01-01T00:00:00Z'),
+        isOutgoing: false,
+      }),
+    )
+
+    expect(createMessagesCache(testCacheDb).get(channelId, 50)?.text).toBe(
+      'Example post',
+    )
+    expect(chatSyncState.get(channelId)).toMatchObject({
+      sync_mode: 'off',
+      sync_enabled: 0,
+      forward_cursor: 40,
+    })
+  })
+
   it('stores a live forward from a channel or a group under its marked ID', async () => {
     const ctx = createContext(
       createAccountsDb([{ id: 1, phone: '+111', user_id: null }]),
