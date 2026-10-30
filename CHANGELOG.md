@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The daemon log is quieter and keeps personal data out: it names an account
+  `#1 (@username)` or by a masked phone, never the full number or name;
+  mtcute's warnings show only with `--verbose`, its update gap notes at debug
+  level; and a Telegram client error is one line, without the stack or the
+  compiled binary's source (#128).
 - Usage stats no longer slow down a command (#129). Every command used to wait up
   to half a second for them before it exited; now a background copy of tg sends
   them after the command has exited, so `tg status` takes as long as with
