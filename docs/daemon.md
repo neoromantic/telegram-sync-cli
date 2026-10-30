@@ -50,6 +50,20 @@ and skips the start-up check of that file that other commands run, so an invalid
 one doesn't stop `tg daemon start`, `--quiet` included: it logs one warning and uses the default
 for each value it can't read (see [configuration.md](configuration.md#runtime-behavior)).
 
+### Log
+
+The daemon writes one line per event to its output: `[INFO]`, `[DEBUG]` (only with `--verbose`),
+`[WARN]` and `[ERROR]`; `--quiet` keeps warnings and errors. It names an account by its ID and
+username, `#1 (@username)`, or by a masked phone, `#1 (+15*******00)`, never by the full number
+or the name, so a log can be pasted into an issue.
+
+mtcute's own log goes through the same logger, tagged `[mtcute <tag>]`. Without `--verbose`
+only its errors show; with it, its warnings too (ping timeouts, connection retries), and the
+update manager's gap notes (`pts_before does not match local_pts`, hundreds a day on a busy
+account) show at debug level. An error the client reports (a data center it can't reach, say)
+is one warning line with the error's message, never a stack or source; the same error again
+within 5 minutes is logged at debug level.
+
 ### Daemon PID
 
 PID file location:

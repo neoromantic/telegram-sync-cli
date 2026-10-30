@@ -2,6 +2,7 @@ import { SyncJobStatus } from '../db/sync-schema'
 import { attemptReconnect, scheduleReconnect } from './daemon-accounts'
 import { maybeSyncContacts } from './daemon-contacts'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
+import { accountLabel } from './daemon-logger'
 import { runMigrationsTick } from './daemon-migrations'
 import {
   cleanupOldJobs,
@@ -92,7 +93,7 @@ async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
         accountState.lastActivity = Date.now()
       } catch (err) {
         ctx.logger.warn(
-          `Connection health check failed for ${accountState.phone}: ${formatError(err)}`,
+          `Connection health check failed for ${accountLabel(accountState)}: ${getErrorMessage(err)}`,
         )
         accountState.status = 'error'
         accountState.lastError = getErrorMessage(err)

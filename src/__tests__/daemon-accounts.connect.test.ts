@@ -87,7 +87,12 @@ class MockEvent<TArgs extends unknown[]> {
 let testCacheDb: Database
 
 // Mutable client behavior
-let nextGetMe = { id: 555, firstName: 'Test', lastName: 'User' }
+let nextGetMe: {
+  id: number
+  firstName: string
+  lastName: string
+  username?: string
+} = { id: 555, firstName: 'Test', lastName: 'User' }
 let startError: Error | null = null
 let getMeError: Error | null = null
 let updatesLoopError: Error | null = null
@@ -103,6 +108,9 @@ class MockTelegramClient {
   onEditMessage = new MockEvent<[Message]>()
   onDeleteMessage = new MockEvent<[DeleteMessageUpdate]>()
   onRawUpdate = new MockEvent<[RawUpdateInfo]>()
+  onConnectionState = new MockEvent<[string]>()
+  onError = new MockEvent<[Error]>()
+  log = { mgr: { level: 2, handler: (() => {}) as unknown } }
 
   start = mock(async (_opts?: Parameters<TelegramClient['start']>[0]) => {
     lifecycle.push(`start:${this.index}`)
@@ -893,6 +901,72 @@ describe('daemon-accounts: connection + event wiring', () => {
       expect(client.destroy).toHaveBeenCalledTimes(1)
     })
   }
+
+  it('a failed connect logs one line without source or the phone number (#128)', async () => {
+    const ctx = createContext(
+      createAccountsDb([{ id: 1, phone: '+15550000001', user_id: null }]),
+    )
+    const { connectAccount } = await import('../daemon/daemon-accounts')
+    const failure = new Error('Could not connect to DC 2')
+    failure.stack = `Error: Could not connect to DC 2\n    at connect (/$bunfs/root/tg:1:2)\n${'x'.repeat(500)}`
+    startError = failure
+
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(false)
+
+    const errors = (ctx.logger.error as ReturnType<typeof mock>).mock.calls
+    expect(errors).toEqual([
+      [
+        'Failed to connect account #1 (+15*******01): Could not connect to DC 2',
+      ],
+    ])
+  })
+
+  it('names the account by its username, never its phone or name (#128)', async () => {
+    nextGetMe = {
+      id: 555,
+      firstName: 'Test',
+      lastName: 'User',
+      username: 'example_user',
+    }
+    const ctx = createContext(
+      createAccountsDb([{ id: 1, phone: '+15550000001', user_id: null }]),
+    )
+    const { connectAccount } = await import('../daemon/daemon-accounts')
+
+    expect(await connectAccount(ctx, 1, '+15550000001', 'Test User')).toBe(true)
+
+    const lines = Object.values(ctx.logger).flatMap((fn) =>
+      (fn as ReturnType<typeof mock>).mock.calls.map((call) => String(call[0])),
+    )
+    expect(lines).toContain('Connected account #1 (@example_user)')
+    for (const line of lines) {
+      expect(line).not.toContain('5550000001')
+      expect(line).not.toContain('Test User')
+    }
+  })
+
+  it("routes the client's errors and mtcute's log through the daemon logger (#128)", async () => {
+    const ctx = createContext(
+      createAccountsDb([{ id: 1, phone: '+15550000001', user_id: null }]),
+    )
+    const { connectAccount } = await import('../daemon/daemon-accounts')
+    expect(await connectAccount(ctx, 1, '+15550000001', null)).toBe(true)
+    const client = createdClients[0]!
+
+    // An error handler is set, so mtcute never prints "unhandled error"
+    expect(client.onError.handlers).toHaveLength(1)
+    const failure = new Error('Could not connect to DC 2')
+    failure.stack = 'Error: Could not connect to DC 2\n    at source dump'
+    client.onError.emit(failure)
+    client.onError.emit(failure)
+    expect(ctx.logger.warn).toHaveBeenCalledTimes(1)
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      '[Account 1] Telegram client error: Could not connect to DC 2',
+    )
+
+    // Only errors without --verbose
+    expect(client.log.mgr.level).toBe(1)
+  })
 
   it('disconnectAllAccounts closes every client once on shutdown', async () => {
     const accountsDb = createAccountsDb([

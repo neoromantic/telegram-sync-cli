@@ -117,6 +117,8 @@ export interface AccountConnectionState {
   phone: string
   /** Account display name */
   name: string | null
+  /** Telegram username, once connected; the log names the account by it */
+  username?: string | null
   /** Connection status */
   status: 'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting'
   /** Last error message */

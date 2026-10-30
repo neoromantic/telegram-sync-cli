@@ -20,6 +20,7 @@ import {
   requestContactsCheckNow,
 } from './daemon-contacts'
 import { type DaemonContext, requestShutdown } from './daemon-context'
+import { accountLabel, routeClientLogs } from './daemon-logger'
 import { daemonPlatform } from './daemon-platform'
 import { rebuildSyncWorker } from './daemon-scheduler'
 import {
@@ -351,10 +352,10 @@ function createDaemonClient(
     storage: sessionPath,
     // Session files stay open until the daemon closes the client (#56)
     platform: daemonPlatform,
-    logLevel: ctx.verbosity === 'verbose' ? 5 : 2,
     ...(telegramConfig.transport && { transport: telegramConfig.transport }),
     network: { middlewares: daemonNetworkMiddlewares(ctx, accountId) },
   })
+  routeClientLogs(client, ctx.logger, ctx.verbosity, `[Account ${accountId}]`)
   wrapClientCallWithRecordReplay(client, {
     accountId,
     dataDir: ctx.dataDir,
@@ -375,10 +376,11 @@ export async function connectAccount(
     status: 'connecting',
   }
   ctx.state.accounts.set(accountId, accountState)
+  const label = () => accountLabel(accountState)
 
   try {
     const sessionPath = join(ctx.dataDir, `session_${accountId}.db`)
-    ctx.logger.debug(`Connecting account ${phone} (session: ${sessionPath})`)
+    ctx.logger.debug(`Connecting account ${label()}`)
 
     const client = createDaemonClient(ctx, accountId, sessionPath)
     // Track it right away, so a failed connect below closes it too.
@@ -397,9 +399,8 @@ export async function connectAccount(
     })
 
     const me = await client.getMe()
-    ctx.logger.info(
-      `Connected account ${phone} (${me.firstName ?? ''} ${me.lastName ?? ''})`.trim(),
-    )
+    accountState.username = me.username
+    ctx.logger.info(`Connected account ${label()}`)
 
     const existingByUserId = ctx.accountsDb.getByUserId(me.id)
     if (existingByUserId && existingByUserId.id !== accountId) {
@@ -410,14 +411,14 @@ export async function connectAccount(
 
       if (currentHasRealPhone && !existingHasRealPhone) {
         ctx.logger.info(
-          `Merging duplicate account: keeping #${accountId} (${phone}), removing #${existingByUserId.id} (${existingByUserId.phone})`,
+          `Merging duplicate account: keeping ${label()}, removing ${accountLabel({ accountId: existingByUserId.id, phone: existingByUserId.phone })}`,
         )
         ctx.accountsDb.delete(existingByUserId.id)
         ctx.accountsDb.update(accountId, { user_id: me.id })
         dropAccountRuntime(ctx, existingByUserId.id)
       } else {
         ctx.logger.info(
-          `Merging duplicate account: keeping #${existingByUserId.id} (${existingByUserId.phone}), removing #${accountId} (${phone})`,
+          `Merging duplicate account: keeping ${accountLabel({ accountId: existingByUserId.id, phone: existingByUserId.phone })}, removing ${label()}`,
         )
         ctx.accountsDb.setActive(existingByUserId.id)
         ctx.accountsDb.delete(accountId)
@@ -449,7 +450,9 @@ export async function connectAccount(
     return true
   } catch (err) {
     const errorMessage = getErrorMessage(err)
-    ctx.logger.error(`Failed to connect account ${phone}: ${formatError(err)}`)
+    ctx.logger.error(
+      `Failed to connect account ${label()}: ${getErrorMessage(err)}`,
+    )
 
     await releaseClient(ctx, accountState, 'connect failed')
 
@@ -486,7 +489,7 @@ export function scheduleReconnect(
 
   if (attempts > ctx.reconnectConfig.maxAttempts) {
     ctx.logger.error(
-      `Account ${accountState.phone} exceeded max reconnection attempts (${ctx.reconnectConfig.maxAttempts}). Giving up.`,
+      `Account ${accountLabel(accountState)} exceeded max reconnection attempts (${ctx.reconnectConfig.maxAttempts}). Giving up.`,
     )
     return
   }
@@ -495,7 +498,7 @@ export function scheduleReconnect(
   accountState.nextReconnectAt = Date.now() + delay
 
   ctx.logger.info(
-    `Scheduling reconnection for ${accountState.phone} in ${Math.round(delay / 1000)}s (attempt ${attempts}/${ctx.reconnectConfig.maxAttempts})`,
+    `Scheduling reconnection for ${accountLabel(accountState)} in ${Math.round(delay / 1000)}s (attempt ${attempts}/${ctx.reconnectConfig.maxAttempts})`,
   )
 }
 
@@ -525,7 +528,7 @@ async function releaseClient(
     removeEventHandlers(ctx, accountState, client)
   } catch (err) {
     ctx.logger.warn(
-      `Error removing event handlers for ${accountState.phone}: ${formatError(err)}`,
+      `Error removing event handlers for ${accountLabel(accountState)}: ${formatError(err)}`,
     )
   }
 }
@@ -535,7 +538,7 @@ export async function attemptReconnect(
   accountState: AccountConnectionState,
 ): Promise<boolean> {
   ctx.logger.info(
-    `Attempting reconnection for ${accountState.phone} (attempt ${accountState.reconnectAttempts}/${ctx.reconnectConfig.maxAttempts})`,
+    `Attempting reconnection for ${accountLabel(accountState)} (attempt ${accountState.reconnectAttempts}/${ctx.reconnectConfig.maxAttempts})`,
   )
 
   accountState.status = 'reconnecting'
@@ -549,9 +552,7 @@ export async function attemptReconnect(
       ctx.dataDir,
       `session_${accountState.accountId}.db`,
     )
-    ctx.logger.debug(
-      `Reconnecting account ${accountState.phone} (session: ${sessionPath})`,
-    )
+    ctx.logger.debug(`Reconnecting account ${accountLabel(accountState)}`)
 
     const client = createDaemonClient(ctx, accountState.accountId, sessionPath)
     // Track it right away, so a failed attempt below closes it too.
@@ -570,9 +571,8 @@ export async function attemptReconnect(
     })
 
     const me = await client.getMe()
-    ctx.logger.info(
-      `Reconnected account ${accountState.phone} (${me.firstName ?? ''} ${me.lastName ?? ''})`.trim(),
-    )
+    accountState.username = me.username
+    ctx.logger.info(`Reconnected account ${accountLabel(accountState)}`)
 
     setupEventHandlers(ctx, accountState)
     await client.startUpdatesLoop()
@@ -593,7 +593,7 @@ export async function attemptReconnect(
   } catch (err) {
     const errorMessage = getErrorMessage(err)
     ctx.logger.error(
-      `Reconnection failed for ${accountState.phone}: ${formatError(err)}`,
+      `Reconnection failed for ${accountLabel(accountState)}: ${getErrorMessage(err)}`,
     )
 
     await releaseClient(ctx, accountState, 'reconnect failed')
@@ -621,7 +621,7 @@ export async function disconnectAllAccounts(ctx: DaemonContext): Promise<void> {
     Array.from(ctx.state.accounts.values(), async (accountState) => {
       await releaseClient(ctx, accountState, 'shutdown')
       accountState.status = 'disconnected'
-      ctx.logger.debug(`Disconnected account ${accountState.phone}`)
+      ctx.logger.debug(`Disconnected account ${accountLabel(accountState)}`)
     }),
   )
 }
