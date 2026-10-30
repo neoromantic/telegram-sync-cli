@@ -156,6 +156,46 @@ export async function fetchMessagesRaw(
 }
 
 /**
+ * Messages by ID: `channels.getMessages` in a channel or supergroup,
+ * `messages.getMessages` elsewhere (the account's private chats and basic
+ * groups share one ID sequence). Telegram answers a message it no longer
+ * has with `messageEmpty`. A `signal` ends the request at once.
+ */
+export async function fetchMessagesByIdRaw(
+  client: Pick<TelegramClient, 'call'>,
+  inputPeer: tl.TypeInputPeer,
+  ids: number[],
+  signal?: AbortSignal,
+): Promise<{ messages: unknown[]; users: tl.TypeUser[] }> {
+  signal?.throwIfAborted()
+  const id: tl.TypeInputMessage[] = ids.map((messageId) => ({
+    _: 'inputMessageID',
+    id: messageId,
+  }))
+  const request:
+    | tl.channels.RawGetMessagesRequest
+    | tl.messages.RawGetMessagesRequest =
+    inputPeer._ === 'inputPeerChannel'
+      ? {
+          _: 'channels.getMessages',
+          channel: {
+            _: 'inputChannel',
+            channelId: inputPeer.channelId,
+            accessHash: inputPeer.accessHash,
+          },
+          id,
+        }
+      : { _: 'messages.getMessages', id }
+  const result = signal
+    ? await client.call(request, { abortSignal: signal })
+    : await client.call(request)
+  return {
+    messages: 'messages' in result ? result.messages : [],
+    users: 'users' in result ? result.users : [],
+  }
+}
+
+/**
  * Cache the senders of a history page. Not "min" users: such a record lacks
  * fields, and its access hash works only in the update that carried it. The
  * others are merged into what is cached: a field the record lacks (an

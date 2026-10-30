@@ -130,6 +130,17 @@ Implemented in `SyncJobType`:
 - `initial_load` — the first page of a chat without a forward cursor: its newest 100 messages
 - `backward_history` — backfill older history
 - `full_sync` — full history job (used sparingly)
+- `refetch_messages` — fetch again, by ID, the cached messages whose `raw_json` is `{}` (#130),
+  up to 100 per request. Older versions cached such rows from live updates without the raw
+  message, so they had no attachment row and no fields for `tg sql`. The background migration
+  `messages_refetch_empty_raw_json` queues one job per chat that has them, at priority 4,
+  whether the chat syncs or not; the live path stores the raw message, and if an update ever
+  comes without one it queues the job itself and logs a warning once. The job asks
+  `channels.getMessages` in a channel or supergroup and `messages.getMessages` elsewhere,
+  writes what Telegram returns like a sync page does (attachments included), and leaves a row
+  Telegram no longer has as it is. A job with 100 IDs queues the next one above them, so each
+  row is asked for once. `tg chats sync` and the startup cleanup keep it: it doesn't depend on
+  the chat's mode.
 
 Job status values:
 - `pending`, `running`, `completed`, `failed`
@@ -331,7 +342,7 @@ hold another's. An account's jobs are split into three lanes:
 | Lane | Job types |
 |------|-----------|
 | catch-up | `forward_catchup` |
-| first page | `initial_load` |
+| first page | `initial_load`, `refetch_messages` |
 | history | `backward_history`, `full_sync` |
 
 The lanes take turns in a fixed cycle of four slots: catch-up, first page, catch-up, history.

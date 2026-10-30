@@ -164,6 +164,14 @@ describe('daemon restart with messages missed while stopped', () => {
         text: `msg ${messageId}`,
         date: 1_700_000_000 + messageId,
         isOutgoing: false,
+        // A live update always carries its raw message (#130)
+        rawMessage: {
+          _: 'message',
+          id: messageId,
+          peerId: { _: 'peerUser', userId: CHAT_ID },
+          message: `msg ${messageId}`,
+          date: 1_700_000_000 + messageId,
+        },
       },
     )
   }

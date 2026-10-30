@@ -107,7 +107,10 @@ describe('background migrations of a 0.5.0 cache', () => {
 
     const rows = await migrateAll(db)
 
-    expect(rows).toBe(MESSAGES + oldFormUsers().length + oldFormChats().length)
+    // The messages twice: the re-encode, then the refetch check (#130)
+    expect(rows).toBe(
+      2 * MESSAGES + oldFormUsers().length + oldFormChats().length,
+    )
     const after = snapshot(db)
     for (const [i, message] of originals.entries()) {
       const row = after.messages[i] as {

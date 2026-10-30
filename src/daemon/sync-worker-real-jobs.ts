@@ -1,6 +1,7 @@
 import type { tl } from '@mtcute/bun'
 import type { MessageInput } from '../db/messages-cache'
-import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
+import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import {
   canMakeApiCall,
   getInputPeer,
@@ -10,9 +11,11 @@ import {
 import {
   cachePageUsers,
   createMessageInputs,
+  fetchMessagesByIdRaw,
   fetchMessagesRaw,
   forwardPageRequest,
   historyTotal,
+  parseRawMessage,
   rawMessageId,
 } from './sync-worker-real-helpers'
 import type {
@@ -396,6 +399,91 @@ export async function processInitialLoadReal(
   return result
 }
 
+/** Most message IDs one `getMessages` request asks for */
+export const REFETCH_BATCH_SIZE = 100
+
+/**
+ * Fetch again the chat's messages that an older version cached live with
+ * raw_json '{}' (#130), up to 100 per request, and write them like a sync
+ * page does: raw_json, attachments and the other columns. A message Telegram
+ * no longer has stays as it is. The job starts above its `cursor_start`; a
+ * full batch queues the next job above it, so the rows that stay '{}' are
+ * asked for once.
+ */
+export async function processRefetchMessagesReal(
+  ctx: RealSyncWorkerContext,
+  job: SyncJobRow,
+): Promise<RealJobResult> {
+  const chatId = job.chat_id
+  const after = job.cursor_start ?? 0
+  const ids = ctx.messagesCache.listEmptyRawJsonIds(
+    chatId,
+    after,
+    REFETCH_BATCH_SIZE,
+  )
+  if (ids.length === 0) return { success: true, messagesFetched: 0 }
+
+  if (!canMakeApiCall(ctx)) {
+    return {
+      success: false,
+      messagesFetched: 0,
+      rateLimited: true,
+      waitSeconds: getWaitTime(ctx),
+    }
+  }
+
+  const inputPeer = getInputPeer(ctx, chatId)
+  if (!inputPeer) {
+    return {
+      success: false,
+      messagesFetched: 0,
+      error: `Could not build InputPeer for chat ${chatId}`,
+      permanent: true,
+    }
+  }
+
+  try {
+    const page = await fetchMessagesByIdRaw(
+      ctx.client,
+      inputPeer,
+      ids,
+      ctx.signal,
+    )
+    cachePageUsers(ctx.usersCache, page.users)
+
+    const wanted = new Set(ids)
+    const inputs = page.messages
+      .filter(
+        (message) =>
+          wanted.has(rawMessageId(message)) &&
+          toPeerIdFromRawPeer(
+            (message as { peerId?: Parameters<typeof toPeerIdFromRawPeer>[0] })
+              .peerId,
+          ) === chatId,
+      )
+      .map((message) => parseRawMessage(message, chatId))
+      .filter((input) => input !== null)
+    if (inputs.length > 0) ctx.messagesCache.upsertBatch(inputs)
+
+    const last = Math.max(...ids)
+    ctx.jobsService.updateProgress(job.id, {
+      cursor_start: last,
+      messages_fetched: inputs.length,
+    })
+    if (ids.length === REFETCH_BATCH_SIZE) {
+      ctx.jobsService.create({
+        chat_id: chatId,
+        job_type: SyncJobType.RefetchMessages,
+        priority: SyncPriority.Background,
+        cursor_start: last,
+      })
+    }
+    return { success: true, messagesFetched: inputs.length }
+  } catch (err) {
+    return resolveJobError(ctx, err)
+  }
+}
+
 async function processFullSyncReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
@@ -417,6 +505,7 @@ const JOB_HANDLERS: Partial<
   [SyncJobType.BackwardHistory]: processBackwardHistoryReal,
   [SyncJobType.InitialLoad]: processInitialLoadReal,
   [SyncJobType.FullSync]: processFullSyncReal,
+  [SyncJobType.RefetchMessages]: processRefetchMessagesReal,
 }
 
 export async function processJobReal(

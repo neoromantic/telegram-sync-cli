@@ -175,7 +175,7 @@ const CACHE_MIGRATIONS_ANNOTATION: TableAnnotation = {
   columns: {
     name: {
       description:
-        'The migration: messages_raw_json_v2, users_raw_json_v2, chats_raw_json_v2',
+        'The migration: messages_raw_json_v2, users_raw_json_v2, chats_raw_json_v2, messages_refetch_empty_raw_json',
       nullable: false,
     },
     state: {
@@ -908,13 +908,14 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
             'initial_load',
             'backward_history',
             'full_sync',
+            'refetch_messages',
           ],
           semanticType: 'enum',
           nullable: false,
         },
         priority: {
           description:
-            "Priority inside the job's lane (lower runs first): the chat's sync tier, or 0 for the first page of a chat turned on with tg chats sync",
+            "Priority inside the job's lane (lower runs first): the chat's sync tier, 0 for the first page of a chat turned on with tg chats sync, 4 for refetch_messages",
           defaultValue: 3,
         },
         status: {

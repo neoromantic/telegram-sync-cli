@@ -87,7 +87,8 @@ export interface SyncSchedulerOptions {
  */
 export const SYNC_LANES = {
   catchup: [SyncJobType.ForwardCatchup],
-  firstPage: [SyncJobType.InitialLoad],
+  // A refetch (#130) is one small request per chat, at the lowest priority
+  firstPage: [SyncJobType.InitialLoad, SyncJobType.RefetchMessages],
   history: [SyncJobType.BackwardHistory, SyncJobType.FullSync],
 } as const satisfies Record<string, readonly SyncJobType[]>
 

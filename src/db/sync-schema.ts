@@ -801,6 +801,11 @@ export enum SyncJobType {
   BackwardHistory = 'backward_history',
   /** Complete full sync of chat */
   FullSync = 'full_sync',
+  /**
+   * Fetch again the cached messages whose raw_json is '{}' (#130), at
+   * SyncPriority.Background, whether the chat syncs or not
+   */
+  RefetchMessages = 'refetch_messages',
 }
 
 /** Sync job status */

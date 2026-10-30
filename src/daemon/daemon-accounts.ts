@@ -150,6 +150,7 @@ export function setupEventHandlers(
     messagesCache,
     chatSyncState,
     chatsCache: createChatsCache(cacheDb),
+    logger: ctx.logger,
     onMessagesSynced: (count) => {
       rt.messagesSynced += count
     },

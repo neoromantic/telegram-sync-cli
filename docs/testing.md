@@ -85,6 +85,8 @@ const deps: AuthDependencies = {
 - `sync-jobs.test.ts` — sync job lifecycle, retries and counts
 - `sync-scheduler.test.ts` — what the scheduler queues and the lane turns
 - `sync-retry.test.ts` — the retry backoff and which errors are permanent
+- `refetch-empty-raw-json.test.ts` — messages cached with `raw_json = '{}'` are queued by a
+  background pass and fetched again by ID, a chat at a time (#130)
 - `update-handlers.test.ts` — daemon update handlers
 - `daemon-restart-gap.test.ts` — messages that arrive while the daemon is stopped are all
   cached after a restart
