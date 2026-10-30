@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { Channel } from './client'
 
 /** The events of a run, as JSON; set only for the copy of tg that sends them */
@@ -28,7 +28,11 @@ export interface Handoff {
 
 type Env = Record<string, string | undefined>
 
-/** The variables by which the client tells that an AI agent runs tg */
+/**
+ * The variables by which the client tells that an AI agent runs tg: a copy
+ * of detectAgent's in client.ts (devkit's templates/telemetry/), kept in step
+ * with it by hand
+ */
 const AGENT_VARS = [
   'AI_AGENT',
   'CLAUDECODE',
@@ -82,6 +86,19 @@ export function sentToday(
 }
 
 /**
+ * The environment of the copy that sends `handoff`. It runs in another
+ * folder, so a data directory given as a relative path is made absolute.
+ */
+export function senderEnv(handoff: Handoff, env: Env = process.env): Env {
+  const dataDir = env.TELEGRAM_SYNC_CLI_DATA_DIR
+  return {
+    ...env,
+    ...(dataDir && { TELEGRAM_SYNC_CLI_DATA_DIR: resolve(dataDir) }),
+    [EVENTS_ENV]: JSON.stringify(handoff),
+  }
+}
+
+/**
  * Starts the copy of tg that sends `handoff`, detached and with no stdio,
  * so this process can exit at once: the binary itself, or Bun with send.ts
  * for the npm package and a checkout.
@@ -91,7 +108,7 @@ export function sendInBackground(handoff: Handoff, env: Env = process.env) {
     ? [process.execPath]
     : [process.execPath, '--no-env-file', join(import.meta.dir, 'send.ts')]
   Bun.spawn(command, {
-    env: { ...env, [EVENTS_ENV]: JSON.stringify(handoff) },
+    env: senderEnv(handoff, env),
     // Not the user's folder: Windows keeps a process's folder from deletion
     cwd: tmpdir(),
     stdio: ['ignore', 'ignore', 'ignore'],

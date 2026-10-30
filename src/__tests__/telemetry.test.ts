@@ -23,7 +23,13 @@ import {
   withoutAccountIds,
   withoutDataDir,
 } from '../telemetry'
-import { dailyKey, type Handoff, sentToday } from '../telemetry/background'
+import {
+  dailyKey,
+  EVENTS_ENV,
+  type Handoff,
+  senderEnv,
+  sentToday,
+} from '../telemetry/background'
 
 const run = () => {}
 const tree: CommandNode = {
@@ -434,5 +440,31 @@ describe('sentToday', () => {
     const { 'feature_used:chats list': _, ...rest } = today
     expect(sentToday(state(true, rest), script, {}, now)).toBe(false)
     expect(sentToday(join(dir, 'missing.json'), script, {}, now)).toBe(false)
+  })
+})
+
+describe('senderEnv', () => {
+  const handoff: Handoff = {
+    channel: 'binary',
+    tty: false,
+    calls: [['started']],
+  }
+
+  it('gives the copy an absolute data directory, as it runs in another folder', () => {
+    const relative = senderEnv(handoff, {
+      TELEGRAM_SYNC_CLI_DATA_DIR: 'tg-data',
+    })
+    expect(relative.TELEGRAM_SYNC_CLI_DATA_DIR).toBe(
+      join(process.cwd(), 'tg-data'),
+    )
+    const absolute = join(tmpdir(), 'tg-data')
+    expect(
+      senderEnv(handoff, { TELEGRAM_SYNC_CLI_DATA_DIR: absolute })
+        .TELEGRAM_SYNC_CLI_DATA_DIR,
+    ).toBe(absolute)
+    expect(senderEnv(handoff, {})).not.toHaveProperty(
+      'TELEGRAM_SYNC_CLI_DATA_DIR',
+    )
+    expect(JSON.parse(relative[EVENTS_ENV] ?? '')).toEqual(handoff)
   })
 })
