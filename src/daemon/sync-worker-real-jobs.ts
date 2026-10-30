@@ -4,8 +4,8 @@ import {
   canMakeApiCall,
   getInputPeer,
   getWaitTime,
-  recordApiCall,
   resolveJobError,
+  trackJobApiCall,
 } from './sync-worker-real-context'
 import {
   createMessageInputs,
@@ -79,13 +79,13 @@ export async function processForwardCatchupReal(
   const topBefore = state?.top_message_id ?? null
 
   try {
-    recordApiCall(ctx)
-
-    const { messages } = await fetchMessagesRaw(
-      ctx.client,
-      inputPeer,
-      forwardPageRequest(cursor, ctx.config.batchSize),
-      ctx.signal,
+    const { messages } = await trackJobApiCall(ctx, () =>
+      fetchMessagesRaw(
+        ctx.client,
+        inputPeer,
+        forwardPageRequest(cursor, ctx.config.batchSize),
+        ctx.signal,
+      ),
     )
 
     // Guard against a server that returns messages at or below the cursor.
@@ -204,13 +204,13 @@ export async function processBackwardHistoryReal(
   let result: RealJobResult
 
   try {
-    recordApiCall(ctx)
-
-    const { messages } = await fetchMessagesRaw(
-      ctx.client,
-      inputPeer,
-      { offsetId: backwardCursor, limit: ctx.config.batchSize },
-      ctx.signal,
+    const { messages } = await trackJobApiCall(ctx, () =>
+      fetchMessagesRaw(
+        ctx.client,
+        inputPeer,
+        { offsetId: backwardCursor, limit: ctx.config.batchSize },
+        ctx.signal,
+      ),
     )
 
     // The newest messages below the cursor, or the newest page without one
@@ -312,13 +312,13 @@ export async function processInitialLoadReal(
   }
 
   try {
-    recordApiCall(ctx)
-
-    const { messages } = await fetchMessagesRaw(
-      ctx.client,
-      inputPeer,
-      { limit: ctx.config.batchSize },
-      ctx.signal,
+    const { messages } = await trackJobApiCall(ctx, () =>
+      fetchMessagesRaw(
+        ctx.client,
+        inputPeer,
+        { limit: ctx.config.batchSize },
+        ctx.signal,
+      ),
     )
 
     // Empty messages hold no data, but they still count for the cursors.

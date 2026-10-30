@@ -75,6 +75,56 @@ function getErrorMessage(error: unknown): string {
   return String(error)
 }
 
+/** Telegram's error code (420 for a FLOOD_WAIT), or null for another error */
+function apiErrorCode(error: unknown): number | null {
+  if (tl.RpcError.is(error)) return error.code
+  return extractFloodWaitSeconds(error) ? tl.RpcError.FLOOD : null
+}
+
+/**
+ * Make one API call and account for it: count it in its rate window, and
+ * log it to api_activity when it ends, with when it started (ms), whether
+ * it succeeded, Telegram's error code and how long it took. A FLOOD_WAIT it
+ * fails with is recorded, so the method's next calls wait it out. The
+ * call's result or error passes through.
+ */
+export async function trackApiCall<T>(
+  rateLimits: RateLimitsService,
+  method: string,
+  call: () => Promise<T>,
+  context?: string,
+): Promise<T> {
+  const start = rateLimits.now()
+  rateLimits.recordCall(method)
+
+  try {
+    const result = await call()
+    rateLimits.logActivity({
+      timestamp: start,
+      method,
+      success: 1,
+      response_ms: rateLimits.now() - start,
+      context,
+    })
+    return result
+  } catch (err) {
+    const waitSeconds = extractFloodWaitSeconds(err)
+    if (waitSeconds) {
+      rateLimits.setFloodWait(method, waitSeconds)
+    }
+
+    rateLimits.logActivity({
+      timestamp: start,
+      method,
+      success: 0,
+      error_code: apiErrorCode(err),
+      response_ms: rateLimits.now() - start,
+      context: getErrorMessage(err),
+    })
+    throw err
+  }
+}
+
 async function callWithRateLimits<T>({
   method,
   call,
@@ -90,34 +140,10 @@ async function callWithRateLimits<T>({
     throw new RateLimitError(method, rateLimits.getWaitTime(method))
   }
 
-  const start = Date.now()
-  const timestamp = Math.floor(start / 1000)
-  rateLimits.recordCall(method)
-
   try {
-    const result = await call()
-    rateLimits.logActivity({
-      timestamp,
-      method,
-      success: 1,
-      response_ms: Date.now() - start,
-      context,
-    })
-    return result
+    return await trackApiCall(rateLimits, method, call, context)
   } catch (err) {
     const waitSeconds = extractFloodWaitSeconds(err)
-    if (waitSeconds) {
-      rateLimits.setFloodWait(method, waitSeconds)
-    }
-
-    rateLimits.logActivity({
-      timestamp,
-      method,
-      success: 0,
-      error_code: waitSeconds ? 420 : null,
-      response_ms: Date.now() - start,
-      context: getErrorMessage(err),
-    })
     // The first flood wait reads like a call to a method that is blocked
     if (waitSeconds && isFloodWait(err)) {
       throw new RateLimitError(method, waitSeconds, { cause: err })

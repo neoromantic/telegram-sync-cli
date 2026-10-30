@@ -35,6 +35,25 @@ export interface PruneOptions {
 const DEFAULT_PRUNE_BATCH_SIZE = 5000
 
 /**
+ * api_activity timestamps below this are seconds: 0.8.0 and older wrote
+ * them so. As ms it would be March 1973, so no ms timestamp is below it.
+ */
+const SECONDS_TIMESTAMP_LIMIT = 100_000_000_000
+
+/**
+ * Turn the api_activity timestamps older versions wrote in seconds into ms.
+ * Idempotent, and cheap: the table keeps a week of calls, and the index on
+ * timestamp finds the second-based rows at its start.
+ */
+function convertSecondsActivity(db: Database): number {
+  return db
+    .query(
+      'UPDATE api_activity SET timestamp = timestamp * 1000 WHERE timestamp < $limit',
+    )
+    .run({ $limit: SECONDS_TIMESTAMP_LIMIT }).changes
+}
+
+/**
  * Delete the rows matching `where` in short batches, each its own
  * autocommit statement, so a first prune of a large table never holds the
  * write lock for seconds while the daemon and a command want it.
@@ -59,7 +78,8 @@ function deleteInBatches(
 
 /**
  * Delete the bookkeeping rows older than their retention:
- * - api_activity by its timestamp, in seconds as the writer stores it;
+ * - api_activity by its timestamp, in ms; rows older versions wrote in
+ *   seconds are turned into ms first;
  * - rate_limits windows, but never the current 60 s window nor a row whose
  *   FLOOD_WAIT still runs;
  * - completed and failed sync jobs by when they finished, each with its own
@@ -76,11 +96,12 @@ export function pruneCache(
   const currentWindowStart =
     Math.floor(nowSec / RATE_WINDOW_SECONDS) * RATE_WINDOW_SECONDS
 
+  convertSecondsActivity(db)
   const api_activity = deleteInBatches(
     db,
     'api_activity',
     'timestamp < $cutoff',
-    { $cutoff: nowSec - Math.floor(retention.apiActivity / 1000) },
+    { $cutoff: now - retention.apiActivity },
     batchSize,
   )
 

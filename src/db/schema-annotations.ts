@@ -1001,7 +1001,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     // -------------------------------------------------------------------------
     api_activity: {
       description:
-        'Audit log of all Telegram API calls for debugging and analytics.',
+        "Audit log of Telegram API calls: every CLI call and the daemon's history pages and contacts checks. tg status counts the last 60 seconds from it.",
       primaryKey: 'id',
       ttl: '7 days',
       ttlMs: 7 * 24 * 60 * 60 * 1000,
@@ -1011,7 +1011,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: false,
         },
         timestamp: {
-          description: 'When the API call was made',
+          description:
+            'When the API call started, in ms (0.8.0 and older wrote seconds; the next prune turns them into ms)',
           semanticType: 'timestamp',
           nullable: false,
         },
@@ -1025,7 +1026,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: false,
         },
         error_code: {
-          description: 'Telegram error code if call failed',
+          description:
+            "Telegram's error code if the call failed (420 for a FLOOD_WAIT); NULL for an error that isn't Telegram's",
           nullable: true,
         },
         response_ms: {
@@ -1033,8 +1035,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         context: {
-          description: 'Additional context (e.g., chat_id, user_id)',
-          semanticType: 'json',
+          description:
+            'Who called (cli:send, daemon:sync, daemon:contacts, ...), or the error message of a failed call',
           nullable: true,
         },
       },

@@ -343,6 +343,9 @@ part counts the daemon's sync jobs and lists some of them:
   job line carries `acct:<id>` and the command adds `--account <id>`.
 - `progress.sample_chats` (the overall top 5) and `rate_limits.active_flood_waits` items carry
   `account_id` too.
+- `rate_limits.api_calls_last_minute` and `calls_by_method` count the API calls of the last 60
+  seconds, from the `api_activity` log: the CLI's calls and the daemon's history pages and
+  contacts checks. A daemon older than this version logs none of its calls.
 - `accounts.accounts[]` gives each account its own figures: `cache` (`status`: `ok`,
   `missing` for an account with no cache yet, which `tg status` never creates, or `error` with
   `error` for a cache that fails to open or to answer a query; its figures are then zero and
