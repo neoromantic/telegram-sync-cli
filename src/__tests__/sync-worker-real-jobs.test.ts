@@ -1790,6 +1790,68 @@ describe('sync-worker real jobs', () => {
       expect(ctx.chatSyncState.get(chatId)?.total_messages).toBe(1234)
     })
 
+    it('merges a page user into a richer cached row instead of erasing it', async () => {
+      const CAROL_ID = 5550103
+      const rich = {
+        username: 'rich_example',
+        phone: '15550000103',
+        is_contact: 1,
+        fetched_at: 1_700_000_000_000,
+        raw_json: '{"_":"user","id":5550103,"accessHash":"111"}',
+      }
+      for (const [id, name] of [
+        [ALICE_ID, 'Alice'],
+        [CAROL_ID, 'Rich Example'],
+      ] as const) {
+        ctx.usersCache.upsert({
+          ...rich,
+          user_id: String(id),
+          username: id === ALICE_ID ? 'alice_example' : rich.username,
+          first_name: name,
+          access_hash: '111',
+        })
+      }
+      // Carol without an access hash; Alice complete, without phone or contact flag
+      const sparseCarol: tl.RawUser = {
+        _: 'user',
+        id: CAROL_ID,
+        firstName: 'Sparse',
+      }
+      const fromCarol = {
+        ...rawMessage(198),
+        fromId: { _: 'peerUser', userId: CAROL_ID },
+      }
+      ctx.client = {
+        call: mock(async () => ({
+          _: 'messages.messagesSlice',
+          count: 300,
+          messages: [fromAlice(200), fromCarol],
+          users: [{ ...alice, accessHash: toLong('2222') }, sparseCarol],
+          chats: [],
+        })),
+      } as unknown as TelegramClient
+
+      await run(SyncJobType.BackwardHistory)
+
+      expect(ctx.usersCache.getById(String(CAROL_ID))).toMatchObject({
+        first_name: 'Sparse',
+        username: 'rich_example',
+        phone: '15550000103',
+        access_hash: '111',
+        is_contact: 1,
+        fetched_at: rich.fetched_at,
+        raw_json: rich.raw_json,
+      })
+      expect(ctx.usersCache.getById(String(ALICE_ID))).toMatchObject({
+        first_name: 'Alice',
+        phone: '15550000103',
+        access_hash: '2222',
+        is_contact: 1,
+      })
+      const hits = createMessagesSearch(db).search('rich_example')
+      expect(hits.map((hit) => hit.message_id)).toEqual([198])
+    })
+
     it('keeps the newest count, and none from a page bounded by minId', async () => {
       const history = createFakeHistory(range(1, 310))
       ctx.client = history.client

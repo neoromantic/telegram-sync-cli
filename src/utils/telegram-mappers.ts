@@ -20,6 +20,31 @@ export function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
   }
 }
 
+/**
+ * A user that a history page mentions, for UsersCache.mergeMany: only the
+ * fields the record has. A missing username, name or phone may be hidden
+ * rather than gone, a missing `contact` flag says nothing about the contact
+ * list, and without an access hash the other flags say nothing either.
+ */
+export function apiPageUserToCacheInput(user: tl.RawUser): UserCacheInput {
+  const complete = user.accessHash !== undefined
+  const flag = (value: boolean | undefined) =>
+    value ? 1 : complete ? 0 : undefined
+  return {
+    user_id: String(user.id),
+    username: user.username ?? undefined,
+    first_name: user.firstName ?? undefined,
+    last_name: user.lastName ?? undefined,
+    phone: user.phone ?? undefined,
+    access_hash: complete ? String(user.accessHash) : undefined,
+    is_contact: user.contact ? 1 : undefined,
+    is_bot: flag(user.bot),
+    is_premium: flag(user.premium),
+    fetched_at: Date.now(),
+    raw_json: toRawJson(user),
+  }
+}
+
 export function apiUserToContact(user: tl.RawUser): Contact {
   return {
     id: user.id,

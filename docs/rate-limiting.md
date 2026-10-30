@@ -53,8 +53,11 @@ Columns:
 0.8.0 and older wrote `timestamp` in seconds. The next prune (the daemon's, or `tg db vacuum`'s)
 turns those rows into ms before it deletes old ones: a value below 10^11 can only be seconds,
 the table holds a week of calls, and its timestamp index finds them, so this is one short
-update rather than a background migration. Until then, `tg status` leaves them out of the last
-minute, as they are older anyway.
+update rather than a background migration. Until then, `tg status` reads a seconds row as a
+time in 1970 and leaves it out of the last minute: right after an upgrade, a CLI call that an
+older tg made less than a minute before is missing from `api_calls_last_minute` until it is a
+minute old anyway. The daemon prunes about every five minutes and when it stops, so a running
+daemon on the new version converts them within minutes.
 
 `tg status` reports `api_calls_last_minute` and `calls_by_method` from the rows of the last 60
 seconds. The `rate_limits` windows are calendar minutes, so the current one holds only the
