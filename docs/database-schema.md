@@ -512,6 +512,9 @@ CREATE INDEX idx_api_activity_method ON api_activity(method);
 
 `rate_limits` and `api_activity` are per account, like every table here: a FLOOD_WAIT on one
 account, recorded or slept through inside a sync job, doesn't block another.
+`api_activity.timestamp` is when the call started, in ms like the other tables; rows older
+versions wrote in seconds are turned into ms by the next prune
+([rate-limiting.md](rate-limiting.md#api_activity)).
 
 ### Table: cache_meta
 

@@ -11,6 +11,9 @@ import type { ApiActivityEntry } from './types'
 /** Duration of rate tracking windows in seconds */
 export const RATE_WINDOW_SECONDS = 60
 
+/** The span `getStatus` counts calls over, in ms: the last 60 seconds */
+export const RECENT_CALLS_MS = 60_000
+
 /**
  * Flood wait information for a blocked method
  */
@@ -25,9 +28,9 @@ export interface FloodWaitInfo {
  * Rate limit status summary
  */
 export interface RateLimitStatus {
-  /** Total API calls in the last minute */
+  /** API calls logged in api_activity in the last 60 seconds */
   totalCalls: number
-  /** Call counts by method in the last minute */
+  /** The same calls by method */
   callsByMethod: Record<string, number>
   /** Currently active flood waits */
   activeFloodWaits: Array<{
@@ -49,10 +52,18 @@ export interface GetActivityOptions {
   onlyErrors?: boolean
 }
 
+export interface RateLimitsOptions {
+  /** The current time in ms; tests inject it */
+  now?: () => number
+}
+
 /**
  * Service for managing rate limits and API activity tracking
  */
 export class RateLimitsService {
+  /** The current time in ms */
+  readonly now: () => number
+
   private recordCallStmt: Statement
   private getCallCountByMethodStmt: Statement
   private getCallCountAllStmt: Statement
@@ -64,10 +75,11 @@ export class RateLimitsService {
   private getActivityByMethodStmt: Statement
   private getActivityErrorsStmt: Statement
   private getActivityByMethodErrorsStmt: Statement
-  private getCallsByMethodStmt: Statement
+  private getRecentCallsStmt: Statement
   private getActiveFloodWaitsStmt: Statement
 
-  constructor(db: Database) {
+  constructor(db: Database, options: RateLimitsOptions = {}) {
+    this.now = options.now ?? (() => Date.now())
     // Prepare all statements for better performance
 
     // Record an API call in the current window
@@ -191,13 +203,14 @@ export class RateLimitsService {
       )
       .as(ApiActivityRow)
 
-    // Get calls by method for status
-    this.getCallsByMethodStmt = db
+    // Calls by method since a time, for status. The rate windows are
+    // calendar minutes; api_activity has each call's own time.
+    this.getRecentCallsStmt = db
       .query(
         `
-      SELECT method, SUM(call_count) as total
-      FROM rate_limits
-      WHERE window_start >= $cutoff
+      SELECT method, COUNT(*) as total
+      FROM api_activity
+      WHERE timestamp >= $cutoff
       GROUP BY method
     `,
       )
@@ -222,11 +235,15 @@ export class RateLimitsService {
       .as(RateLimitRow)
   }
 
+  private nowSeconds(): number {
+    return Math.floor(this.now() / 1000)
+  }
+
   /**
    * Get the current window start timestamp
    */
   private getCurrentWindowStart(): number {
-    const now = Math.floor(Date.now() / 1000)
+    const now = this.nowSeconds()
     return Math.floor(now / RATE_WINDOW_SECONDS) * RATE_WINDOW_SECONDS
   }
 
@@ -234,7 +251,7 @@ export class RateLimitsService {
    * Record an API call for rate tracking
    */
   recordCall(method: string): void {
-    const now = Math.floor(Date.now() / 1000)
+    const now = this.nowSeconds()
     const windowStart = this.getCurrentWindowStart()
 
     this.recordCallStmt.run({
@@ -248,7 +265,7 @@ export class RateLimitsService {
    * Get call count for a method (or all methods) in the last N minutes
    */
   getCallCount(method: string | null, minutes: number): number {
-    const now = Math.floor(Date.now() / 1000)
+    const now = this.nowSeconds()
     const cutoff = now - minutes * 60
 
     if (method) {
@@ -269,7 +286,7 @@ export class RateLimitsService {
    * Set flood wait for a method
    */
   setFloodWait(method: string, seconds: number): void {
-    const now = Math.floor(Date.now() / 1000)
+    const now = this.nowSeconds()
     const windowStart = this.getCurrentWindowStart()
     const blockedUntil = now + seconds
 
@@ -285,7 +302,7 @@ export class RateLimitsService {
    * Get flood wait info for a method
    */
   getFloodWait(method: string): FloodWaitInfo | null {
-    const now = Math.floor(Date.now() / 1000)
+    const now = this.nowSeconds()
 
     const row = this.getFloodWaitStmt.get({
       $method: method,
@@ -319,7 +336,7 @@ export class RateLimitsService {
    * Returns the number of cleared entries
    */
   clearExpiredFloodWaits(): number {
-    const now = Math.floor(Date.now() / 1000)
+    const now = this.nowSeconds()
     const result = this.clearExpiredFloodWaitsStmt.run({ $now: now })
     return result.changes
   }
@@ -333,14 +350,14 @@ export class RateLimitsService {
       return 0
     }
 
-    const now = Math.floor(Date.now() / 1000)
+    const now = this.nowSeconds()
     const remaining = floodWait.blockedUntil - now
 
     return Math.max(0, remaining)
   }
 
   /**
-   * Log API activity
+   * Log API activity; `timestamp` is when the call started, in ms
    */
   logActivity(entry: {
     timestamp: number
@@ -405,25 +422,23 @@ export class RateLimitsService {
   }
 
   /**
-   * Get rate limit status summary
+   * Get rate limit status summary: the calls of the last 60 seconds, from
+   * api_activity, and the FLOOD_WAITs still running
    */
   getStatus(): RateLimitStatus {
-    const now = Math.floor(Date.now() / 1000)
-    const cutoff = now - 60 // Last minute
+    const now = this.nowSeconds()
 
-    // Get total calls
-    const totalCalls = this.getCallCount(null, 1)
-
-    // Get calls by method
-    const methodRows = this.getCallsByMethodStmt.all({
-      $cutoff: cutoff,
+    const methodRows = this.getRecentCallsStmt.all({
+      $cutoff: this.now() - RECENT_CALLS_MS,
     }) as Array<{
       method: string
       total: number
     }>
+    let totalCalls = 0
     const callsByMethod: Record<string, number> = {}
     for (const row of methodRows) {
       callsByMethod[row.method] = row.total
+      totalCalls += row.total
     }
 
     // Get active flood waits
@@ -450,6 +465,9 @@ export class RateLimitsService {
 /**
  * Create a rate limits service for a database
  */
-export function createRateLimitsService(db: Database): RateLimitsService {
-  return new RateLimitsService(db)
+export function createRateLimitsService(
+  db: Database,
+  options?: RateLimitsOptions,
+): RateLimitsService {
+  return new RateLimitsService(db, options)
 }

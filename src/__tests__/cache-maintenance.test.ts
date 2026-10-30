@@ -48,10 +48,10 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-function addActivity(timestampSec: number, method = 'messages.getHistory') {
+function addActivity(timestamp: number, method = 'messages.getHistory') {
   db.query(
     'INSERT INTO api_activity (timestamp, method, success) VALUES (?, ?, 1)',
-  ).run(timestampSec, method)
+  ).run(timestamp, method)
 }
 
 function addWindow(windowStart: number, floodWaitUntil: number | null = null) {
@@ -90,11 +90,11 @@ const count = (table: string) =>
   (db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
 
 describe('pruneCache', () => {
-  it('deletes api_activity rows older than the retention, in seconds', () => {
-    addActivity(NOW_SEC - 8 * 24 * 3600)
-    addActivity(NOW_SEC - 7 * 24 * 3600 - 1)
-    addActivity(NOW_SEC - 6 * 24 * 3600)
-    addActivity(NOW_SEC)
+  it('deletes api_activity rows older than the retention, in ms', () => {
+    addActivity(NOW - 8 * DAY)
+    addActivity(NOW - 7 * DAY - 1)
+    addActivity(NOW - 6 * DAY)
+    addActivity(NOW)
 
     const result = pruneCache(db, getDefaultRetentionConfig(), { now: NOW })
 
@@ -102,10 +102,28 @@ describe('pruneCache', () => {
     const left = db
       .query('SELECT timestamp FROM api_activity ORDER BY timestamp')
       .all() as Array<{ timestamp: number }>
+    expect(left.map((row) => row.timestamp)).toEqual([NOW - 6 * DAY, NOW])
+  })
+
+  it('turns the seconds older versions wrote into ms before it prunes', () => {
+    addActivity(NOW_SEC - 8 * 24 * 3600) // seconds, past the retention
+    addActivity(NOW_SEC - 3600) // seconds, an hour ago
+    addActivity(NOW - 60_000) // ms, a minute ago
+
+    const result = pruneCache(db, getDefaultRetentionConfig(), { now: NOW })
+
+    expect(result.api_activity).toBe(1)
+    const left = db
+      .query('SELECT timestamp FROM api_activity ORDER BY timestamp')
+      .all() as Array<{ timestamp: number }>
     expect(left.map((row) => row.timestamp)).toEqual([
-      NOW_SEC - 6 * 24 * 3600,
-      NOW_SEC,
+      (NOW_SEC - 3600) * 1000,
+      NOW - 60_000,
     ])
+
+    // A second pass changes nothing
+    pruneCache(db, getDefaultRetentionConfig(), { now: NOW })
+    expect(count('api_activity')).toBe(2)
   })
 
   it('deletes finished jobs by their own retention and keeps pending and running ones', () => {
@@ -171,8 +189,8 @@ describe('pruneCache', () => {
   })
 
   it('deletes every old row across several batches', () => {
-    for (let i = 0; i < 5; i++) addActivity(NOW_SEC - 30 * 24 * 3600 - i)
-    addActivity(NOW_SEC)
+    for (let i = 0; i < 5; i++) addActivity(NOW - 30 * DAY - i)
+    addActivity(NOW)
 
     const result = pruneCache(db, getDefaultRetentionConfig(), {
       now: NOW,

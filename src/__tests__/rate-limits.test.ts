@@ -14,6 +14,7 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { createRateLimitsService, RateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
+import { trackApiCall } from '../utils/telegram-rate-limits'
 
 describe('RateLimitsService', () => {
   let db: Database
@@ -398,7 +399,7 @@ describe('RateLimitsService', () => {
       mockTime(baseTime)
 
       service.logActivity({
-        timestamp: nowSeconds(),
+        timestamp: Date.now(),
         method: 'messages.sendMessage',
         success: 1,
         response_ms: 150,
@@ -416,7 +417,7 @@ describe('RateLimitsService', () => {
       mockTime(baseTime)
 
       service.logActivity({
-        timestamp: nowSeconds(),
+        timestamp: Date.now(),
         method: 'messages.sendMessage',
         success: 0,
         error_code: 420,
@@ -435,7 +436,7 @@ describe('RateLimitsService', () => {
 
       for (let i = 0; i < 5; i++) {
         service.logActivity({
-          timestamp: nowSeconds() + i,
+          timestamp: Date.now() + i,
           method: `method${i}`,
           success: 1,
         })
@@ -453,26 +454,26 @@ describe('RateLimitsService', () => {
 
       // Set up test data
       service.logActivity({
-        timestamp: nowSeconds(),
+        timestamp: Date.now(),
         method: 'messages.sendMessage',
         success: 1,
         response_ms: 100,
       })
       service.logActivity({
-        timestamp: nowSeconds() + 1,
+        timestamp: Date.now() + 1,
         method: 'messages.sendMessage',
         success: 0,
         error_code: 420,
         context: 'FLOOD_WAIT',
       })
       service.logActivity({
-        timestamp: nowSeconds() + 2,
+        timestamp: Date.now() + 2,
         method: 'contacts.getContacts',
         success: 1,
         response_ms: 200,
       })
       service.logActivity({
-        timestamp: nowSeconds() + 3,
+        timestamp: Date.now() + 3,
         method: 'contacts.getContacts',
         success: 0,
         error_code: 500,
@@ -531,7 +532,7 @@ describe('RateLimitsService', () => {
       // Add more entries
       for (let i = 0; i < 50; i++) {
         service.logActivity({
-          timestamp: nowSeconds() + 10 + i,
+          timestamp: Date.now() + 10 + i,
           method: 'test.method',
           success: 1,
         })
@@ -552,10 +553,14 @@ describe('RateLimitsService', () => {
       const baseTime = 1700000000000
       mockTime(baseTime)
 
-      // Record some calls
-      service.recordCall('messages.sendMessage')
-      service.recordCall('messages.sendMessage')
-      service.recordCall('contacts.getContacts')
+      // getStatus counts the calls logged in api_activity
+      for (const method of [
+        'messages.sendMessage',
+        'messages.sendMessage',
+        'contacts.getContacts',
+      ]) {
+        service.logActivity({ timestamp: baseTime, method, success: 1 })
+      }
 
       const status = service.getStatus()
 
@@ -617,13 +622,20 @@ describe('RateLimitsService', () => {
       const baseTime = 1700000000000
       mockTime(baseTime)
 
-      service.recordCall('messages.sendMessage')
-      service.recordCall('messages.sendMessage')
+      service.logActivity({
+        timestamp: baseTime,
+        method: 'messages.sendMessage',
+        success: 1,
+      })
 
       // Move forward 2 minutes
       mockTime(baseTime + 120000)
 
-      service.recordCall('contacts.getContacts')
+      service.logActivity({
+        timestamp: baseTime + 120000,
+        method: 'contacts.getContacts',
+        success: 1,
+      })
 
       const status = service.getStatus()
 
@@ -631,6 +643,40 @@ describe('RateLimitsService', () => {
       expect(status.totalCalls).toBe(1)
       expect(status.callsByMethod).toEqual({
         'contacts.getContacts': 1,
+      })
+    })
+
+    it('counts the last 60 seconds across a rate window boundary', async () => {
+      // 50 s into a calendar minute
+      const minute = 1_700_000_000_000 - (1_700_000_000_000 % 60_000)
+      let now = minute + 50_000
+      const clocked = createRateLimitsService(db, { now: () => now })
+      const callAt = (at: number) => {
+        now = at
+        return trackApiCall(clocked, 'messages.getHistory', async () => {
+          now += 250
+          return null
+        })
+      }
+
+      await callAt(minute - 10_000) // 100 s before the status: too old
+      await callAt(minute + 50_000) // the minute that ended
+      await callAt(minute + 70_000) // the current minute
+      now = minute + 90_000
+
+      const status = clocked.getStatus()
+      expect(status.totalCalls).toBe(2)
+      expect(status.callsByMethod).toEqual({ 'messages.getHistory': 2 })
+
+      // The current calendar window alone holds one of them
+      const windows = db
+        .query(
+          'SELECT window_start, call_count FROM rate_limits ORDER BY window_start',
+        )
+        .all()
+      expect(windows.at(-1)).toEqual({
+        window_start: (minute + 60_000) / 1000,
+        call_count: 1,
       })
     })
   })
@@ -724,7 +770,7 @@ describe('RateLimitsService', () => {
       mockTime(baseTime)
 
       service.logActivity({
-        timestamp: nowSeconds(),
+        timestamp: Date.now(),
         method: 'test.method',
         success: 1,
         // All optional fields omitted

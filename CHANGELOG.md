@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them after the command has exited, so `tg status` takes as long as with
   `DO_NOT_TRACK=1`, even when the network is slow or down. The daemon still sends
   from its own process.
+- `tg status` `rate_limits.api_calls_last_minute` and `calls_by_method` count the last 60
+  seconds instead of the current calendar minute, which showed 2 calls while the daemon made
+  about 14 a minute (#127).
+- The daemon logs its history pages and contacts checks to `api_activity` (method, outcome,
+  Telegram's error code, duration), as CLI commands do; it logged none. `api_activity`
+  timestamps are in ms, as documented: older versions wrote seconds, and the next prune turns
+  those rows into ms (#127).
 
 ## [0.8.0] - 2026-10-29
 

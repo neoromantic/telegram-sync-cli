@@ -318,6 +318,8 @@ Sync jobs use a default batch size of **100 messages** (configurable in worker c
 
 Rate limits are tracked per API method:
 - `rate_limits` table stores call count + flood wait
+- Every page request is logged to `api_activity` (method, outcome, Telegram's error code,
+  duration), so `tg status` counts the calls of the last 60 seconds
 - Workers and CLI calls share the same rate-limit service
 - A FLOOD_WAIT on `messages.getHistory` blocks every lane of that account until it expires;
   the job that hit it waits it out without using an attempt and runs again from its chat's

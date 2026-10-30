@@ -11,15 +11,18 @@ account: a recorded one blocks its calls, and in the daemon one that mtcute slee
 inside a sync job holds only that account's job loop (see [Notes](#notes)).
 
 Key behaviors:
-- Track per-method call counts in rolling windows
+- Track per-method call counts in 60-second windows (calendar minutes)
 - Record FLOOD_WAITs and block calls until the wait expires
-- Log API activity (success/error) for status output and diagnostics
+- Log each API call to `api_activity` (success/error, error code, duration) for status output
+  and diagnostics; `tg status` counts the calls of the last 60 seconds from it
 
 ## Where It Lives
 
 - `src/db/rate-limits.ts` — `RateLimitsService`
-- `src/utils/telegram-rate-limits.ts` — CLI wrapper helpers
-- `src/daemon/*` — daemon job execution uses the same service
+- `src/utils/telegram-rate-limits.ts` — `trackApiCall` (counts, times and logs one call) and
+  the CLI wrapper
+- `src/daemon/*` — the daemon's sync jobs and contacts checks call through `trackApiCall` on
+  the same service
 
 ## Database Tables (each account's cache.db)
 
@@ -34,15 +37,28 @@ Columns (see `docs/database-schema.md` for full definitions):
 - `flood_wait_until`
 
 ### api_activity
-Audits API calls (success/errors).
+Audits API calls (success/errors): every call of a CLI command, and the daemon's history pages
+and contacts checks.
 
 Columns:
-- `timestamp`
+- `timestamp` — when the call started, in ms
 - `method`
 - `success`
-- `error_code`
-- `response_ms`
-- `context`
+- `error_code` — Telegram's error code (`420` for a FLOOD_WAIT, `400`, …); `NULL` for an error
+  that isn't Telegram's
+- `response_ms` — how long the call took
+- `context` — who called (`cli:send`, `daemon:sync`, `daemon:contacts`, …), or the error
+  message of a failed call
+
+0.8.0 and older wrote `timestamp` in seconds. The next prune (the daemon's, or `tg db vacuum`'s)
+turns those rows into ms before it deletes old ones: a value below 10^11 can only be seconds,
+the table holds a week of calls, and its timestamp index finds them, so this is one short
+update rather than a background migration. Until then, `tg status` leaves them out of the last
+minute, as they are older anyway.
+
+`tg status` reports `api_calls_last_minute` and `calls_by_method` from the rows of the last 60
+seconds. The `rate_limits` windows are calendar minutes, so the current one holds only the
+calls since the minute began.
 
 ### Retention
 
@@ -56,7 +72,8 @@ FLOOD_WAIT is never forgotten, and so is the current 60-second window.
 
 1. Before an API call, the caller checks `RateLimitsService.isBlocked()`.
 2. If blocked, the call returns a rate-limited result with wait time.
-3. On success, `recordCall()` increments the window count and activity log.
+3. `trackApiCall()` increments the window count with `recordCall()` and, when the call ends,
+   logs it to `api_activity` with `logActivity()`.
 4. On FLOOD_WAIT errors, `setFloodWait()` records the block in `rate_limits`.
 
 ## CLI Integration

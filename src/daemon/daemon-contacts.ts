@@ -23,6 +23,7 @@ import {
 import { createRateLimitsService } from '../db/rate-limits'
 import { createUsersCache } from '../db/users-cache'
 import { apiUserToCacheInput } from '../utils/telegram-mappers'
+import { trackApiCall } from '../utils/telegram-rate-limits'
 import type { DaemonContext } from './daemon-context'
 import { formatError, isDaemonStopError } from './daemon-utils'
 
@@ -114,10 +115,15 @@ export async function syncAccountContacts(
   state.inFlight.add(accountId)
 
   try {
-    createRateLimitsService(rt.db).recordCall(CONTACTS_METHOD)
-    const result = await client
-      .withParams({ abortSignal: ctx.runtime.shutdown.signal })
-      .call({ _: CONTACTS_METHOD, hash: contactsHash(rt.db) })
+    const result = await trackApiCall(
+      createRateLimitsService(rt.db),
+      CONTACTS_METHOD,
+      () =>
+        client
+          .withParams({ abortSignal: ctx.runtime.shutdown.signal })
+          .call({ _: CONTACTS_METHOD, hash: contactsHash(rt.db) }),
+      'daemon:contacts',
+    )
 
     // A stop while the request ran: write nothing. The check and the write
     // are one synchronous block, so a stop can't land between them.
