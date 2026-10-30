@@ -174,7 +174,7 @@ export interface StatusPacing {
   mode: 'history' | 'calm'
   /** The pace the daemon runs at now, in calls per second */
   target_calls_per_second: number
-  /** FLOOD_WAITs since the daemon started */
+  /** FLOOD_WAITs on messages.getHistory since the daemon started */
   flood_waits: number
 }
 

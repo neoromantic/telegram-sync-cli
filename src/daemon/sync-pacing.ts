@@ -103,8 +103,8 @@ export class SyncPacer {
   }
 
   /**
-   * Telegram answered a call with FLOOD_WAIT_<seconds>, in any mode and for
-   * any method: half the pace, and no job until the wait and one interval at
+   * Telegram answered a sync page (messages.getHistory) with
+   * FLOOD_WAIT_<seconds>, in any mode: half the pace, and no job until the wait and one interval at
    * the new pace are over. mtcute's flood waiter retries the call when the
    * wait ends, so the next job comes one interval after that retry. Returns
    * the new history pace.

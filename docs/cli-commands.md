@@ -373,7 +373,7 @@ part counts the daemon's sync jobs and lists some of them:
   included), or `null` without two calls in that span. `pacing` is the live daemon's pace
   ([rate-limiting.md](rate-limiting.md#pacing)), or `null` without one: `mode` (`history`
   while first or history pages are due, else `calm`), `target_calls_per_second` and
-  `flood_waits` since the daemon started. Over several accounts both rates and the FLOOD_WAITs
+  `flood_waits` (on `messages.getHistory`) since the daemon started. Over several accounts both rates and the FLOOD_WAITs
   are sums, and `mode` is `history` if any account's is. Pretty output shows History Cached,
   History Left with the time left, History Pace (measured, then the target, the mode and any
   FLOOD_WAITs), and the chats.
