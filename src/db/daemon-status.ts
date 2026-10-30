@@ -35,7 +35,7 @@ export interface DaemonPacing {
   mode: 'history' | 'calm'
   /** The pace it runs at now, in calls per second */
   targetCallsPerSecond: number
-  /** FLOOD_WAITs the account's client got since the daemon started */
+  /** FLOOD_WAITs on messages.getHistory since the daemon started */
   floodWaits: number
 }
 

@@ -566,6 +566,22 @@ describe('daemonNetworkMiddlewares', () => {
       db.close()
     })
 
+    it("leaves the sync pace alone on another method's FLOOD_WAIT", async () => {
+      const { ctx, db } = withCache()
+      const rt = ctx.runtime.accounts.get(1)!
+      rt.pacer = createSyncPacer()
+      const call = compose(daemonNetworkMiddlewares(ctx, 1), async () => ({
+        _: 'mt_rpc_error',
+        errorCode: 420,
+        errorMessage: 'FLOOD_WAIT_400',
+      }))
+
+      await call(rpc('messages.getDialogs'))
+
+      expect(rt.pacer.snapshot().floodWaits).toBe(0)
+      db.close()
+    })
+
     it('reads the seconds of FLOOD_WAIT and FLOOD_PREMIUM_WAIT only', () => {
       expect(floodWaitSecondsOf('FLOOD_WAIT_12')).toBe(12)
       expect(floodWaitSecondsOf('FLOOD_PREMIUM_WAIT_5')).toBe(5)

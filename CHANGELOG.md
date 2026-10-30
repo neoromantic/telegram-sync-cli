@@ -17,11 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The daemon paces history to what Telegram allows instead of a fixed 3 seconds between
   jobs. While first pages or history are due, each account starts at 0.7 calls per second,
   speeds up after every 30 calls without a FLOOD_WAIT up to 0.9, halves the pace on a
-  FLOOD_WAIT after waiting it out, and goes back to one job every 3 seconds once history is
-  done. The pause now counts from each job's start and no longer waits for the next 1-second
-  tick, so 3 seconds is 3 seconds; a first sync used to make one call about every 4 seconds.
-  `sync.pacing.maxCallsPerSecond` and `sync.pacing.calmInterval` in `config.json` change the
-  cap and the calm interval (#133).
+  FLOOD_WAIT on a history page after waiting it out, and goes back to one job every 3 seconds
+  once history is done. The pause now counts from each job's start and no longer waits for the
+  next 1-second tick, so 3 seconds is 3 seconds; a first sync used to make one call about every
+  4 seconds. `sync.pacing.maxCallsPerSecond` and `sync.pacing.calmInterval` in `config.json`
+  change the cap and the calm interval (#133).
 
 ### Added
 
