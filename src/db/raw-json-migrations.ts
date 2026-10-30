@@ -70,6 +70,36 @@ const messagesMigration: BackgroundMigration = {
   },
 }
 
+/**
+ * Messages an older version cached live without their raw message have
+ * raw_json '{}' (#130): no attachment row, no fields for tg sql, and nothing
+ * fetches them again. The pass queues one refetch job per such chat, which
+ * the daemon runs at the lowest priority. The SQL names the job type and
+ * priority itself (SyncJobType.RefetchMessages, SyncPriority.Background):
+ * sync-schema.ts imports this module.
+ */
+const refetchEmptyMigration: BackgroundMigration = {
+  name: 'messages_refetch_empty_raw_json',
+  description: 'Queue a refetch of messages cached with an empty raw_json',
+  table: 'messages_cache',
+  columns: ['chat_id', 'raw_json'],
+  prepare(db: Database) {
+    const queue = db.query(`
+      INSERT INTO sync_jobs (chat_id, job_type, priority, status, created_at)
+      SELECT $chat_id, 'refetch_messages', 4, 'pending', $now
+      WHERE NOT EXISTS (
+        SELECT 1 FROM sync_jobs
+        WHERE chat_id = $chat_id AND job_type = 'refetch_messages'
+          AND status IN ('pending', 'running')
+      )
+    `)
+    return (row: MigrationRow) => {
+      if (row.raw_json !== '{}') return
+      queue.run({ $chat_id: row.chat_id as number, $now: Date.now() })
+    }
+  },
+}
+
 function reencodeMigration(
   name: string,
   table: MigrationTable,
@@ -99,4 +129,5 @@ export const BACKGROUND_MIGRATIONS: readonly BackgroundMigration[] = [
   messagesMigration,
   reencodeMigration('users_raw_json_v2', 'users_cache', 'users'),
   reencodeMigration('chats_raw_json_v2', 'chats_cache', 'chats'),
+  refetchEmptyMigration,
 ]

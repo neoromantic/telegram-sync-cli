@@ -119,12 +119,20 @@ export interface SyncJobsService {
   getFailedJobs(limit: number): SyncJobRow[]
   /** Count jobs by status */
   countJobs(): SyncJobCounts
-  /** Cancel pending jobs for a chat */
+  /** Cancel pending jobs for a chat, except a refetch: it doesn't depend on the mode */
   cancelPendingForChat(chatId: number): number
   /** Delete every pending job of a type */
   deletePendingOfType(jobType: SyncJobType): number
-  /** Delete pending jobs of chats that are disabled or have no sync state */
+  /**
+   * Delete pending jobs of chats that are disabled or have no sync state,
+   * except refetches
+   */
   deletePendingForInactiveChats(): number
+  /**
+   * Queue a refetch of the chat's messages cached with raw_json '{}' (#130),
+   * unless one is pending or running. Returns whether it queued one.
+   */
+  queueRefetch(chatId: number): boolean
   /**
    * Delete pending history jobs of chats the policy gives the newest page
    * only (bots and deleted accounts, unless turned on by hand)
@@ -203,37 +211,41 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       WHERE id = $id AND status = $expected_status
     `),
 
+    // A refetch runs whether its chat syncs or not
     failIfEnabled: db.prepare(`
       UPDATE sync_jobs
       SET status = $status, error_message = $error, completed_at = $now,
           attempts = attempts + 1
       WHERE id = $id AND status = $expected_status
-        AND EXISTS (
+        AND (job_type = '${SyncJobType.RefetchMessages}' OR EXISTS (
           SELECT 1 FROM chat_sync_state s
           WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
-        )
+        ))
     `),
 
     // The chat's mode may have changed while the job ran, and tg chats sync
     // cancels only pending jobs, so the retry takes the chat's lane priority
-    // now, like alignPendingPriorities.
+    // now, like alignPendingPriorities. A refetch keeps its own.
     retryLater: db.prepare(`
       UPDATE sync_jobs
       SET status = $pending_status, attempts = attempts + $inc,
           next_run_at = $run_at, error_message = $error, started_at = NULL,
-          priority = COALESCE((
-            SELECT CASE
-              WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
-              ELSE s.sync_priority
-            END
-            FROM chat_sync_state s
-            WHERE s.chat_id = sync_jobs.chat_id
-          ), priority)
+          priority = CASE WHEN job_type = '${SyncJobType.RefetchMessages}'
+            THEN priority
+            ELSE COALESCE((
+              SELECT CASE
+                WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
+                ELSE s.sync_priority
+              END
+              FROM chat_sync_state s
+              WHERE s.chat_id = sync_jobs.chat_id
+            ), priority)
+          END
       WHERE id = $id AND status = $running_status
-        AND EXISTS (
+        AND (job_type = '${SyncJobType.RefetchMessages}' OR EXISTS (
           SELECT 1 FROM chat_sync_state s
           WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
-        )
+        ))
     `),
 
     deleteRunning: db.prepare(`
@@ -307,6 +319,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     cancelPendingForChat: db.prepare(`
       DELETE FROM sync_jobs
       WHERE chat_id = $chat_id AND status = $status
+        AND job_type != '${SyncJobType.RefetchMessages}'
     `),
 
     deletePendingOfType: db.prepare(`
@@ -317,6 +330,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     deletePendingForInactiveChats: db.prepare(`
       DELETE FROM sync_jobs
       WHERE status = $status
+        AND job_type != '${SyncJobType.RefetchMessages}'
         AND NOT EXISTS (
           SELECT 1 FROM chat_sync_state s
           WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
@@ -344,9 +358,20 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         WHERE s.chat_id = sync_jobs.chat_id
       )
       WHERE status = $status
+        AND job_type != '${SyncJobType.RefetchMessages}'
         AND EXISTS (
           SELECT 1 FROM chat_sync_state s WHERE s.chat_id = sync_jobs.chat_id
         )
+    `),
+
+    queueRefetch: db.prepare(`
+      INSERT INTO sync_jobs (chat_id, job_type, priority, status, created_at)
+      SELECT $chat_id, $job_type, $priority, $pending_status, $now
+      WHERE NOT EXISTS (
+        SELECT 1 FROM sync_jobs
+        WHERE chat_id = $chat_id AND job_type = $job_type
+          AND status IN ($pending_status, $running_status)
+      )
     `),
 
     recoverCrashedJobs: db.prepare(`
@@ -585,6 +610,19 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return stmts.deletePendingForInactiveChats.run({
         $status: SyncJobStatus.Pending,
       }).changes
+    },
+
+    queueRefetch(chatId: number): boolean {
+      return (
+        stmts.queueRefetch.run({
+          $chat_id: chatId,
+          $job_type: SyncJobType.RefetchMessages,
+          $priority: SyncPriority.Background,
+          $pending_status: SyncJobStatus.Pending,
+          $running_status: SyncJobStatus.Running,
+          $now: Date.now(),
+        }).changes === 1
+      )
     },
 
     deletePendingHistoryOfFirstPageOnlyChats(): number {

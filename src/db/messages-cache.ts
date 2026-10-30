@@ -67,6 +67,11 @@ export interface MessagesCache {
   upsert(message: MessageInput): void
   /** Insert or update multiple messages in a transaction */
   upsertBatch(messages: MessageInput[]): void
+  /**
+   * IDs of the chat's messages cached with raw_json '{}' (#130), above
+   * `afterId`, oldest first
+   */
+  listEmptyRawJsonIds(chatId: number, afterId: number, limit: number): number[]
   /** Get a message by chat_id and message_id */
   get(chatId: number, messageId: number): MessageCacheRow | null
   /**
@@ -151,6 +156,13 @@ export function createMessagesCache(db: Database): MessagesCache {
       WHERE chat_id = $chat_id AND message_id = $message_id
     `)
       .as(MessageCacheRow),
+
+    listEmptyRawJsonIds: db.query(`
+      SELECT message_id FROM messages_cache
+      WHERE chat_id = $chat_id AND message_id > $after AND raw_json = '{}'
+      ORDER BY message_id
+      LIMIT $limit
+    `),
 
     listByChatId: db
       .query(`
@@ -254,6 +266,19 @@ export function createMessagesCache(db: Database): MessagesCache {
   return {
     upsert(message: MessageInput): void {
       upsertOne(message)
+    },
+
+    listEmptyRawJsonIds(
+      chatId: number,
+      afterId: number,
+      limit: number,
+    ): number[] {
+      const rows = stmts.listEmptyRawJsonIds.all({
+        $chat_id: chatId,
+        $after: afterId,
+        $limit: limit,
+      }) as { message_id: number }[]
+      return rows.map((row) => row.message_id)
     },
 
     upsertBatch(messages: MessageInput[]): void {

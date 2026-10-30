@@ -16,9 +16,11 @@ import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
+import { createSyncJobsService } from '../db/sync-jobs'
 import {
   initSyncSchema,
   type SyncChatType,
+  SyncJobType,
   SyncPriority,
 } from '../db/sync-schema'
 import { toLong } from '../utils/long'
@@ -98,6 +100,8 @@ describe('UpdateHandlers', () => {
       const cached = messagesCache.get(100, 42)
       expect(cached).not.toBeNull()
       expect(cached?.raw_json).toBe(JSON.stringify(rawMessage))
+      // The live path stores the raw message: nothing to fetch again (#130)
+      expect(createSyncJobsService(db).getJobsForChat(100)).toHaveLength(0)
 
       // Verify the raw JSON can be parsed back
       const parsed = JSON.parse(cached!.raw_json)
@@ -106,24 +110,40 @@ describe('UpdateHandlers', () => {
       expect(parsed.peerId.userId).toBe(123)
     })
 
-    it('stores empty object when rawMessage is not provided', async () => {
+    it('without a raw message, stores an empty object, logs once and queues a refetch (#130)', async () => {
+      const logger: DaemonLogger = {
+        info: mock(() => {}),
+        debug: mock(() => {}),
+        warn: mock(() => {}),
+        error: mock(() => {}),
+      }
+      handlers = createUpdateHandlers({
+        db,
+        messagesCache,
+        chatSyncState,
+        logger,
+      })
       const ctx: UpdateContext = {
         accountId: 1,
         receivedAt: Date.now(),
       }
 
-      await handlers.handleNewMessage(ctx, {
-        chatId: 100,
-        messageId: 99,
-        fromId: 123,
-        text: 'No raw message',
-        date: Date.now(),
-        isOutgoing: false,
-      })
+      for (const messageId of [99, 100]) {
+        await handlers.handleNewMessage(ctx, {
+          chatId: 100,
+          messageId,
+          fromId: 123,
+          text: 'No raw message',
+          date: Date.now(),
+          isOutgoing: false,
+        })
+      }
 
-      const cached = messagesCache.get(100, 99)
-      expect(cached).not.toBeNull()
-      expect(cached?.raw_json).toBe('{}')
+      expect(messagesCache.get(100, 99)?.raw_json).toBe('{}')
+      expect(logger.warn).toHaveBeenCalledTimes(1)
+      expect(createSyncJobsService(db).getJobsForChat(100)).toMatchObject([
+        { job_type: SyncJobType.RefetchMessages, status: 'pending' },
+      ])
     })
 
     it('seeds sync state using provided chat type', async () => {

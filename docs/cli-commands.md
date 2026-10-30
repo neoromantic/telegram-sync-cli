@@ -557,7 +557,8 @@ in small batches, each a short write, resuming where the last one stopped. The d
 them on its own, a little each second ([daemon.md](daemon.md#background-migrations)).
 `tg db migrate` runs the pending ones of one account's cache (`--account`, else the active
 account, else the only one) in the foreground until they are done, and needs no Telegram
-credentials. It works while the daemon runs too, and then gives way to the daemon's writes:
+credentials. `messages_refetch_empty_raw_json` only queues sync jobs for messages cached with
+an empty `raw_json`; the daemon fetches them again (#130). It works while the daemon runs too, and then gives way to the daemon's writes:
 each batch takes at most 50 ms and is followed by a 150 ms pause, so a daemon write waits for
 one batch at most. That makes the run four to five times as long as with the daemon stopped,
 when batches go back to back: at the rates in [storage.md](storage.md), a million messages

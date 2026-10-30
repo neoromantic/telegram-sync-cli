@@ -283,7 +283,7 @@ this version knows.
 
 ```sql
 CREATE TABLE cache_migrations (
-  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, users_raw_json_v2, chats_raw_json_v2
+  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, …, messages_refetch_empty_raw_json
   state       TEXT NOT NULL DEFAULT 'pending',  -- pending, running, done
   cursor      INTEGER NOT NULL DEFAULT 0,       -- rowid of the last row done
   end_rowid   INTEGER,           -- the table's largest rowid when it started
@@ -422,7 +422,7 @@ CREATE INDEX idx_chat_sync_state_incomplete
 CREATE TABLE sync_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   chat_id INTEGER NOT NULL,
-  job_type TEXT NOT NULL,
+  job_type TEXT NOT NULL,         -- forward_catchup, initial_load, backward_history, full_sync, refetch_messages
   priority INTEGER NOT NULL DEFAULT 3,
   status TEXT NOT NULL DEFAULT 'pending',
   cursor_start INTEGER,
@@ -660,13 +660,14 @@ a tick, with the event loop free between batches ([daemon.md](daemon.md#backgrou
 and `tg status` shows each unfinished one with its progress. Reads give the same answers while a
 migration is half done: every reader takes rows in the old and the new form.
 
-The first migrations ([raw_json](#raw_json)):
+The migrations so far (see [raw_json](#raw_json)):
 
 | Name | Table | Rewrites |
 |------|-------|----------|
 | `messages_raw_json_v2` | `messages_cache` | `raw_json` into the current form; the `message_attachments` row of each media message; `message_type` of each message whose `raw_json` is a TL message, as a history page writes it now |
 | `users_raw_json_v2` | `users_cache` | `raw_json` into the current form |
 | `chats_raw_json_v2` | `chats_cache` | `raw_json` into the current form |
+| `messages_refetch_empty_raw_json` | `messages_cache` | nothing: it queues a `refetch_messages` sync job for each chat with a message whose `raw_json` is `{}`, which the daemon fetches again by ID (see [sync-strategy.md](sync-strategy.md#job-types)) |
 
 `messages_raw_json_v2` parses each message's `raw_json` once for all three. It writes neither
 `text`, `from_id` nor `media_path`, so the search index is untouched, and it leaves

@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bot`, `deleted_account`, `small_group`, `medium_group`, `on_by_hand`, `off_by_hand` and
   others). `tg chats sync` returns `syncReason` too (#131).
 
+### Fixed
+
+- Messages an older version cached live without their raw form (`raw_json = '{}'`) are
+  fetched again: a background pass queues one low-priority request per chat, which fills in
+  their raw_json and attachments; messages Telegram no longer has stay as they are. A live
+  message always stores its raw form, and the daemon logs a warning if one ever comes
+  without (#130).
+
 ## [0.9.0] - 2026-10-30
 
 Fixes from a day of running the daemon on a real account. Restart the daemon after

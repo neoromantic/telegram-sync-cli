@@ -12,6 +12,7 @@ import type {
   MessageInput,
   MessagesCache,
 } from '../db/messages-cache'
+import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
 import {
   determineSyncPolicy,
   rawUserPolicy,
@@ -125,9 +126,12 @@ export interface UpdateHandlersOptions {
 interface HandlerDeps {
   messagesCache: MessagesCache
   chatSyncState: ChatSyncStateService
+  jobsService: SyncJobsService
   chatsCache?: ChatsCache
   logger: DaemonLogger
   onMessagesSynced?: (count: number) => void
+  /** A message without its raw form was logged already */
+  loggedEmptyRaw: boolean
 }
 
 /**
@@ -138,6 +142,25 @@ const noopLogger: DaemonLogger = {
   debug: () => {},
   warn: () => {},
   error: () => {},
+}
+
+/**
+ * A live update always carries its raw message, so raw_json is never '{}'
+ * (#130). If one ever comes without, the row gets '{}' and a refetch job
+ * fills it in later; the first such message is logged.
+ */
+function liveMessageInput(deps: HandlerDeps, data: NewMessageData) {
+  const input = toMessageInput(data)
+  if (data.rawMessage) return input
+
+  if (!deps.loggedEmptyRaw) {
+    deps.loggedEmptyRaw = true
+    deps.logger.warn(
+      `A live message came without its raw form (chat ${data.chatId}); it is cached with raw_json '{}' and fetched again later`,
+    )
+  }
+  deps.jobsService.queueRefetch(data.chatId)
+  return input
 }
 
 function toMessageInput(data: NewMessageData): MessageInput {
@@ -211,7 +234,7 @@ async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
   )
   ensureChatCached(deps.chatsCache, data.chatId, data.rawChat)
 
-  const input = toMessageInput(data)
+  const input = liveMessageInput(deps, data)
   deps.messagesCache.upsert(input)
 
   // The forward cursor means "every message up to here is cached", so live
@@ -336,9 +359,11 @@ export function createUpdateHandlers(
   const deps: HandlerDeps = {
     messagesCache: options.messagesCache,
     chatSyncState: options.chatSyncState,
+    jobsService: createSyncJobsService(options.db),
     chatsCache: options.chatsCache,
     logger: options.logger ?? noopLogger,
     onMessagesSynced: options.onMessagesSynced,
+    loggedEmptyRaw: false,
   }
 
   return {
