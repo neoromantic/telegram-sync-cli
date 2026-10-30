@@ -360,8 +360,9 @@ part counts the daemon's sync jobs and lists some of them:
   `messages_left`. Pretty output shows History Cached, History Left with the time left, and
   the chats.
 - `rate_limits.api_calls_last_minute` and `calls_by_method` count the API calls of the last 60
-  seconds, from the `api_activity` log: the CLI's calls and the daemon's history pages and
-  contacts checks. A daemon older than this version logs none of its calls.
+  seconds, from the `api_activity` log: the CLI's calls and every request of the daemon (sync
+  pages, contacts checks, dialog passes, `getMe` health checks, mtcute's update requests). A
+  daemon older than this version logs none of its calls.
 - `accounts.accounts[]` gives each account its own figures: `cache` (`status`: `ok`,
   `missing` for an account with no cache yet, which `tg status` never creates, or `error` with
   `error` for a cache that fails to open or to answer a query; its figures are then zero and

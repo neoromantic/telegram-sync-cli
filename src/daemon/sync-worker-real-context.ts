@@ -1,5 +1,4 @@
 import type { tl } from '@mtcute/bun'
-import { trackApiCall } from '../utils/telegram-rate-limits'
 import { isDaemonStopError } from './daemon-utils'
 import { isPermanentSyncError } from './sync-retry'
 import {
@@ -17,17 +16,6 @@ export function canMakeApiCall(ctx: RealSyncWorkerContext): boolean {
 
 export function getWaitTime(ctx: RealSyncWorkerContext): number {
   return ctx.rateLimits.getWaitTime(ctx.config.apiMethod)
-}
-
-/**
- * A job's API call: counted in its rate window and logged to api_activity
- * with its outcome and duration
- */
-export function trackJobApiCall<T>(
-  ctx: RealSyncWorkerContext,
-  call: () => Promise<T>,
-): Promise<T> {
-  return trackApiCall(ctx.rateLimits, ctx.config.apiMethod, call, 'daemon:sync')
 }
 
 export function handleFloodWait(
