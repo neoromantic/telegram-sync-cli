@@ -167,6 +167,32 @@ describe('UpdateHandlers', () => {
       expect(state?.sync_enabled).toBe(1)
     })
 
+    it('gives a bot first seen live the newest page only (#131)', async () => {
+      await handlers.handleNewMessage(
+        { accountId: 1, receivedAt: Date.now() },
+        {
+          chatId: 5001,
+          chatType: 'private',
+          messageId: 1,
+          text: 'Your order has shipped',
+          date: 1_700_000_000,
+          isOutgoing: false,
+          rawChat: {
+            _: 'user',
+            id: 5001,
+            firstName: 'Example Bot',
+            bot: true,
+          } as tl.RawUser,
+        },
+      )
+
+      expect(chatSyncState.get(5001)).toMatchObject({
+        sync_policy: 'bot',
+        sync_priority: SyncPriority.Medium,
+        sync_enabled: 1,
+      })
+    })
+
     it('leaves a supergroup without a member count off', async () => {
       await handlers.handleNewMessage(
         { accountId: 1, receivedAt: Date.now() },

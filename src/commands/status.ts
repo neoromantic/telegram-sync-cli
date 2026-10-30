@@ -38,7 +38,7 @@ import {
 } from '../db/history-progress'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
-import type { SyncMode } from '../db/sync-schema'
+import { historyDoneSql, type SyncMode } from '../db/sync-schema'
 import { cacheUnavailableSuggestion } from '../utils/account-cache'
 import {
   ACCOUNT_SELECTOR_DESCRIPTION,
@@ -393,11 +393,11 @@ function readOpenAccountStatus(
     ),
     chats_history_complete: count(
       cacheDb,
-      'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 1',
+      `SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND ${historyDoneSql('chat_sync_state')}`,
     ),
     chats_history_pending: count(
       cacheDb,
-      'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND history_complete = 0',
+      `SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND NOT ${historyDoneSql('chat_sync_state')}`,
     ),
     chats_cached: count(cacheDb, 'SELECT COUNT(*) as count FROM chats_cache'),
     messages_tracked: count(

@@ -72,6 +72,35 @@ function seedPage(
 }
 
 describe('readHistoryProgress', () => {
+  it('counts a bot that had its newest page as done, at what is cached (#131)', () => {
+    seedChat(201, { total: 500, cached: 3 })
+    seedChat(202, { total: 40, cached: 0 })
+    const state = createChatSyncStateService(db)
+    for (const chatId of [201, 202]) {
+      state.upsert({
+        chat_id: chatId,
+        chat_type: 'private',
+        sync_priority: SyncPriority.Medium,
+        sync_enabled: true,
+        sync_policy: 'bot',
+      })
+    }
+    state.recordFirstPage(201, {
+      forward_cursor: 500,
+      backward_cursor: 401,
+      history_complete: false,
+      new_messages: 3,
+    })
+
+    // 202 still waits for its first page
+    expect(readHistoryProgress(db, { now: NOW })).toMatchObject({
+      chats_pending: 1,
+      messages_cached: 3,
+      messages_known: 43,
+      messages_left: 40,
+    })
+  })
+
   it('sums messages cached of the counts, for the chats with sync on', () => {
     seedChat(101, { total: 10, cached: 4 })
     seedChat(102, { total: 5, cached: 5, complete: true })

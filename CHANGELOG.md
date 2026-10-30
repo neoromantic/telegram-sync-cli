@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Bots and deleted accounts get their newest 100 messages and new ones, but no longer their
+  full history: on a large account they were most of the DMs, and each cost history requests
+  in the first sync. Messages already cached stay; the next dialog pass moves such a chat to
+  the new rule and drops its pending history jobs. `tg chats sync <bot>` still turns full
+  history on for one of them (#131).
+
+### Added
+
+- `tg chats list` shows why each chat syncs or not: `syncEnabled` and `syncReason` (`dm`,
+  `bot`, `deleted_account`, `small_group`, `medium_group`, `on_by_hand`, `off_by_hand` and
+  others). `tg chats sync` returns `syncReason` too (#131).
+
 ## [0.9.0] - 2026-10-30
 
 Fixes from a day of running the daemon on a real account. Restart the daemon after

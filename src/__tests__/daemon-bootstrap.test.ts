@@ -165,6 +165,82 @@ describe('bootstrapDialogs', () => {
     })
   })
 
+  it('gives bots and deleted accounts the newest page only, keeping what is cached (#131)', async () => {
+    // A bot an older version synced in full, with a history job pending
+    seedSynced(1001, 50, 50)
+    chatSyncState.resetSyncState(1001, {
+      forward_cursor: false,
+      backward_cursor: false,
+      synced_messages: false,
+    })
+    const jobs = createSyncJobsService(testCacheDb)
+    jobs.create({
+      chat_id: 1001,
+      job_type: SyncJobType.BackwardHistory,
+      priority: SyncPriority.High,
+    })
+    createMessagesCache(testCacheDb).upsert({
+      chat_id: 1001,
+      message_id: 50,
+      text: 'Your code is 12345',
+      message_type: 'text',
+      date: 1_700_000_000,
+      is_outgoing: false,
+      raw_json: '{}',
+    })
+    // A bot turned on by hand keeps its full history
+    seedSynced(1004, 20, 20)
+    chatSyncState.resetSyncState(1004, {
+      forward_cursor: false,
+      backward_cursor: false,
+      synced_messages: false,
+    })
+    chatSyncState.setSyncMode(1004, 'on')
+
+    await runPass([
+      { kind: 'user', id: 1001, bot: true, topMessage: 50 },
+      { kind: 'user', id: 1002, deleted: true, topMessage: 7 },
+      { kind: 'user', id: 1003, topMessage: 3 },
+      { kind: 'user', id: 1004, bot: true, topMessage: 20 },
+    ])
+
+    expect(chatSyncState.get(1001)).toMatchObject({
+      sync_policy: 'bot',
+      sync_priority: SyncPriority.Medium,
+      sync_enabled: 1,
+    })
+    expect(chatSyncState.get(1002)).toMatchObject({
+      sync_policy: 'deleted_account',
+      sync_priority: SyncPriority.Medium,
+      sync_enabled: 1,
+    })
+    expect(chatSyncState.get(1003)).toMatchObject({
+      sync_policy: 'dm',
+      sync_priority: SyncPriority.High,
+    })
+    expect(chatSyncState.get(1004)).toMatchObject({
+      sync_policy: 'bot',
+      sync_mode: 'on',
+      sync_priority: SyncPriority.High,
+    })
+
+    const pending = (await startScheduler()).map((job) => [
+      job.chat_id,
+      job.job_type,
+      job.priority,
+    ])
+    expect(pending).toEqual(
+      expect.arrayContaining([
+        [1002, SyncJobType.InitialLoad, SyncPriority.Medium],
+        [1003, SyncJobType.InitialLoad, SyncPriority.High],
+        [1004, SyncJobType.BackwardHistory, SyncPriority.High],
+      ]),
+    )
+    expect(pending).toHaveLength(3)
+    // Messages are eternal: the bot keeps what is cached
+    expect(createMessagesCache(testCacheDb).get(1001, 50)).not.toBeNull()
+  })
+
   it('keeps the newest post of each chat with sync off, and only theirs (#125)', async () => {
     // A synced DM, turned off; a channel turned on with tg chats sync
     seedSynced(1001, 10, 10)

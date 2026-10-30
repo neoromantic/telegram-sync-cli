@@ -145,7 +145,8 @@ Sync uses two cursors per chat: forward (every message up to it is cached; only 
 move it, never live updates) and backward (history backfill). Catch-up runs only for chats
 whose newest message (`top_message_id`, from the dialog pass on start and after reconnects and wakes) is
 above the forward cursor, never as polling. Priorities: real-time first; DMs
-and groups under 20 members get full history; groups of 20–100 get the newest 100 messages,
+and groups under 20 members get full history, but bots and deleted accounts get only the newest
+100 messages and catch-up; groups of 20–100 get the newest 100 messages,
 then history after the small chats; groups of unknown size or over 100 members and channels
 get catch-up and history only on request (`tg chats sync`). Every message that arrives live is
 cached, in any chat; Telegram may push few posts of channels, so each dialog pass also caches

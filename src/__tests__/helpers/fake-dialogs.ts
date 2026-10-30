@@ -23,6 +23,10 @@ export interface FakeDialogInput {
   membersCount?: number | null
   topMessage?: number
   archived?: boolean
+  /** A user dialog with a bot */
+  bot?: boolean
+  /** A user dialog with a deleted account */
+  deleted?: boolean
   /** The dialog's newest message, as the dialog list carries it */
   lastMessage?: { id: number; text?: string; date?: number }
 }
@@ -44,7 +48,14 @@ export function fakeDialog(input: FakeDialogInput): Dialog {
           type: 'user',
           displayName: title,
           username: input.username ?? null,
-          raw: { _: 'user', id, firstName: title, accessHash: 777 },
+          raw: {
+            _: 'user',
+            id,
+            firstName: title,
+            accessHash: 777,
+            bot: input.bot,
+            deleted: input.deleted,
+          },
         }
       : {
           type: 'chat',

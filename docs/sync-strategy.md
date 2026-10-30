@@ -37,6 +37,7 @@ Stored in `chat_sync_state`:
 |----------|----------|---------------|
 | **P1** | DMs + small groups (<20 members) | Full history sync |
 | **P2** | Medium groups (20–100 members) | Newest 100 messages, then history after the P1 chats |
+| **P2** | Bots and deleted accounts | Newest 100 messages and catch-up, no older history |
 | **P3** | Groups of unknown size, large groups (>100) & channels | On request only (`tg chats sync`) |
 
 Live updates don't go through the queue: they are cached as they arrive. A chat's tier
@@ -48,7 +49,8 @@ Live updates don't go through the queue: they are cached as they arrive. A chat'
 
 Implemented in `determineSyncPolicy`:
 
-- `private` → enabled, **High**
+- `private` → enabled, **High**; a bot or a deleted account → enabled, **Medium**, newest
+  page only
 - `group/supergroup`:
   - unknown member count → disabled, **Low**
   - `< 20` → enabled, **High**
@@ -58,13 +60,35 @@ Implemented in `determineSyncPolicy`:
   chats linked to it are ordinary supergroups and channels and get their own policy. A
   community has no messages of its own, so `tg chats sync` refuses to turn one on.
 
+The policy's reason is stored in `chat_sync_state.sync_policy` (`dm`, `bot`, `deleted_account`,
+`small_group`, `medium_group`, `large_group`, `unknown_size`, `channel`, `community`), and
+`tg chats list` shows it as `syncReason`, or `on_by_hand` / `off_by_hand` for a chat set with
+`tg chats sync`.
+
+### Bots and deleted accounts
+
+Bot chats are mostly notifications, and a deleted account's chat gets no new messages, yet on a
+large account they are a big share of the DMs, and each costs at least one history request in
+the first sync. So a bot (the user's `bot` flag) or a deleted account (`deleted`) gets the
+first-page treatment of a medium group, without the history after it: its first page at P2,
+then catch-up whenever the dialog list shows a newer message, and every message that arrives
+live. Its backward cursor stays where the first page left it, and `tg status` counts it as done
+once it has its first page.
+
+The dialog pass classifies each private chat from the user it lists, and a live message from a
+chat the daemon hasn't seen yet does the same from the user the update carries. A chat an
+earlier version gave full history moves to the new tier at the next dialog pass: the messages
+already cached stay (messages are eternal), and the scheduler drops its pending history jobs at
+the next refresh. `tg chats sync <bot>` turns full history on for one of them, and `--auto` goes
+back to the newest page only.
+
 ### Turning a chat on or off
 
 `tg chats sync <chat>` turns sync on for any chat but a community, `--off` turns it off and `--auto` goes back
 to the policy. The choice is stored in `chat_sync_state.sync_mode` (`auto`, `on`, `off`), and
 the dialog pass and live updates never overwrite it: an upsert keeps `sync_enabled` at 1 for
 `on` and 0 for `off`, and `sync_priority` at High for `on`, while the chat type and member
-count still update. A chat turned on gets the High tier and its first page at P0.
+count still update. A chat turned on gets the High tier, full history and its first page at P0.
 
 Running `tg chats sync <chat>` again, even with the same mode, deletes the chat's failed jobs,
 so the daemon retries them at its next refresh (see [Retries](#retries)). To retry without

@@ -9,6 +9,7 @@ import type { MessagesCache } from '../db/messages-cache'
 import type { SyncJobsService } from '../db/sync-jobs'
 import {
   type ChatSyncStateRow,
+  isHistoryAllowed,
   type SyncJobRow,
   SyncJobType,
   SyncPriority,
@@ -168,6 +169,8 @@ class SyncSchedulerImpl implements SyncScheduler {
   queueBackwardHistory(chatId: number): void {
     const state = this.enabledState(chatId)
     if (!state || state.history_complete) return
+    // Bots and deleted accounts get their first page only (#131)
+    if (!isHistoryAllowed(state)) return
 
     // The first page sets both cursors, so it comes before any history.
     if (state.forward_cursor === null) {
@@ -224,6 +227,11 @@ class SyncSchedulerImpl implements SyncScheduler {
    * until the failed row is deleted.
    */
   refreshQueues(): void {
+    // A dialog pass may have found that a chat is a bot or a deleted
+    // account, which gets no older history (#131): its pending history jobs
+    // go, its cached messages stay.
+    this.jobsService.deletePendingHistoryOfFirstPageOnlyChats()
+
     // Catch-up only for chats whose newest message is above the cursor or
     // unknown. Live updates don't move the cursor or the top, so a chat
     // that is caught up stays that way until a dialog pass sees more.

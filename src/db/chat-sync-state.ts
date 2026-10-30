@@ -6,8 +6,11 @@ import type { Database } from 'bun:sqlite'
 import {
   ChatSyncStateRow,
   determineSyncPolicy,
+  historyAllowedSql,
+  policyUserFromReason,
   type SyncChatType,
   type SyncMode,
+  type SyncPolicyReason,
   SyncPriority,
 } from './sync-schema'
 
@@ -24,6 +27,8 @@ export interface ChatSyncStateInput {
   forward_cursor?: number | null
   backward_cursor?: number | null
   total_messages?: number | null
+  /** The policy's reason; omitted or null keeps the stored one */
+  sync_policy?: SyncPolicyReason | null
 }
 
 /**
@@ -80,6 +85,28 @@ export interface ResetSyncStateOptions {
 }
 
 /**
+ * Why a chat syncs or not, as `tg chats list` shows it: the user's choice
+ * from `tg chats sync`, else the policy's reason (#131)
+ */
+export type SyncReason = SyncPolicyReason | 'on_by_hand' | 'off_by_hand'
+
+export function syncReason(
+  state: Pick<
+    ChatSyncStateRow,
+    'sync_mode' | 'sync_policy' | 'chat_type' | 'member_count'
+  >,
+): SyncReason {
+  if (state.sync_mode === 'on') return 'on_by_hand'
+  if (state.sync_mode === 'off') return 'off_by_hand'
+  // Rows of older versions have no reason until the next dialog pass
+  return (
+    state.sync_policy ??
+    determineSyncPolicy(state.chat_type as SyncChatType, state.member_count)
+      .reason
+  )
+}
+
+/**
  * Chat sync state service interface
  */
 export interface ChatSyncStateService {
@@ -115,7 +142,10 @@ export interface ChatSyncStateService {
   getCatchupDue(): ChatSyncStateRow[]
   /** Enabled chats with a forward cursor */
   getEnabledWithCursor(): ChatSyncStateRow[]
-  /** Enabled chats that had their first page and have history left */
+  /**
+   * Enabled chats that had their first page and have history left, except
+   * those the policy gives the newest page only (bots, deleted accounts)
+   */
   getHistoryDue(): ChatSyncStateRow[]
   /** Store one catch-up page: the cursor, the counter and maybe the top */
   recordCatchupPage(chatId: number, page: CatchupPageResult): void
@@ -133,7 +163,8 @@ export interface ChatSyncStateService {
   setSyncEnabled(chatId: number, enabled: boolean): void
   /**
    * Set the user's choice and the sync_enabled and sync_priority it means:
-   * 'on' syncs at High, 'off' doesn't sync, 'auto' follows the policy
+   * 'on' syncs at High with full history, 'off' doesn't sync, 'auto'
+   * follows the policy
    */
   setSyncMode(chatId: number, mode: SyncMode): void
   /** Reset sync state to allow re-syncing (sets cursors to NULL) */
@@ -154,10 +185,12 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
     upsert: db.prepare(`
       INSERT INTO chat_sync_state (
         chat_id, chat_type, member_count, sync_priority, sync_enabled,
-        forward_cursor, backward_cursor, total_messages, updated_at
+        forward_cursor, backward_cursor, total_messages, sync_policy,
+        updated_at
       ) VALUES (
         $chat_id, $chat_type, $member_count, $sync_priority, $sync_enabled,
-        $forward_cursor, $backward_cursor, $total_messages, $now
+        $forward_cursor, $backward_cursor, $total_messages, $sync_policy,
+        $now
       )
       ON CONFLICT(chat_id) DO UPDATE SET
         chat_type = excluded.chat_type,
@@ -170,6 +203,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         forward_cursor = COALESCE(excluded.forward_cursor, chat_sync_state.forward_cursor),
         backward_cursor = COALESCE(excluded.backward_cursor, chat_sync_state.backward_cursor),
         total_messages = COALESCE(excluded.total_messages, chat_sync_state.total_messages),
+        sync_policy = COALESCE(excluded.sync_policy, chat_sync_state.sync_policy),
         updated_at = excluded.updated_at
     `),
 
@@ -277,6 +311,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       WHERE sync_enabled = 1
         AND forward_cursor IS NOT NULL
         AND history_complete = 0
+        AND ${historyAllowedSql('chat_sync_state')}
       ORDER BY sync_priority ASC, chat_id ASC
     `)
       .as(ChatSyncStateRow),
@@ -375,6 +410,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $forward_cursor: input.forward_cursor ?? null,
         $backward_cursor: input.backward_cursor ?? null,
         $total_messages: input.total_messages ?? null,
+        $sync_policy: input.sync_policy ?? null,
         $now: Date.now(),
       })
     },
@@ -534,6 +570,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       const policy = determineSyncPolicy(
         state.chat_type as SyncChatType,
         state.member_count,
+        policyUserFromReason(state.sync_policy),
       )
       const enabled =
         mode === 'on' ? true : mode === 'off' ? false : policy.enabled

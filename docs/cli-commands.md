@@ -80,13 +80,21 @@ tg chats sync @examplenews        # sync this chat in the background
 community, a collection of linked chats). `--type community` lists the communities the
 account joined once a daemon start or `tg chats list --fresh` has cached them.
 
+Each item of `tg chats list` has `syncEnabled` (whether the daemon syncs the chat) and
+`syncReason`, why: `dm`, `bot`, `deleted_account`, `small_group`, `medium_group` (the default
+policy), `large_group`, `unknown_size`, `channel`, `community` (off by the policy), or
+`on_by_hand` / `off_by_hand` (set with `tg chats sync`). It is `null` for a chat without sync
+state: an archived chat that hasn't synced yet, or one no daemon start has seen.
+
 `tg chats get --id` reads an ID like `tg chats sync` does. A bare 0.2.0 ID that names both a
 cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
 `details: { identifier, candidates }`.
 
 ### Chat sync
 
-The daemon syncs DMs and groups of up to 100 members by default. Archived ones start when a
+The daemon syncs DMs and groups of up to 100 members by default. A bot or a deleted account
+gets its newest 100 messages and new ones, but no older history unless you turn it on with
+`tg chats sync`; messages already cached stay. Archived ones start when a
 message arrives in them live, or with `tg chats sync`. A community has no messages of its own,
 so `tg chats sync <community>` refuses to turn it on (see the errors below); the chats linked to
 it are ordinary supergroups and channels and sync as such. Groups of unknown size or over 100
@@ -131,6 +139,8 @@ tg chats sync @examplenews --auto # follow the default policy again
   chat again until it is cleaned up a day later, so running the command again with the chat's
   current mode retries it at the next refresh: `--auto` for a chat that follows the policy (the
   default), no flag for one turned on. Without a flag the command turns the chat on.
+- `syncReason` says why the chat syncs or not, as in `tg chats list`. A bot turned on gets
+  its full history; `--auto` gives it the newest page only again.
   `tg status` prints the command for each failed job.
 - `--account` picks the account whose sync state changes; another account's chats aren't in
   its cache, so the command reports them as not found (`details.account_id` names the account).
@@ -149,6 +159,7 @@ tg chats sync @examplenews --auto # follow the default policy again
     "username": "examplenews",
     "mode": "on",
     "syncEnabled": true,
+    "syncReason": "on_by_hand",
     "historyComplete": false,
     "syncedMessages": 0,
     "changed": true,

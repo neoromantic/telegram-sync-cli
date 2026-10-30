@@ -5,7 +5,7 @@
  * last history pages. Database only.
  */
 import type { Database } from 'bun:sqlite'
-import { SyncJobStatus, SyncJobType } from './sync-schema'
+import { historyDoneSql, SyncJobStatus, SyncJobType } from './sync-schema'
 
 /** The span the pace of history pages is measured over */
 export const HISTORY_PACE_WINDOW_MS = 15 * 60 * 1000
@@ -74,6 +74,8 @@ interface ChatRow {
   chat_id: number
   chat_type: string
   history_complete: number
+  /** History reached the start, or the chat gets its newest page only */
+  history_done: number
   total_messages: number | null
   cached: number
 }
@@ -115,7 +117,8 @@ export function readHistoryProgress(
   // The primary key (chat_id, message_id) counts each chat's messages
   const rows = db
     .query(
-      `SELECT s.chat_id, s.chat_type, s.history_complete, s.total_messages,
+      `SELECT s.chat_id, s.chat_type, s.history_complete,
+         ${historyDoneSql('s')} AS history_done, s.total_messages,
          (SELECT COUNT(*) FROM messages_cache m WHERE m.chat_id = s.chat_id) AS cached
        FROM chat_sync_state s
        WHERE s.sync_enabled = 1`,
@@ -125,9 +128,12 @@ export function readHistoryProgress(
   const progress = emptyHistoryProgress()
   const pending: PendingHistoryChat[] = []
   for (const row of rows) {
-    const pendingChat = row.history_complete === 0
+    const pendingChat = row.history_done === 0
     if (pendingChat) progress.chats_pending++
-    if (row.total_messages === null) {
+    // A bot or deleted account keeps its newest page only (#131): what is
+    // cached is all it gets, whatever Telegram's count
+    const newestPageOnly = !pendingChat && row.history_complete === 0
+    if (row.total_messages === null || newestPageOnly) {
       if (pendingChat) {
         progress.chats_without_count++
       } else {

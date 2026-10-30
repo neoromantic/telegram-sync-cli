@@ -804,7 +804,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         sync_priority: {
           description:
-            "Sync tier: 1=high (DMs, groups under 20 members), 2=medium (20-100 members), 3=low (not synced unless turned on). Also the priority of the chat's jobs inside each lane",
+            "Sync tier: 1=high (DMs, groups under 20 members), 2=medium (20-100 members; bots and deleted accounts), 3=low (not synced unless turned on). Also the priority of the chat's jobs inside each lane",
           enumValues: ['1', '2', '3'],
           defaultValue: 3,
         },
@@ -857,6 +857,23 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           enumValues: ['auto', 'on', 'off'],
           semanticType: 'enum',
           defaultValue: 'auto',
+        },
+        sync_policy: {
+          description:
+            "Why the sync policy turns the chat on or off, set by each dialog pass and the first live message. 'bot' and 'deleted_account' get the newest page and catch-up but no older history unless sync_mode is 'on'. NULL: not classified yet",
+          enumValues: [
+            'dm',
+            'bot',
+            'deleted_account',
+            'small_group',
+            'medium_group',
+            'large_group',
+            'unknown_size',
+            'channel',
+            'community',
+          ],
+          semanticType: 'enum',
+          nullable: true,
         },
       },
       indexes: {

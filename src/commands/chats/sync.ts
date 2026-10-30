@@ -1,6 +1,9 @@
 import type { Database } from 'bun:sqlite'
 import { defineCommand } from 'citty'
-import { createChatSyncStateService } from '../../db/chat-sync-state'
+import {
+  createChatSyncStateService,
+  syncReason,
+} from '../../db/chat-sync-state'
 import { type CachedChat, createChatsCache } from '../../db/chats-cache'
 import { createSyncJobsService } from '../../db/sync-jobs'
 import {
@@ -154,7 +157,7 @@ export const syncChatCommand = defineCommand({
     auto: {
       type: 'boolean',
       description:
-        'Follow the default policy again (DMs and groups up to 100 members)',
+        'Follow the default policy again (DMs and groups up to 100 members; the newest page only for bots and deleted accounts)',
       default: false,
     },
     account: {
@@ -215,6 +218,7 @@ export const syncChatCommand = defineCommand({
       username: chat.username,
       mode: state.sync_mode,
       syncEnabled: state.sync_enabled === 1,
+      syncReason: syncReason(state),
       historyComplete: state.history_complete === 1,
       syncedMessages: state.synced_messages,
       changed,

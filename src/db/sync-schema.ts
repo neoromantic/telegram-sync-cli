@@ -606,7 +606,8 @@ export function initSyncSchema(
       created_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
       updated_at        INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
       top_message_id    INTEGER,
-      sync_mode         TEXT NOT NULL DEFAULT 'auto'
+      sync_mode         TEXT NOT NULL DEFAULT 'auto',
+      sync_policy       TEXT
     )
   `)
 
@@ -618,6 +619,8 @@ export function initSyncSchema(
     'sync_mode',
     "TEXT NOT NULL DEFAULT 'auto'",
   )
+  // Added in 0.10: why the policy turns the chat on or off (#131)
+  ensureColumn(db, 'chat_sync_state', 'sync_policy', 'TEXT')
 
   // Chat sync state indexes
   db.run(`
@@ -737,6 +740,8 @@ export class ChatSyncStateRow {
   top_message_id!: number | null
   /** Set by `tg chats sync`: 'auto' follows the policy, 'on' and 'off' override it */
   sync_mode!: SyncMode
+  /** The policy's reason for the chat; NULL until a dialog pass or live message sets it */
+  sync_policy!: SyncPolicyReason | null
 }
 
 /** Sync job row class */
@@ -775,7 +780,10 @@ export enum SyncPriority {
   Realtime = 0,
   /** P1 - DMs and small groups (<20 members), full sync */
   High = 1,
-  /** P2 - Medium groups (20-100 members), partial sync */
+  /**
+   * P2 - Medium groups (20-100 members), partial sync; bots and deleted
+   * accounts, the newest page only
+   */
   Medium = 2,
   /** P3 - Groups of unknown size or over 100 members and channels, on request only */
   Low = 3,
@@ -820,8 +828,88 @@ export type SyncMode = 'auto' | 'on' | 'off'
 export const SYNC_MODES: readonly SyncMode[] = ['auto', 'on', 'off']
 
 /**
+ * Why the policy turns a chat on or off, stored as
+ * `chat_sync_state.sync_policy` (#131)
+ */
+export type SyncPolicyReason =
+  | 'dm'
+  | 'bot'
+  | 'deleted_account'
+  | 'small_group'
+  | 'medium_group'
+  | 'large_group'
+  | 'unknown_size'
+  | 'channel'
+  | 'community'
+
+/** Policies that get the newest page and catch-up, but no older history */
+export const FIRST_PAGE_ONLY_POLICIES: readonly SyncPolicyReason[] = [
+  'bot',
+  'deleted_account',
+]
+
+/**
+ * SQL condition: the chat in `table` gets older history. A chat turned on
+ * by hand always does; under the policy, bots and deleted accounts don't.
+ */
+export function historyAllowedSql(table: string): string {
+  const reasons = FIRST_PAGE_ONLY_POLICIES.map((reason) => `'${reason}'`)
+  return `(${table}.sync_mode = 'on' OR ${table}.sync_policy IS NULL OR ${table}.sync_policy NOT IN (${reasons.join(', ')}))`
+}
+
+/**
+ * SQL condition: the chat in `table` needs no more history, because it
+ * reached the start or because it gets its newest page only and had it
+ */
+export function historyDoneSql(table: string): string {
+  return `(${table}.history_complete = 1 OR (${table}.forward_cursor IS NOT NULL AND NOT ${historyAllowedSql(table)}))`
+}
+
+/** Whether a chat with this sync state gets older history */
+export function isHistoryAllowed(state: {
+  sync_mode: SyncMode
+  sync_policy: SyncPolicyReason | null
+}): boolean {
+  return (
+    state.sync_mode === 'on' ||
+    state.sync_policy === null ||
+    !FIRST_PAGE_ONLY_POLICIES.includes(state.sync_policy)
+  )
+}
+
+/** What the policy knows about the other side of a private chat */
+export interface SyncPolicyUser {
+  bot?: boolean
+  deleted?: boolean
+}
+
+export interface SyncPolicy {
+  priority: SyncPriority
+  enabled: boolean
+  /** Whether the chat gets older history after its first page */
+  history: boolean
+  reason: SyncPolicyReason
+}
+
+/** Whether a raw Telegram user is a bot or a deleted account; a chat is neither */
+export function rawUserPolicy(raw: unknown): SyncPolicyUser {
+  const user = raw as { _?: string; bot?: boolean; deleted?: boolean } | null
+  if (user?._ !== 'user') return {}
+  return { bot: Boolean(user.bot), deleted: Boolean(user.deleted) }
+}
+
+/** The user flags a stored policy reason stands for */
+export function policyUserFromReason(
+  reason: SyncPolicyReason | null | undefined,
+): SyncPolicyUser {
+  return { bot: reason === 'bot', deleted: reason === 'deleted_account' }
+}
+
+/**
  * Determine sync policy based on chat type and member count:
  * - private chats and groups under 20 members: High, full history
+ * - bots and deleted accounts: Medium, the newest 100 messages and
+ *   catch-up, but no older history (#131)
  * - groups of 20-100 members: Medium, the newest 100 messages, then history
  *   after the small chats
  * - groups of unknown size or over 100 members, and channels: off, synced
@@ -835,10 +923,31 @@ export const SYNC_MODES: readonly SyncMode[] = ['auto', 'on', 'off']
 export function determineSyncPolicy(
   chatType: SyncChatType,
   memberCount?: number | null,
-): { priority: SyncPriority; enabled: boolean } {
+  user: SyncPolicyUser = {},
+): SyncPolicy {
+  const off = (reason: SyncPolicyReason): SyncPolicy => ({
+    priority: SyncPriority.Low,
+    enabled: false,
+    history: false,
+    reason,
+  })
+
   switch (chatType) {
     case 'private':
-      return { priority: SyncPriority.High, enabled: true }
+      if (user.bot || user.deleted) {
+        return {
+          priority: SyncPriority.Medium,
+          enabled: true,
+          history: false,
+          reason: user.bot ? 'bot' : 'deleted_account',
+        }
+      }
+      return {
+        priority: SyncPriority.High,
+        enabled: true,
+        history: true,
+        reason: 'dm',
+      }
 
     case 'group':
     case 'supergroup':
@@ -847,21 +956,30 @@ export function determineSyncPolicy(
         memberCount === null ||
         memberCount <= 0
       ) {
-        return { priority: SyncPriority.Low, enabled: false }
+        return off('unknown_size')
       }
       if (memberCount < 20) {
-        return { priority: SyncPriority.High, enabled: true }
+        return {
+          priority: SyncPriority.High,
+          enabled: true,
+          history: true,
+          reason: 'small_group',
+        }
       }
       if (memberCount <= 100) {
-        return { priority: SyncPriority.Medium, enabled: true }
+        return {
+          priority: SyncPriority.Medium,
+          enabled: true,
+          history: true,
+          reason: 'medium_group',
+        }
       }
-      return { priority: SyncPriority.Low, enabled: false }
+      return off('large_group')
 
     case 'channel':
-    case 'community':
-      return { priority: SyncPriority.Low, enabled: false }
+      return off('channel')
 
     default:
-      return { priority: SyncPriority.Low, enabled: false }
+      return off('community')
   }
 }

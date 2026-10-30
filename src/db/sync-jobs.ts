@@ -4,6 +4,7 @@
  */
 import type { Database } from 'bun:sqlite'
 import {
+  historyAllowedSql,
   SyncJobRow,
   SyncJobStatus,
   SyncJobType,
@@ -124,6 +125,11 @@ export interface SyncJobsService {
   deletePendingOfType(jobType: SyncJobType): number
   /** Delete pending jobs of chats that are disabled or have no sync state */
   deletePendingForInactiveChats(): number
+  /**
+   * Delete pending history jobs of chats the policy gives the newest page
+   * only (bots and deleted accounts, unless turned on by hand)
+   */
+  deletePendingHistoryOfFirstPageOnlyChats(): number
   /** Set each pending job's priority to its chat's lane priority */
   alignPendingPriorities(): number
   /** Recover jobs that were running when daemon crashed (reset to pending) */
@@ -314,6 +320,16 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         AND NOT EXISTS (
           SELECT 1 FROM chat_sync_state s
           WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
+        )
+    `),
+
+    deletePendingHistoryOfFirstPageOnlyChats: db.prepare(`
+      DELETE FROM sync_jobs
+      WHERE status = $status
+        AND job_type IN ($backward, $full)
+        AND EXISTS (
+          SELECT 1 FROM chat_sync_state s
+          WHERE s.chat_id = sync_jobs.chat_id AND NOT ${historyAllowedSql('s')}
         )
     `),
 
@@ -568,6 +584,14 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     deletePendingForInactiveChats(): number {
       return stmts.deletePendingForInactiveChats.run({
         $status: SyncJobStatus.Pending,
+      }).changes
+    },
+
+    deletePendingHistoryOfFirstPageOnlyChats(): number {
+      return stmts.deletePendingHistoryOfFirstPageOnlyChats.run({
+        $status: SyncJobStatus.Pending,
+        $backward: SyncJobType.BackwardHistory,
+        $full: SyncJobType.FullSync,
       }).changes
     },
 
