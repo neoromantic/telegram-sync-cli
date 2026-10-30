@@ -21,8 +21,8 @@ Key behaviors:
 - `src/db/rate-limits.ts` — `RateLimitsService`
 - `src/utils/telegram-rate-limits.ts` — `trackApiCall` (counts, times and logs one call) and
   the CLI wrapper
-- `src/daemon/*` — the daemon's sync jobs and contacts checks call through `trackApiCall` on
-  the same service
+- `src/daemon/daemon-api-activity.ts` — a network middleware of the daemon's clients that
+  counts and logs every request they send, on the same service
 
 ## Database Tables (each account's cache.db)
 
@@ -37,8 +37,12 @@ Columns (see `docs/database-schema.md` for full definitions):
 - `flood_wait_until`
 
 ### api_activity
-Audits API calls (success/errors): every call of a CLI command, and the daemon's history pages
-and contacts checks.
+Audits API calls (success/errors): every call of a CLI command, and every request of the
+daemon: sync pages, contacts checks, dialog passes, the joined-communities check, `getMe` at
+start, reconnect and health checks (`users.getUsers`), and mtcute's own requests such as
+`updates.getDifference`. The daemon logs in a network middleware inside mtcute's flood waiter,
+so a FLOOD_WAIT and the retry after it are two rows; a write that fails never fails the
+request.
 
 Columns:
 - `timestamp` — when the call started, in ms
@@ -47,8 +51,8 @@ Columns:
 - `error_code` — Telegram's error code (`420` for a FLOOD_WAIT, `400`, …); `NULL` for an error
   that isn't Telegram's
 - `response_ms` — how long the call took
-- `context` — who called (`cli:send`, `daemon:sync`, `daemon:contacts`, …), or the error
-  message of a failed call
+- `context` — who called (`cli:send`, `cli:api`, …, `daemon`), or the error message of a
+  failed call
 
 0.8.0 and older wrote `timestamp` in seconds. The next prune (the daemon's, or `tg db vacuum`'s)
 turns those rows into ms before it deletes old ones: a value below 10^11 can only be seconds,
@@ -75,8 +79,8 @@ FLOOD_WAIT is never forgotten, and so is the current 60-second window.
 
 1. Before an API call, the caller checks `RateLimitsService.isBlocked()`.
 2. If blocked, the call returns a rate-limited result with wait time.
-3. `trackApiCall()` increments the window count with `recordCall()` and, when the call ends,
-   logs it to `api_activity` with `logActivity()`.
+3. `trackApiCall()` (CLI) or the daemon's middleware increments the window count with
+   `recordCall()` and, when the call ends, logs it to `api_activity` with `logActivity()`.
 4. On FLOOD_WAIT errors, `setFloodWait()` records the block in `rate_limits`.
 
 ## CLI Integration

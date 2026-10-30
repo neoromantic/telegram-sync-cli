@@ -155,10 +155,6 @@ describe('maybeSyncContacts', () => {
     expect(ctx.logger.info).toHaveBeenCalledWith(
       '[Account 1] Contacts synced: 2 (0 no longer contacts)',
     )
-    // The call is in the account's API activity log
-    expect(createRateLimitsService(db).getActivity()).toMatchObject([
-      { method: 'contacts.getContacts', success: 1, error_code: null },
-    ])
   })
 
   it('makes no call while the list is younger than the peer TTL', () => {

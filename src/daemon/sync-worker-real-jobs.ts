@@ -6,7 +6,6 @@ import {
   getInputPeer,
   getWaitTime,
   resolveJobError,
-  trackJobApiCall,
 } from './sync-worker-real-context'
 import {
   cachePageUsers,
@@ -43,8 +42,11 @@ async function fetchJobPage(
   inputPeer: tl.TypeInputPeer,
   request: Parameters<typeof fetchMessagesRaw>[2],
 ): Promise<unknown[]> {
-  const page = await trackJobApiCall(ctx, () =>
-    fetchMessagesRaw(ctx.client, inputPeer, request, ctx.signal),
+  const page = await fetchMessagesRaw(
+    ctx.client,
+    inputPeer,
+    request,
+    ctx.signal,
   )
   cachePageUsers(ctx.usersCache, page.users)
   const total = historyTotal(page, request)

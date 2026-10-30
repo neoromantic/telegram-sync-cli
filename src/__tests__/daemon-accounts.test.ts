@@ -21,12 +21,15 @@ import {
   setupSignalHandlers,
 } from '../daemon/daemon-accounts'
 import {
+  type AccountRuntime,
   createDaemonRuntime,
   type DaemonContext,
   requestShutdown,
 } from '../daemon/daemon-context'
 import { isDaemonStopError } from '../daemon/daemon-utils'
 import type { AccountConnectionState } from '../daemon/types'
+import { createRateLimitsService } from '../db/rate-limits'
+import { createTestCacheDatabase } from '../db/schema'
 
 class MockEmitter<T> {
   handlers: Array<(value: T) => void> = []
@@ -438,5 +441,116 @@ describe('daemonNetworkMiddlewares', () => {
     )
     // The wait ended without a retry
     expect(sent).toEqual(['messages.getHistory'])
+  })
+
+  describe('API activity', () => {
+    const manager = {
+      teardownSignal: new AbortController().signal,
+      _log: { warn: () => {} },
+    } as unknown as RpcCallMiddlewareContext['manager']
+    const rpc = (method: string): RpcCallMiddlewareContext => ({
+      request: { _: method } as unknown as tl.RpcMethod,
+      manager,
+    })
+
+    /** A context whose account 1 has a cache */
+    function withCache() {
+      const ctx = createContext()
+      const { db } = createTestCacheDatabase()
+      ctx.runtime.accounts.set(1, { accountId: 1, db } as AccountRuntime)
+      return { ctx, db }
+    }
+
+    it('logs every request the daemon sends to the account, in ms: a dialog pass, the communities check, getMe', async () => {
+      const { ctx, db } = withCache()
+      const call = compose(daemonNetworkMiddlewares(ctx, 1), async () => ({
+        _: 'ok',
+      }))
+      const before = Date.now()
+
+      // iterDialogs pages, getJoinedCommunities, getMe (start, reconnect, health check)
+      for (const method of [
+        'messages.getDialogs',
+        'messages.getDialogs',
+        'communities.getJoinedCommunities',
+        'users.getUsers',
+      ]) {
+        await call(rpc(method))
+      }
+
+      const rateLimits = createRateLimitsService(db)
+      const rows = rateLimits.getActivity()
+      expect(rows).toHaveLength(4)
+      for (const row of rows) {
+        expect(row).toMatchObject({ success: 1, error_code: null })
+        expect(row.timestamp).toBeGreaterThanOrEqual(before)
+        expect(row.timestamp).toBeLessThanOrEqual(Date.now())
+      }
+      const status = rateLimits.getStatus()
+      expect(status.totalCalls).toBe(4)
+      expect(status.callsByMethod).toEqual({
+        'messages.getDialogs': 2,
+        'communities.getJoinedCommunities': 1,
+        'users.getUsers': 1,
+      })
+      expect(rateLimits.getCallCount('messages.getDialogs', 1)).toBe(2)
+      db.close()
+    })
+
+    it("logs Telegram's error code, and an error that isn't Telegram's without one", async () => {
+      const { ctx, db } = withCache()
+      const call = compose(daemonNetworkMiddlewares(ctx, 1), async (req) => {
+        if (req.request._ === 'channels.getMessages') {
+          return {
+            _: 'mt_rpc_error',
+            errorCode: 400,
+            errorMessage: 'CHANNEL_PRIVATE',
+          }
+        }
+        throw new Error('connection reset')
+      })
+
+      await call(rpc('channels.getMessages'))
+      const thrown = await call(rpc('users.getUsers')).catch(
+        (err: unknown) => err,
+      )
+
+      expect(thrown).toBeInstanceOf(Error)
+      expect(
+        createRateLimitsService(db)
+          .getActivity()
+          .sort((a, b) => a.id - b.id),
+      ).toMatchObject([
+        {
+          method: 'channels.getMessages',
+          success: 0,
+          error_code: 400,
+          error_message: 'CHANNEL_PRIVATE',
+        },
+        {
+          method: 'users.getUsers',
+          success: 0,
+          error_code: null,
+          error_message: 'connection reset',
+        },
+      ])
+      db.close()
+    })
+
+    it('sends the request without a log for an account without a cache, or a cache that fails', async () => {
+      const ctx = createContext()
+      const call = compose(daemonNetworkMiddlewares(ctx, 1), async () => ({
+        _: 'ok',
+      }))
+      expect(await call(rpc('users.getUsers'))).toEqual({ _: 'ok' })
+
+      const { ctx: closed, db } = withCache()
+      db.close()
+      const closedCall = compose(
+        daemonNetworkMiddlewares(closed, 1),
+        async () => ({ _: 'ok' }),
+      )
+      expect(await closedCall(rpc('users.getUsers'))).toEqual({ _: 'ok' })
+    })
   })
 })

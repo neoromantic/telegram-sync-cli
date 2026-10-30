@@ -15,7 +15,6 @@ import {
   getWaitTime,
   resolveFloodWaitResult,
   resolveJobError,
-  trackJobApiCall,
 } from '../daemon/sync-worker-real-context'
 import {
   buildInputPeer,
@@ -379,7 +378,7 @@ describe('sync-worker real helpers/context', () => {
   })
 
   describe('sync-worker real context helpers', () => {
-    it('records API call and checks wait state', async () => {
+    it('records API call and checks wait state', () => {
       const rateLimits = createRateLimitsService(db)
       const ctx: RealSyncWorkerContext = {
         client: createMockClient(),
@@ -394,7 +393,7 @@ describe('sync-worker real helpers/context', () => {
       }
 
       expect(canMakeApiCall(ctx)).toBe(true)
-      await trackJobApiCall(ctx, async () => null)
+      rateLimits.recordCall('messages.getHistory')
       expect(rateLimits.getCallCount('messages.getHistory', 1)).toBe(1)
     })
 

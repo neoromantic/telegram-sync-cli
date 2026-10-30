@@ -1002,7 +1002,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     // -------------------------------------------------------------------------
     api_activity: {
       description:
-        "Audit log of Telegram API calls: every CLI call and the daemon's history pages and contacts checks. tg status counts the last 60 seconds from it.",
+        'Audit log of Telegram API calls: every CLI call and every request of the daemon. tg status counts the last 60 seconds from it.',
       primaryKey: 'id',
       ttl: '7 days',
       ttlMs: 7 * 24 * 60 * 60 * 1000,
@@ -1037,7 +1037,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         context: {
           description:
-            'Who called (cli:send, daemon:sync, daemon:contacts, ...), or the error message of a failed call',
+            'Who called (cli:send, cli:api, ..., daemon), or the error message of a failed call',
           nullable: true,
         },
       },

@@ -6,6 +6,7 @@ import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { TelegramClient } from '@mtcute/bun'
 import { fetchJoinedCommunities } from '../commands/chats/helpers'
+import { daemonNetworkMiddlewares } from '../daemon/daemon-accounts'
 import {
   createDaemonRuntime,
   type DaemonContext,
@@ -19,6 +20,7 @@ import {
 } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
+import { createRateLimitsService } from '../db/rate-limits'
 import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
@@ -752,6 +754,75 @@ describe('bootstrapDialogs', () => {
       expect(call).toHaveBeenCalledTimes(1)
       expect(signals).toHaveLength(1)
       expect(signals[0]).toBe(signal)
+    } finally {
+      await client.destroy()
+    }
+  })
+
+  it("logs a dialog pass, the communities check and a health check's getMe to api_activity", async () => {
+    const { syncAccountDialogs } = await import('../daemon/daemon-bootstrap')
+    // A real client on the daemon's middlewares; only the network below
+    // them is replaced
+    const client = new TelegramClient({
+      apiId: 1,
+      apiHash: 'test-api-hash',
+      storage: ':memory:',
+      network: { middlewares: daemonNetworkMiddlewares(ctx, 1) },
+    })
+    await client.prepare()
+    const internals = client._client as unknown as {
+      _connected: boolean
+      mt: { network: { _call: (request: { _: string }) => Promise<unknown> } }
+    }
+    internals._connected = true
+    const sent: string[] = []
+    internals.mt.network._call = async (request) => {
+      sent.push(request._)
+      switch (request._) {
+        case 'messages.getDialogs':
+          return {
+            _: 'messages.dialogs',
+            dialogs: [],
+            messages: [],
+            chats: [],
+            users: [],
+          }
+        case 'users.getUsers':
+          return [
+            {
+              _: 'user',
+              id: 5550100,
+              self: true,
+              firstName: 'Example',
+              accessHash: toLong('1'),
+            },
+          ]
+        default:
+          return { _: 'messages.chats', chats: [] }
+      }
+    }
+    connect(ctx, 1, client)
+    addAccountRuntime(ctx, 1, testCacheDb)
+
+    try {
+      await syncAccountDialogs(ctx, 1, client)
+      await client.getMe()
+
+      expect(sent).toEqual([
+        'messages.getDialogs',
+        'communities.getJoinedCommunities',
+        'users.getUsers',
+      ])
+      const rateLimits = createRateLimitsService(testCacheDb)
+      expect(rateLimits.getActivity()).toHaveLength(3)
+      expect(rateLimits.getStatus()).toMatchObject({
+        totalCalls: 3,
+        callsByMethod: {
+          'messages.getDialogs': 1,
+          'communities.getJoinedCommunities': 1,
+          'users.getUsers': 1,
+        },
+      })
     } finally {
       await client.destroy()
     }

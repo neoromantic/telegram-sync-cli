@@ -47,8 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tg status` `rate_limits.api_calls_last_minute` and `calls_by_method` count the last 60
   seconds instead of the current calendar minute, which showed 2 calls while the daemon made
   about 14 a minute (#127).
-- The daemon logs its history pages and contacts checks to `api_activity` (method, outcome,
-  Telegram's error code, duration), as CLI commands do; it logged none. `api_activity`
+- The daemon logs every request it sends to `api_activity` (method, outcome, Telegram's error
+  code, duration), as CLI commands do: sync pages, contacts checks, dialog passes, `getMe`
+  health checks and mtcute's update requests; it logged none. `api_activity`
   timestamps are in ms, as documented: older versions wrote seconds, and the next prune turns
   those rows into ms (#127).
 

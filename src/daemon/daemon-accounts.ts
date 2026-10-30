@@ -15,6 +15,7 @@ import {
 } from '../utils/message-parser'
 import { messageTypeOfMediaType } from '../utils/message-type'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
+import { apiActivityMiddleware } from './daemon-api-activity'
 import { createConnectionWatch, noteConnectionState } from './daemon-catch-up'
 import {
   handleContactRawUpdate,
@@ -326,11 +327,21 @@ const DAEMON_FLOOD_WAIT_MAX_MS = 5 * 60 * 1000
  * The network middlewares of the account's daemon client. The flood waiter
  * sleeps inside the request; a request given the daemon's stop signal
  * (`ctx.runtime.shutdown`) ends that sleep when the daemon stops (#64).
+ * Innermost, every request goes to the account's api_activity (#127).
  */
 export function daemonNetworkMiddlewares(
   ctx: DaemonContext,
   accountId: number,
 ) {
+  return [
+    ...basicDaemonMiddlewares(ctx, accountId),
+    apiActivityMiddleware(
+      () => ctx.runtime.accounts.get(accountId)?.db ?? null,
+    ),
+  ]
+}
+
+function basicDaemonMiddlewares(ctx: DaemonContext, accountId: number) {
   return networkMiddlewares.basic({
     floodWaiter: {
       maxWait: DAEMON_FLOOD_WAIT_MAX_MS,
