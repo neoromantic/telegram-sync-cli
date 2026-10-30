@@ -8,14 +8,19 @@ import { createDaemonRuntime, requestShutdown } from '../daemon/daemon-context'
 import { mainLoop } from '../daemon/daemon-loop'
 import { startDueJobs, waitForJobsInFlight } from '../daemon/daemon-scheduler'
 import type { SyncScheduler } from '../daemon/scheduler'
+import { createSyncScheduler } from '../daemon/scheduler'
 import type { RealSyncWorker } from '../daemon/sync-worker'
 import type { AccountConnectionState } from '../daemon/types'
+import { createChatSyncStateService } from '../db/chat-sync-state'
 import type { DaemonStatusService, DaemonTick } from '../db/daemon-status'
+import { createMessagesCache } from '../db/messages-cache'
+import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
 import {
   addAccountRuntime,
   createAccountCacheDb,
 } from './helpers/daemon-runtime'
+import { fakeDialogClient } from './helpers/fake-dialogs'
 
 function createMockStatusService(
   overrides: Partial<DaemonStatusService> = {},
@@ -325,6 +330,78 @@ describe('mainLoop', () => {
 
     expect(ctx.state.accounts.get(1)?.status).toBe('error')
     expect(ctx.state.accounts.get(1)?.nextReconnectAt).toBeDefined()
+  })
+
+  it('catches up after the computer slept during a health check (#124)', async () => {
+    const ctx = createContext()
+    const db = createAccountCacheDb()
+    const chatSyncState = createChatSyncStateService(db)
+    chatSyncState.upsert({
+      chat_id: 1002,
+      chat_type: 'private',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+      forward_cursor: 1000,
+      backward_cursor: 1,
+    })
+    chatSyncState.markHistoryComplete(1002)
+    chatSyncState.raiseTopMessageId(1002, 1000)
+    const jobsService = createSyncJobsService(db)
+    addAccountRuntime(ctx, 1, db, {
+      statusService: stopAfterTicks(ctx, 72),
+      scheduler: createSyncScheduler({
+        db,
+        jobsService,
+        chatSyncState,
+        messagesCache: createMessagesCache(db),
+      }),
+    })
+
+    let clock = Date.UTC(2026, 0, 1)
+    const fake = fakeDialogClient([
+      { kind: 'user', id: 1002, topMessage: 1004 },
+    ])
+    // The laptop sleeps for 9 h while the 60th tick waits on getMe; mtcute
+    // reconnects within 2 s of the wake, too fast to count as offline
+    const client = Object.assign(fake.client, {
+      getMe: async () => {
+        clock += 9 * 3_600_000
+        return {}
+      },
+    }) as unknown as TelegramClient
+    ctx.state.accounts.set(1, {
+      ...connectedState(1, client),
+      watch: { online: true },
+    })
+
+    const originalNow = Date.now
+    Date.now = () => clock
+    try {
+      await runWithImmediateTimeouts(
+        () => mainLoop(ctx),
+        () => {
+          clock += 1_000
+        },
+      )
+    } finally {
+      Date.now = originalNow
+    }
+    for (let i = 0; i < 50 && ctx.runtime.dialogPassesInFlight.size > 0; i++) {
+      await Bun.sleep(1)
+    }
+
+    expect(fake.calls).toHaveLength(1)
+    expect(chatSyncState.get(1002)?.top_message_id).toBe(1004)
+    expect(
+      jobsService
+        .getPendingJobs()
+        .filter((job) => job.job_type === SyncJobType.ForwardCatchup)
+        .map((job) => job.chat_id),
+    ).toEqual([1002])
+    expect(ctx.logger.info).toHaveBeenCalledWith(
+      '[Account 1] Woke after 9 h asleep: dialog pass, 1 chat(s) to catch up',
+    )
+    db.close()
   })
 
   it("refreshes every account's queues, even when one fails", async () => {

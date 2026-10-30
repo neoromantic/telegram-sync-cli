@@ -354,8 +354,9 @@ account's scheduler → its sync_jobs → its worker and client → its messages
 - mtcute reconnects by itself after a network drop or a sleep, and the health
   check's `getMe` then succeeds, so the daemon also watches each client's
   connection state and the wall clock (#124). When an account's connection is
-  back after more than 5 seconds offline, or the loop's 1-second wait took more
-  than 30 seconds (the computer slept), and the connection has stayed up for
+  back after more than 5 seconds offline, or two ticks of the loop (about a second
+  apart) were more than 30 seconds apart (the computer slept, whatever the tick
+  was waiting on, or a call it waited on hung), and the connection has stayed up for
   5 seconds, the daemon runs the dialog pass on the client it has, at most once
   per account in 5 minutes. See
   [sync-strategy.md](sync-strategy.md#reconnects-and-wakes)

@@ -177,7 +177,6 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     // Last and lowest: a few batches of each cache's background migrations
     await runMigrationsTick(ctx)
 
-    ctx.runtime.sleepStartedAt = Date.now()
     await sleepUnlessStopped(1000, ctx.runtime.shutdown.signal)
   }
 
