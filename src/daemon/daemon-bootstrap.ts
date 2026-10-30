@@ -105,6 +105,15 @@ export async function syncAccountDialogs(
     }
   }
 
+  /** Keep the dialog's newest message: the chat gets no catch-up */
+  const keepNewestMessage = (dialog: Dialog, chatId: number) => {
+    const newest = dialog.lastMessage?.raw
+    const input = newest ? parseRawMessage(newest, chatId) : null
+    if (!input) return
+    messagesBatch.push(input)
+    if (messagesBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushMessages()
+  }
+
   const onDialog = (dialog: Dialog) => {
     dialogsCount++
     const chatInput = dialogToCacheInput(dialog)
@@ -123,7 +132,11 @@ export async function syncAccountDialogs(
     const existing = chatSyncState.get(chatId)
     if (dialog.isArchived) {
       archivedCount++
-      if (!existing) return
+      // Without a sync state it doesn't sync, so it is off too
+      if (!existing) {
+        keepNewestMessage(dialog, chatId)
+        return
+      }
     }
 
     // Dialogs often leave the member count out; the stored one keeps a
@@ -148,16 +161,7 @@ export async function syncAccountDialogs(
     // The upsert keeps an explicit on or off; auto follows the policy
     const mode = existing?.sync_mode ?? 'auto'
     const syncOn = mode === 'on' || (mode === 'auto' && policy.enabled)
-    if (!syncOn) {
-      const newest = dialog.lastMessage?.raw
-      const input = newest ? parseRawMessage(newest, chatId) : null
-      if (input) {
-        messagesBatch.push(input)
-        if (messagesBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) {
-          flushMessages()
-        }
-      }
-    }
+    if (!syncOn) keepNewestMessage(dialog, chatId)
   }
 
   // The stop signal ends a page request at once, a FLOOD_WAIT it waits out

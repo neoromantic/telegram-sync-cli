@@ -202,6 +202,23 @@ describe('bootstrapDialogs', () => {
     expect(chatSyncState.get(-1_000_000_002_002)?.forward_cursor).toBeNull()
   })
 
+  it('keeps the newest post of an archived channel without starting to sync it (#125)', async () => {
+    await runPass([
+      {
+        kind: 'channel',
+        id: 2005,
+        archived: true,
+        topMessage: 15,
+        lastMessage: { id: 15, text: 'Archived post' },
+      },
+    ])
+
+    expect(
+      createMessagesCache(testCacheDb).get(-1_000_000_002_005, 15)?.text,
+    ).toBe('Archived post')
+    expect(chatSyncState.get(-1_000_000_002_005)).toBeNull()
+  })
+
   it('lists archived dialogs too', async () => {
     const fake = await runPass([{ kind: 'user', id: 1001, topMessage: 5 }])
 
