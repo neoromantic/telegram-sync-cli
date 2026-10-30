@@ -9,7 +9,10 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
-import { refreshDialogsAfterReconnect } from './daemon-bootstrap'
+import {
+  type CatchUpTrigger,
+  refreshDialogsAfterReconnect,
+} from './daemon-bootstrap'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
 import { formatError } from './daemon-utils'
 import { DEFAULT_JOB_EXECUTOR_CONFIG } from './job-executor'
@@ -118,7 +121,8 @@ export function rebuildSyncWorker(
   ctx: DaemonContext,
   accountId: number,
   client: TelegramClient,
-): Promise<void> | undefined {
+  trigger?: CatchUpTrigger,
+): Promise<boolean> | undefined {
   const rt = ctx.runtime.accounts.get(accountId)
   if (!rt?.scheduler) return
 
@@ -129,7 +133,7 @@ export function rebuildSyncWorker(
   )
   ctx.logger.debug(`[Account ${accountId}] Rebuilt sync worker`)
 
-  return refreshDialogsAfterReconnect(ctx, accountId, client)
+  return refreshDialogsAfterReconnect(ctx, accountId, client, trigger)
 }
 
 /**

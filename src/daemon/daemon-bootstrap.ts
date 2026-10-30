@@ -8,6 +8,7 @@ import {
   createChatSyncStateService,
 } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
+import type { CatchUpReason } from '../db/daemon-status'
 import { determineSyncPolicy, type SyncChatType } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { apiUserToCacheInput } from '../utils/telegram-mappers'
@@ -55,13 +56,17 @@ export async function syncAccountDialogs(
   ctx: DaemonContext,
   accountId: number,
   client: TelegramClient,
+  /** A pass after a reconnect logs one summary line of its own */
+  options: { quiet?: boolean } = {},
 ): Promise<DialogPassResult> {
+  const info = (message: string) =>
+    options.quiet ? ctx.logger.debug(message) : ctx.logger.info(message)
   const cacheDb = requireRuntime(ctx, accountId).db
   const chatsCache = createChatsCache(cacheDb)
   const usersCache = createUsersCache(cacheDb)
   const chatSyncState = createChatSyncStateService(cacheDb)
 
-  ctx.logger.info(`[Account ${accountId}] Bootstrapping dialogs...`)
+  info(`[Account ${accountId}] Bootstrapping dialogs...`)
   const start = Date.now()
 
   const visited = new Set<number>()
@@ -200,7 +205,7 @@ export async function syncAccountDialogs(
 
   if (complete) {
     const elapsedMs = Date.now() - start
-    ctx.logger.info(
+    info(
       `[Account ${accountId}] Bootstrapped ${dialogsCount} dialogs (${archivedCount} archived), ${usersCount} users, ${communitiesCount} communities in ${Math.round(elapsedMs / 1000)}s`,
     )
   } else if (stopped) {
@@ -296,19 +301,53 @@ export async function bootstrapDialogs(ctx: DaemonContext): Promise<void> {
   }
 }
 
+/** What started a dialog pass after the daemon's start (#124) */
+export interface CatchUpTrigger {
+  reason: CatchUpReason
+  /** How long the account was offline or the computer asleep, if known */
+  offlineMs: number | null
+}
+
+/** `25 s`, `12 min`, `9 h` */
+export function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return `${seconds} s`
+  const minutes = Math.round(ms / 60_000)
+  if (minutes < 60) return `${minutes} min`
+  const hours = ms / 3_600_000
+  return `${hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours)} h`
+}
+
+function describeTrigger({ reason, offlineMs }: CatchUpTrigger): string {
+  const after = offlineMs === null ? '' : ` after ${formatDuration(offlineMs)}`
+  switch (reason) {
+    case 'reconnect':
+      return `Reconnected${after}${offlineMs === null ? '' : ' offline'}`
+    case 'wake':
+      return `Woke${after}${offlineMs === null ? '' : ' asleep'}`
+    case 'new_client':
+      return `Reconnected on a new client${after}${offlineMs === null ? '' : ' offline'}`
+  }
+}
+
 /**
- * After a reconnect, list the account's dialogs on the new client, so the
- * scheduler catches up the chats that got messages while the connection was
- * down. Runs in the background, one pass per account at a time. A pass a
- * daemon stop ended marks nothing and refreshes no queues.
+ * After a reconnect or a wake, list the account's dialogs on its client, so
+ * the scheduler catches up the chats that got messages while the connection
+ * was down. Runs in the background, one pass per account at a time; logs one
+ * line and records it for `tg status` (#124). A pass a daemon stop ended
+ * marks nothing and refreshes no queues.
+ *
+ * Returns false when no pass ran: the daemon is stopping or the account's
+ * pass is already running.
  */
 export async function refreshDialogsAfterReconnect(
   ctx: DaemonContext,
   accountId: number,
   client: TelegramClient,
-): Promise<void> {
-  if (ctx.state.shutdownRequested) return
-  if (ctx.runtime.dialogPassesInFlight.has(accountId)) return
+  trigger: CatchUpTrigger = { reason: 'new_client', offlineMs: null },
+): Promise<boolean> {
+  if (ctx.state.shutdownRequested) return false
+  if (ctx.runtime.dialogPassesInFlight.has(accountId)) return false
   ctx.runtime.dialogPassesInFlight.add(accountId)
 
   try {
@@ -317,17 +356,25 @@ export async function refreshDialogsAfterReconnect(
       ctx,
       accountId,
       client,
+      { quiet: true },
     )
-    if (stopped) return
+    if (stopped) return true
     // The pass covers this account's own cache, so a complete one marks the
     // chats it didn't list caught up, as on start
-    markUnvisitedChats(
-      createChatSyncStateService(rt.db),
-      visited,
-      complete,
-      true,
-    )
+    const chatSyncState = createChatSyncStateService(rt.db)
+    markUnvisitedChats(chatSyncState, visited, complete, true)
     rt.scheduler?.refreshQueues()
+
+    const chats = chatSyncState.getCatchupDue().length
+    ctx.logger.info(
+      `[Account ${accountId}] ${describeTrigger(trigger)}: dialog pass, ${chats} chat(s) to catch up`,
+    )
+    rt.statusService.recordCatchUp({
+      at: Date.now(),
+      reason: trigger.reason,
+      offlineMs: trigger.offlineMs,
+      chats,
+    })
   } catch (err) {
     const message = `[Account ${accountId}] Dialog pass after reconnect failed: ${formatError(err)}`
     if (ctx.state.shutdownRequested) ctx.logger.debug(message)
@@ -335,4 +382,5 @@ export async function refreshDialogsAfterReconnect(
   } finally {
     ctx.runtime.dialogPassesInFlight.delete(accountId)
   }
+  return true
 }

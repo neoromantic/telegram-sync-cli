@@ -201,6 +201,20 @@ every pass, complete or not, so it gets one checking page on start and after eac
 It may be a channel you haven't joined: no dialog list shows it and no live update reaches it,
 so those checks are the only way its new messages arrive.
 
+#### Reconnects and wakes
+
+A reconnect is any return of an account's connection after more than 5 seconds offline, or a
+wake of the computer, not only the daemon's own reconnect after a failed health check. mtcute
+reconnects by itself after a network drop or a sleep, so the daemon watches each client's
+connection state (`offline`/`connecting` → `connected`) and the wall clock of its loop: a
+1-second wait that took more than 30 seconds means the computer slept. Once the connection has
+stayed up for 5 seconds, the daemon runs the dialog pass on the account's current client (it
+doesn't replace a client that works) and the scheduler queues catch-up for the chats whose
+newest message moved. A connection that flaps gets one pass per account in 5 minutes. The
+daemon logs one line, such as `[Account 1] Reconnected after 9 h offline: dialog pass, 4
+chat(s) to catch up`, and `tg status` shows the last one under
+`accounts.accounts[].connection.last_catch_up`.
+
 Trade-off: live updates don't move the cursor, so an active chat's cursor trails its live
 messages for the whole run. The first catch-up after a restart or reconnect fetches them again,
 about one `getHistory` call per 100 live messages per chat. The upsert doesn't duplicate them,
@@ -246,8 +260,8 @@ arrived live come from Telegram until the next catch-up covers them.
 1. The scheduler recovers jobs a crash left running, deletes failed jobs (a restart retries
    them), drops pending catch-ups (older versions left one for every chat) and queues the work
    that is due: catch-up for chats that are behind, first pages and history
-2. Every 30 seconds, and after each reconnect's dialog pass, it queues due work again, such as
-   chats first seen live
+2. Every 30 seconds, and after the dialog pass of each reconnect or wake, it queues due work
+   again, such as chats first seen live
 3. The worker runs jobs with `messages.getHistory` and updates cursors and counters
 
 The scheduler uses the database as the single source of truth. There is **no in-memory priority queue**.

@@ -64,6 +64,7 @@ const createClientWithEvents = (): TelegramClient => {
     onEditMessage: new MockEmitter<Message>(),
     onDeleteMessage: new MockEmitter<DeleteMessageUpdate>(),
     onRawUpdate: new MockEmitter<RawUpdateInfo>(),
+    onConnectionState: new MockEmitter<string>(),
   }
 
   return client as unknown as TelegramClient
@@ -144,6 +145,7 @@ describe('removeEventHandlers', () => {
         onEditMessage: () => {},
         onDeleteMessage: () => {},
         onRawUpdate: () => {},
+        onConnectionState: () => {},
       },
     }
     const raw = (

@@ -465,6 +465,7 @@ The daemon writes each account's own rows, every second in one transaction per a
 | `connection_status`, `last_error` | The account's connection (`connecting` from the start until the daemon's first write, then `connected`, `reconnecting`, `error`, `disconnected`) and its last error |
 | `messages_synced` | Messages the daemon cached for this account since it started |
 | `pending_jobs`, `running_jobs` | The account's queue; a start deletes the previous run's counts |
+| `last_catch_up_at`, `last_catch_up_reason`, `last_offline_ms`, `last_catch_up_chats` | The last dialog pass after a reconnect or a wake: when it ended, why (`reconnect`, `wake`, `new_client`), how long the account was offline and how many chats it left to catch up; a start deletes them |
 | `last_update` | When the daemon last wrote these rows |
 
 `tg status` and `tg daemon status` count only rows whose `daemon_pid` is the PID in

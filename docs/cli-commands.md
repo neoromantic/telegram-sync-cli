@@ -344,7 +344,10 @@ part counts the daemon's sync jobs and lists some of them:
 - `accounts.accounts[]` gives each account its own figures: `cache` (`status`: `ok`,
   `missing` for an account with no cache yet, which `tg status` never creates, or `error` with
   `error` for a cache that fails to open or to answer a query; its figures are then zero and
-  the other accounts still report), `connection` (`{ status, last_error }` from a live daemon, else `null`), `sync`
+  the other accounts still report), `connection` (`{ status, last_error, last_catch_up }` from a live daemon, else `null`;
+  `last_catch_up` is the daemon's last dialog pass after a reconnect or a wake, `{ at,
+  reason, offline_ms, chats }` with `reason` `reconnect`, `wake` or `new_client` and `chats`
+  the chats it left to catch up, or `null` before the first), `sync`
   (`pending_jobs`, `running_jobs`, `failed_jobs`, `retrying_jobs`), `progress`
   (`chats_enabled`, `chats_history_complete`, `chats_history_pending`, `messages_cached`) and
   `rate_limits` (`api_calls_last_minute`, `active_flood_waits`, a count). With several

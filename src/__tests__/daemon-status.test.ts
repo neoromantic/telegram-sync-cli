@@ -356,6 +356,7 @@ describe('summarizeDaemonStatus', () => {
     messagesSynced: 10,
     pendingJobs: 0,
     runningJobs: 0,
+    lastCatchUp: null,
     ...overrides,
   })
 

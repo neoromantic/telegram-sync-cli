@@ -81,7 +81,8 @@ and reconnect asks for a hash check at the next look (see
 ## Gaps / Too Long Updates
 
 Gaps are closed by forward catch-up, not by `getDifference`. On start and after each reconnect
-the daemon lists the dialogs; a chat whose newest message is above its forward cursor gets
+or wake (see [sync-strategy.md](sync-strategy.md#reconnects-and-wakes)) the daemon lists the
+dialogs; a chat whose newest message is above its forward cursor gets
 catch-up pages until the cursor reaches it. The daemon does not perform ad-hoc full diffs on
 realtime gaps.
 
