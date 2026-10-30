@@ -253,6 +253,8 @@ function printSyncProgressSection(status: StatusSnapshot): void {
     printRow('Chats Cached', c.number(status.progress.chats_cached))
   }
 
+  printHistoryProgress(status)
+
   if (status.progress.sample_chats.length > 0) {
     console.log()
     console.log(c.label('  Sample Chats:'))
@@ -263,6 +265,46 @@ function printSyncProgressSection(status: StatusSnapshot): void {
       const synced = c.number(chat.synced_messages.toLocaleString())
       console.log(
         `    ${c.dim(icons.bullet)} ${c.value(chat.chat_type)} ${c.dim(`chat:${chat.chat_id}`)}${accountTag(status, chat.account_id)} ${c.dim(icons.arrow)} ${synced} msgs ${c.dim(icons.arrow)} ${state}`,
+      )
+    }
+  }
+}
+
+/** Messages cached of the counts Telegram gave, and what is left (#126) */
+function printHistoryProgress(status: StatusSnapshot): void {
+  const history = status.progress.history
+  if (history.messages_known > 0) {
+    const share = Math.floor(
+      (history.messages_cached / history.messages_known) * 100,
+    )
+    printRow(
+      'History Cached',
+      `${c.number(history.messages_cached.toLocaleString())} ${c.dim('/')} ${c.number(history.messages_known.toLocaleString())} msgs ${c.dim(`(${share}%)`)}`,
+    )
+  }
+  if (history.messages_left > 0) {
+    const pace =
+      history.eta_seconds !== null && history.messages_per_minute !== null
+        ? ` ${c.dim(icons.arrow)} ~${formatDuration(history.eta_seconds * 1000)} at ${history.messages_per_minute.toLocaleString()} msgs/min`
+        : ''
+    printRow(
+      'History Left',
+      `${c.number(history.messages_left.toLocaleString())} msgs in ${c.number(history.chats_pending)} chats${pace}`,
+    )
+  }
+  if (history.chats_without_count > 0) {
+    printRow(
+      'Not Counted Yet',
+      `${c.number(history.chats_without_count)} chats ${c.dim('(no history page yet)')}`,
+    )
+  }
+
+  if (history.largest_pending.length > 0) {
+    console.log()
+    console.log(c.label('  Most History Left:'))
+    for (const chat of history.largest_pending) {
+      console.log(
+        `    ${c.dim(icons.bullet)} ${c.value(chat.chat_type)} ${c.dim(`chat:${chat.chat_id}`)}${accountTag(status, chat.account_id)} ${c.dim(icons.arrow)} ${c.number(chat.messages_cached.toLocaleString())} ${c.dim('/')} ${c.number(chat.messages_known.toLocaleString())} msgs`,
       )
     }
   }
@@ -363,6 +405,11 @@ function accountSummary(acc: StatusAccount): string {
     ...(failed_jobs > 0 ? [c.red(`${failed_jobs} failed`)] : []),
     `history ${c.number(acc.progress.chats_history_complete)}${c.dim('/')}${c.number(acc.progress.chats_enabled)}`,
     `${c.number(acc.progress.messages_cached.toLocaleString())} msgs`,
+    ...(acc.progress.history.messages_left > 0
+      ? [
+          `${c.number(acc.progress.history.messages_left.toLocaleString())} left`,
+        ]
+      : []),
     `${c.number(acc.rate_limits.api_calls_last_minute)} calls/min`,
   )
   if (acc.rate_limits.active_flood_waits > 0) {

@@ -93,6 +93,8 @@ export interface ChatSyncStateService {
   markHistoryComplete(chatId: number): void
   /** Increment synced messages count */
   incrementSyncedMessages(chatId: number, count: number): void
+  /** Store the chat's message count on the server; the newest one wins */
+  setTotalMessages(chatId: number, total: number): void
   /** Get all enabled chats ordered by priority */
   getEnabledChats(): ChatSyncStateRow[]
   /** Get chats by priority level */
@@ -198,6 +200,12 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
     incrementSyncedMessages: db.prepare(`
       UPDATE chat_sync_state
       SET synced_messages = synced_messages + $count, updated_at = $now
+      WHERE chat_id = $chat_id
+    `),
+
+    setTotalMessages: db.prepare(`
+      UPDATE chat_sync_state
+      SET total_messages = $total, updated_at = $now
       WHERE chat_id = $chat_id
     `),
 
@@ -410,6 +418,14 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       stmts.incrementSyncedMessages.run({
         $chat_id: chatId,
         $count: count,
+        $now: Date.now(),
+      })
+    },
+
+    setTotalMessages(chatId: number, total: number): void {
+      stmts.setTotalMessages.run({
+        $chat_id: chatId,
+        $total: total,
         $now: Date.now(),
       })
     },

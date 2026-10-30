@@ -5,6 +5,7 @@ import type { HistoryRanges } from '../db/history-ranges'
 import type { MessagesCache } from '../db/messages-cache'
 import type { RateLimitsService } from '../db/rate-limits'
 import type { SyncJobsService } from '../db/sync-jobs'
+import type { UsersCache } from '../db/users-cache'
 import type { JobResult, SyncWorkerConfig } from './sync-worker-core'
 
 export interface RealSyncWorkerDeps {
@@ -15,6 +16,8 @@ export interface RealSyncWorkerDeps {
   jobsService: SyncJobsService
   rateLimits: RateLimitsService
   chatsCache: ChatsCache
+  /** Where the senders of history pages go */
+  usersCache: UsersCache
   config?: Partial<SyncWorkerConfig>
   /** The daemon's stop signal: it ends the request a job waits on */
   signal?: AbortSignal
@@ -34,6 +37,8 @@ export interface RealSyncWorkerContext {
   jobsService: SyncJobsService
   rateLimits: RateLimitsService
   chatsCache: ChatsCache
+  /** Where the senders of history pages go */
+  usersCache: UsersCache
   config: SyncWorkerConfig
   /** The daemon's stop signal: it ends the request a job waits on */
   signal?: AbortSignal

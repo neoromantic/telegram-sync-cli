@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import type { StatusHistoryProgress } from '../commands/status'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createDaemonStatusService } from '../db/daemon-status'
 import { createMessagesCache } from '../db/messages-cache'
@@ -404,6 +405,125 @@ describe('E2E: status', () => {
     )
 
     expect(stripAnsi(result.stdout)).toMatch(/Queue\s+Empty/)
+  })
+})
+
+interface HistoryStatusResult {
+  data: {
+    progress: { history: StatusHistoryProgress }
+    accounts: {
+      accounts: Array<{ progress: { history: Record<string, unknown> } }>
+    }
+    rate_limits: {
+      api_calls_last_minute: number
+      calls_by_method: Record<string, number>
+    }
+  }
+}
+
+describe('E2E: status, history progress and API calls', () => {
+  let env: TestEnvironment
+  let cacheDb: Database
+
+  beforeEach(() => {
+    env = createTestEnvironment('status-history')
+    env.initDatabase()
+    env.seedAccounts([{ phone: '+15550000001', is_active: true }])
+    cacheDb = env.openCacheDb(1)
+
+    // A group with 1,000 messages on the server, 200 of them cached
+    const state = createChatSyncStateService(cacheDb)
+    state.upsert({
+      chat_id: -4242,
+      chat_type: 'group',
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+    })
+    state.setTotalMessages(-4242, 1000)
+    createMessagesCache(cacheDb).upsertBatch(
+      Array.from({ length: 200 }, (_, i) => ({
+        chat_id: -4242,
+        message_id: 801 + i,
+        text: `made-up note ${i}`,
+        message_type: 'text',
+        date: 1_760_000_000 + i,
+        raw_json: '{}',
+      })),
+    )
+
+    // Two history pages in the last minutes, and calls 30 s and 90 s ago
+    const now = Date.now()
+    for (const completedAt of [now - 4 * 60_000, now - 2 * 60_000]) {
+      cacheDb.run(
+        `INSERT INTO sync_jobs (chat_id, job_type, status, messages_fetched, completed_at)
+         VALUES (-4242, 'backward_history', 'completed', 100, ?)`,
+        [completedAt],
+      )
+    }
+    for (const timestamp of [now - 30_000, now - 90_000]) {
+      cacheDb.run(
+        `INSERT INTO api_activity (timestamp, method, success, response_ms)
+         VALUES (?, 'messages.getHistory', 1, 150)`,
+        [timestamp],
+      )
+    }
+  })
+
+  afterEach(() => {
+    env.cleanup()
+  })
+
+  function options() {
+    return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } }
+  }
+
+  it('reports messages cached of those known, what is left and the API calls of the last 60 s', async () => {
+    const result = await runCliSuccess(['status'], options())
+    const { data } = result.json as HistoryStatusResult
+
+    expect(data.progress.history).toMatchObject({
+      chats_pending: 1,
+      chats_without_count: 0,
+      messages_cached: 200,
+      messages_known: 1000,
+      messages_left: 800,
+      largest_pending: [
+        {
+          account_id: 1,
+          chat_id: -4242,
+          chat_type: 'group',
+          messages_cached: 200,
+          messages_known: 1000,
+          messages_left: 800,
+        },
+      ],
+    })
+    // About 100 messages over the 4 minutes since the first page
+    expect(data.progress.history.messages_per_minute).toBeGreaterThan(20)
+    expect(data.progress.history.eta_seconds).toBeGreaterThan(0)
+    expect(data.accounts.accounts[0]?.progress.history).toMatchObject({
+      messages_left: 800,
+    })
+    expect(data.accounts.accounts[0]?.progress.history).not.toHaveProperty(
+      'largest_pending',
+    )
+    expect(data.rate_limits.api_calls_last_minute).toBe(1)
+    expect(data.rate_limits.calls_by_method).toEqual({
+      'messages.getHistory': 1,
+    })
+  })
+
+  it('shows the history progress in pretty output', async () => {
+    const result = await runCliSuccess(
+      ['status', '--format', 'pretty'],
+      options(),
+    )
+    const out = stripAnsi(result.stdout)
+
+    expect(out).toMatch(/History Cached\s+200 \/ 1,000 msgs \(20%\)/)
+    expect(out).toMatch(/History Left\s+800 msgs in 1 chats → ~\d/)
+    expect(out).toMatch(/group chat:-4242 → 200 \/ 1,000 msgs/)
+    expect(out).toMatch(/API Calls \(1m\)\s+1/)
   })
 })
 

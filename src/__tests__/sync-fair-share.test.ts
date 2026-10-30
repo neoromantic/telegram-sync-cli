@@ -33,6 +33,7 @@ import {
   SyncJobType,
   SyncPriority,
 } from '../db/sync-schema'
+import { createUsersCache } from '../db/users-cache'
 import { addAccountRuntime } from './helpers/daemon-runtime'
 import {
   createMultiChatHistory,
@@ -179,6 +180,7 @@ describe('job budget with 500 chats', () => {
       jobsService,
       rateLimits: createRateLimitsService(db),
       chatsCache: createChatsCache(db),
+      usersCache: createUsersCache(db),
     })
   }
 
@@ -469,6 +471,7 @@ describe('job budget with two accounts', () => {
         jobsService,
         rateLimits: createRateLimitsService(db),
         chatsCache: createChatsCache(db),
+        usersCache: createUsersCache(db),
       }),
     })
     ctx.state.accounts.set(accountId, {

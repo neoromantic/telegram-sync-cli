@@ -14,6 +14,7 @@ import type { MessagesCache } from '../db/messages-cache'
 import type { RateLimitsService } from '../db/rate-limits'
 import type { SyncJobsService } from '../db/sync-jobs'
 import type { SyncJobRow } from '../db/sync-schema'
+import type { UsersCache } from '../db/users-cache'
 
 type ProcessJobReal = (
   ctx: RealSyncWorkerContext,
@@ -88,6 +89,7 @@ describe('createRealSyncWorker', () => {
       jobsService: jobsService as unknown as SyncJobsService,
       rateLimits: rateLimits as unknown as RateLimitsService,
       chatsCache: {} as unknown as ChatsCache,
+      usersCache: {} as unknown as UsersCache,
     })
 
     const result = await worker.runOnceReal()
@@ -124,6 +126,7 @@ describe('createRealSyncWorker', () => {
       jobsService: jobsService as unknown as SyncJobsService,
       rateLimits: rateLimits as unknown as RateLimitsService,
       chatsCache: {} as unknown as ChatsCache,
+      usersCache: {} as unknown as UsersCache,
     })
 
     const result = await worker.runOnceReal()
@@ -151,6 +154,7 @@ describe('createRealSyncWorker', () => {
       > as unknown as SyncJobsService,
       rateLimits: rateLimits as unknown as RateLimitsService,
       chatsCache: {} as unknown as ChatsCache,
+      usersCache: {} as unknown as UsersCache,
       config: {
         apiMethod: 'messages.search',
         batchSize: 5,
@@ -184,6 +188,7 @@ describe('createRealSyncWorker', () => {
         'isBlocked' | 'getWaitTime'
       > as unknown as RateLimitsService,
       chatsCache: {} as unknown as ChatsCache,
+      usersCache: {} as unknown as UsersCache,
     })
 
     const job = { id: 1, chat_id: 1, job_type: 'forward_catchup' } as SyncJobRow

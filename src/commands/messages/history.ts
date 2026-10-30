@@ -10,6 +10,7 @@ import type { TelegramClient, tl } from '@mtcute/bun'
 
 import { getErrorMessage } from '../../daemon/daemon-utils'
 import {
+  cachePageUsers,
   createMessageInputs,
   fetchMessagesRaw,
   forwardPageRequest,
@@ -24,7 +25,6 @@ import type { MessageSearchRow } from '../../db/messages-search'
 import { createUsersCache, type UsersCache } from '../../db/users-cache'
 import type { MessageSearchItem } from '../../types'
 import { verbose } from '../../utils/output'
-import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import { toPeerIdFromInputPeer } from '../../utils/telegram-peer-ids'
 import { type DmLookup, resolvePeer } from '../send/peer-resolver'
 import { resolveSelfId } from '../send/sent-message-cache'
@@ -120,11 +120,7 @@ export function cacheHistoryResponse(
   )
 
   cacheDb.transaction(() => {
-    for (const user of users) {
-      if (user._ === 'user' && !user.min) {
-        usersCache.upsert(apiUserToCacheInput(user))
-      }
-    }
+    cachePageUsers(usersCache, users)
     messagesCache.upsertBatch(inputs)
     createHistoryRanges(cacheDb).recordPage(
       chatId,

@@ -1,3 +1,4 @@
+import type { tl } from '@mtcute/bun'
 import type { MessageInput } from '../db/messages-cache'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
 import {
@@ -8,9 +9,11 @@ import {
   trackJobApiCall,
 } from './sync-worker-real-context'
 import {
+  cachePageUsers,
   createMessageInputs,
   fetchMessagesRaw,
   forwardPageRequest,
+  historyTotal,
   rawMessageId,
 } from './sync-worker-real-helpers'
 import type {
@@ -27,6 +30,26 @@ function countUncached(
   return inputs.filter(
     (input) => ctx.messagesCache.get(chatId, input.message_id) === null,
   ).length
+}
+
+/**
+ * Fetch one history page for a job, and cache what it says besides its
+ * messages: the senders, before the job writes the messages, so the search
+ * index has their names, and the chat's message count on the server.
+ */
+async function fetchJobPage(
+  ctx: RealSyncWorkerContext,
+  chatId: number,
+  inputPeer: tl.TypeInputPeer,
+  request: Parameters<typeof fetchMessagesRaw>[2],
+): Promise<unknown[]> {
+  const page = await trackJobApiCall(ctx, () =>
+    fetchMessagesRaw(ctx.client, inputPeer, request, ctx.signal),
+  )
+  cachePageUsers(ctx.usersCache, page.users)
+  const total = historyTotal(page, request)
+  if (total !== null) ctx.chatSyncState.setTotalMessages(chatId, total)
+  return page.messages
 }
 
 /**
@@ -79,13 +102,11 @@ export async function processForwardCatchupReal(
   const topBefore = state?.top_message_id ?? null
 
   try {
-    const { messages } = await trackJobApiCall(ctx, () =>
-      fetchMessagesRaw(
-        ctx.client,
-        inputPeer,
-        forwardPageRequest(cursor, ctx.config.batchSize),
-        ctx.signal,
-      ),
+    const messages = await fetchJobPage(
+      ctx,
+      chatId,
+      inputPeer,
+      forwardPageRequest(cursor, ctx.config.batchSize),
     )
 
     // Guard against a server that returns messages at or below the cursor.
@@ -204,14 +225,10 @@ export async function processBackwardHistoryReal(
   let result: RealJobResult
 
   try {
-    const { messages } = await trackJobApiCall(ctx, () =>
-      fetchMessagesRaw(
-        ctx.client,
-        inputPeer,
-        { offsetId: backwardCursor, limit: ctx.config.batchSize },
-        ctx.signal,
-      ),
-    )
+    const messages = await fetchJobPage(ctx, chatId, inputPeer, {
+      offsetId: backwardCursor,
+      limit: ctx.config.batchSize,
+    })
 
     // The newest messages below the cursor, or the newest page without one
     const bounds = {
@@ -312,14 +329,9 @@ export async function processInitialLoadReal(
   }
 
   try {
-    const { messages } = await trackJobApiCall(ctx, () =>
-      fetchMessagesRaw(
-        ctx.client,
-        inputPeer,
-        { limit: ctx.config.batchSize },
-        ctx.signal,
-      ),
-    )
+    const messages = await fetchJobPage(ctx, chatId, inputPeer, {
+      limit: ctx.config.batchSize,
+    })
 
     // Empty messages hold no data, but they still count for the cursors.
     const ids = messages.map(rawMessageId).filter((id) => id > 0)

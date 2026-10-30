@@ -343,6 +343,20 @@ part counts the daemon's sync jobs and lists some of them:
   job line carries `acct:<id>` and the command adds `--account <id>`.
 - `progress.sample_chats` (the overall top 5) and `rate_limits.active_flood_waits` items carry
   `account_id` too.
+- `progress.history` is how far the history backfill is, over the chats with sync on.
+  Telegram gives each chat's message count on the sync pages (`chat_sync_state.total_messages`):
+  `messages_known` sums the counts, `messages_cached` the messages cached in those chats (at
+  most the count each), and `messages_left` what pending chats still miss. `chats_pending` is
+  the chats whose history isn't complete, `chats_without_count` those with no count yet (no
+  sync page so far; their messages are in none of the sums). `messages_per_minute` is the pace
+  of the daemon's history pages over the last 15 minutes and `eta_seconds` the time
+  `messages_left` takes at it; both are `null` without two history pages in those 15 minutes,
+  and `eta_seconds` also with nothing left. Over several accounts the pace is their sum and
+  `eta_seconds` the longest account's, or `null` while an account with messages left has no
+  pace. `largest_pending` lists the 5 pending chats with the most messages left, each with
+  `account_id`, `chat_id`, `chat_type`, `messages_cached`, `messages_known` and
+  `messages_left`. Pretty output shows History Cached, History Left with the time left, and
+  the chats.
 - `rate_limits.api_calls_last_minute` and `calls_by_method` count the API calls of the last 60
   seconds, from the `api_activity` log: the CLI's calls and the daemon's history pages and
   contacts checks. A daemon older than this version logs none of its calls.
@@ -354,7 +368,8 @@ part counts the daemon's sync jobs and lists some of them:
   reason, offline_ms, chats }` with `reason` `reconnect`, `wake` or `new_client` and `chats`
   the chats it left to catch up, or `null` before the first), `sync`
   (`pending_jobs`, `running_jobs`, `failed_jobs`, `retrying_jobs`), `progress`
-  (`chats_enabled`, `chats_history_complete`, `chats_history_pending`, `messages_cached`) and
+  (`chats_enabled`, `chats_history_complete`, `chats_history_pending`, `messages_cached` and
+  `history`, the account's `progress.history` without `largest_pending`) and
   `rate_limits` (`api_calls_last_minute`, `active_flood_waits`, a count). With several
   accounts, pretty output prints a line with these under each account.
 - `accounts.accounts[].cache.size` is the cache's size, or `null` for a missing cache or one
