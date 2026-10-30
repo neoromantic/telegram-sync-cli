@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Usage stats no longer slow down a command (#129). Every command used to wait up
+  to half a second for them before it exited; now a background copy of tg sends
+  them after the command has exited, so `tg status` takes as long as with
+  `DO_NOT_TRACK=1`, even when the network is slow or down. The daemon still sends
+  from its own process.
+
 ## [0.8.0] - 2026-10-29
 
 After the upgrade the daemon rewrites what older versions cached, a little each

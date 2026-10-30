@@ -33,6 +33,8 @@ import {
   reportLocalError,
   startTelemetry,
 } from './telemetry'
+import { EVENTS_ENV } from './telemetry/background'
+import { sendHandoff } from './telemetry/send'
 import { ErrorCodes, type OutputFormat } from './types'
 import { error, getOutputFormat, setOutputFormat } from './utils/output'
 import { VERSION } from './version'
@@ -148,5 +150,10 @@ const main = defineCommand({
   },
 })
 
-instrumentCommands(main)
-runMain(main)
+// The compiled binary is also the copy of tg that sends a run's usage stats
+if (process.env[EVENTS_ENV] !== undefined) {
+  void sendHandoff(process.env[EVENTS_ENV])
+} else {
+  instrumentCommands(main)
+  runMain(main)
+}
