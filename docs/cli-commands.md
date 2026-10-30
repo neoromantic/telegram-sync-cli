@@ -346,9 +346,11 @@ part counts the daemon's sync jobs and lists some of them:
 - `progress.history` is how far the history backfill is, over the chats with sync on.
   Telegram gives each chat's message count on the sync pages (`chat_sync_state.total_messages`):
   `messages_known` sums the counts, `messages_cached` the messages cached in those chats (at
-  most the count each), and `messages_left` what pending chats still miss. `chats_pending` is
-  the chats whose history isn't complete, `chats_without_count` those with no count yet (no
-  sync page so far; their messages are in none of the sums). `messages_per_minute` is the pace
+  most the count each), and `messages_left` what pending chats still miss; a complete chat
+  without a count (synced by an older version: catch-up pages give none) counts its cached
+  messages as known. `chats_pending` is the chats whose history isn't complete,
+  `chats_without_count` the pending ones with no count yet (no first or history page so far;
+  their messages are in none of the sums). `messages_per_minute` is the pace
   of the daemon's history pages over the last 15 minutes and `eta_seconds` the time
   `messages_left` takes at it; both are `null` without two history pages in those 15 minutes,
   and `eta_seconds` also with nothing left. Over several accounts the pace is their sum and
