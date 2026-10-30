@@ -111,13 +111,46 @@ the next run after the wait resumes it ([media.md](media.md#download)).
 
 ## Daemon Sync Jobs
 
-The daemon's sync jobs make one `messages.getHistory` call each, at most one job every 3
-seconds per account, shared by the account's three lanes (catch-up, first pages, history; see
-[sync-strategy.md](sync-strategy.md#job-lanes)). While a FLOOD_WAIT on `messages.getHistory`
-lasts, no lane of that account runs a job; the other accounts' jobs go on. The job that hit it doesn't fail: it waits out the FLOOD_WAIT as a
-pending job and uses no attempt, then runs again from its chat's cursor, where the last page
-left it. Other errors retry with backoff (see
+The daemon's sync jobs make one `messages.getHistory` call each, one job at a time per
+account, shared by the account's three lanes (catch-up, first pages, history; see
+[sync-strategy.md](sync-strategy.md#job-lanes)). How often a job starts is the account's pace
+(see [Pacing](#pacing)). While a FLOOD_WAIT on `messages.getHistory` lasts, no lane of that
+account runs a job; the other accounts' jobs go on. The job that hit it doesn't fail: it waits
+out the FLOOD_WAIT as a pending job and uses no attempt, then runs again from its chat's cursor,
+where the last page left it. Other errors retry with backoff (see
 [sync-strategy.md](sync-strategy.md#retries)).
+
+### Pacing
+
+Each account's pace counts from the start of each job, so a slow page doesn't stretch it, and
+the daemon starts a job as soon as it is due rather than on its next 1-second tick:
+
+- **Calm.** With no first page or history page due, a job starts at most every 3 seconds
+  (`sync.pacing.calmInterval`): catch-up and real-time traffic only.
+- **History.** While a first page or a history page is due (the first sync, or the backfill of a
+  chat `tg chats sync` turned on), the account starts at 0.7 calls per second. After each 30
+  calls without a FLOOD_WAIT it speeds up by 0.05 calls per second, up to
+  `sync.pacing.maxCallsPerSecond` (0.9 by default). Catch-up still gets its lane turns, so
+  history going faster never delays it.
+- **FLOOD_WAIT.** Any FLOOD_WAIT Telegram sends the account's client, on any method, halves
+  the pace (never below the calm pace). The account starts no job until the wait is over and one
+  interval at the new pace has passed; mtcute's flood waiter retries the call that hit it when
+  the wait ends. The daemon logs the new pace.
+- Once no history is due, the account goes back to the calm interval. The pace it learned is
+  kept for the next backfill until the daemon restarts, which starts at 0.7 again.
+
+Why these numbers: on a test account a closed loop of `messages.getHistory` calls (100 per
+page, one public channel) got its first FLOOD_WAIT at 1 call per second after 70 to 100 calls,
+with waits of 3 to 15 seconds that grew under pressure, and went on at 0.85 to 0.95 calls per
+second through them; 0.7 calls per second ran 150 seconds with none. Two chats in parallel were
+no faster, so an account runs one job at a time. Before this pacing, a first sync of about
+10,000 pages made one call every ~4 seconds and spent ~92% of its time in the pause between
+jobs.
+
+`tg status` shows the pace in `progress.history`: `calls_per_second`, the `messages.getHistory`
+calls of the last 5 minutes from `api_activity`, and `pacing`, the live daemon's
+`{ mode, target_calls_per_second, flood_waits }` (see
+[cli-commands.md](cli-commands.md#daemon--status--sql)).
 
 ## Notes
 

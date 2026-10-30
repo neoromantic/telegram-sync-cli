@@ -1092,7 +1092,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       columns: {
         key: {
           description:
-            'Status key: daemon_pid, daemon_started_at, daemon_status, daemon_version, daemon_version_pid, last_update, connection_status, last_error, messages_synced, pending_jobs, running_jobs, last_catch_up_at, last_catch_up_reason (reconnect, wake, new_client), last_offline_ms, last_catch_up_chats',
+            'Status key: daemon_pid, daemon_started_at, daemon_status, daemon_version, daemon_version_pid, last_update, connection_status, last_error, messages_synced, pending_jobs, running_jobs, last_catch_up_at, last_catch_up_reason (reconnect, wake, new_client), last_offline_ms, last_catch_up_chats, pacing_mode (history, calm), pacing_target_calls_per_second, pacing_flood_waits',
           nullable: false,
         },
         value: {

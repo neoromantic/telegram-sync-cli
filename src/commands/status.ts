@@ -168,8 +168,20 @@ export interface StatusSampleChat {
 /** A chat whose history is pending, with the account whose cache holds it */
 export type StatusPendingChat = PendingHistoryChat & { account_id: number }
 
+/** How fast the live daemon starts sync jobs (#133) */
+export interface StatusPacing {
+  /** `history` while first or history pages are due, else `calm` */
+  mode: 'history' | 'calm'
+  /** The pace the daemon runs at now, in calls per second */
+  target_calls_per_second: number
+  /** FLOOD_WAITs since the daemon started */
+  flood_waits: number
+}
+
 /** History progress (#126); see HistoryProgress */
 export type StatusHistoryProgress = Omit<HistoryProgress, 'largest_pending'> & {
+  /** The live daemon's pacing; null without a live daemon */
+  pacing: StatusPacing | null
   largest_pending: StatusPendingChat[]
 }
 
@@ -247,7 +259,7 @@ function emptyAccountSnapshot(accountId: number): AccountStatusSnapshot {
       messages_tracked: 0,
       messages_cached: 0,
       sample_chats: [],
-      history: { ...emptyHistoryProgress(), largest_pending: [] },
+      history: { ...emptyHistoryProgress(), pacing: null, largest_pending: [] },
     },
     rate_limits: {
       api_calls_last_minute: 0,
@@ -430,10 +442,32 @@ function withAccountId(
 ): StatusHistoryProgress {
   return {
     ...history,
+    // Filled in once the live daemon is known
+    pacing: null,
     largest_pending: history.largest_pending.map((chat) => ({
       account_id: accountId,
       ...chat,
     })),
+  }
+}
+
+/**
+ * The pacing of several accounts: each runs at its own pace, so the
+ * targets and FLOOD_WAITs add up, and it is `history` if any account is
+ */
+function sumPacing(
+  total: StatusPacing | null,
+  pacing: StatusPacing | null,
+): StatusPacing | null {
+  if (!pacing) return total
+  if (!total) return { ...pacing }
+  return {
+    mode: total.mode === 'history' ? 'history' : pacing.mode,
+    target_calls_per_second:
+      Math.round(
+        (total.target_calls_per_second + pacing.target_calls_per_second) * 100,
+      ) / 100,
+    flood_waits: total.flood_waits + pacing.flood_waits,
   }
 }
 
@@ -447,6 +481,7 @@ function sumHistoryProgress(
 ): StatusHistoryProgress {
   const total: StatusHistoryProgress = {
     ...emptyHistoryProgress(),
+    pacing: null,
     largest_pending: [],
   }
   let paced = false
@@ -462,6 +497,13 @@ function sumHistoryProgress(
       total.messages_per_minute =
         (total.messages_per_minute ?? 0) + history.messages_per_minute
     }
+    if (history.calls_per_second !== null) {
+      total.calls_per_second =
+        Math.round(
+          ((total.calls_per_second ?? 0) + history.calls_per_second) * 100,
+        ) / 100
+    }
+    total.pacing = sumPacing(total.pacing, history.pacing)
     if (history.messages_left > 0) {
       if (history.eta_seconds === null) etaKnown = false
       else
@@ -578,6 +620,21 @@ export function liveConnection(
   }
 }
 
+/** The live daemon's pacing of an account, or null without one */
+function livePacing(
+  snapshot: AccountStatusSnapshot,
+  livePid: number | null,
+): StatusPacing | null {
+  const pacing = snapshot.daemon?.pacing
+  if (!pacing || !liveConnection(snapshot, livePid)) return null
+  return {
+    mode: pacing.mode,
+    target_calls_per_second:
+      Math.round(pacing.targetCallsPerSecond * 100) / 100,
+    flood_waits: pacing.floodWaits,
+  }
+}
+
 /** History progress without the list of chats */
 function historySummary({
   largest_pending: _list,
@@ -667,6 +724,9 @@ export async function collectStatus(
   const snapshotOf = new Map(
     allSnapshots.map((snapshot) => [snapshot.accountId, snapshot]),
   )
+  for (const snapshot of allSnapshots) {
+    snapshot.progress.history.pacing = livePacing(snapshot, livePid)
+  }
 
   // Daemon: only the rows the live daemon wrote count
   const summary = summarizeDaemonStatus(

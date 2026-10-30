@@ -36,6 +36,7 @@ import { mainLoop, updateDaemonStatus } from './daemon-loop'
 import { cleanupScheduler, initializeScheduler } from './daemon-scheduler'
 import { formatError } from './daemon-utils'
 import { createPidFile } from './pid-file'
+import { createSyncPacer, DEFAULT_SYNC_PACING } from './sync-pacing'
 import {
   type DaemonConfig,
   DaemonExitCode,
@@ -98,6 +99,7 @@ export function createContext(
     accountsDb,
     runtime: createDaemonRuntime(),
     retention: config.retention ?? getDefaultRetentionConfig(),
+    pacing: config.pacing ?? DEFAULT_SYNC_PACING,
   }
 }
 
@@ -130,7 +132,7 @@ async function initializeDatabase(ctx: DaemonContext): Promise<boolean> {
         statusService,
         scheduler: null,
         worker: null,
-        lastJobProcessTime: 0,
+        pacer: createSyncPacer(ctx.pacing),
         messagesSynced: 0,
       })
     } catch (err) {

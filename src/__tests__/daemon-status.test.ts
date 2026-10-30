@@ -275,6 +275,35 @@ describe('DaemonStatusService', () => {
           lastError: null,
         })
       })
+
+      it("writes the account's sync pace, and a start clears it (#133)", () => {
+        const tick = {
+          connectionStatus: 'connected',
+          lastError: null,
+          messagesSynced: 0,
+          pendingJobs: 4,
+          runningJobs: 1,
+        }
+        service.writeTick(tick)
+        expect(service.getDaemonInfo().pacing).toBeNull()
+
+        service.writeTick({
+          ...tick,
+          pacing: {
+            mode: 'history',
+            targetCallsPerSecond: 0.75,
+            floodWaits: 2,
+          },
+        })
+        expect(service.getDaemonInfo().pacing).toEqual({
+          mode: 'history',
+          targetCallsPerSecond: 0.75,
+          floodWaits: 2,
+        })
+
+        service.setDaemonRunning(4242, '0.9.0')
+        expect(service.getDaemonInfo().pacing).toBeNull()
+      })
     })
 
     describe('updateLastUpdate', () => {
@@ -357,6 +386,7 @@ describe('summarizeDaemonStatus', () => {
     pendingJobs: 0,
     runningJobs: 0,
     lastCatchUp: null,
+    pacing: null,
     ...overrides,
   })
 

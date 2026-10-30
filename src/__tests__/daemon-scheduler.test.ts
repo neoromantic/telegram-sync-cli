@@ -60,6 +60,7 @@ const createSchedulerStub = (
     initializeForStartup: mock(async () => {}),
     refreshQueues: mock(() => {}),
     getNextJob: () => null,
+    hasHistoryDue: () => false,
     recordJobRun: mock(() => {}),
     claimNextJob: () => null,
     startJob: () => true,
@@ -670,7 +671,7 @@ describe('processJobs', () => {
     expect(totalMessagesSynced(ctx.runtime)).toBe(4)
   })
 
-  it('records last job time when rate limited', async () => {
+  it('counts the pace from the start of a job that was rate limited', async () => {
     const ctx = createContext()
     const job = jobOf(SyncJobType.ForwardCatchup, { id: 2, chat_id: 44 })
     const scheduler = createSchedulerStub({
@@ -687,10 +688,15 @@ describe('processJobs', () => {
       })),
     })
     const rt = runAccount(ctx, 1, { scheduler, worker })
+    const clock = useClock()
 
-    await processJobs(ctx)
+    try {
+      await processJobs(ctx)
+    } finally {
+      clock.restore()
+    }
 
-    expect(rt.lastJobProcessTime).toBeGreaterThan(0)
+    expect(rt.pacer.nextStartAt()).toBe(1_760_000_000_000 + 3000)
     expect(ctx.runtime.jobsInFlight.size).toBe(0)
     expect(scheduler.queueForwardCatchup).not.toHaveBeenCalled()
   })
@@ -876,14 +882,14 @@ describe('processJobs', () => {
     })
   })
 
-  it("skips an account whose inter-job delay hasn't elapsed", async () => {
+  it("skips an account whose pace doesn't let a job start yet", async () => {
     const ctx = createContext()
     const clock = useClock()
     const getNextJob = mock(() => null)
     const rt = runAccount(ctx, 1, {
       scheduler: createSchedulerStub({ getNextJob }),
     })
-    rt.lastJobProcessTime = Date.now()
+    rt.pacer.recordStart(Date.now())
 
     try {
       await processJobs(ctx)
@@ -894,7 +900,7 @@ describe('processJobs', () => {
     expect(getNextJob).not.toHaveBeenCalled()
   })
 
-  it("runs each account's jobs on its own 3 s delay", async () => {
+  it("runs each account's jobs on its own 3 s calm pace", async () => {
     const ctx = createContext()
     const ran: Array<[number, number]> = []
     let tick = 0
@@ -995,6 +1001,124 @@ describe('processJobs', () => {
 
     expect(processJobReal).toHaveBeenCalledTimes(1)
     expect(ctx.runtime.jobsInFlight.size).toBe(0)
+  })
+})
+
+describe('history pacing (#133)', () => {
+  /** An account whose jobs record their start on the test's clock */
+  function pacedAccount(
+    ctx: DaemonContext,
+    options: {
+      historyDue: () => boolean
+      /** How long each job takes, by its index */
+      jobMs?: (index: number) => number
+      clock: ReturnType<typeof useClock>
+    },
+  ) {
+    const starts: number[] = []
+    const rt = runAccount(ctx, 1, {
+      scheduler: createSchedulerStub({
+        hasHistoryDue: options.historyDue,
+        getNextJob: () => jobOf(SyncJobType.BackwardHistory),
+      }),
+      worker: createWorkerStub({
+        processJobReal: mock(async () => {
+          starts.push(Date.now())
+          options.clock.advance(options.jobMs?.(starts.length - 1) ?? 0)
+          return { success: true, messagesFetched: 100 }
+        }),
+      }),
+    })
+    return { rt, starts }
+  }
+
+  it('runs history at 0.7 calls/s, counted from each start, whatever the tick', async () => {
+    const ctx = createContext()
+    const clock = useClock(0)
+    const { starts } = pacedAccount(ctx, {
+      historyDue: () => true,
+      jobMs: () => 300,
+      clock,
+    })
+
+    try {
+      // Every 100 ms of the clock the jobs move too
+      while (Date.now() < 4000) {
+        await processJobs(ctx)
+        clock.advance(100)
+      }
+    } finally {
+      clock.restore()
+    }
+
+    // Due 1429 ms after each start, found on the next 100 ms poll: the
+    // 300 ms each page took doesn't stretch it
+    expect(starts).toEqual([0, 1500, 3000])
+  })
+
+  it('starts the next job as soon as a job that outlasted its interval ends', async () => {
+    const ctx = createContext()
+    const clock = useClock(0)
+    // The first job sleeps a FLOOD_WAIT of 5 s inside its call
+    const { starts } = pacedAccount(ctx, {
+      historyDue: () => true,
+      jobMs: (index) => (index === 0 ? 5000 : 0),
+      clock,
+    })
+
+    try {
+      await processJobs(ctx)
+      await waitForJobsInFlight(ctx)
+    } finally {
+      clock.restore()
+    }
+
+    expect(starts).toEqual([0, 5000])
+  })
+
+  it('goes back to the calm 3 s once no history is due', async () => {
+    const ctx = createContext()
+    const clock = useClock(0)
+    let historyDue = true
+    const { rt, starts } = pacedAccount(ctx, {
+      historyDue: () => historyDue,
+      clock,
+    })
+
+    try {
+      await processJobs(ctx)
+      historyDue = false
+      for (let t = 0; t < 3000; t += 500) {
+        clock.advance(500)
+        await processJobs(ctx)
+      }
+    } finally {
+      clock.restore()
+    }
+
+    expect(starts).toEqual([0, 3000])
+    expect(rt.pacer.snapshot().mode).toBe('calm')
+  })
+
+  it('starts no job until a FLOOD_WAIT and one interval at the halved pace are over', async () => {
+    const ctx = createContext()
+    const clock = useClock(0)
+    const { rt, starts } = pacedAccount(ctx, { historyDue: () => true, clock })
+
+    try {
+      await processJobs(ctx)
+      // The client got a FLOOD_WAIT of 10 s at 0 (a call outside the jobs)
+      rt.pacer.recordFloodWait(0, 10)
+      clock.advance(10_000 + 2856)
+      await processJobs(ctx)
+      clock.advance(1)
+      await processJobs(ctx)
+    } finally {
+      clock.restore()
+    }
+
+    // 0.35 calls/s after the halving: 2857 ms
+    expect(starts).toEqual([0, 12_857])
   })
 })
 

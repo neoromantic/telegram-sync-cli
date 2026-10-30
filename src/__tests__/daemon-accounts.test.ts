@@ -20,6 +20,7 @@ import {
   scheduleReconnect,
   setupSignalHandlers,
 } from '../daemon/daemon-accounts'
+import { floodWaitSecondsOf } from '../daemon/daemon-api-activity'
 import {
   type AccountRuntime,
   createDaemonRuntime,
@@ -27,6 +28,7 @@ import {
   requestShutdown,
 } from '../daemon/daemon-context'
 import { isDaemonStopError } from '../daemon/daemon-utils'
+import { createSyncPacer } from '../daemon/sync-pacing'
 import type { AccountConnectionState } from '../daemon/types'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
@@ -535,6 +537,40 @@ describe('daemonNetworkMiddlewares', () => {
         },
       ])
       db.close()
+    })
+
+    it("halves the account's sync pace on a FLOOD_WAIT, short or long (#133)", async () => {
+      const { ctx, db } = withCache()
+      const rt = ctx.runtime.accounts.get(1)!
+      rt.pacer = createSyncPacer()
+      rt.pacer.setHistoryDue(true)
+      // Longer than the daemon's 5 minutes: returned, not slept through
+      const call = compose(daemonNetworkMiddlewares(ctx, 1), async () => ({
+        _: 'mt_rpc_error',
+        errorCode: 420,
+        errorMessage: 'FLOOD_WAIT_400',
+      }))
+      const before = Date.now()
+
+      await call(rpc('messages.getHistory'))
+
+      expect(rt.pacer.snapshot()).toMatchObject({
+        mode: 'history',
+        floodWaits: 1,
+      })
+      expect(rt.pacer.snapshot().targetCallsPerSecond).toBeCloseTo(0.35, 2)
+      expect(rt.pacer.nextStartAt()).toBeGreaterThanOrEqual(before + 400_000)
+      expect(ctx.logger.info).toHaveBeenCalledWith(
+        '[Account 1] messages.getHistory: FLOOD_WAIT of 400s, history pace down to 0.35 calls/s',
+      )
+      db.close()
+    })
+
+    it('reads the seconds of FLOOD_WAIT and FLOOD_PREMIUM_WAIT only', () => {
+      expect(floodWaitSecondsOf('FLOOD_WAIT_12')).toBe(12)
+      expect(floodWaitSecondsOf('FLOOD_PREMIUM_WAIT_5')).toBe(5)
+      expect(floodWaitSecondsOf('SLOWMODE_WAIT_5')).toBeNull()
+      expect(floodWaitSecondsOf('CHANNEL_PRIVATE')).toBeNull()
     })
 
     it('sends the request without a log for an account without a cache, or a cache that fails', async () => {

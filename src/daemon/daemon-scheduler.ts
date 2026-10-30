@@ -16,8 +16,8 @@ import {
 } from './daemon-bootstrap'
 import type { AccountRuntime, DaemonContext } from './daemon-context'
 import { formatError } from './daemon-utils'
-import { DEFAULT_JOB_EXECUTOR_CONFIG } from './job-executor'
 import { createSyncScheduler } from './scheduler'
+import { formatPace, PACING_CLEAN_RUN_CALLS } from './sync-pacing'
 import { retryDelayMs, SYNC_RETRY_CONFIG } from './sync-retry'
 import {
   createRealSyncWorker,
@@ -141,35 +141,31 @@ export function rebuildSyncWorker(
 /**
  * The account's next job, or null when it can't run one now: while it is
  * not connected, while its worker can't call Telegram (a FLOOD_WAIT), or
- * while its own inter-job delay runs. Each account runs only the jobs in its
- * own cache. An account whose cache fails to answer (a corrupt page, a lock
- * held past busy_timeout) is logged and waits out its delay; the other
- * accounts pick their own jobs.
+ * before its pace lets the next job start (#133). Each account runs only the
+ * jobs in its own cache. An account whose cache fails to answer (a corrupt
+ * page, a lock held past busy_timeout) is logged and waits one interval;
+ * the other accounts pick their own jobs.
  */
 function pickJob(
   ctx: DaemonContext,
   rt: AccountRuntime,
   now: number,
 ): { worker: RealSyncWorker; job: SyncJobRow } | null {
-  const { scheduler, worker } = rt
+  const { scheduler, worker, pacer } = rt
   if (!scheduler || !worker) return null
 
   const accountState = ctx.state.accounts.get(rt.accountId)
   if (accountState?.status !== 'connected' || !accountState.client) return null
-  if (
-    rt.lastJobProcessTime !== 0 &&
-    now - rt.lastJobProcessTime < DEFAULT_JOB_EXECUTOR_CONFIG.interJobDelayMs
-  ) {
-    return null
-  }
 
   try {
-    // Both read the account's cache: rate_limits, then sync_jobs
+    // All read the account's cache: sync_jobs, rate_limits, sync_jobs
+    pacer.setHistoryDue(scheduler.hasHistoryDue())
+    if (!pacer.isDue(now)) return null
     if (!worker.canMakeApiCall()) return null
     const job = scheduler.getNextJob()
     return job ? { worker, job } : null
   } catch (err) {
-    rt.lastJobProcessTime = now
+    pacer.recordStart(now)
     ctx.logger.warn(
       `[Account ${rt.accountId}] Failed to pick a job: ${formatError(err)}`,
     )
@@ -252,6 +248,12 @@ async function runJob(
 
     if (result.success) {
       rt.messagesSynced += result.messagesFetched
+      const faster = rt.pacer.recordCleanCall()
+      if (faster !== null) {
+        ctx.logger.debug(
+          `${tag} No FLOOD_WAIT in ${PACING_CLEAN_RUN_CALLS} calls, history pace up to ${formatPace(faster)} calls/s`,
+        )
+      }
 
       ctx.logger.debug(
         `${tag} Job ${job.id} completed: ${result.messagesFetched} messages fetched`,
@@ -279,19 +281,21 @@ async function runJob(
   } catch (err) {
     ctx.logger.error(`${tag} Job ${job.id} error: ${formatError(err)}`)
   } finally {
-    // The job used its lane's slot, whatever the outcome; the account's
-    // delay counts from its end.
+    // The job used its lane's slot, whatever the outcome
     scheduler.recordJobRun(job)
-    rt.lastJobProcessTime = Date.now()
   }
 }
 
 /**
  * Start the next job of every account that has none running and can run
- * one now (#60). Each account runs one job at a time, 3 s after its last
- * one ended, and never waits for another account's job: a FLOOD_WAIT or a
+ * one now (#60). Each account runs one job at a time, at its own pace
+ * (#133), and never waits for another account's job: a FLOOD_WAIT or a
  * slow page holds only its own account. Returns the started jobs, which
  * never reject; each leaves `jobsInFlight` when it ends.
+ *
+ * A job that ends after its account's next start was due (a FLOOD_WAIT
+ * slept inside it, a slow page) starts the next one right away, so the
+ * account doesn't wait for the main loop's next tick.
  */
 export function startDueJobs(ctx: DaemonContext): Promise<void>[] {
   if (ctx.state.shutdownRequested) return []
@@ -305,6 +309,8 @@ export function startDueJobs(ctx: DaemonContext): Promise<void>[] {
     if (!picked) continue
 
     const { worker, job } = picked
+    // Intervals count from the start, so a slow page doesn't stretch them
+    rt.pacer.recordStart(now)
     const p = runJob(ctx, rt, worker, job)
       .catch((err) => {
         ctx.logger.error(
@@ -313,11 +319,31 @@ export function startDueJobs(ctx: DaemonContext): Promise<void>[] {
       })
       .finally(() => {
         ctx.runtime.jobsInFlight.delete(id)
+        if (!ctx.state.shutdownRequested && rt.pacer.isDue(Date.now())) {
+          startDueJobs(ctx)
+        }
       })
     ctx.runtime.jobsInFlight.set(id, p)
     started.push(p)
   }
   return started
+}
+
+/**
+ * The earliest time after `now` at which an account with a scheduler may
+ * start its next job, or null if none comes due later: the main loop wakes
+ * then instead of at its next 1 s tick (#133). An account that is due now
+ * but started nothing (no job, a FLOOD_WAIT, a job still running) counts
+ * from the next tick, or from its job's end.
+ */
+export function nextJobDueAt(ctx: DaemonContext, now: number): number | null {
+  let next: number | null = null
+  for (const rt of ctx.runtime.accounts.values()) {
+    if (!rt.scheduler || !rt.worker) continue
+    const due = rt.pacer.nextStartAt()
+    if (due > now && (next === null || due < next)) next = due
+  }
+  return next
 }
 
 /** Run every due account's next job and wait for them: tests, one-shot use */

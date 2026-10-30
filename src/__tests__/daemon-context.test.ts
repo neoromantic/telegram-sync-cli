@@ -9,6 +9,7 @@ import {
   totalMessagesSynced,
 } from '../daemon/daemon-context'
 import { isDaemonStopError } from '../daemon/daemon-utils'
+import { createSyncPacer } from '../daemon/sync-pacing'
 import { createAccountCacheDb } from './helpers/daemon-runtime'
 
 describe('daemon-context', () => {
@@ -60,7 +61,7 @@ describe('daemon-context', () => {
         statusService: {} as never,
         scheduler: null,
         worker: null,
-        lastJobProcessTime: 0,
+        pacer: createSyncPacer(),
         messagesSynced,
       })
     }

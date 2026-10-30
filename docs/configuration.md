@@ -152,7 +152,14 @@ Supported keys:
   A failed row keeps its chat from getting a new job of the same type, so this is also how
   long a job waits for its next try after its retries ran out
 
-The retention keys take a value above 0; `0s` is rejected. The daemon prunes on a schedule
+- `sync.pacing.maxCallsPerSecond` (number, default `0.9`): the fastest the daemon calls
+  `messages.getHistory` per account while first or history pages are due. A number above 0
+  and at most 2, such as `0.8`; the adaptive pace starts at 0.7 (or this value, if lower)
+  and never goes above it ([rate-limiting.md](rate-limiting.md#pacing))
+- `sync.pacing.calmInterval` (duration, default `3s`): how often a job may start per account
+  with no history due, and the slowest the pace drops to after FLOOD_WAITs
+
+The retention keys and `sync.pacing.calmInterval` take a value above 0; `0s` is rejected. The daemon prunes on a schedule
 ([daemon.md](daemon.md#cache-pruning)) and `tg db vacuum` prunes before it compacts.
 Messages, chats and users are never pruned.
 
@@ -178,6 +185,12 @@ Example:
       "completedJobs": "24h",
       "failedJobs": "24h"
     }
+  },
+  "sync": {
+    "pacing": {
+      "maxCallsPerSecond": 0.9,
+      "calmInterval": "3s"
+    }
   }
 }
 ```
@@ -199,6 +212,7 @@ Examples:
 tg config get cache.staleness.peers
 tg config set cache.staleness.peers 3d
 tg config set activeAccount 2
+tg config set sync.pacing.maxCallsPerSecond 0.8
 ```
 
 ## Runtime Behavior
@@ -222,10 +236,11 @@ tg config set activeAccount 2
   every command except `tg config`, `tg skill`, `tg telemetry` and `tg daemon` with
   `INVALID_ARGS` and issue details before it runs; `tg config set` can still fix a wrong
   value. A `config.json` that can't be read fails them with `GENERAL_ERROR` (`details.path`).
-  `tg daemon` reads only `cache.retention.*`, non-strictly, once at start, so such a file
-  doesn't stop `tg daemon start`, with `--quiet` or without: the daemon logs one warning and
-  uses the default for each value it can't read, and the next other command reports the file.
-  A change to `cache.retention.*` takes effect when the daemon restarts.
+  `tg daemon` reads only `cache.retention.*` and `sync.pacing.*`, non-strictly, once at
+  start, so such a file doesn't stop `tg daemon start`, with `--quiet` or without: the daemon
+  logs one warning and uses the default for each value it can't read, and the next other
+  command reports the file. A change to `cache.retention.*` or `sync.pacing.*` takes effect
+  when the daemon restarts.
 - Cache-related commands resolve TTLs via `config.json` overrides.
 
 ## Usage stats

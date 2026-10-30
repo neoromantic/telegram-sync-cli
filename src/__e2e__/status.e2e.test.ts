@@ -501,6 +501,9 @@ describe('E2E: status, history progress and API calls', () => {
     // About 100 messages over the 4 minutes since the first page
     expect(data.progress.history.messages_per_minute).toBeGreaterThan(20)
     expect(data.progress.history.eta_seconds).toBeGreaterThan(0)
+    // One call after the first, over the 90 s since it; no live daemon
+    expect(data.progress.history.calls_per_second).toBe(0.01)
+    expect(data.progress.history.pacing).toBeNull()
     expect(data.accounts.accounts[0]?.progress.history).toMatchObject({
       messages_left: 800,
     })
@@ -522,6 +525,7 @@ describe('E2E: status, history progress and API calls', () => {
 
     expect(out).toMatch(/History Cached\s+200 \/ 1,000 msgs \(20%\)/)
     expect(out).toMatch(/History Left\s+800 msgs in 1 chats → ~\d/)
+    expect(out).toMatch(/History Pace\s+0\.01 calls\/s\n/)
     expect(out).toMatch(/group chat:-4242 → 200 \/ 1,000 msgs/)
     expect(out).toMatch(/API Calls \(1m\)\s+1/)
   })

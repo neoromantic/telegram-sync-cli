@@ -7,6 +7,7 @@ import { accountLabel } from './daemon-logger'
 import { runMigrationsTick } from './daemon-migrations'
 import {
   cleanupOldJobs,
+  nextJobDueAt,
   refreshAllQueues,
   startDueJobs,
 } from './daemon-scheduler'
@@ -53,6 +54,7 @@ export async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
         messagesSynced: rt.messagesSynced,
         pendingJobs: pending,
         runningJobs: running,
+        pacing: rt.pacer.snapshot(),
       })
     } catch (err) {
       ctx.logger.warn(
@@ -78,6 +80,37 @@ function sleepUnlessStopped(ms: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener('abort', done, { once: true })
     timer = setTimeout(done, ms)
   })
+}
+
+/**
+ * Wait out the rest of a tick, starting each account's job when its pace
+ * makes it due, not at the next tick (#133). A stop ends the wait at once.
+ * Exported for tests, which pass a clock and a sleep of their own.
+ */
+export async function waitForNextTick(
+  ctx: DaemonContext,
+  tickMs: number,
+  clock: {
+    now: () => number
+    sleep: (ms: number, signal: AbortSignal) => Promise<void>
+  } = { now: () => Date.now(), sleep: sleepUnlessStopped },
+): Promise<void> {
+  const signal = ctx.runtime.shutdown.signal
+  let now = clock.now()
+  const end = now + tickMs
+  for (;;) {
+    const due = nextJobDueAt(ctx, now)
+    if (due === null || due >= end) break
+    await clock.sleep(due - now, signal)
+    if (ctx.state.shutdownRequested) return
+    startDueJobs(ctx)
+    const after = clock.now()
+    // A clock that stands still (a test's) would wake for the same job
+    // forever
+    if (after <= now) break
+    now = after
+  }
+  await clock.sleep(Math.max(0, end - now), signal)
 }
 
 async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
@@ -177,7 +210,7 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     // Last and lowest: a few batches of each cache's background migrations
     await runMigrationsTick(ctx)
 
-    await sleepUnlessStopped(1000, ctx.runtime.shutdown.signal)
+    await waitForNextTick(ctx, 1000)
   }
 
   ctx.logger.debug('Main loop exiting...')

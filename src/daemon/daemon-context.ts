@@ -9,6 +9,7 @@ import {
 import { DaemonStopError } from './daemon-utils'
 import type { PidFile } from './pid-file'
 import type { SyncScheduler } from './scheduler'
+import type { SyncPacer, SyncPacingConfig } from './sync-pacing'
 import type { RealSyncWorker } from './sync-worker'
 import type {
   DaemonLogger,
@@ -31,8 +32,8 @@ export interface AccountRuntime {
   scheduler: SyncScheduler | null
   /** Bound to the account's current client; null while it is disconnected */
   worker: RealSyncWorker | null
-  /** When the account's last job finished; each account waits its own delay */
-  lastJobProcessTime: number
+  /** When the account's next job may start: its own pace (#133) */
+  pacer: SyncPacer
   /** Messages cached for this account since the daemon started */
   messagesSynced: number
 }
@@ -90,6 +91,11 @@ export interface DaemonContext {
    * once at start; the defaults when absent
    */
   retention?: CacheRetentionConfig
+  /**
+   * How fast each account's jobs start (`sync.pacing.*`), read from
+   * config.json once at start; the defaults when absent
+   */
+  pacing?: SyncPacingConfig
 }
 
 export function createDaemonRuntime(): DaemonRuntime {

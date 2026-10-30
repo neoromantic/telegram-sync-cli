@@ -5,7 +5,7 @@ import { describe, expect, it, mock } from 'bun:test'
 import type { TelegramClient } from '@mtcute/bun'
 import type { DaemonContext } from '../daemon/daemon-context'
 import { createDaemonRuntime, requestShutdown } from '../daemon/daemon-context'
-import { mainLoop } from '../daemon/daemon-loop'
+import { mainLoop, waitForNextTick } from '../daemon/daemon-loop'
 import { startDueJobs, waitForJobsInFlight } from '../daemon/daemon-scheduler'
 import type { SyncScheduler } from '../daemon/scheduler'
 import { createSyncScheduler } from '../daemon/scheduler'
@@ -50,6 +50,7 @@ function createMockStatusService(
       pendingJobs: 0,
       runningJobs: 0,
       lastCatchUp: null,
+      pacing: null,
     }),
   }
   return { ...base, ...overrides }
@@ -65,6 +66,7 @@ function createMockScheduler(
     initializeForStartup: async () => {},
     refreshQueues: () => {},
     getNextJob: () => null,
+    hasHistoryDue: () => false,
     recordJobRun: () => {},
     claimNextJob: () => null,
     startJob: () => false,
@@ -752,6 +754,93 @@ describe('mainLoop', () => {
     for (const finish of finishes) finish({ success: true, messagesFetched: 0 })
     await waitForJobsInFlight(ctx)
     expect(finishes).toHaveLength(2)
+    expect(ctx.runtime.jobsInFlight.size).toBe(0)
+  })
+})
+
+describe('waitForNextTick (#133)', () => {
+  /** A clock the fake sleep moves; `onSleep` runs before each sleep ends */
+  function fakeClock(start: number, onSleep: (ms: number) => void = () => {}) {
+    let now = start
+    const sleeps: number[] = []
+    return {
+      sleeps,
+      clock: {
+        now: () => now,
+        sleep: async (ms: number) => {
+          sleeps.push(ms)
+          now += ms
+          onSleep(ms)
+        },
+      },
+      get now() {
+        return now
+      },
+    }
+  }
+
+  /** Account 1 with history due, whose last job started at `lastStart` */
+  function historyAccount(ctx: DaemonContext, lastStart: number) {
+    const starts: number[] = []
+    const rt = addAccountRuntime(ctx, 1, createAccountCacheDb(), {
+      scheduler: createMockScheduler({
+        hasHistoryDue: () => true,
+        getNextJob: () => jobOf(1),
+      }),
+      worker: {
+        client: {} as TelegramClient,
+        canMakeApiCall: () => true,
+        processJobReal: mock(async () => {
+          starts.push(Date.now())
+          return { success: true, messagesFetched: 100 }
+        }),
+      } as unknown as RealSyncWorker,
+    })
+    ctx.state.accounts.set(1, connectedState(1))
+    rt.pacer.setHistoryDue(true)
+    rt.pacer.recordStart(lastStart)
+    return { rt, starts }
+  }
+
+  it("wakes inside the tick when an account's next job is due, then sleeps the rest", async () => {
+    const ctx = createContext()
+    const time = fakeClock(10_000)
+    // Started 1029 ms ago at 0.7 calls/s: due in 400 ms
+    const { starts } = historyAccount(ctx, 10_000 - 1029)
+    const originalNow = Date.now
+    Date.now = () => time.now
+
+    try {
+      await waitForNextTick(ctx, 1000, time.clock)
+      await waitForJobsInFlight(ctx)
+    } finally {
+      Date.now = originalNow
+    }
+
+    expect(starts).toEqual([10_400])
+    expect(time.sleeps).toEqual([400, 600])
+  })
+
+  it('sleeps the whole tick when no job comes due in it', async () => {
+    const ctx = createContext()
+    const time = fakeClock(10_000)
+    const { starts } = historyAccount(ctx, 10_000)
+
+    await waitForNextTick(ctx, 1000, time.clock)
+
+    expect(starts).toEqual([])
+    expect(time.sleeps).toEqual([1000])
+  })
+
+  it('a stop during the wait for a due job starts no job and ends the tick', async () => {
+    const ctx = createContext()
+    const time = fakeClock(10_000, () => requestShutdown(ctx))
+    const { starts } = historyAccount(ctx, 10_000 - 1029)
+
+    await waitForNextTick(ctx, 1000, time.clock)
+
+    expect(starts).toEqual([])
+    expect(time.sleeps).toEqual([400])
     expect(ctx.runtime.jobsInFlight.size).toBe(0)
   })
 })

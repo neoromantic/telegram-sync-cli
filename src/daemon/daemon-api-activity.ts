@@ -16,6 +16,15 @@ import { getErrorMessage } from './daemon-utils'
 /** What a call's activity row goes into, or null to log nothing */
 export type ActivityTarget = () => Database | null
 
+/** Told of each FLOOD_WAIT Telegram answers, with its seconds */
+export type FloodWaitListener = (method: string, seconds: number) => void
+
+/** The seconds of a FLOOD_WAIT_<n> or FLOOD_PREMIUM_WAIT_<n>, else null */
+export function floodWaitSecondsOf(errorMessage: string): number | null {
+  const match = /^FLOOD_(?:PREMIUM_)?WAIT_(\d+)$/.exec(errorMessage)
+  return match ? Number(match[1]) : null
+}
+
 /** An RPC error mtcute's network layer returns instead of throwing */
 function rpcErrorOf(
   result: unknown,
@@ -36,11 +45,14 @@ function rpcErrorOf(
  * Count each request in its rate window and log it to api_activity: its
  * start in ms, success, Telegram's error code and how long it took. It sits
  * inside the flood waiter, so a FLOOD_WAIT and the retry after it are two
- * rows. A write that fails (a locked cache) never fails the request.
+ * rows, and it sees every FLOOD_WAIT Telegram sends, short or long:
+ * `onFloodWait` hears of each (the account's pace, #133). A write that
+ * fails (a locked cache) never fails the request.
  */
 export function apiActivityMiddleware(
   target: ActivityTarget,
   context = 'daemon',
+  onFloodWait?: FloodWaitListener,
 ): RpcCallMiddleware {
   const services = new WeakMap<Database, RateLimitsService>()
   const serviceFor = (db: Database) => {
@@ -50,6 +62,16 @@ export function apiActivityMiddleware(
       services.set(db, service)
     }
     return service
+  }
+
+  const notifyFloodWait = (method: string, errorMessage: string) => {
+    const seconds = floodWaitSecondsOf(errorMessage)
+    if (seconds === null || !onFloodWait) return
+    try {
+      onFloodWait(method, seconds)
+    } catch {
+      // Pacing never fails the request
+    }
   }
 
   return async (ctx, next) => {
@@ -91,8 +113,12 @@ export function apiActivityMiddleware(
     try {
       const result = await next(ctx)
       const error = rpcErrorOf(result)
-      if (error) log(0, error.errorCode, error.errorMessage)
-      else log(1, null, null)
+      if (error) {
+        log(0, error.errorCode, error.errorMessage)
+        notifyFloodWait(method, error.errorMessage)
+      } else {
+        log(1, null, null)
+      }
       return result
     } catch (err) {
       log(0, null, getErrorMessage(err))

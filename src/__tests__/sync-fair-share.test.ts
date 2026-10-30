@@ -15,6 +15,7 @@ import {
 } from '../daemon/daemon-context'
 import { processJobs } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
+import { createSyncPacer } from '../daemon/sync-pacing'
 import { createRealSyncWorker } from '../daemon/sync-worker'
 import {
   type ChatSyncStateService,
@@ -200,7 +201,7 @@ describe('job budget with 500 chats', () => {
       if (ran.length > 0 && ran.length % 10 === 0) scheduler.refreshQueues()
       const job = scheduler.getNextJob()
       if (!job) break
-      account().lastJobProcessTime = 0
+      account().pacer = createSyncPacer()
       await processJobs(ctx)
       expect(jobsService.getById(job.id)?.status).toBe('completed')
       ran.push({ id: job.id, type: job.job_type })
@@ -301,7 +302,7 @@ describe('job budget with 500 chats', () => {
     const ran: SyncJobRow[] = []
     for (let i = 0; i < 4; i++) {
       ran.push(scheduler.getNextJob()!)
-      account().lastJobProcessTime = 0
+      account().pacer = createSyncPacer()
       await processJobs(ctx)
     }
     const floodedJob = ran[3]!
@@ -323,7 +324,7 @@ describe('job budget with 500 chats', () => {
     const requests = history.requestCount
     const pending = jobsService.getPendingJobs().length
     for (let i = 0; i < 5; i++) {
-      account().lastJobProcessTime = 0
+      account().pacer = createSyncPacer()
       await processJobs(ctx)
     }
     expect(history.requestCount).toBe(requests)
@@ -342,7 +343,7 @@ describe('job budget with 500 chats', () => {
       scheduler.refreshQueues()
       for (let i = 0; i < 1200 && scheduler.getNextJob(); i++) {
         if (i > 0 && i % 10 === 0) scheduler.refreshQueues()
-        account().lastJobProcessTime = 0
+        account().pacer = createSyncPacer()
         await processJobs(ctx)
       }
     } finally {
@@ -376,7 +377,7 @@ describe('job budget with 500 chats', () => {
     } as unknown as TelegramClient)
     scheduler.queueForwardCatchup(chatId)
 
-    account().lastJobProcessTime = 0
+    account().pacer = createSyncPacer()
     await processJobs(ctx)
 
     // The running page finished, but its full page queued nothing
@@ -526,7 +527,8 @@ describe('job budget with two accounts', () => {
     await second.scheduler.initializeForStartup()
 
     for (let i = 0; i < 20; i++) {
-      for (const rt of ctx.runtime.accounts.values()) rt.lastJobProcessTime = 0
+      for (const rt of ctx.runtime.accounts.values())
+        rt.pacer = createSyncPacer()
       await processJobs(ctx)
     }
 

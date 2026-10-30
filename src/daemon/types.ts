@@ -11,6 +11,7 @@ import type {
 import type { CacheRetentionConfig } from '../db/types'
 import type { ConnectionWatch } from './daemon-catch-up'
 import type { UpdateHandlers } from './handlers'
+import type { SyncPacingConfig } from './sync-pacing'
 
 /**
  * Event handler references for cleanup
@@ -94,6 +95,8 @@ export interface DaemonConfig {
   shutdownTimeoutMs?: number
   /** How long the caches keep their bookkeeping rows; defaults if absent */
   retention?: CacheRetentionConfig
+  /** How fast each account's sync jobs start; defaults if absent */
+  pacing?: SyncPacingConfig
 }
 
 /**

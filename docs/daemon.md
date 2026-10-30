@@ -84,7 +84,8 @@ PID file location:
 │                tg daemon                     │
 ├──────────────────────────────────────────────┤
 │  Job loop per account: one job at a time,    │
-│  3 s between its jobs                        │
+│  at its own pace (3 s calm, ~0.7–0.9/s while │
+│  history is due)                             │
 ├──────────────────────────────────────────────┤
 │  Account runtime (one per account)           │
 │    - mtcute client, session_<id>.db          │
@@ -143,15 +144,18 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
   next to catch-up; inside a lane, small chats go first
 - A refresh every ~30 seconds (daemon loop) and after each reconnect's dialog pass queues
   the work that is due again, such as chats first seen live
-- Each account runs its own jobs: one at a time, the next one 3 seconds after its last one
-  ended. On the 1-second tick the daemon starts an account's next job when it has none
-  running, its client is connected, it isn't waiting out a FLOOD_WAIT recorded in its
-  `rate_limits` and its delay has passed. A FLOOD_WAIT that mtcute sleeps through inside a
+- Each account runs its own jobs: one at a time, at its own pace, counted from each job's
+  start: every 3 seconds with no history due, and an adaptive 0.7 to 0.9 calls per second
+  while first or history pages are due, halved on a FLOOD_WAIT
+  ([rate-limiting.md](rate-limiting.md#pacing)). The daemon starts an account's next job when
+  it has none running, its client is connected, it isn't waiting out a FLOOD_WAIT recorded in
+  its `rate_limits` and its pace lets it; the main loop wakes for that inside its 1-second
+  tick, and a job that ends after the next one was due starts it at once. A FLOOD_WAIT that mtcute sleeps through inside a
   job (up to 5 minutes), a recorded one (over 5 minutes) or a slow page holds only that
   account; the others keep syncing. One account's lost connection doesn't stop the others; a
   disconnected account's jobs stay pending until it reconnects. An account whose cache fails
   while its next job is picked (a corrupt page, a lock held past the 5-second
-  `busy_timeout`) is logged, waits out its delay and is tried again; the other accounts go on.
+  `busy_timeout`) is logged, waits one interval and is tried again; the other accounts go on.
   A FLOOD_WAIT on one account's health-check `getMe` still pauses new job starts for every
   account until it ends
 

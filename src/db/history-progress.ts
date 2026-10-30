@@ -10,6 +10,9 @@ import { historyDoneSql, SyncJobStatus, SyncJobType } from './sync-schema'
 /** The span the pace of history pages is measured over */
 export const HISTORY_PACE_WINDOW_MS = 15 * 60 * 1000
 
+/** The span the rate of `messages.getHistory` calls is measured over */
+export const HISTORY_CALL_RATE_WINDOW_MS = 5 * 60 * 1000
+
 /** How many pending chats `largest_pending` lists */
 const LARGEST_PENDING_LIMIT = 5
 
@@ -53,6 +56,12 @@ export interface HistoryProgress {
   messages_per_minute: number | null
   /** messages_left at that pace; null without a pace or nothing left */
   eta_seconds: number | null
+  /**
+   * `messages.getHistory` calls per second over the last 5 minutes, from
+   * api_activity: every call of the account, the retry after a FLOOD_WAIT
+   * and CLI calls included; null without two calls in that span
+   */
+  calls_per_second: number | null
   /** The pending chats with the most messages left */
   largest_pending: PendingHistoryChat[]
 }
@@ -66,6 +75,7 @@ export function emptyHistoryProgress(): HistoryProgress {
     messages_left: 0,
     messages_per_minute: null,
     eta_seconds: null,
+    calls_per_second: null,
     largest_pending: [],
   }
 }
@@ -107,6 +117,27 @@ function measurePace(db: Database, now: number): number | null {
     .slice(1)
     .reduce((sum, job) => sum + (job.messages_fetched ?? 0), 0)
   return (messages / (now - first.completed_at)) * 60_000
+}
+
+/**
+ * `messages.getHistory` calls per second in the window: the calls after the
+ * first, over the time from the first to now, so a pause slows it down
+ */
+function measureCallRate(db: Database, now: number): number | null {
+  const row = db
+    .query(
+      `SELECT COUNT(*) AS calls, MIN(timestamp) AS first FROM api_activity
+       WHERE method = 'messages.getHistory'
+         AND timestamp >= $since AND timestamp <= $now`,
+    )
+    .get({ $since: now - HISTORY_CALL_RATE_WINDOW_MS, $now: now }) as {
+    calls: number
+    first: number | null
+  } | null
+  if (!row || row.calls < 2 || row.first === null || now <= row.first) {
+    return null
+  }
+  return ((row.calls - 1) / (now - row.first)) * 1000
 }
 
 export function readHistoryProgress(
@@ -170,6 +201,9 @@ export function readHistoryProgress(
     pace !== null && pace > 0 && progress.messages_left > 0
       ? Math.ceil((progress.messages_left / pace) * 60)
       : null
+  const callRate = measureCallRate(db, now)
+  progress.calls_per_second =
+    callRate === null ? null : Math.round(callRate * 100) / 100
 
   return progress
 }

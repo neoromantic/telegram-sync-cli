@@ -14,12 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the first sync. Messages already cached stay; the next dialog pass moves such a chat to
   the new rule and drops its pending history jobs. `tg chats sync <bot>` still turns full
   history on for one of them (#131).
+- The daemon paces history to what Telegram allows instead of a fixed 3 seconds between
+  jobs. While first pages or history are due, each account starts at 0.7 calls per second,
+  speeds up after every 30 calls without a FLOOD_WAIT up to 0.9, halves the pace on a
+  FLOOD_WAIT after waiting it out, and goes back to one job every 3 seconds once history is
+  done. The pause now counts from each job's start and no longer waits for the next 1-second
+  tick, so 3 seconds is 3 seconds; a first sync used to make one call about every 4 seconds.
+  `sync.pacing.maxCallsPerSecond` and `sync.pacing.calmInterval` in `config.json` change the
+  cap and the calm interval (#133).
 
 ### Added
 
 - `tg chats list` shows why each chat syncs or not: `syncEnabled` and `syncReason` (`dm`,
   `bot`, `deleted_account`, `small_group`, `medium_group`, `on_by_hand`, `off_by_hand` and
   others). `tg chats sync` returns `syncReason` too (#131).
+- `tg status` shows the history pace next to the time left: `progress.history.calls_per_second`
+  (the `messages.getHistory` calls of the last 5 minutes) and `progress.history.pacing` (the
+  running daemon's mode, target pace and FLOOD_WAITs), per account and summed; pretty output
+  shows a History Pace row (#133).
 
 ### Fixed
 

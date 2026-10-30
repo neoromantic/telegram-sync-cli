@@ -488,6 +488,7 @@ The daemon writes each account's own rows, every second in one transaction per a
 | `messages_synced` | Messages the daemon cached for this account since it started |
 | `pending_jobs`, `running_jobs` | The account's queue; a start deletes the previous run's counts |
 | `last_catch_up_at`, `last_catch_up_reason`, `last_offline_ms`, `last_catch_up_chats` | The last dialog pass after a reconnect or a wake: when it ended, why (`reconnect`, `wake`, `new_client`), how long the account was offline and how many chats it left to catch up; a start deletes them |
+| `pacing_mode`, `pacing_target_calls_per_second`, `pacing_flood_waits` | The account's sync pace: `history` while first or history pages are due, else `calm`; the calls per second it runs at; FLOOD_WAITs since the daemon started ([rate-limiting.md](rate-limiting.md#pacing)); a start deletes them |
 | `last_update` | When the daemon last wrote these rows |
 
 `tg status` and `tg daemon status` count only rows whose `daemon_pid` is the PID in
