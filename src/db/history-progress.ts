@@ -31,11 +31,18 @@ export interface PendingHistoryChat {
 export interface HistoryProgress {
   /** Chats with sync on whose history isn't complete */
   chats_pending: number
-  /** Chats with sync on that have no count from Telegram yet */
+  /** Pending chats that have no count from Telegram yet */
   chats_without_count: number
-  /** Messages cached in the chats with a count, at most the count each */
+  /**
+   * Messages cached in the chats with a count, at most the count each, and
+   * in complete chats without one
+   */
   messages_cached: number
-  /** Those chats' messages on the server, by the newest count */
+  /**
+   * Those chats' messages on the server: the newest count, or for a
+   * complete chat without one (synced by an older version; catch-up pages
+   * give none) its cached messages
+   */
   messages_known: number
   /** Messages of pending chats not cached yet, by their counts */
   messages_left: number
@@ -118,16 +125,22 @@ export function readHistoryProgress(
   const progress = emptyHistoryProgress()
   const pending: PendingHistoryChat[] = []
   for (const row of rows) {
-    if (row.history_complete === 0) progress.chats_pending++
+    const pendingChat = row.history_complete === 0
+    if (pendingChat) progress.chats_pending++
     if (row.total_messages === null) {
-      progress.chats_without_count++
+      if (pendingChat) {
+        progress.chats_without_count++
+      } else {
+        progress.messages_cached += row.cached
+        progress.messages_known += row.cached
+      }
       continue
     }
     // Messages deleted on the server since they were cached count once
     const cached = Math.min(row.cached, row.total_messages)
     progress.messages_cached += cached
     progress.messages_known += row.total_messages
-    if (row.history_complete === 0) {
+    if (pendingChat) {
       const left = row.total_messages - cached
       progress.messages_left += left
       pending.push({

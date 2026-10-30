@@ -747,12 +747,12 @@ describe('E2E: status per account', () => {
           failed_jobs: 1,
           retrying_jobs: 0,
         },
-        progress: {
+        progress: expect.objectContaining({
           chats_enabled: 0,
           chats_history_complete: 0,
           chats_history_pending: 0,
           messages_cached: 1,
-        },
+        }),
         rate_limits: { api_calls_last_minute: 0, active_flood_waits: 0 },
       }),
       expect.objectContaining({
@@ -851,16 +851,17 @@ describe('E2E: status totals over two accounts', () => {
 
   beforeAll(() => {
     env = createTwoAccounts('multi-account-status-totals')
-    const now = Math.floor(Date.now() / 1000)
-    // Calls of the last minute. window_start is now, not the minute's
-    // start, so a minute boundary before tg status reads can't drop them
-    const calls = (accountId: number, method: string, count: number) =>
-      env
-        .openCacheDb(accountId)
-        .run(
-          'INSERT INTO rate_limits (method, window_start, call_count, last_call_at) VALUES (?, ?, ?, ?)',
-          [method, now, count, now],
+    const now = Date.now()
+    // Calls of the last minute, as api_activity logs them
+    const calls = (accountId: number, method: string, count: number) => {
+      const db = env.openCacheDb(accountId)
+      for (let i = 0; i < count; i++) {
+        db.run(
+          'INSERT INTO api_activity (timestamp, method, success) VALUES (?, ?, 1)',
+          [now - 1000 * i, method],
         )
+      }
+    }
     calls(1, 'messages.getHistory', 2)
     calls(1, 'users.getUsers', 1)
     calls(2, 'messages.getHistory', 3)

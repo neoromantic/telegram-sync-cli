@@ -78,13 +78,15 @@ describe('readHistoryProgress', () => {
     // Deleted on the server after it was cached: counted once
     seedChat(-4242, { total: 3, cached: 6, complete: true })
     seedChat(103, { total: null, cached: 2 })
+    // Complete without a count: an older version synced it
+    seedChat(105, { total: null, cached: 7, complete: true })
     seedChat(104, { total: 50, cached: 0, enabled: false })
 
     expect(readHistoryProgress(db, { now: NOW })).toEqual({
       chats_pending: 2,
       chats_without_count: 1,
-      messages_cached: 12,
-      messages_known: 18,
+      messages_cached: 19,
+      messages_known: 25,
       messages_left: 6,
       messages_per_minute: null,
       eta_seconds: null,

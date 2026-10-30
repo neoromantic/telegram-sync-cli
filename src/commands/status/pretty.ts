@@ -295,7 +295,7 @@ function printHistoryProgress(status: StatusSnapshot): void {
   if (history.chats_without_count > 0) {
     printRow(
       'Not Counted Yet',
-      `${c.number(history.chats_without_count)} chats ${c.dim('(no history page yet)')}`,
+      `${c.number(history.chats_without_count)} chats ${c.dim('(pending, no history page yet)')}`,
     )
   }
 
