@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-30
+
+Fixes from a day of running the daemon on a real account. Restart the daemon after
+the upgrade: its first dialog pass catches up the messages an earlier version missed
+after a laptop sleep or a network drop (#124).
+
 ### Added
 
 - `tg status` shows how far the history backfill is: `progress.history` gives the messages
@@ -760,7 +766,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.5.0...v0.6.0
