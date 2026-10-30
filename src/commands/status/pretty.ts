@@ -292,6 +292,17 @@ function printHistoryProgress(status: StatusSnapshot): void {
       `${c.number(history.messages_left.toLocaleString())} msgs in ${c.number(history.chats_pending)} chats${pace}`,
     )
   }
+  const pacing = history.pacing
+  if (history.calls_per_second !== null || pacing) {
+    const measured =
+      history.calls_per_second === null
+        ? c.dim('no recent calls')
+        : `${c.number(history.calls_per_second.toFixed(2))} calls/s`
+    const target = pacing
+      ? ` ${c.dim(icons.arrow)} target ${c.number(pacing.target_calls_per_second.toFixed(2))} ${c.dim(`(${pacing.mode})`)}${pacing.flood_waits > 0 ? `, ${c.warning(`${pacing.flood_waits} FLOOD_WAIT${pacing.flood_waits === 1 ? '' : 's'}`)}` : ''}`
+      : ''
+    printRow('History Pace', `${measured}${target}`)
+  }
   if (history.chats_without_count > 0) {
     printRow(
       'Not Counted Yet',

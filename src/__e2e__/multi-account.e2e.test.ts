@@ -686,6 +686,10 @@ describe('E2E: status per account', () => {
         messagesSynced: synced,
         pendingJobs: 0,
         runningJobs: 0,
+        pacing:
+          accountId === 1
+            ? { mode: 'history', targetCallsPerSecond: 0.75, floodWaits: 1 }
+            : { mode: 'calm', targetCallsPerSecond: 1 / 3, floodWaits: 0 },
       })
       return status
     }
@@ -766,6 +770,26 @@ describe('E2E: status per account', () => {
         progress: expect.objectContaining({ messages_cached: 1 }),
       }),
     ])
+  })
+
+  it("shows each account's sync pace from the live daemon, and their sum (#133)", async () => {
+    const data = await run(env, ['status'])
+    const accounts = (
+      data.accounts as {
+        accounts: Array<{ progress: { history: { pacing: unknown } } }>
+      }
+    ).accounts
+    const progress = data.progress as { history: { pacing: unknown } }
+
+    expect(accounts.map((account) => account.progress.history.pacing)).toEqual([
+      { mode: 'history', target_calls_per_second: 0.75, flood_waits: 1 },
+      { mode: 'calm', target_calls_per_second: 0.33, flood_waits: 0 },
+    ])
+    expect(progress.history.pacing).toEqual({
+      mode: 'history',
+      target_calls_per_second: 1.08,
+      flood_waits: 1,
+    })
   })
 
   it('reports only the account --account selects', async () => {

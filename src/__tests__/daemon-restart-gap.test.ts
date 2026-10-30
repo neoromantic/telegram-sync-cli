@@ -17,6 +17,7 @@ import {
 import { processJobs } from '../daemon/daemon-scheduler'
 import { createUpdateHandlers, type UpdateHandlers } from '../daemon/handlers'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
+import { createSyncPacer } from '../daemon/sync-pacing'
 import { createRealSyncWorker } from '../daemon/sync-worker'
 import {
   type ChatSyncStateService,
@@ -179,7 +180,7 @@ describe('daemon restart with messages missed while stopped', () => {
   /** One pass of the daemon loop's job step, without the inter-job delay. */
   async function runNextJob(): Promise<boolean> {
     if (!scheduler.getNextJob()) return false
-    rt.lastJobProcessTime = 0
+    rt.pacer = createSyncPacer()
     await processJobs(ctx)
     return true
   }
@@ -374,7 +375,8 @@ describe('daemon restart with two accounts', () => {
       if (!first.scheduler.getNextJob() && !second.scheduler.getNextJob()) {
         break
       }
-      for (const rt of ctx.runtime.accounts.values()) rt.lastJobProcessTime = 0
+      for (const rt of ctx.runtime.accounts.values())
+        rt.pacer = createSyncPacer()
       await processJobs(ctx)
     }
 

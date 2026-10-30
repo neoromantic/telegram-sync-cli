@@ -1,5 +1,9 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import {
+  DEFAULT_SYNC_PACING,
+  type SyncPacingConfig,
+} from '../daemon/sync-pacing'
 import { type AccountsDbInterface, accountsDb } from '../db'
 import type {
   CacheConfig,
@@ -12,14 +16,26 @@ import {
   parseDuration,
 } from '../db/types'
 
-/** `positiveDuration` is a duration above 0, such as a retention */
-type ConfigValueType = 'number' | 'boolean' | 'duration' | 'positiveDuration'
+/**
+ * `positiveDuration` is a duration above 0, such as a retention; `rate` is
+ * a number of calls per second above 0 and at most MAX_CALLS_PER_SECOND
+ */
+type ConfigValueType =
+  | 'number'
+  | 'boolean'
+  | 'duration'
+  | 'positiveDuration'
+  | 'rate'
+
+/** The fastest `sync.pacing.maxCallsPerSecond` accepts */
+const MAX_CALLS_PER_SECOND = 2
 
 const TYPE_DESCRIPTIONS: Record<ConfigValueType, string> = {
   number: 'number',
   boolean: 'boolean',
   duration: 'duration',
   positiveDuration: 'duration above 0',
+  rate: `number above 0 and at most ${MAX_CALLS_PER_SECOND}`,
 }
 
 export type ConfigLeafKey =
@@ -33,6 +49,8 @@ export type ConfigLeafKey =
   | 'cache.retention.rateLimits'
   | 'cache.retention.completedJobs'
   | 'cache.retention.failedJobs'
+  | 'sync.pacing.maxCallsPerSecond'
+  | 'sync.pacing.calmInterval'
 
 const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   activeAccount: 'number',
@@ -45,12 +63,16 @@ const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   'cache.retention.rateLimits': 'positiveDuration',
   'cache.retention.completedJobs': 'positiveDuration',
   'cache.retention.failedJobs': 'positiveDuration',
+  'sync.pacing.maxCallsPerSecond': 'rate',
+  'sync.pacing.calmInterval': 'positiveDuration',
 }
 
 const CONFIG_PREFIX_KEYS = new Set<string>([
   'cache',
   'cache.staleness',
   'cache.retention',
+  'sync',
+  'sync.pacing',
 ])
 
 /** The retention keys and the CacheRetentionConfig field each one sets */
@@ -81,9 +103,19 @@ export interface CacheConfigFile {
   maxCacheAge?: DurationString
 }
 
+export interface SyncPacingConfigFile {
+  maxCallsPerSecond?: number
+  calmInterval?: DurationString
+}
+
+export interface SyncConfigFile {
+  pacing?: SyncPacingConfigFile
+}
+
 export interface ConfigFile {
   activeAccount?: number
   cache?: CacheConfigFile
+  sync?: SyncConfigFile
 }
 
 export interface ConfigIssue {
@@ -176,6 +208,15 @@ function isValidDuration(
   }
 }
 
+function isValidRate(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value > 0 &&
+    value <= MAX_CALLS_PER_SECOND
+  )
+}
+
 function validateValue(type: ConfigValueType, value: unknown): boolean {
   switch (type) {
     case 'number':
@@ -188,6 +229,8 @@ function validateValue(type: ConfigValueType, value: unknown): boolean {
       return (
         typeof value === 'string' && isValidDuration(value, { positive: true })
       )
+    case 'rate':
+      return isValidRate(value)
     default:
       return false
   }
@@ -335,6 +378,18 @@ export function parseConfigValue(
       }
       return normalized
     }
+    case 'rate': {
+      const parsed = Number(trimmed)
+      if (trimmed === '' || !isValidRate(parsed)) {
+        throw new ConfigError('Invalid value', [
+          {
+            path: key,
+            message: `Expected a ${TYPE_DESCRIPTIONS.rate}, like 0.9`,
+          },
+        ])
+      }
+      return parsed
+    }
   }
 }
 
@@ -416,15 +471,33 @@ function resolveRetention(config: ConfigFile): CacheRetentionConfig {
   return retention
 }
 
+/** The pacing config.json sets, over the defaults */
+function resolvePacing(config: ConfigFile): SyncPacingConfig {
+  const pacing = { ...DEFAULT_SYNC_PACING }
+  const file = config.sync?.pacing
+  if (file?.maxCallsPerSecond) pacing.maxCallsPerSecond = file.maxCallsPerSecond
+  if (file?.calmInterval)
+    pacing.calmIntervalMs = parseDuration(file.calmInterval)
+  return pacing
+}
+
+/** The keys the daemon reads; the other commands read the rest */
+const DAEMON_KEY_PREFIXES = ['cache.retention.', 'sync.pacing.']
+
 /**
- * The retention for the daemon, read once at its start. Unlike the
- * commands it never fails: bad JSON, an unreadable file or a bad value
- * gives one warning, and every key that can't be read keeps its default.
+ * The retention and the sync pacing for the daemon, read once at its start.
+ * Unlike the commands it never fails: bad JSON, an unreadable file or a bad
+ * value gives one warning, and every key that can't be read keeps its
+ * default.
  */
-export async function loadRetentionConfig(
+export async function loadDaemonConfig(
   options: { dataDir?: string } = {},
-): Promise<{ retention: CacheRetentionConfig; warning: string | null }> {
-  const fallback = 'using the default retention'
+): Promise<{
+  retention: CacheRetentionConfig
+  pacing: SyncPacingConfig
+  warning: string | null
+}> {
+  const fallback = 'using the defaults'
   let loaded: Awaited<ReturnType<typeof loadConfig>>
   try {
     loaded = await loadConfig({ dataDir: options.dataDir, strict: false })
@@ -437,15 +510,17 @@ export async function loadRetentionConfig(
           : String(err)
     return {
       retention: getDefaultRetentionConfig(),
+      pacing: { ...DEFAULT_SYNC_PACING },
       warning: `${getConfigPath(options.dataDir)}: ${why}; ${fallback}`,
     }
   }
 
   const bad = loaded.errors.filter((issue) =>
-    issue.path.startsWith('cache.retention.'),
+    DAEMON_KEY_PREFIXES.some((prefix) => issue.path.startsWith(prefix)),
   )
   return {
     retention: resolveRetention(loaded.config),
+    pacing: resolvePacing(loaded.config),
     warning:
       bad.length === 0
         ? null

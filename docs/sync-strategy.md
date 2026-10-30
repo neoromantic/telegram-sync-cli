@@ -337,10 +337,13 @@ is archived), or when `tg chats sync` turns it on.
 
 ## Job lanes
 
-Each account has its own queue, scheduler and job loop: it runs at most one job at a time,
-starts the next 3 seconds after the last one ended, and doesn't wait for other accounts, so its
-jobs share one `messages.getHistory` budget and one account's FLOOD_WAIT or slow page doesn't
-hold another's. An account's jobs are split into three lanes:
+Each account has its own queue, scheduler and job loop: it runs at most one job at a time, at
+its own pace, and doesn't wait for other accounts, so its jobs share one `messages.getHistory`
+budget and one account's FLOOD_WAIT or slow page doesn't hold another's. The pace counts from
+each job's start: a job every 3 seconds with no history due, and while first or history pages
+are due an adaptive pace that starts at 0.7 calls per second, speeds up after clean runs to 0.9
+and halves on a FLOOD_WAIT ([rate-limiting.md](rate-limiting.md#pacing)). Catch-up keeps its
+lane turns at any pace. An account's jobs are split into three lanes:
 
 | Lane | Job types |
 |------|-----------|

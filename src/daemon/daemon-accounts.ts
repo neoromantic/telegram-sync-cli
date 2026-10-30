@@ -35,6 +35,7 @@ import {
   type NewMessageData,
   type UpdateContext,
 } from './handlers'
+import { formatPace } from './sync-pacing'
 import type { AccountConnectionState, AccountEventHandlers } from './types'
 
 export function resolveRealtimeMessageType(msg: {
@@ -328,7 +329,8 @@ const DAEMON_FLOOD_WAIT_MAX_MS = 5 * 60 * 1000
  * The network middlewares of the account's daemon client. The flood waiter
  * sleeps inside the request; a request given the daemon's stop signal
  * (`ctx.runtime.shutdown`) ends that sleep when the daemon stops (#64).
- * Innermost, every request goes to the account's api_activity (#127).
+ * Innermost, every request goes to the account's api_activity (#127), and
+ * every FLOOD_WAIT slows the account's sync jobs down (#133).
  */
 export function daemonNetworkMiddlewares(
   ctx: DaemonContext,
@@ -338,6 +340,15 @@ export function daemonNetworkMiddlewares(
     ...basicDaemonMiddlewares(ctx, accountId),
     apiActivityMiddleware(
       () => ctx.runtime.accounts.get(accountId)?.db ?? null,
+      'daemon',
+      (method, seconds) => {
+        const pacer = ctx.runtime.accounts.get(accountId)?.pacer
+        if (!pacer) return
+        const pace = pacer.recordFloodWait(Date.now(), seconds)
+        ctx.logger.info(
+          `[Account ${accountId}] ${method}: FLOOD_WAIT of ${seconds}s, history pace down to ${formatPace(pace)} calls/s`,
+        )
+      },
     ),
   ]
 }

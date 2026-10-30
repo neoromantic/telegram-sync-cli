@@ -4,6 +4,7 @@
  */
 import { Database } from 'bun:sqlite'
 import type { AccountRuntime, DaemonContext } from '../../daemon/daemon-context'
+import { createSyncPacer } from '../../daemon/sync-pacing'
 import { createDaemonStatusService } from '../../db/daemon-status'
 import { initCacheSchema } from '../../db/schema'
 import { initSyncSchema } from '../../db/sync-schema'
@@ -29,7 +30,7 @@ export function addAccountRuntime(
     statusService: createDaemonStatusService(db),
     scheduler: null,
     worker: null,
-    lastJobProcessTime: 0,
+    pacer: createSyncPacer(),
     messagesSynced: 0,
     ...overrides,
   }

@@ -25,6 +25,18 @@ export interface DaemonInfo {
   runningJobs: number
   /** The daemon's last dialog pass after a reconnect or a wake; null if none */
   lastCatchUp: CatchUpRecord | null
+  /** How fast the daemon starts the account's sync jobs; null if unknown */
+  pacing: DaemonPacing | null
+}
+
+/** How fast the daemon starts an account's sync jobs (#133) */
+export interface DaemonPacing {
+  /** `history` while first or history pages are due, else `calm` */
+  mode: 'history' | 'calm'
+  /** The pace it runs at now, in calls per second */
+  targetCallsPerSecond: number
+  /** FLOOD_WAITs the account's client got since the daemon started */
+  floodWaits: number
 }
 
 /** Why the daemon ran a dialog pass and catch-up after the start (#124) */
@@ -48,6 +60,8 @@ export interface DaemonTick {
   messagesSynced: number
   pendingJobs: number
   runningJobs: number
+  /** The account's sync pace; left as it was when absent */
+  pacing?: DaemonPacing
 }
 
 /**
@@ -148,6 +162,23 @@ const CATCH_UP_KEYS = [
   'last_offline_ms',
   'last_catch_up_chats',
 ] as const
+
+const PACING_KEYS = [
+  'pacing_mode',
+  'pacing_target_calls_per_second',
+  'pacing_flood_waits',
+] as const
+
+function readPacing(read: (key: string) => string | null): DaemonPacing | null {
+  const mode = read('pacing_mode')
+  const target = Number(read('pacing_target_calls_per_second'))
+  if ((mode !== 'history' && mode !== 'calm') || !(target > 0)) return null
+  return {
+    mode,
+    targetCallsPerSecond: target,
+    floodWaits: parseNumber(read('pacing_flood_waits')) ?? 0,
+  }
+}
 
 const CATCH_UP_REASONS: readonly string[] = [
   'reconnect',
@@ -260,6 +291,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         service.delete('pending_jobs')
         service.delete('running_jobs')
         for (const key of CATCH_UP_KEYS) service.delete(key)
+        for (const key of PACING_KEYS) service.delete(key)
         service.set('last_update', now.toString())
       }).immediate()
     },
@@ -298,6 +330,14 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         service.set('messages_synced', String(tick.messagesSynced))
         service.set('pending_jobs', String(tick.pendingJobs))
         service.set('running_jobs', String(tick.runningJobs))
+        if (tick.pacing) {
+          service.set('pacing_mode', tick.pacing.mode)
+          service.set(
+            'pacing_target_calls_per_second',
+            String(tick.pacing.targetCallsPerSecond),
+          )
+          service.set('pacing_flood_waits', String(tick.pacing.floodWaits))
+        }
         service.set('last_update', Date.now().toString())
       }).immediate()
     },
@@ -335,6 +375,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         pendingJobs: parseNumber(read('pending_jobs')) ?? 0,
         runningJobs: parseNumber(read('running_jobs')) ?? 0,
         lastCatchUp: readCatchUp(read),
+        pacing: readPacing(read),
       }
     },
   }

@@ -49,6 +49,11 @@ export interface SyncScheduler {
    * concurrent safety)
    */
   getNextJob(): SyncJobRow | null
+  /**
+   * Whether a first page or a history page is due: the account then runs
+   * at its adaptive history pace (#133)
+   */
+  hasHistoryDue(): boolean
   /** Move to the next lane slot after a job ran */
   recordJobRun(job: SyncJobRow): void
   /** Atomically claim and start the next pending job (prevents race conditions) */
@@ -273,6 +278,13 @@ class SyncSchedulerImpl implements SyncScheduler {
       if (fallbackJob) return fallbackJob
     }
     return null
+  }
+
+  hasHistoryDue(): boolean {
+    return (
+      this.nextInLane('firstPage') !== null ||
+      this.nextInLane('history') !== null
+    )
   }
 
   recordJobRun(_job: SyncJobRow): void {

@@ -368,8 +368,15 @@ part counts the daemon's sync jobs and lists some of them:
   `eta_seconds` the longest account's, or `null` while an account with messages left has no
   pace. `largest_pending` lists the 5 pending chats with the most messages left, each with
   `account_id`, `chat_id`, `chat_type`, `messages_cached`, `messages_known` and
-  `messages_left`. Pretty output shows History Cached, History Left with the time left, and
-  the chats.
+  `messages_left`. `calls_per_second` is the account's `messages.getHistory` calls per second
+  over the last 5 minutes, from `api_activity` (the retry after a FLOOD_WAIT and CLI calls
+  included), or `null` without two calls in that span. `pacing` is the live daemon's pace
+  ([rate-limiting.md](rate-limiting.md#pacing)), or `null` without one: `mode` (`history`
+  while first or history pages are due, else `calm`), `target_calls_per_second` and
+  `flood_waits` since the daemon started. Over several accounts both rates and the FLOOD_WAITs
+  are sums, and `mode` is `history` if any account's is. Pretty output shows History Cached,
+  History Left with the time left, History Pace (measured, then the target, the mode and any
+  FLOOD_WAITs), and the chats.
 - `rate_limits.api_calls_last_minute` and `calls_by_method` count the API calls of the last 60
   seconds, from the `api_activity` log: the CLI's calls and every request of the daemon (sync
   pages, contacts checks, dialog passes, `getMe` health checks, mtcute's update requests). A

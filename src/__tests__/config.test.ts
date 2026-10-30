@@ -12,11 +12,12 @@ import {
   getConfigValue,
   getResolvedCacheConfig,
   loadConfig,
-  loadRetentionConfig,
+  loadDaemonConfig,
   parseConfigValue,
   setConfigValue,
   syncActiveAccountFromConfig,
 } from '../config'
+import { DEFAULT_SYNC_PACING } from '../daemon/sync-pacing'
 import { createTestDatabase } from '../db'
 import {
   getDefaultCacheConfig,
@@ -173,13 +174,41 @@ describe('config', () => {
     })
   })
 
-  describe('loadRetentionConfig', () => {
+  describe('sync.pacing', () => {
+    it('accepts a pace above 0 and at most 2 calls/s, and a calm interval above 0', () => {
+      expect(parseConfigValue('sync.pacing.maxCallsPerSecond', '0.8')).toBe(0.8)
+      expect(parseConfigValue('sync.pacing.maxCallsPerSecond', '2')).toBe(2)
+      for (const bad of ['0', '-1', '2.5', 'fast', '']) {
+        expect(() =>
+          parseConfigValue('sync.pacing.maxCallsPerSecond', bad),
+        ).toThrow(ConfigError)
+      }
+      expect(parseConfigValue('sync.pacing.calmInterval', '5s')).toBe('5s')
+      expect(() => parseConfigValue('sync.pacing.calmInterval', '0s')).toThrow(
+        ConfigError,
+      )
+    })
+
+    it('rejects a pace above 2 in config.json in strict mode', async () => {
+      await Bun.write(
+        getConfigPath(dataDir),
+        JSON.stringify({ sync: { pacing: { maxCallsPerSecond: 3 } } }),
+      )
+
+      await expect(loadConfig({ dataDir, strict: true })).rejects.toThrow(
+        'Config file has invalid values',
+      )
+    })
+  })
+
+  describe('loadDaemonConfig', () => {
     it('falls back to the defaults on invalid JSON', async () => {
       await Bun.write(getConfigPath(dataDir), '{ not json')
 
-      const result = await loadRetentionConfig({ dataDir })
+      const result = await loadDaemonConfig({ dataDir })
 
       expect(result.retention).toEqual(getDefaultRetentionConfig())
+      expect(result.pacing).toEqual(DEFAULT_SYNC_PACING)
       expect(result.warning).toContain('Invalid JSON')
     })
 
@@ -189,18 +218,37 @@ describe('config', () => {
         JSON.stringify({ cache: { retention: { apiActivity: 'x' } } }),
       )
 
-      const result = await loadRetentionConfig({ dataDir })
+      const result = await loadDaemonConfig({ dataDir })
 
       expect(result.retention).toEqual(getDefaultRetentionConfig())
       expect(result.warning).toContain('cache.retention.apiActivity')
     })
 
+    it('reads the sync pacing, and falls back to the default for a bad value', async () => {
+      await Bun.write(
+        getConfigPath(dataDir),
+        JSON.stringify({
+          sync: { pacing: { maxCallsPerSecond: 0.8, calmInterval: 'soon' } },
+        }),
+      )
+
+      const result = await loadDaemonConfig({ dataDir })
+
+      expect(result.pacing).toEqual({
+        maxCallsPerSecond: 0.8,
+        calmIntervalMs: DEFAULT_SYNC_PACING.calmIntervalMs,
+      })
+      expect(result.warning).toContain('sync.pacing.calmInterval')
+    })
+
     it('reads valid values without a warning', async () => {
       await setConfigValue('cache.retention.apiActivity', '3d', { dataDir })
+      await setConfigValue('sync.pacing.calmInterval', '5s', { dataDir })
 
-      const result = await loadRetentionConfig({ dataDir })
+      const result = await loadDaemonConfig({ dataDir })
 
       expect(result.retention.apiActivity).toBe(parseDuration('3d'))
+      expect(result.pacing.calmIntervalMs).toBe(5000)
       expect(result.warning).toBeNull()
     })
   })

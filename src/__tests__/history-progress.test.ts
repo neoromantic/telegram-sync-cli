@@ -119,6 +119,7 @@ describe('readHistoryProgress', () => {
       messages_left: 6,
       messages_per_minute: null,
       eta_seconds: null,
+      calls_per_second: null,
       largest_pending: [
         {
           chat_id: 101,
@@ -176,5 +177,33 @@ describe('readHistoryProgress', () => {
 
     expect(progress.messages_per_minute).toBe(13)
     expect(progress.eta_seconds).toBeNull()
+  })
+
+  it('measures the getHistory calls per second of the last 5 minutes (#133)', () => {
+    const call = (timestamp: number, method = 'messages.getHistory') =>
+      db.run(
+        `INSERT INTO api_activity (timestamp, method, success, response_ms)
+         VALUES (?, ?, 1, 200)`,
+        [timestamp, method],
+      )
+    // 61 calls a second apart, the last a second ago; others don't count
+    for (let i = 0; i <= 60; i++) call(NOW - 61_000 + i * 1000)
+    call(NOW - 30_000, 'messages.getDialogs')
+    call(NOW - 6 * MINUTE)
+
+    const progress = readHistoryProgress(db, { now: NOW })
+
+    // 60 calls after the first, over the 61 s since it
+    expect(progress.calls_per_second).toBe(0.98)
+  })
+
+  it('gives no call rate without two recent calls', () => {
+    db.run(
+      `INSERT INTO api_activity (timestamp, method, success, response_ms)
+       VALUES (?, 'messages.getHistory', 1, 200)`,
+      [NOW - MINUTE],
+    )
+
+    expect(readHistoryProgress(db, { now: NOW }).calls_per_second).toBeNull()
   })
 })
