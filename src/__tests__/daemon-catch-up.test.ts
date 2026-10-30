@@ -202,10 +202,9 @@ describe('catch-up after a reconnect or a wake', () => {
 
   it('queues catch-up after a jump of the wall clock between loop ticks (a wake)', async () => {
     const { ctx, rt, fake } = connectedAccount()
-    ctx.runtime.sleepStartedAt = T0
-    expect(detectWake(ctx, T0 + 1_000)).toBeNull()
+    expect(detectWake(ctx, T0)).toBeNull()
+    expect(detectWake(ctx, T0 + 2_000)).toBeNull()
 
-    ctx.runtime.sleepStartedAt = T0 + 2_000
     const woke = T0 + 2_000 + 7 * HOUR
     expect(detectWake(ctx, woke)).toBe(7 * HOUR)
 
@@ -221,7 +220,7 @@ describe('catch-up after a reconnect or a wake', () => {
 
   it('waits while the connection is still down after a wake', async () => {
     const { ctx, fake, accountState } = connectedAccount()
-    ctx.runtime.sleepStartedAt = T0
+    detectWake(ctx, T0)
     detectWake(ctx, T0 + HOUR)
     noteConnectionState(accountState.watch!, 'connecting', T0 + HOUR + 1_000)
 

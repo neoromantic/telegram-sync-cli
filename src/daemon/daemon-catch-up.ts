@@ -18,7 +18,10 @@ import type { AccountConnectionState } from './types'
 
 /** Offline for longer than this: messages may have been missed */
 export const OFFLINE_CATCH_UP_MS = 5_000
-/** The loop's 1-second wait took this long: the computer slept */
+/**
+ * Two loop ticks this far apart (a tick takes ~1 s): the computer slept,
+ * or a call the tick waited on hung, which a dropped connection causes
+ */
 export const WAKE_GAP_MS = 30_000
 /** The connection must stay up this long before the pass starts */
 export const CATCH_UP_SETTLE_MS = 5_000
@@ -103,14 +106,16 @@ export function noteConnectionState(
 }
 
 /**
- * Compare the wall clock with the start of the loop's 1-second wait: a wait
- * of more than `WAKE_GAP_MS` means the computer slept, and every connected
- * account catches up. Only the wait counts, so a slow tick (a health check
- * during an outage) is no wake. Returns the gap when it was one.
+ * Compare the wall clock with the start of the loop's previous tick: a gap
+ * of more than `WAKE_GAP_MS` means the computer slept, whatever the tick was
+ * waiting on (its 1-second wait, a health check's `getMe`, a migration
+ * batch), and every connected account catches up. A call that hung that
+ * long counts too: the connection was down meanwhile. Returns the gap when
+ * it was one.
  */
 export function detectWake(ctx: DaemonContext, now: number): number | null {
-  const last = ctx.runtime.sleepStartedAt
-  ctx.runtime.sleepStartedAt = null
+  const last = ctx.runtime.lastTickAt
+  ctx.runtime.lastTickAt = now
   if (last === null) return null
   const gap = now - last
   if (gap <= WAKE_GAP_MS) return null

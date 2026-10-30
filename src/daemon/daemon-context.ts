@@ -54,10 +54,10 @@ export interface DaemonRuntime {
   /** The background migrations of every account's cache (#89) */
   migrations: MigrationsState
   /**
-   * Wall clock when the main loop began its 1-second wait; a much longer
-   * wait means the computer slept (#124)
+   * Wall clock at the start of the main loop's last tick; a much longer gap
+   * to the next one means the computer slept or the loop stalled (#124)
    */
-  sleepStartedAt: number | null
+  lastTickAt: number | null
 }
 
 export interface ContactsSyncState {
@@ -106,7 +106,7 @@ export function createDaemonRuntime(): DaemonRuntime {
       checkAt: new Map(),
     },
     migrations: createMigrationsState(),
-    sleepStartedAt: null,
+    lastTickAt: null,
   }
 }
 

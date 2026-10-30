@@ -212,8 +212,10 @@ so those checks are the only way its new messages arrive.
 A reconnect is any return of an account's connection after more than 5 seconds offline, or a
 wake of the computer, not only the daemon's own reconnect after a failed health check. mtcute
 reconnects by itself after a network drop or a sleep, so the daemon watches each client's
-connection state (`offline`/`connecting` → `connected`) and the wall clock of its loop: a
-1-second wait that took more than 30 seconds means the computer slept. Once the connection has
+connection state (`offline`/`connecting` → `connected`) and the wall clock of its loop: two
+ticks (about a second apart) more than 30 seconds apart mean the computer slept, whether the
+tick was in its 1-second wait or waiting on a call such as the health check's `getMe`; a call
+that hung that long counts too, as the connection was down meanwhile. Once the connection has
 stayed up for 5 seconds, the daemon runs the dialog pass on the account's current client (it
 doesn't replace a client that works) and the scheduler queues catch-up for the chats whose
 newest message moved. A connection that flaps gets one pass per account in 5 minutes. The
