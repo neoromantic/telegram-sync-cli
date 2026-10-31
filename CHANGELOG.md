@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-31
+
+The first sync of a big account is about three times faster: the daemon paces history
+calls to what Telegram allows instead of one call every three seconds (#133).
+
 ### Changed
 
 - Bots and deleted accounts get their newest 100 messages and new ones, but no longer their
@@ -800,7 +805,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.6.0...v0.7.0
