@@ -1109,7 +1109,7 @@ describe('history pacing (#133)', () => {
       await processJobs(ctx)
       // The client got a FLOOD_WAIT of 10 s at 0 (a call outside the jobs)
       rt.pacer.recordFloodWait(0, 10)
-      clock.advance(10_000 + 2856)
+      clock.advance(10_000 + 2857)
       await processJobs(ctx)
       clock.advance(1)
       await processJobs(ctx)
@@ -1117,8 +1117,8 @@ describe('history pacing (#133)', () => {
       clock.restore()
     }
 
-    // 0.35 calls/s after the halving: 2857 ms
-    expect(starts).toEqual([0, 12_857])
+    // 0.35 calls/s after the halving: 2858 ms, rounded up
+    expect(starts).toEqual([0, 12_858])
   })
 })
 
