@@ -157,7 +157,7 @@ Supported keys:
   and at most 2, such as `0.8`; the adaptive pace starts at 0.7 (or this value, if lower)
   and never goes above it ([rate-limiting.md](rate-limiting.md#pacing))
 - `sync.pacing.calmInterval` (duration, default `3s`): how often a job may start per account
-  with no history due, and the slowest the pace drops to after FLOOD_WAITs
+  with no history due
 
 The retention keys and `sync.pacing.calmInterval` take a value above 0; `0s` is rejected. The daemon prunes on a schedule
 ([daemon.md](daemon.md#cache-pruning)) and `tg db vacuum` prunes before it compacts.

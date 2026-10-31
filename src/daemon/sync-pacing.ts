@@ -28,6 +28,11 @@ export const DEFAULT_SYNC_PACING: SyncPacingConfig = {
 
 /** The pace history starts at: a probe ran 150 s at 0.7/s with no FLOOD_WAIT */
 export const PACING_START_CALLS_PER_SECOND = 0.7
+/**
+ * The slowest the history pace halves down to, whatever the calm interval:
+ * one call every 5 s
+ */
+export const PACING_MIN_CALLS_PER_SECOND = 0.2
 /** How much the pace grows after a clean run */
 export const PACING_STEP_CALLS_PER_SECOND = 0.05
 /** Calls without a FLOOD_WAIT that make a clean run */
@@ -35,9 +40,14 @@ export const PACING_CLEAN_RUN_CALLS = 30
 
 export type SyncPacingMode = DaemonPacing['mode']
 
+/** The interval of a history pace, rounded up to whole ms */
+function historyIntervalMs(callsPerSecond: number): number {
+  return Math.ceil(1000 / callsPerSecond)
+}
+
 export class SyncPacer {
   private readonly maxRate: number
-  /** Never slower than the calm interval, nor faster than the cap */
+  /** The floor of the halving; never above the cap */
   private readonly minRate: number
   private readonly calmIntervalMs: number
   /** The pace while history is due, in calls per second */
@@ -52,14 +62,17 @@ export class SyncPacer {
   constructor(config: SyncPacingConfig = DEFAULT_SYNC_PACING) {
     this.maxRate = config.maxCallsPerSecond
     this.calmIntervalMs = config.calmIntervalMs
-    this.minRate = Math.min(1000 / config.calmIntervalMs, this.maxRate)
+    this.minRate = Math.min(PACING_MIN_CALLS_PER_SECOND, this.maxRate)
     this.rate = Math.min(PACING_START_CALLS_PER_SECOND, this.maxRate)
   }
 
-  /** The interval between job starts in the current mode, in ms */
+  /**
+   * The interval between job starts in the current mode, in ms; rounded up,
+   * so the pace never goes above the cap
+   */
   intervalMs(): number {
     return this.mode === 'history'
-      ? Math.round(1000 / this.rate)
+      ? historyIntervalMs(this.rate)
       : this.calmIntervalMs
   }
 
@@ -104,7 +117,7 @@ export class SyncPacer {
 
   /**
    * Telegram answered a sync page (messages.getHistory) with
-   * FLOOD_WAIT_<seconds>, in any mode: half the pace, and no job until the wait and one interval at
+   * FLOOD_WAIT_<seconds>, in any mode: half the pace (at least 0.2 calls/s), and no job until the wait and one interval at
    * the new pace are over. mtcute's flood waiter retries the call when the
    * wait ends, so the next job comes one interval after that retry. Returns
    * the new history pace.
@@ -116,7 +129,7 @@ export class SyncPacer {
     const waitEnd = now + Math.max(1, seconds) * 1000
     this.notBefore = Math.max(
       this.notBefore,
-      waitEnd + Math.round(1000 / this.rate),
+      waitEnd + historyIntervalMs(this.rate),
     )
     return this.rate
   }

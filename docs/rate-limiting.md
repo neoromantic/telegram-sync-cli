@@ -132,8 +132,8 @@ the daemon starts a job as soon as it is due rather than on its next 1-second ti
   calls without a FLOOD_WAIT it speeds up by 0.05 calls per second, up to
   `sync.pacing.maxCallsPerSecond` (0.9 by default). Catch-up still gets its lane turns, so
   history going faster never delays it.
-- **FLOOD_WAIT.** A FLOOD_WAIT on `messages.getHistory` halves the pace (never below the calm
-  pace). A FLOOD_WAIT on another method, such as `messages.getDialogs` in the dialog pass at
+- **FLOOD_WAIT.** A FLOOD_WAIT on `messages.getHistory` halves the pace (never below 0.2 calls
+  per second, whatever the calm interval). A FLOOD_WAIT on another method, such as `messages.getDialogs` in the dialog pass at
   start, leaves it alone. The account starts no job until the wait is over and one
   interval at the new pace has passed; mtcute's flood waiter retries the call that hit it when
   the wait ends. The daemon logs the new pace.
