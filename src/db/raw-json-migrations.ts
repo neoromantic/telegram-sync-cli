@@ -74,7 +74,10 @@ const messagesMigration: BackgroundMigration = {
  * Messages an older version cached live without their raw message have
  * raw_json '{}' (#130): no attachment row, no fields for tg sql, and nothing
  * fetches them again. The pass queues one refetch job per such chat, which
- * the daemon runs at the lowest priority. The SQL names the job type and
+ * the daemon runs at the lowest priority. refetch_chats remembers each chat
+ * it queued, so a later batch never queues it again, whatever became of its
+ * job (done, failed, deleted): a row Telegram doesn't have or a request
+ * that fails for good is asked for once. The SQL names the job type and
  * priority itself (SyncJobType.RefetchMessages, SyncPriority.Background):
  * sync-schema.ts imports this module.
  */
@@ -84,18 +87,24 @@ const refetchEmptyMigration: BackgroundMigration = {
   table: 'messages_cache',
   columns: ['chat_id', 'raw_json'],
   prepare(db: Database) {
+    const remember = db.query(`
+      INSERT OR IGNORE INTO refetch_chats (chat_id, queued_at)
+      VALUES ($chat_id, $now)
+    `)
+    // A live message without its raw form may have queued one already
     const queue = db.query(`
       INSERT INTO sync_jobs (chat_id, job_type, priority, status, created_at)
       SELECT $chat_id, 'refetch_messages', 4, 'pending', $now
       WHERE NOT EXISTS (
         SELECT 1 FROM sync_jobs
         WHERE chat_id = $chat_id AND job_type = 'refetch_messages'
-          AND status IN ('pending', 'running')
+          AND status = 'pending'
       )
     `)
     return (row: MigrationRow) => {
       if (row.raw_json !== '{}') return
-      queue.run({ $chat_id: row.chat_id as number, $now: Date.now() })
+      const params = { $chat_id: row.chat_id as number, $now: Date.now() }
+      if (remember.run(params).changes === 1) queue.run(params)
     }
   },
 }

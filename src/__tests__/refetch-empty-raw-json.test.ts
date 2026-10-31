@@ -5,7 +5,7 @@
  */
 import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { TelegramClient } from '@mtcute/bun'
+import { type TelegramClient, tl } from '@mtcute/bun'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { createSyncScheduler } from '../daemon/scheduler'
 import {
@@ -13,12 +13,16 @@ import {
   REFETCH_BATCH_SIZE,
 } from '../daemon/sync-worker-real-jobs'
 import type { RealSyncWorkerContext } from '../daemon/sync-worker-real-types'
-import { runPendingMigrations } from '../db/background-migrations'
+import {
+  runMigrationBatch,
+  runPendingMigrations,
+} from '../db/background-migrations'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
+import { BACKGROUND_MIGRATIONS } from '../db/raw-json-migrations'
 import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
 import {
@@ -98,6 +102,30 @@ beforeEach(() => {
 afterEach(() => {
   db.close()
 })
+
+const refetchMigration = BACKGROUND_MIGRATIONS.find(
+  (migration) => migration.name === 'messages_refetch_empty_raw_json',
+)!
+
+/** Make the refetch pass pending again, as on a cache of an older version */
+function restartRefetchPass() {
+  db.run(
+    `UPDATE cache_migrations SET state = 'pending', cursor = 0, end_rowid = NULL, done = 0, total = NULL WHERE name = ?`,
+    [refetchMigration.name],
+  )
+}
+
+/** One batch of the refetch pass, then every pending job, like the daemon interleaves them */
+async function migrateBatchThenRunJobs(maxRows: number) {
+  const batch = runMigrationBatch(db, refetchMigration, {
+    maxRows,
+    maxMs: 60_000,
+  })
+  for (const job of ctx.jobsService.getPendingJobs()) {
+    await processJobReal(ctx, job)
+  }
+  return batch.finished
+}
 
 describe('refetching messages cached with an empty raw_json (#130)', () => {
   it('queues one low-priority job per chat in a background pass', async () => {
@@ -227,6 +255,70 @@ describe('refetching messages cached with an empty raw_json (#130)', () => {
     )
     expect(rawJsonOf(DM, REFETCH_BATCH_SIZE + 2)).not.toBe('{}')
     // The rows that stay '{}' are asked for once
+    expect(ctx.jobsService.getPendingJobs()).toHaveLength(0)
+  })
+
+  it('queues a chat once per pass, even after its job failed for good', async () => {
+    for (const id of range(1, 501)) seedEmpty(DM, id)
+    restartRefetchPass()
+    ctx.client = {
+      call: mock(async (request: Record<string, unknown>) => {
+        requests.push(request)
+        throw new tl.RpcError(400, 'PEER_ID_INVALID')
+      }),
+    } as unknown as TelegramClient
+
+    // 500 rows, the failing job, then the 501st row
+    expect(await migrateBatchThenRunJobs(500)).toBe(false)
+    while (!(await migrateBatchThenRunJobs(500))) {}
+
+    expect(requests).toHaveLength(1)
+    expect(ctx.jobsService.getJobsForChat(DM)).toMatchObject([
+      { status: SyncJobStatus.Failed },
+    ])
+  })
+
+  it('asks for a message Telegram no longer has once, across batches of the pass', async () => {
+    seedEmpty(DM, 3)
+    seedEmpty(DM, 4)
+    restartRefetchPass()
+    answer([
+      { _: 'messageEmpty', id: 3 },
+      { _: 'messageEmpty', id: 4 },
+    ])
+
+    while (!(await migrateBatchThenRunJobs(1))) {}
+
+    expect(requests).toHaveLength(1)
+    expect(rawJsonOf(DM, 3)).toBe('{}')
+    expect(ctx.jobsService.getPendingJobs()).toHaveLength(0)
+  })
+
+  it('fetches a message cached without raw form while a refetch of its chat runs', async () => {
+    const peer = { _: 'peerUser', userId: DM } as const
+    seedEmpty(DM, 3)
+    ctx.jobsService.queueRefetch(DM)
+    ctx.client = {
+      call: mock(async (request: Record<string, unknown>) => {
+        requests.push(request)
+        if (requests.length === 1) {
+          // A live message without its raw form lands mid-request
+          seedEmpty(DM, 9)
+          ctx.jobsService.queueRefetch(DM)
+          return { messages: [textMessage(peer, 3)], users: [] }
+        }
+        return { messages: [textMessage(peer, 9)], users: [] }
+      }),
+    } as unknown as TelegramClient
+
+    for (let i = 0; i < 5; i++) {
+      const [job] = ctx.jobsService.getPendingJobs()
+      if (!job) break
+      await processJobReal(ctx, job)
+    }
+
+    expect(requests).toHaveLength(2)
+    expect(rawJsonOf(DM, 9)).toBe(toRawJson(textMessage(peer, 9)))
     expect(ctx.jobsService.getPendingJobs()).toHaveLength(0)
   })
 

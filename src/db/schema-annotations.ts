@@ -884,6 +884,23 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
+    refetch_chats: {
+      description:
+        'Chats the background migration messages_refetch_empty_raw_json queued a refetch_messages job for (#130): each chat once, whatever became of its job, so messages Telegram no longer has are asked for once',
+      primaryKey: 'chat_id',
+      columns: {
+        chat_id: {
+          description: 'Marked peer ID of the chat, as in messages_cache',
+          nullable: false,
+        },
+        queued_at: {
+          description: 'When the pass queued the job, in ms since the epoch',
+          semanticType: 'timestamp',
+          nullable: false,
+        },
+      },
+    },
+
     // -------------------------------------------------------------------------
     // Sync Jobs Table
     // -------------------------------------------------------------------------

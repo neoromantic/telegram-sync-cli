@@ -678,6 +678,14 @@ export function initSyncSchema(
     ON sync_jobs(chat_id)
   `)
 
+  // Chats the background pass queued a refetch for, each once (#130)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS refetch_chats (
+      chat_id    INTEGER PRIMARY KEY,
+      queued_at  INTEGER NOT NULL
+    )
+  `)
+
   // Daemon status table - key-value store for daemon state
   db.run(`
     CREATE TABLE IF NOT EXISTS daemon_status (
