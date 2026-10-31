@@ -134,12 +134,15 @@ Implemented in `SyncJobType`:
   up to 100 per request. Older versions cached such rows from live updates without the raw
   message, so they had no attachment row and no fields for `tg sql`. The background migration
   `messages_refetch_empty_raw_json` queues one job per chat that has them, at priority 4,
-  whether the chat syncs or not; the live path stores the raw message, and if an update ever
-  comes without one it queues the job itself and logs a warning once. The job asks
+  whether the chat syncs or not, and records the chat in `refetch_chats`: a later batch of the
+  pass never queues it again, even after its job failed for good or got `messageEmpty`. The
+  live path stores the raw message; if an update ever comes without one, it queues the job
+  itself (next to one that is running) and logs a warning once. The job asks
   `channels.getMessages` in a channel or supergroup and `messages.getMessages` elsewhere,
   writes what Telegram returns like a sync page does (attachments included), and leaves a row
-  Telegram no longer has as it is. A job with 100 IDs queues the next one above them, so each
-  row is asked for once. `tg chats sync` and the startup cleanup keep it: it doesn't depend on
+  Telegram no longer has as it is. If `{}` rows are left above its batch (a full batch of 100,
+  or a live message cached while it ran), it queues the next job above them, so each row is
+  asked for once. `tg chats sync` and the startup cleanup keep it: it doesn't depend on
   the chat's mode.
 
 Job status values:

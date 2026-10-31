@@ -455,6 +455,19 @@ CREATE INDEX idx_sync_jobs_chat ON sync_jobs(chat_id);
 - `error_message`: the last error, kept while the job waits for its retry.
 - Databases from 0.1.4 get `attempts` and `next_run_at` added with their defaults.
 
+### Table: refetch_chats
+
+```sql
+CREATE TABLE refetch_chats (
+  chat_id   INTEGER PRIMARY KEY,
+  queued_at INTEGER NOT NULL
+);
+```
+
+The chats the background migration `messages_refetch_empty_raw_json` queued a
+`refetch_messages` job for (#130), each once: a later batch of the pass doesn't queue the chat
+again, whatever became of its job, so messages Telegram no longer has are asked for once.
+
 ### Table: daemon_status
 
 ```sql

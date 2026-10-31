@@ -1,6 +1,11 @@
 import type { tl } from '@mtcute/bun'
 import type { MessageInput } from '../db/messages-cache'
-import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
+import {
+  type SyncJobRow,
+  SyncJobStatus,
+  SyncJobType,
+  SyncPriority,
+} from '../db/sync-schema'
 import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import {
   canMakeApiCall,
@@ -406,9 +411,10 @@ export const REFETCH_BATCH_SIZE = 100
  * Fetch again the chat's messages that an older version cached live with
  * raw_json '{}' (#130), up to 100 per request, and write them like a sync
  * page does: raw_json, attachments and the other columns. A message Telegram
- * no longer has stays as it is. The job starts above its `cursor_start`; a
- * full batch queues the next job above it, so the rows that stay '{}' are
- * asked for once.
+ * no longer has stays as it is. The job starts above its `cursor_start`; if
+ * '{}' rows are left above its batch (a full batch, or a live message cached
+ * while it ran), it queues the next job above it, so the rows that stay '{}'
+ * are asked for once.
  */
 export async function processRefetchMessagesReal(
   ctx: RealSyncWorkerContext,
@@ -470,7 +476,15 @@ export async function processRefetchMessagesReal(
       cursor_start: last,
       messages_fetched: inputs.length,
     })
-    if (ids.length === REFETCH_BATCH_SIZE) {
+    const more = ctx.messagesCache.listEmptyRawJsonIds(chatId, last, 1)
+    const queued = ctx.jobsService
+      .getJobsForChat(chatId)
+      .some(
+        (other) =>
+          other.job_type === SyncJobType.RefetchMessages &&
+          other.status === SyncJobStatus.Pending,
+      )
+    if (more.length > 0 && !queued) {
       ctx.jobsService.create({
         chat_id: chatId,
         job_type: SyncJobType.RefetchMessages,

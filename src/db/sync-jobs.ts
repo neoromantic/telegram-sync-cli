@@ -130,7 +130,8 @@ export interface SyncJobsService {
   deletePendingForInactiveChats(): number
   /**
    * Queue a refetch of the chat's messages cached with raw_json '{}' (#130),
-   * unless one is pending or running. Returns whether it queued one.
+   * unless one is pending. One that is running may have read its IDs
+   * already, so it doesn't count. Returns whether it queued one.
    */
   queueRefetch(chatId: number): boolean
   /**
@@ -370,7 +371,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       WHERE NOT EXISTS (
         SELECT 1 FROM sync_jobs
         WHERE chat_id = $chat_id AND job_type = $job_type
-          AND status IN ($pending_status, $running_status)
+          AND status = $pending_status
       )
     `),
 
@@ -619,7 +620,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
           $job_type: SyncJobType.RefetchMessages,
           $priority: SyncPriority.Background,
           $pending_status: SyncJobStatus.Pending,
-          $running_status: SyncJobStatus.Running,
           $now: Date.now(),
         }).changes === 1
       )
