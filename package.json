@@ -1,6 +1,6 @@
 {
   "name": "@goodit/telegram-sync-cli",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Agent-friendly Telegram sync CLI with full API support",
   "type": "module",
   "bin": {
