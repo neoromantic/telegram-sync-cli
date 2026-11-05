@@ -1,11 +1,12 @@
 # telegram-sync-cli
 
 Agent-friendly Telegram CLI with a local cache, a read-only sync daemon and full MTProto API access.
-Website: [tg.sergeybaus.com](https://tg.sergeybaus.com).
+Website: [tg.sergeybaus.com](https://tg.sergeybaus.com). Made by [Sergey Baus](https://www.sergeybaus.com).
 
 [![CI](https://github.com/neoromantic/telegram-sync-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/neoromantic/telegram-sync-cli/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@goodit/telegram-sync-cli)](https://www.npmjs.com/package/@goodit/telegram-sync-cli)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Usage stats](https://img.shields.io/badge/usage-stats-595b54)](https://www.sergeybaus.com/usage/telegram-sync-cli)
 
 <img src="docs/images/telegram-sync-cli@2x.png" width="800" alt="A terminal split in two: the top pane shows tg daemon start logging that it bootstrapped 186 dialogs and initialized sync jobs; the bottom pane runs tg messages search --query lisbon piped through jq, column and grep, listing four matches from different chats (Weekend Crew, Ana Ribeiro, Climbing Club, Product Team) with the word Lisbon highlighted">
 
