@@ -197,6 +197,12 @@ describe('senders missing from the cache (#143)', () => {
     ])
   })
 
+  it('does not count a sender whose every cached message is deleted', () => {
+    seed(GROUP, 30, 7006, { is_deleted: true })
+    expect(ctx.senderLookups.countMissing()).toBe(3)
+    expect(ctx.senderLookups.scan(Date.now())).toBe(2)
+  })
+
   it('takes the newest message, not the one cached last: history is written newest first', () => {
     const ELENA = 7005
     seed(GROUP, 900, ELENA)

@@ -378,7 +378,8 @@ part counts the daemon's sync jobs and lists some of them:
   History Left with the time left, History Pace (measured, then the target, the mode and any
   FLOOD_WAITs), and the chats.
 - `progress.senders` counts the users who sent cached messages but have no `users_cache` row
-  (#143): `missing`, and `not_found`, those of them Telegram was asked for and didn't return
+  (#143), leaving out those whose every cached message is deleted (nothing is left to ask for, and
+  search doesn't show those messages by default): `missing`, and `not_found`, those of them Telegram was asked for and didn't return
   (asked again 30 days later). Their messages show the sender's ID only and `sender:name`
   misses them until the daemon fetches them ([daemon.md](daemon.md#missing-senders)).
   Channels that post as themselves aren't counted. Pretty output shows a Senders Missing row

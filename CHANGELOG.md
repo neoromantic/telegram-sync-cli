@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tg status` no longer counts a sender whose every cached message is deleted as missing:
+  nothing is left to ask Telegram for, and search doesn't show those messages by default. On a
+  1.16M-message cache, 1,125 of the 1,376 senders still missing after the first fetch were such
+  senders (#143).
+
 ## [0.12.1] - 2026-11-13
 
 ### Fixed

@@ -59,6 +59,10 @@ const MISSING_SENDERS_CTE = `
   missing(id) AS (
     SELECT id FROM senders
     WHERE id IS NOT NULL AND NOT ${cachedUserSql('id')}
+      -- With every message deleted, none is left to ask for or to show
+      AND EXISTS (
+        SELECT 1 FROM messages_cache WHERE from_id = senders.id AND is_deleted = 0
+      )
   )
 `
 
