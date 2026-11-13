@@ -217,7 +217,9 @@ cache), and the background runners merge instead (`src/db/search-merge.ts`): the
 the sync work of each tick, in the budget of the
 [background migrations](daemon.md#background-migrations), and `tg db migrate` at the end of its
 run. Each batch is a short write transaction of FTS5 `merge` steps of 16 pages, none started
-after 50 ms; FTS5 records a merge in progress, so a stop loses nothing. The runner keeps the
+after 50 ms; a step itself can't be cut short and, for a word with a long list of entries, takes
+up to about 200 ms at 1M messages and 0.7 s at 10M; FTS5 records a merge in progress, so a stop
+loses nothing. The runner keeps the
 index's list of segments from its last merge that found nothing to do, so with no write since
 the check is one read. It merges in one of two ways:
 

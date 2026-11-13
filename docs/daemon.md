@@ -249,8 +249,10 @@ Key file: `src/db/cache-maintenance.ts`
 After the sync work of each tick, the daemon runs the pending
 [background migrations](database-schema.md#background-migrations) of every account's cache,
 one account after the other, for up to 250 ms a tick. Each batch is a short write of at most
-500 rows or 50 ms, and the event loop is free between batches, so live updates and sync jobs
-wait for one batch at most. Then the loop sleeps for a second, so a write of another process
+500 rows or 50 ms (a merge step of the search index can't be cut short: up to about 200 ms on
+a 1M-message cache, [search.md](search.md#keeping-the-index-merged)), and the event loop is
+free between batches, so live updates and sync jobs wait for one batch at most. Then the loop
+sleeps for a second, so a write of another process
 (another `tg` command, 5 seconds of `busy_timeout`) waits for the tick's 250 ms at most. A stop
 (`tg daemon stop`) starts no new batch; the next start goes on from where it stopped. A failed
 batch rolls back, is logged as a warning and recorded in `cache_migrations.last_error`, and that
