@@ -160,6 +160,7 @@ export const searchNamesMigration: BackgroundMigration = {
   description: 'Re-index the sender and chat names of cached messages',
   table: 'messages_cache',
   columns: [],
+  writesSearch: true,
   prepare(db: Database) {
     const reindex = prepareMessageReindex(db)
     return (row) => reindex(row.rowid)
@@ -171,6 +172,18 @@ interface QueueRow {
   peer_id: number
   cursor: number
   end_rowid: number
+}
+
+/**
+ * Whether the search index can be written. An older SQLite that can't
+ * disables it (sync-schema.ts): the re-index waits for a newer one, which
+ * rebuilds the whole index with the names cached then.
+ */
+export function isSearchEnabled(db: Database): boolean {
+  const row = db
+    .query(`SELECT value FROM search_meta WHERE key = 'search_index_version'`)
+    .get() as { value: string } | null
+  return row?.value !== '0'
 }
 
 /** Whether queued peers wait for a re-index */

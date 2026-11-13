@@ -50,8 +50,9 @@ auto_vacuum ([cli-commands.md](cli-commands.md#cache-maintenance)). Stop the dae
 upgrading, so that the old daemon doesn't write while the new tg moves the index.
 
 If an older SQLite opens a cache that has the contentless table (the same data directory used
-from a newer macOS, say), it can't read that table: it drops only the three `messages_cache_a*`
-triggers and sets `search_index_version` to `0`. Messages are still cached, and
+from a newer macOS, say), it can't read that table: it drops only the triggers that write it (the three
+`messages_cache_a*` and those that fill `search_reindex_queue`) and sets
+`search_index_version` to `0`. Messages are still cached, and
 `tg messages search` fails with SQLite's error (`GENERAL_ERROR`). The next open on a SQLite
 with `contentless_delete` recreates the triggers and rebuilds the index, so search finds every
 message again, those cached in between too.
@@ -175,6 +176,9 @@ index catches up in the background (#93):
   [background migrations](database-schema.md#background-migrations). Without the daemon,
   `tg db migrate` drains it. Until then a search by the new name misses the older messages,
   and one by the old name still finds them.
+- On an older SQLite that disables search (see [above](#a-contentless-index)), the queue and the
+  one-off re-index below wait; the next open on a newer SQLite rebuilds the index with the
+  current names, which empties the queue.
 - A sender with no `users_cache` row at all stays indexed under its numeric ID: tg doesn't ask
   Telegram for it.
 - Caches written before this queue existed get a one-off re-index of every message, the

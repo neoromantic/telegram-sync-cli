@@ -19,7 +19,11 @@
 import type { Database } from 'bun:sqlite'
 
 import { BACKGROUND_MIGRATIONS } from './raw-json-migrations'
-import { hasQueuedReindex, runReindexBatch } from './search-reindex'
+import {
+  hasQueuedReindex,
+  isSearchEnabled,
+  runReindexBatch,
+} from './search-reindex'
 
 export type MigrationTable = 'messages_cache' | 'users_cache' | 'chats_cache'
 
@@ -36,6 +40,8 @@ export interface BackgroundMigration {
    * one row; it runs inside the batch's transaction and must be idempotent.
    */
   prepare(db: Database): (row: MigrationRow) => void
+  /** Writes message_search: waits while search is disabled (isSearchEnabled) */
+  writesSearch?: boolean
 }
 
 export type MigrationRow = { rowid: number } & Record<string, unknown>
@@ -384,7 +390,8 @@ export function foregroundPacing(
 /**
  * Run pending migrations in registry order, then the queued search
  * re-index (src/db/search-reindex.ts), until each is done or `shouldStop`
- * says so. Returns the rows done.
+ * says so. While search is disabled, the work on its index waits. Returns
+ * the rows done.
  */
 export async function runPendingMigrations(
   db: Database,
@@ -392,7 +399,9 @@ export async function runPendingMigrations(
   migrations: readonly BackgroundMigration[] = BACKGROUND_MIGRATIONS,
 ): Promise<number> {
   let total = 0
+  const search = isSearchEnabled(db)
   for (const migration of migrations) {
+    if (migration.writesSearch && !search) continue
     for (;;) {
       if (options.shouldStop?.()) return total
       const batch = runMigrationBatch(db, migration, options.limits)
@@ -406,7 +415,7 @@ export async function runPendingMigrations(
     }
   }
   // Checked first, outside the write lock: the queue is empty most ticks
-  while (hasQueuedReindex(db)) {
+  while (search && hasQueuedReindex(db)) {
     if (options.shouldStop?.()) return total
     const batch = runReindexBatch(db, options.limits ?? DEFAULT_BATCH_LIMITS)
     total += batch.rows

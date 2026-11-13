@@ -259,3 +259,50 @@ describe('the one-off re-index of an older cache', () => {
     expect(names).toMatchObject({ state: 'done', done: MESSAGES })
   })
 })
+
+describe('search disabled by an older SQLite', () => {
+  /** A cache with a pending one-off re-index and a queued sender */
+  function cacheWithReindexWork(): Database {
+    const db = open()
+    seedMessages(db)
+    createUsersCache(db).upsert(user)
+    db.run(`DELETE FROM cache_migrations WHERE name = 'message_search_names'`)
+    registerBackgroundMigrations(db)
+    return db
+  }
+
+  const namesState = (db: Database) =>
+    readMigrationStatus(db).find(
+      (status) => status.name === 'message_search_names',
+    )?.state
+
+  it('leaves the re-index for a newer SQLite, which rebuilds the index', async () => {
+    const db = cacheWithReindexWork()
+    initSyncSchema(db, { contentlessSearch: false })
+
+    expect(await drain(db)).toBe(0)
+    expect(namesState(db)).toBe('pending')
+    expect(queue(db)).toHaveLength(1)
+
+    initSyncSchema(db)
+    expect(queue(db)).toEqual([])
+    expect(matches(db, 'sender:ann')).toBe(MESSAGES)
+  })
+
+  it('skips a cache without the queue, from before it existed', async () => {
+    const db = cacheWithReindexWork()
+    for (const trigger of [
+      'users_cache_search_ai',
+      'users_cache_search_au',
+      'chats_cache_search_ai',
+      'chats_cache_search_au',
+    ]) {
+      db.run(`DROP TRIGGER ${trigger}`)
+    }
+    db.run('DROP TABLE search_reindex_queue')
+    initSyncSchema(db, { contentlessSearch: false })
+
+    expect(await drain(db)).toBe(0)
+    expect(namesState(db)).toBe('pending')
+  })
+})
