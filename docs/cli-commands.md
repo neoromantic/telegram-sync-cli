@@ -571,8 +571,10 @@ search by a new name finds older messages without the daemon; `rows` counts thos
 too. Last it merges the search index, which a cache written by 0.11.1 or older needs once
 ([search.md](search.md#keeping-the-index-merged)): 2.6 s on a 1M-message cache that 0.11.1 had
 re-indexed; `rows` doesn't count it. It works while the daemon runs too, and then gives way to the daemon's writes:
-each batch takes at most 50 ms and is followed by a 150 ms pause, so a daemon write waits for
-one batch at most. That makes the run four to five times as long as with the daemon stopped,
+each batch is followed by a 150 ms pause, so a daemon write waits for one batch at most. A
+migration batch takes at most 50 ms; one step of an index merge can't be cut short and takes
+up to about 200 ms on a 1M-message cache (a common word). That makes the run four to
+five times as long as with the daemon stopped,
 when batches go back to back: at the rates in [storage.md](storage.md), a million messages
 written by 0.5.0 take about 19 seconds alone and about 80 seconds next to the daemon, and the
 one-off re-index of names (`message_search_names`) about 27 seconds more alone. Stopping it
