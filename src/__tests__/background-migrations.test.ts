@@ -491,7 +491,7 @@ const MIGRATE_SCRIPT = `
   import { Database } from 'bun:sqlite'
   const { foregroundPacing, runPendingMigrations } = await import(process.env.MIGRATE_MODULE)
   const { BACKGROUND_MIGRATIONS } = await import(process.env.MIGRATIONS_MODULE)
-  const [messages, ...others] = BACKGROUND_MIGRATIONS
+  const [messages] = BACKGROUND_MIGRATIONS
   let batchStarted = 0
   let longestBatchMs = 0
   const slowMessages = {
@@ -514,7 +514,7 @@ const MIGRATE_SCRIPT = `
         longestBatchMs = Math.max(longestBatchMs, performance.now() - batchStarted)
       },
     },
-    [slowMessages, ...others],
+    [slowMessages],
   )
   db.close()
   console.log(JSON.stringify({ longestBatchMs }))
