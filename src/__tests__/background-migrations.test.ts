@@ -602,5 +602,7 @@ describe('a writer in another process next to tg db migrate', () => {
     expect(status.done).toBe(status.total!)
     expect(status.done).toBeGreaterThanOrEqual(70)
     writer.close()
-  })
+    // A child process that starts Bun and runs 7 paced batches: a slow CI
+    // runner needs more than the default 5 s
+  }, 20_000)
 })
