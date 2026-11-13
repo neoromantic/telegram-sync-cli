@@ -664,6 +664,11 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   const cases: Array<[string, string, () => unknown]> = [
     ['search_rare_word', rare, () => runSearch(rare)],
     ['search_common_word', common, () => runSearch(common)],
+    [
+      'search_common_offset',
+      `${common} --offset 200`,
+      () => runSearch(common, { offset: 200 }),
+    ],
     ['search_two_words', twoWords, () => runSearch(twoWords)],
     [
       'search_phrase',
