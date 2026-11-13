@@ -19,6 +19,7 @@
 import type { Database } from 'bun:sqlite'
 
 import { BACKGROUND_MIGRATIONS } from './raw-json-migrations'
+import { hasQueuedReindex, runReindexBatch } from './search-reindex'
 
 export type MigrationTable = 'messages_cache' | 'users_cache' | 'chats_cache'
 
@@ -195,16 +196,6 @@ export function readMigrationStatus(
   return result
 }
 
-/** Whether a registered migration hasn't finished */
-export function hasPendingMigrations(
-  db: Database,
-  migrations: readonly BackgroundMigration[] = BACKGROUND_MIGRATIONS,
-): boolean {
-  return readMigrationStatus(db, migrations).some(
-    (status) => status.state !== 'done',
-  )
-}
-
 /**
  * Fix the rows a migration covers: up to the largest rowid now. The count
  * reads the table outside the write lock; rows written meanwhile have a
@@ -253,7 +244,7 @@ export function runMigrationBatch(
   if (initial.state === 'pending') startMigration(db, migration, now())
 
   const select = db.query(`
-    SELECT rowid, ${migration.columns.join(', ')} FROM ${migration.table}
+    SELECT ${['rowid', ...migration.columns].join(', ')} FROM ${migration.table}
     WHERE rowid > $cursor AND rowid <= $end
     ORDER BY rowid
     LIMIT $limit
@@ -391,8 +382,9 @@ export function foregroundPacing(
 }
 
 /**
- * Run pending migrations in registry order until each is done or
- * `shouldStop` says so. Returns the rows done.
+ * Run pending migrations in registry order, then the queued search
+ * re-index (src/db/search-reindex.ts), until each is done or `shouldStop`
+ * says so. Returns the rows done.
  */
 export async function runPendingMigrations(
   db: Database,
@@ -412,6 +404,14 @@ export async function runPendingMigrations(
       if (batch.finished) break
       await options.yieldBetweenBatches?.()
     }
+  }
+  // Checked first, outside the write lock: the queue is empty most ticks
+  while (hasQueuedReindex(db)) {
+    if (options.shouldStop?.()) return total
+    const batch = runReindexBatch(db, options.limits ?? DEFAULT_BATCH_LIMITS)
+    total += batch.rows
+    if (batch.finished) return total
+    await options.yieldBetweenBatches?.()
   }
   return total
 }

@@ -80,13 +80,6 @@ every column, hence the `WHEN` clause. The rest leaves the index alone:
 - Marking a message deleted sets `is_deleted` and keeps its index row; search filters on
   `is_deleted`.
 
-The `sender` and `chat` columns copy names from `users_cache` and `chats_cache` when a message
-is indexed. Up to 0.5.0 every re-fetch re-indexed the message and so refreshed them; now a
-renamed user or chat shows its new name in the index only for messages indexed after the
-rename, or whose text or sender changes. Results still show the current names, which search
-reads from those tables. Re-indexing after a rename is tracked in
-[#93](https://github.com/neoromantic/telegram-sync-cli/issues/93).
-
 A cache created by 0.5.0 or older gets the new `messages_cache_au` on its first open by a newer
 version ([database-schema.md](database-schema.md#migrations)).
 
@@ -162,6 +155,33 @@ BEGIN
 END;
 ```
 
+### Names after a rename
+
+The `sender` and `chat` columns copy names from `users_cache` and `chats_cache` when a message
+is indexed. Results always show the current names, which search reads from those tables; the
+index catches up in the background (#93):
+
+- When a `users_cache` row is inserted, or its username, first, last or display name changes,
+  triggers queue a re-index of that sender's messages in `search_reindex_queue`. A
+  `chats_cache` row does the same for its chat's messages when it is inserted or its title or
+  username changes. So a rename, and a sender or chat cached after their messages (before 0.9.0
+  the daemon didn't cache the senders of history pages, #126), both reach the index.
+- An upsert that changes none of those names (every dialog pass rewrites thousands of rows)
+  queues nothing, and neither does a peer with no cached messages.
+- Only the messages cached so far are queued: those written later read the new names already.
+  A peer renamed again before its re-index ends starts over.
+- The daemon drains the queue after its sync work, a few batches per tick, each its own short
+  write transaction (at most 500 messages or 50 ms), like the
+  [background migrations](database-schema.md#background-migrations). Without the daemon,
+  `tg db migrate` drains it. Until then a search by the new name misses the older messages,
+  and one by the old name still finds them.
+- A sender with no `users_cache` row at all stays indexed under its numeric ID: tg doesn't ask
+  Telegram for it.
+- Caches written before this queue existed get a one-off re-index of every message, the
+  background migration `message_search_names` (shown by `tg status`, finished by
+  `tg db migrate`). `tg db migrate` does 1M messages in about 70 s, the daemon in about
+  5 minutes ([storage.md](storage.md#6-big-caches)).
+
 ## Index Versioning & Rebuild
 
 A `search_index_version` key in `search_meta` tracks schema compatibility.
@@ -172,7 +192,8 @@ On startup, `initSyncSchema()` checks:
 
 If a column is missing, or the table is the full-content one where a contentless one is
 supported, it drops and recreates `message_search` and its triggers;
-if either check fails, it rebuilds the index from `messages_cache`. That work runs
+if either check fails, it rebuilds the index from `messages_cache` (with the names cached now,
+so it empties `search_reindex_queue`). That work runs
 in one transaction under the write lock and checks again there, so when several
 processes open the cache at once (the daemon and a command after the first login),
 one builds the index while the others wait and then find nothing to do. An

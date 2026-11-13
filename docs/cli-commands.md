@@ -565,11 +565,15 @@ them on its own, a little each second ([daemon.md](daemon.md#background-migratio
 `tg db migrate` runs the pending ones of one account's cache (`--account`, else the active
 account, else the only one) in the foreground until they are done, and needs no Telegram
 credentials. `messages_refetch_empty_raw_json` only queues sync jobs for messages cached with
-an empty `raw_json`; the daemon fetches them again (#130). It works while the daemon runs too, and then gives way to the daemon's writes:
+an empty `raw_json`; the daemon fetches them again (#130). Then it re-indexes the messages of
+senders and chats whose names changed ([search.md](search.md#names-after-a-rename)), so a
+search by a new name finds older messages without the daemon; `rows` counts those messages
+too. It works while the daemon runs too, and then gives way to the daemon's writes:
 each batch takes at most 50 ms and is followed by a 150 ms pause, so a daemon write waits for
 one batch at most. That makes the run four to five times as long as with the daemon stopped,
 when batches go back to back: at the rates in [storage.md](storage.md), a million messages
-written by 0.5.0 take about 19 seconds alone and about 80 seconds next to the daemon. Stopping it
+written by 0.5.0 take about 19 seconds alone and about 80 seconds next to the daemon, and the
+one-off re-index of names (`message_search_names`) about 70 seconds more alone. Stopping it
 (Ctrl-C) loses nothing; the next run, or the daemon, goes on from there. Reads give the same
 answers before, during and after.
 

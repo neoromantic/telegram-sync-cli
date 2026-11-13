@@ -10,15 +10,25 @@ import type { Database } from 'bun:sqlite'
 import { registerBackgroundMigrations } from './background-migrations'
 import { createMessageSearchTextView } from './messages-search'
 import { migratePeerIds } from './peer-id-migration'
+import {
+  buildChatSearchExpr,
+  buildSenderSearchExpr,
+  createSearchReindexSchema,
+  REINDEX_TRIGGERS,
+} from './search-reindex'
 
 const SEARCH_INDEX_VERSION = 1
 const MESSAGE_SEARCH_COLUMNS = ['text', 'sender', 'chat', 'files'] as const
 
-/** The triggers on messages_cache that keep message_search in sync */
+/**
+ * The triggers that keep message_search in sync: on messages_cache, and on
+ * users_cache and chats_cache for the names (src/db/search-reindex.ts)
+ */
 const SEARCH_TRIGGERS = [
   'messages_cache_ai',
   'messages_cache_ad',
   'messages_cache_au',
+  ...REINDEX_TRIGGERS,
 ] as const
 
 /** The first SQLite with FTS5's contentless_delete option */
@@ -49,42 +59,6 @@ export function isContentlessSearch(db: Database): boolean {
     )
     .get() as { sql: string | null } | null
   return /contentless_delete\s*=\s*1/i.test(row?.sql ?? '')
-}
-
-function buildSenderSearchExpr(prefix: string): string {
-  return `
-    COALESCE(
-      (
-        SELECT trim(
-          COALESCE(username, '') || ' ' ||
-          COALESCE(first_name, '') || ' ' ||
-          COALESCE(last_name, '') || ' ' ||
-          COALESCE(display_name, '') || ' ' ||
-          COALESCE(user_id, '')
-        )
-        FROM users_cache
-        WHERE user_id = CAST(${prefix}.from_id AS TEXT)
-      ),
-      COALESCE(CAST(${prefix}.from_id AS TEXT), '')
-    )
-  `
-}
-
-function buildChatSearchExpr(prefix: string): string {
-  return `
-    COALESCE(
-      (
-        SELECT trim(
-          COALESCE(title, '') || ' ' ||
-          COALESCE(username, '') || ' ' ||
-          COALESCE(chat_id, '')
-        )
-        FROM chats_cache
-        WHERE chat_id = CAST(${prefix}.chat_id AS TEXT)
-      ),
-      COALESCE(CAST(${prefix}.chat_id AS TEXT), '')
-    )
-  `
 }
 
 function dropMessageSearchSchema(db: Database): void {
@@ -167,6 +141,7 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
   `)
 
   createSearchUpdateTrigger(db)
+  createSearchReindexSchema(db)
 }
 
 /**
@@ -242,7 +217,10 @@ function upgradeMessagesCacheWrites(db: Database): void {
   })
 }
 
-/** Fill the search index again from messages_cache, in one transaction */
+/**
+ * Fill the search index again from messages_cache, in one transaction. It
+ * reads the names cached now, so no queued re-index is left.
+ */
 export function rebuildMessageSearchIndex(db: Database): void {
   const senderExpr = buildSenderSearchExpr('m')
   const chatExpr = buildChatSearchExpr('m')
@@ -264,6 +242,7 @@ export function rebuildMessageSearchIndex(db: Database): void {
         COALESCE(m.media_path, '')
       FROM messages_cache m
     `)
+    db.run('DELETE FROM search_reindex_queue')
 
     setSearchIndexVersion(db, SEARCH_INDEX_VERSION)
   })()

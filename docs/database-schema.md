@@ -283,7 +283,7 @@ this version knows.
 
 ```sql
 CREATE TABLE cache_migrations (
-  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, …, messages_refetch_empty_raw_json
+  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, …, message_search_names
   state       TEXT NOT NULL DEFAULT 'pending',  -- pending, running, done
   cursor      INTEGER NOT NULL DEFAULT 0,       -- rowid of the last row done
   end_rowid   INTEGER,           -- the table's largest rowid when it started
@@ -316,7 +316,9 @@ CREATE TABLE chat_content_protection (
 ### Table: message_search
 
 FTS5 index for message search.
-Maintained via triggers on `messages_cache` and rebuilt when schema versions change. On
+Maintained via triggers on `messages_cache` and rebuilt when schema versions change. Triggers on
+`users_cache` and `chats_cache` queue a re-index of a peer's messages when its names change
+([search_reindex_queue](#table-search_reindex_queue)). On
 SQLite 3.43 and newer it is contentless: it holds only the index, its columns read as `NULL`,
 and search joins `messages_cache` by rowid for the text ([search.md](search.md#a-contentless-index)).
 With an older SQLite it is the full-content table, without the `content` options.
@@ -349,6 +351,25 @@ CREATE TABLE search_meta (
   key TEXT PRIMARY KEY,
   value TEXT,
   updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+);
+```
+
+### Table: search_reindex_queue
+
+Senders and chats whose cached messages wait for a re-index with their current names
+([search.md](search.md#names-after-a-rename), #93). The triggers `users_cache_search_ai`/`_au`
+and `chats_cache_search_ai`/`_au` add a row when a peer with cached messages is inserted or
+one of the names the index reads changes; an upsert that changes no name adds none. The daemon
+and `tg db migrate` drain it in batches, like the background migrations, and delete each row
+when its messages are done. A search index rebuild empties it.
+
+```sql
+CREATE TABLE search_reindex_queue (
+  kind       TEXT NOT NULL,              -- sender (users_cache) or chat (chats_cache)
+  peer_id    INTEGER NOT NULL,           -- from_id or marked chat_id of the messages
+  cursor     INTEGER NOT NULL DEFAULT 0, -- last done: rowid (sender) or message_id (chat)
+  end_rowid  INTEGER NOT NULL,           -- messages_cache's largest rowid when queued
+  PRIMARY KEY (kind, peer_id)
 );
 ```
 
@@ -668,9 +689,9 @@ are already in the new form. Each rewrite is idempotent: a row done twice ends t
 of a cache by a version that brings a migration records it as `pending`, or as `done` when its
 table is empty (a new cache); opens that find every migration recorded only read.
 
-The daemon runs pending migrations after the sync work of each one-second tick, for up to 250 ms
-a tick, with the event loop free between batches ([daemon.md](daemon.md#background-migrations)).
-`tg db migrate` runs them in the foreground ([cli-commands.md](cli-commands.md#tg-db-migrate)),
+The daemon runs pending migrations, then drains [search_reindex_queue](#table-search_reindex_queue)
+in the same batches, after the sync work of each one-second tick, for up to 250 ms a tick, with the event loop free between batches ([daemon.md](daemon.md#background-migrations)).
+`tg db migrate` runs both in the foreground ([cli-commands.md](cli-commands.md#tg-db-migrate)),
 and `tg status` shows each unfinished one with its progress. Reads give the same answers while a
 migration is half done: every reader takes rows in the old and the new form.
 
@@ -682,6 +703,7 @@ The migrations so far (see [raw_json](#raw_json)):
 | `users_raw_json_v2` | `users_cache` | `raw_json` into the current form |
 | `chats_raw_json_v2` | `chats_cache` | `raw_json` into the current form |
 | `messages_refetch_empty_raw_json` | `messages_cache` | nothing: it queues a `refetch_messages` sync job for each chat with a message whose `raw_json` is `{}`, which the daemon fetches again by ID (see [sync-strategy.md](sync-strategy.md#job-types)) |
+| `message_search_names` | `messages_cache` | the message's `message_search` row, with the sender and chat names cached now; for caches written before `search_reindex_queue` (#93, [search.md](search.md#names-after-a-rename)) |
 
 `messages_raw_json_v2` parses each message's `raw_json` once for all three. It writes neither
 `text`, `from_id` nor `media_path`, so the search index is untouched, and it leaves

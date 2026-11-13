@@ -17,6 +17,7 @@ import type {
   MigrationTable,
 } from './background-migrations'
 import { createMessageAttachmentsStore } from './message-attachments'
+import { searchNamesMigration } from './search-reindex'
 
 /**
  * The message_type a history page stores for this raw message: `text` for
@@ -139,4 +140,5 @@ export const BACKGROUND_MIGRATIONS: readonly BackgroundMigration[] = [
   reencodeMigration('users_raw_json_v2', 'users_cache', 'users'),
   reencodeMigration('chats_raw_json_v2', 'chats_cache', 'chats'),
   refetchEmptyMigration,
+  searchNamesMigration,
 ]

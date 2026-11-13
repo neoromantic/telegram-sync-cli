@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Search by name finds older messages after a person or chat is renamed, and messages whose
+  sender or chat was cached after them (most history synced before 0.9.0): `sender:` and
+  `chat:` used to match only the names at the time a message was indexed. A rename queues a
+  re-index of that peer's messages, which the daemon or `tg db migrate` does in short batches;
+  existing caches re-index every message once, as the background migration
+  `message_search_names` shown by `tg status` (#93).
+
 ## [0.10.0] - 2026-10-31
 
 The first sync of a big account is about three times faster: the daemon paces history

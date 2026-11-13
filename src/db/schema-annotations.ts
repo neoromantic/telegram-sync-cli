@@ -175,7 +175,7 @@ const CACHE_MIGRATIONS_ANNOTATION: TableAnnotation = {
   columns: {
     name: {
       description:
-        'The migration: messages_raw_json_v2, users_raw_json_v2, chats_raw_json_v2, messages_refetch_empty_raw_json',
+        'The migration: messages_raw_json_v2, users_raw_json_v2, chats_raw_json_v2, messages_refetch_empty_raw_json, message_search_names',
       nullable: false,
     },
     state: {
@@ -589,11 +589,13 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         sender: {
-          description: 'Indexed sender tokens (username, name, id)',
+          description:
+            'Indexed sender tokens (username, name, id); a rename reaches older messages through search_reindex_queue',
           nullable: true,
         },
         chat: {
-          description: 'Indexed chat tokens (title, username, id)',
+          description:
+            'Indexed chat tokens (title, username, id); a rename reaches older messages through search_reindex_queue',
           nullable: true,
         },
         files: {
@@ -602,6 +604,35 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
       },
       indexes: {},
+    },
+
+    search_reindex_queue: {
+      description:
+        'Senders and chats whose cached messages wait for a re-index of message_search with their current names (#93). Triggers on users_cache and chats_cache add a row when a peer with cached messages is inserted or renamed; the daemon and tg db migrate drain it in batches and delete each row when done.',
+      primaryKey: ['kind', 'peer_id'],
+      columns: {
+        kind: {
+          description:
+            'sender: the messages with this from_id (users_cache); chat: the messages of this chat (chats_cache)',
+          nullable: false,
+          semanticType: 'enum',
+          enumValues: ['sender', 'chat'],
+        },
+        peer_id: {
+          description: 'from_id, or the marked chat_id, of the messages',
+          nullable: false,
+        },
+        cursor: {
+          description:
+            'The last message done: its rowid for a sender, its message_id for a chat',
+          nullable: false,
+        },
+        end_rowid: {
+          description:
+            'The largest rowid of messages_cache when queued; later messages were indexed with the new names',
+          nullable: false,
+        },
+      },
     },
 
     // -------------------------------------------------------------------------
