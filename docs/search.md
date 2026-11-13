@@ -175,10 +175,10 @@ index catches up in the background (#93):
 - Only the messages cached so far are queued: those written later read the new names already.
   A peer renamed again before its re-index ends starts over.
 - The daemon drains the queue after its sync work, a few batches per tick, each its own short
-  write transaction (at most 500 messages or 50 ms), like the
-  [background migrations](database-schema.md#background-migrations). Without the daemon,
-  `tg db migrate` drains it. Until then a search by the new name misses the older messages,
-  and one by the old name still finds them.
+  write transaction, like the [background migrations](database-schema.md#background-migrations):
+  at most 500 messages (2,500 for `tg db migrate` next to the daemon), and none started after
+  50 ms. Without the daemon, `tg db migrate` drains it. Until then a
+  search by the new name misses the older messages, and one by the old name still finds them.
 - On an older SQLite that disables search (see [above](#a-contentless-index)), the queue and the
   one-off re-index below wait; the next open on a newer SQLite rebuilds the index with the
   current names, which empties the queue.
@@ -186,8 +186,31 @@ index catches up in the background (#93):
   Telegram for it.
 - Caches written before this queue existed get a one-off re-index of every message, the
   background migration `message_search_names` (shown by `tg status`, finished by
-  `tg db migrate`). `tg db migrate` does 1M messages in about 70 s, the daemon in about
-  5 minutes ([storage.md](storage.md#6-big-caches)).
+  `tg db migrate`). `tg db migrate` does 1M messages in about 27 s; the daemon, at 250 ms a
+  second, should take about 2 minutes ([storage.md](storage.md#6-big-caches)).
+
+A re-index deletes rows of the index and inserts them again, and FTS5 handles that its own way:
+
+- It merges a segment of the index once 10% of its rows are deleted (its `deletemerge` option),
+  inside the insert that flushes the index to disk. tg sets `deletemerge` to 0 on every cache:
+  deleted rows leave the index when their segments merge as it grows, as FTS5 merges them
+  anyway. Until then the index is larger: right after the one-off re-index of the made-up
+  caches of [storage.md](storage.md), 19.7 MB instead of 11.8 MB at 100,000 messages and
+  106 MB instead of 104 MB at 1M.
+- It writes its pending rows to disk as a new segment at every statement savepoint, and SQLite
+  opens one for an `INSERT … SELECT`, which may write many rows, but not for an
+  `INSERT … VALUES` of one row. So the re-index reads the names first and inserts plain values:
+  a batch writes one segment, not one per message, which halved the time of the re-index.
+
+On 100,000 made-up messages of one sender, every word repeated in each, the re-index of that
+sender took 9.1 s with batches of up to 0.55 s before; it takes 1.0 s, with batches of 41 ms at
+most. On the 1M cache of storage.md the one-off re-index went from 70 s to 27–36 s; 14 of its
+2,070 batches took more than 100 ms (up to 179 ms), and one run had a batch of 1.04 s. Those
+are FTS5 merging its big segments a common word at a time, which no batch size splits.
+History writes hit the same: writing that cache in pages of 100 messages, 4 of the 10,050
+pages took more than 100 ms (up to 253 ms), and right after the re-index the merges it left
+made 16 of the next 100 pages take 104–212 ms (up to 0.73 s in another run), then none of the
+2,900 after them.
 
 ## Index Versioning & Rebuild
 

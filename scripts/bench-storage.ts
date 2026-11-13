@@ -801,8 +801,23 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
     }
   ).n
   let start = performance.now()
-  const reindexed = await runPendingMigrations(db, {}, [searchNamesMigration])
+  // Batches run back to back, so the time between two is one batch
+  let batchEnd = start
+  let maxBatchMs = 0
+  const reindexed = await runPendingMigrations(
+    db,
+    {
+      onBatch: () => {
+        const now = performance.now()
+        maxBatchMs = Math.max(maxBatchMs, now - batchEnd)
+        batchEnd = now
+      },
+    },
+    [searchNamesMigration],
+  )
   const reindexSeconds = (performance.now() - start) / 1000
+  db.run('PRAGMA wal_checkpoint(TRUNCATE)')
+  const afterReindex = readCacheSize(db, cachePath, { tables: true })
 
   log('rebuilding the search index')
   start = performance.now()
@@ -855,6 +870,8 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
         queued_by_writes: queued,
         seconds: round(reindexSeconds, 2),
         messages_per_s: Math.round(reindexed / reindexSeconds),
+        max_batch_ms: round(maxBatchMs, 1),
+        index_bytes_after: afterReindex.tables?.message_search ?? 0,
       },
       search_rebuild: {
         seconds: round(rebuildSeconds, 2),
@@ -1064,7 +1081,7 @@ function markdown(
   const v = r.maintenance.vacuum
   lines.push(
     '',
-    `Names re-index (#93) ${n(r.maintenance.names_reindex.messages)} messages in ${r.maintenance.names_reindex.seconds} s, ${n(r.maintenance.names_reindex.messages_per_s)} messages/s (${n(r.maintenance.names_reindex.queued_by_writes)} peers queued by the writes). Search index rebuild ${r.maintenance.search_rebuild.seconds} s. \`tg db vacuum\` ${v.seconds} s, ${mb(v.bytes_before)} → ${mb(v.bytes_after)}, peak extra disk ${mb(v.peak_extra_disk_bytes)}. Whole run ${r.total_seconds} s.`,
+    `Names re-index (#93) ${n(r.maintenance.names_reindex.messages)} messages in ${r.maintenance.names_reindex.seconds} s, ${n(r.maintenance.names_reindex.messages_per_s)} messages/s, longest batch ${r.maintenance.names_reindex.max_batch_ms} ms, index ${mb(r.maintenance.names_reindex.index_bytes_after)} after it (${n(r.maintenance.names_reindex.queued_by_writes)} peers queued by the writes). Search index rebuild ${r.maintenance.search_rebuild.seconds} s. \`tg db vacuum\` ${v.seconds} s, ${mb(v.bytes_before)} → ${mb(v.bytes_after)}, peak extra disk ${mb(v.peak_extra_disk_bytes)}. Whole run ${r.total_seconds} s.`,
   )
   return lines.join('\n')
 }

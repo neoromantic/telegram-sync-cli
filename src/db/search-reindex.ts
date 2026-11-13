@@ -151,11 +151,15 @@ export function createSearchReindexSchema(db: Database): void {
   `)
 }
 
-/** Prepare a re-index of one message by rowid, with the names cached now */
+/**
+ * Prepare a re-index of one message by rowid, with the names cached now.
+ * The names are read first and inserted as values: FTS5 writes its pending
+ * rows to disk at every statement savepoint, which an INSERT … SELECT opens,
+ * so that made a segment per message and twice the time (docs/search.md).
+ */
 function prepareMessageReindex(db: Database): (rowid: number) => void {
   const remove = db.query('DELETE FROM message_search WHERE rowid = ?')
-  const insert = db.query(`
-    INSERT INTO message_search(rowid, text, sender, chat, files)
+  const read = db.query(`
     SELECT
       m.rowid,
       COALESCE(m.text, ''),
@@ -165,9 +169,16 @@ function prepareMessageReindex(db: Database): (rowid: number) => void {
     FROM messages_cache m
     WHERE m.rowid = ?
   `)
+  const insert = db.query(`
+    INSERT INTO message_search(rowid, text, sender, chat, files)
+    VALUES (?, ?, ?, ?, ?)
+  `)
+  // The batch read these rowids in its own transaction: each row exists
   return (rowid) => {
     remove.run(rowid)
-    insert.run(rowid)
+    insert.run(
+      ...(read.values(rowid)[0] as [number, string, string, string, string]),
+    )
   }
 }
 

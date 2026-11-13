@@ -321,7 +321,9 @@ Maintained via triggers on `messages_cache` and rebuilt when schema versions cha
 ([search_reindex_queue](#table-search_reindex_queue)). On
 SQLite 3.43 and newer it is contentless: it holds only the index, its columns read as `NULL`,
 and search joins `messages_cache` by rowid for the text ([search.md](search.md#a-contentless-index)).
-With an older SQLite it is the full-content table, without the `content` options.
+With an older SQLite it is the full-content table, without the `content` options. Its FTS5
+option `deletemerge` is 0: deleted rows leave the index when their segments merge, not in a
+merge of their own ([search.md](search.md#names-after-a-rename)).
 
 ```sql
 CREATE VIRTUAL TABLE message_search USING fts5(

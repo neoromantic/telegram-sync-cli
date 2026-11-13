@@ -573,7 +573,7 @@ each batch takes at most 50 ms and is followed by a 150 ms pause, so a daemon wr
 one batch at most. That makes the run four to five times as long as with the daemon stopped,
 when batches go back to back: at the rates in [storage.md](storage.md), a million messages
 written by 0.5.0 take about 19 seconds alone and about 80 seconds next to the daemon, and the
-one-off re-index of names (`message_search_names`) about 70 seconds more alone. Stopping it
+one-off re-index of names (`message_search_names`) about 27 seconds more alone. Stopping it
 (Ctrl-C) loses nothing; the next run, or the daemon, goes on from there. Reads give the same
 answers before, during and after.
 

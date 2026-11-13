@@ -28,7 +28,7 @@ The tables themselves are in [database-schema.md](database-schema.md), search in
 | CLI run: `tg messages search`, rare word | 92 ms | 98 ms | 102 ms |
 | CLI run: `tg messages search`, common word | 122 ms | 423 ms | 3.4 s |
 | `tg db migrate` on rows written by 0.5.0, rows/s | 58,828 | 53,393 | not run |
-| Re-index of names, once per cache (#93), messages/s | 16,085 | 14,324 | not run |
+| Re-index of names, once per cache (#93), messages/s | 53,719 | 37,741 | not run |
 | Search index rebuild | 0.8 s | 9.3 s | 1.8 min |
 | `tg db vacuum`, daemon stopped | 0.6 s | 5.3 s | 1.4 min |
 | `tg db vacuum`, extra disk at its peak | 314 MB | 3.37 GB | 30.62 GB |
@@ -220,9 +220,13 @@ Edit history: [#96](https://github.com/neoromantic/telegram-sync-cli/issues/96).
   search index rebuild below.
 - **Names in the index.** The one-off re-index of names (`message_search_names`, #93) does a
   message at a time, a delete and an insert in the index, in the same batches as the other
-  migrations: 16,085 messages/s at 100,000 (6.3 s) and 14,324 messages/s at 1M (70 s alone, as
+  migrations: 53,719 messages/s at 100,000 (1.9 s) and 37,741 messages/s at 1M (27 s alone, as
   `tg db migrate` runs it). The daemon gives migrations 250 ms of each second, so there it should
-  take about four times as long, some 5 minutes for 1M; that wasn't measured. A rename re-indexes
+  take about four times as long, some 2 minutes for 1M; that wasn't measured. The longest batch
+  took 139 ms at 100,000 and 1.04 s at 1M: FTS5 merging the big segments of its index, which
+  history writes hit too ([search.md](search.md#names-after-a-rename)). Right after it the index
+  took 19.7 MB instead of 11.8 MB at 100,000 and 106 MB instead of 104 MB at 1M, until its
+  segments merge. A rename re-indexes
   only that peer's messages, at the same rate. The history writes queued no peer: a page caches
   its senders before its messages. The triggers that queue a rename cost about 9 µs per
   `users_cache` upsert even when they queue nothing: the same pages fetched again unchanged went
@@ -339,7 +343,7 @@ twice that again for `tg db vacuum` at the end.
 Time on the machine above: 21.6 s at 100,000, 3.4 min at 1M, 31.0 min at 10M (21.0 min of it
 writing the history); with `--old-form` 15.1 s and 2.8 min. The 10M cache took 15.55 GB and
 30.62 GB more during the VACUUM. The re-index of names (#93) came later and adds its own time:
-the 1M run took 4.8 min with it.
+the 1M run took 4.0 min with it.
 
 Compare runs on the same machine only. To measure a change, run the same `--messages` and
 `--seed` before and after it.
