@@ -10,15 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `tg messages search` returns the newest page of a common word without sorting every match:
-  when a query matches often, it goes through the newest messages and asks the index of each
-  until the page is full. On a made-up cache of 10M messages a word in 30% of them took 3.0 s
-  and now takes 12 ms; with `--chat` 2.1 s and 12 ms, its fifth page (`--offset 200`) 3.0 s and
-  43 ms. Rare words, phrases and prefixes take as long as before, and results and their order
+  when a query has many matches, it goes through a bounded number of the newest messages and
+  asks the index of each until the page is full. On a made-up cache of 10M messages a word in
+  30% of them took 3.0 s and now takes 21 ms; with `--chat` 2.1 s and 21 ms, its fifth page
+  (`--offset 200`) 3.0 s and 64 ms. Queries with fewer matches (under about 7% of 10M messages
+  or 21% of 1M, for a page of 50) and prefixes are sorted as before and take about as long; a
+  common word found only in old messages takes up to about 30% longer. Results and their order
   don't change; messages sent in the same second keep the order they were cached in. The new
   index, `idx_messages_cache_newest`, is built on the first open of an existing cache (4.3 s at
   10M messages) and makes history pages about a fifth slower to write (6,639 instead of 8,420
-  messages/s at 10M). `--count` joins chats and senders only for `--chat @name` or
-  `--sender @name`, so counting a common word at 10M takes 1.9 s instead of 2.9 s (#118).
+  messages/s at 10M). `--count` joins chats and senders only for `--chat @name` or `--sender
+  @name`, so counting a common word at 10M takes 1.9 s instead of 2.9 s (#118).
 
 ### Fixed
 

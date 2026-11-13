@@ -18,16 +18,16 @@ The tables themselves are in [database-schema.md](database-schema.md), search in
 | History pages of 100, messages/s | 9,313 | 6,922 | 6,639 |
 | Live messages, one per write, messages/s | 6,615 | 5,762 | 5,378 |
 | The same pages again, messages/s (rows rewritten) | 26,273 (0) | 20,950 (0) | 22,727 (0) |
-| `messages search`, rare word | 0.07 ms | 0.29 ms | 2.8 ms |
-| `messages search`, common word | 7.2 ms | 8.0 ms | 12 ms |
-| `messages search --offset 200`, common word | 30 ms | 52 ms | 43 ms |
-| `messages search --sort relevance`, common word | 58 ms | 689 ms | 6.2 s |
+| `messages search`, rare word | 0.09 ms | 0.29 ms | 2.8 ms |
+| `messages search`, common word | 25 ms | 10 ms | 21 ms |
+| `messages search --offset 200`, common word | 26 ms | 296 ms | 64 ms |
+| `messages search --sort relevance`, common word | 58 ms | 592 ms | 6.2 s |
 | `messages list`, a page of 20 | 0.18 ms | 0.21 ms | 0.21 ms |
 | `messages get --context 5` | 0.22 ms | 0.24 ms | 0.23 ms |
 | CLI run: `tg status` | 92 ms | 98 ms | 127 ms |
 | CLI run: `tg status --sizes` | 124 ms | 400 ms | 3.2 s |
-| CLI run: `tg messages search`, rare word | 92 ms | 93 ms | 97 ms |
-| CLI run: `tg messages search`, common word | 97 ms | 101 ms | 108 ms |
+| CLI run: `tg messages search`, rare word | 90 ms | 95 ms | 97 ms |
+| CLI run: `tg messages search`, common word | 116 ms | 104 ms | 114 ms |
 | `tg db migrate` on rows written by 0.5.0, rows/s | 58,828 | 53,393 | not run |
 | Re-index of names, once per cache (#93), messages/s | 53,719 | 37,741 | not run |
 | Search index rebuild | 0.8 s | 9.3 s | 1.8 min |
@@ -163,7 +163,7 @@ slow ([#101](https://github.com/neoromantic/telegram-sync-cli/issues/101)).
 
 **Numbers.** At 10M messages the file is 15.72 GB. A page of `tg messages list` takes 0.21 ms,
 `tg messages get --context 5` 0.23 ms, a search for a rare word 2.8 ms and the newest page of a
-common word 12 ms, so reading a chat or finding something specific doesn't need the old
+common word 21 ms, so reading a chat or finding something specific doesn't need the old
 messages gone. What slows down is a query over every match or row: `--sort relevance` on a
 common word takes 6.2 s, `--count` on it 1.9 s and a `tg sql` aggregate that scans
 `messages_cache` 23.9 s. An archive wouldn't make a search over the whole
@@ -262,28 +262,30 @@ relevance` and `--count` still read every match: making them fast would change t
 
 |  | 1M before | 1M after | 10M before | 10M after |
 |---|---:|---:|---:|---:|
-| `messages search`, common word | 315 ms | 8.0 ms | 3.0 s | 12 ms |
-| `messages search --offset 200`, common word | 288 ms | 52 ms | 3.0 s | 43 ms |
-| `messages search --chat`, common word, biggest chat | 211 ms | 6.5 ms | 2.1 s | 12 ms |
-| CLI run: `tg messages search`, common word | 374 ms | 101 ms | 3.1 s | 108 ms |
+| `messages search`, common word | 315 ms | 10 ms | 3.0 s | 21 ms |
+| `messages search --offset 200`, common word | 288 ms | 296 ms | 3.0 s | 64 ms |
+| `messages search --chat`, common word, biggest chat | 211 ms | 9.2 ms | 2.1 s | 21 ms |
+| CLI run: `tg messages search`, common word | 374 ms | 104 ms | 3.1 s | 114 ms |
 | `messages search`, rare word | 0.24 ms | 0.29 ms | 3.0 ms | 2.8 ms |
-| `messages search --phrase`, two common words | 24 ms | 27 ms | 251 ms | 237 ms |
-| `messages search`, prefix `stem*` | 44 ms | 53 ms | 477 ms | 433 ms |
-| `messages search --count`, common word (the page and the count) | 574 ms | 208 ms | 5.9 s | 1.9 s |
-| `messages search --sort relevance`, common word | 627 ms | 689 ms | 6.6 s | 6.2 s |
+| `messages search --phrase`, two common words | 24 ms | 24 ms | 251 ms | 235 ms |
+| `messages search`, prefix `stem*` | 44 ms | 44 ms | 477 ms | 434 ms |
+| `messages search --count`, common word (the page and the count) | 574 ms | 215 ms | 5.9 s | 1.9 s |
+| `messages search --sort relevance`, common word | 627 ms | 592 ms | 6.6 s | 6.2 s |
 | History pages of 100, messages/s | 8,797 | 6,922 | 8,420 | 6,639 |
 | Live messages, one per write, messages/s | 6,315 | 5,762 | 5,632 | 5,378 |
 | Cache file | 1.56 GB | 1.58 GB | 15.57 GB | 15.72 GB |
 
-- **The page.** Asking the index about one message costs about as much as reading and sorting
-  40 matches, so a page of 50 of a word in 30% of the messages, about 170 messages to go
-  through, takes about 10 ms at any size. A query with fewer matches than √(40 × page × messages)
-  (141,000 for a page of 50 at 10M) sorts them as before; so does a prefix, which would read
-  every word it starts for each message. The old and the new code run against each other on
-  one 1M cache, by turns: rare word 0.21 and 0.23 ms, two words 0.99 and 1.00 ms, phrase 23.5
-  and 23.1 ms, prefix 42.9 and 43.1 ms, `--sort relevance` 678 and 676 ms; a word in 2% of the
-  messages 28.1 and 29.4 ms (its 22,489 matches are sorted, as before), in 5% 61 and 33 ms, in
-  10% 127 and 14 ms.
+- **The page.** tg counts the matches in the index up to T = √(900 × page × messages): 212,000
+  for a page of 50 at 1M, 671,000 at 10M. With T or more it goes through at most page ×
+  messages / T of the newest messages and asks the index about each, so a page of 50 of a word
+  in 30% of the messages, about 170 messages to go through, takes 10 ms at 1M and 21 ms at 10M.
+  With fewer it sorts the matches as before: at 100,000 messages the common word does (25 ms),
+  and so does its fifth page at 1M, whose T is 474,000. Asking the index about one message
+  costs as much as sorting tens to hundreds of matches, which sets the 900: when the walk finds
+  too few matches, as for a word only in old messages, counting and walking add at most about
+  30% to the sort ([search.md](search.md#query-pattern)). A prefix always sorts: asking about
+  one message would read every word it starts. Phrases, two words, prefixes and rare words take
+  as long as before.
 - **`--count`** joins chats and senders only for `--chat @name` or `--sender @name`; the count
   itself went from about 260 ms to 200 ms at 1M and from 2.9 s to 1.9 s at 10M. Its answer is
   the same.
@@ -304,18 +306,18 @@ Median of the in-process runs, with p95 in parentheses:
 
 |  | 100,000 | 1M | 10M |
 |---|---:|---:|---:|
-| `messages search`, rare word | 0.07 ms (0.10 ms) | 0.29 ms (0.36 ms) | 2.8 ms (2.9 ms) |
-| `messages search`, common word | 7.2 ms (7.4 ms) | 8.0 ms (8.4 ms) | 12 ms (12 ms) |
-| `messages search --offset 200`, common word | 30 ms (32 ms) | 52 ms (56 ms) | 43 ms (45 ms) |
-| `messages search`, two words | 0.26 ms (0.29 ms) | 1.0 ms (1.2 ms) | 15 ms (15 ms) |
-| `messages search --phrase`, two common words | 1.6 ms (1.8 ms) | 27 ms (28 ms) | 237 ms (252 ms) |
-| `messages search`, prefix `stem*` | 3.8 ms (4.0 ms) | 53 ms (55 ms) | 433 ms (454 ms) |
-| `messages search --chat`, common word, biggest chat | 3.6 ms (3.8 ms) | 6.5 ms (6.6 ms) | 12 ms (12 ms) |
-| `messages search --sort relevance`, common word | 58 ms (61 ms) | 689 ms (714 ms) | 6.2 s (7.1 s) |
-| `messages search --sort relevance`, two words | 0.38 ms (0.41 ms) | 2.4 ms (2.8 ms) | 32 ms (37 ms) |
-| `messages search --count`, common word | 28 ms (29 ms) | 208 ms (216 ms) | 1.9 s (2.0 s) |
-| `messages search --count`, rare word | 0.10 ms (0.13 ms) | 0.35 ms (0.43 ms) | 4.6 ms (4.8 ms) |
-| `messages search --snippet`, two words | 0.56 ms (0.63 ms) | 1.5 ms (2.0 ms) | 16 ms (16 ms) |
+| `messages search`, rare word | 0.09 ms (0.12 ms) | 0.29 ms (0.34 ms) | 2.8 ms (2.9 ms) |
+| `messages search`, common word | 25 ms (26 ms) | 10 ms (11 ms) | 21 ms (21 ms) |
+| `messages search --offset 200`, common word | 26 ms (28 ms) | 296 ms (303 ms) | 64 ms (65 ms) |
+| `messages search`, two words | 0.23 ms (0.35 ms) | 1.0 ms (1.1 ms) | 15 ms (15 ms) |
+| `messages search --phrase`, two common words | 1.6 ms (1.6 ms) | 24 ms (25 ms) | 235 ms (239 ms) |
+| `messages search`, prefix `stem*` | 3.5 ms (3.5 ms) | 44 ms (45 ms) | 434 ms (438 ms) |
+| `messages search --chat`, common word, biggest chat | 22 ms (24 ms) | 9.2 ms (9.4 ms) | 21 ms (21 ms) |
+| `messages search --sort relevance`, common word | 58 ms (63 ms) | 592 ms (698 ms) | 6.2 s (7.1 s) |
+| `messages search --sort relevance`, two words | 0.39 ms (0.44 ms) | 2.2 ms (2.4 ms) | 34 ms (35 ms) |
+| `messages search --count`, common word | 45 ms (47 ms) | 215 ms (222 ms) | 1.9 s (2.0 s) |
+| `messages search --count`, rare word | 0.12 ms (0.14 ms) | 0.38 ms (0.44 ms) | 4.7 ms (4.8 ms) |
+| `messages search --snippet`, two words | 0.58 ms (0.63 ms) | 1.4 ms (1.6 ms) | 15 ms (17 ms) |
 | `messages list`, newest page of 20 | 0.18 ms (0.23 ms) | 0.21 ms (0.38 ms) | 0.21 ms (0.28 ms) |
 | `messages list --before`, a page in the middle | 0.19 ms (0.31 ms) | 0.20 ms (0.35 ms) | 0.19 ms (0.33 ms) |
 | `messages get --context 5` | 0.22 ms (0.32 ms) | 0.24 ms (0.44 ms) | 0.23 ms (0.37 ms) |
@@ -326,8 +328,8 @@ Median of the in-process runs, with p95 in parentheses:
 | CLI run: `tg --help` | 87 ms (88 ms) | 88 ms (90 ms) | 87 ms (87 ms) |
 | CLI run: `tg status` | 92 ms (93 ms) | 98 ms (99 ms) | 127 ms (128 ms) |
 | CLI run: `tg status --sizes` | 124 ms (126 ms) | 400 ms (410 ms) | 3.2 s (3.2 s) |
-| CLI run: `tg messages search`, rare word | 92 ms (96 ms) | 93 ms (96 ms) | 97 ms (98 ms) |
-| CLI run: `tg messages search`, common word | 97 ms (98 ms) | 101 ms (101 ms) | 108 ms (109 ms) |
+| CLI run: `tg messages search`, rare word | 90 ms (92 ms) | 95 ms (96 ms) | 97 ms (98 ms) |
+| CLI run: `tg messages search`, common word | 116 ms (117 ms) | 104 ms (105 ms) | 114 ms (114 ms) |
 | CLI run: `tg sql`, aggregate over `message_search_text` | 91 ms (105 ms) | 94 ms (97 ms) | 110 ms (111 ms) |
 
 ## Method

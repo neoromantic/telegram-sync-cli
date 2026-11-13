@@ -213,11 +213,15 @@ function searchFilter(options: MessageSearchOptions): {
 }
 
 /**
- * Asking the search index whether one message matches costs about as much
- * as joining and sorting this many matches (measured with
- * `bun run bench:storage`, docs/storage.md)
+ * The walk below runs when a query has at least T = sqrt(WALK_THRESHOLD * P
+ * * N) matches, for a page of P (limit + offset) of N messages, and goes
+ * through at most P * N / T messages, as many as a page needs at that share
+ * of matches. Asking the search index about one message costs as much as
+ * sorting tens to hundreds of matches (made-up caches of 1M and 10M
+ * messages), so when the walk finds too few matches, counting and walking
+ * add at most about 30% to the sort it falls back to (docs/search.md).
  */
-const PROBE_COST = 40
+const WALK_THRESHOLD = 900
 
 /** Newest first; messages sent in the same second in the order they were cached */
 const NEWEST_FIRST = 'm.date DESC, m.rowid'
@@ -255,31 +259,25 @@ function sortedPage(
     ) as MessageSearchRow[]
 }
 
-/**
- * How the newest page was found: from the few matches there are, by going
- * through the newest messages, or by sorting every match
- */
-export type NewestFirstWay = 'matches' | 'messages' | 'sort'
+/** How the newest page was found: by going through the newest messages, or by sorting every match */
+export type NewestFirstWay = 'messages' | 'sort'
 
 /**
  * The newest page of a search. Sorting every match reads each one's
- * message, so a common query would take seconds; instead, when matches are
- * frequent, go through the newest messages (of the chat, between --since
- * and --until) in date order and ask the search index of each whether it
- * matches, until the page is full. With M of N messages matching, a page of
- * P is expected after P * N / M messages, against M matches to sort; so
- * this runs when M >= sqrt(PROBE_COST * P * N), and goes through at most
- * twice the messages expected at that point: every message from the
- * window's last date on. Since the window holds every message from its
- * last date on, a full page is the one sorting every match gives; a page
- * that isn't full falls back to sorting. Fewer matches than that are read
- * from the index alone and only they are sorted. A prefix query is always
- * sorted.
+ * message, so a common query would take seconds; instead, when a query has
+ * many matches, go through the newest messages (of the chat, between
+ * --since and --until) in date order and ask the search index of each
+ * whether it matches, until the page is full. The walk goes through a fixed
+ * number of messages, the window; a page found there is the one sorting
+ * every match gives, and a page that isn't full falls back to sorting. A
+ * prefix query is always sorted. Tests pass a lower `walkThreshold` to
+ * walk small caches.
  */
 export function searchNewestFirst(
   db: Database,
   query: string,
   options: MessageSearchOptions = {},
+  walkThreshold = WALK_THRESHOLD,
 ): { rows: MessageSearchRow[]; way: NewestFirstWay } {
   const limit = options.limit ?? 50
   const offset = options.offset ?? 0
@@ -296,32 +294,37 @@ export function searchNewestFirst(
   const { maxRowid } = db
     .query('SELECT max(rowid) AS maxRowid FROM messages_cache')
     .get() as { maxRowid: number | null }
-  const messages = maxRowid ?? 0
-  const page = limit + offset
-  const enough = Math.max(1, Math.ceil(Math.sqrt(PROBE_COST * page * messages)))
+  const pageTimesMessages = (limit + offset) * (maxRowid ?? 0)
+  const enough = Math.max(
+    1,
+    Math.ceil(Math.sqrt(walkThreshold * pageTimesMessages)),
+  )
 
-  // Reading matches from the index alone is cheap; fewer than enough are all
-  // of them, and sorting just those needs no second pass over the index
-  const matches = (
-    db
-      .query(
-        'SELECT rowid FROM message_search WHERE message_search MATCH ? LIMIT ?',
-      )
-      .values(match, enough) as Array<[number]>
-  ).map(([rowid]) => rowid)
-  if (matches.length < enough) {
+  // Reading matches from the index alone costs a fraction of sorting them,
+  // and fewer than enough are all of them. The sort asks the index again,
+  // which for one word costs about as much as counting; for a phrase or
+  // several words it costs more than handing the sort the rowids read here
+  const oneWord = /^"[^"\s]+"$/.test(match)
+  const { matches, rowids } = db
+    .query(
+      `SELECT count(*) AS matches,
+         ${oneWord ? 'NULL' : 'json_group_array(rowid)'} AS rowids
+       FROM (SELECT rowid FROM message_search WHERE message_search MATCH ? LIMIT ?)`,
+    )
+    .get(match, enough) as { matches: number; rowids: string | null }
+  if (matches < enough) {
+    if (rowids === null) return sorted()
     const rows = sortedPage(
       db,
       'FROM json_each(?) AS j CROSS JOIN messages_cache m ON m.rowid = j.value',
-      JSON.stringify(matches),
+      rowids,
       options,
       NEWEST_FIRST,
     )
-    return { rows, way: 'matches' }
+    return { rows, way: 'sort' }
   }
 
-  // The window: the messages in range, newest first, by an index in that order
-  const window = Math.ceil((2 * page * messages) / enough)
+  const window = Math.ceil(pageTimesMessages / enough)
   const index =
     options.chatId === undefined
       ? 'idx_messages_cache_newest'
@@ -340,37 +343,45 @@ export function searchNewestFirst(
     range.push('date < ?')
     rangeParams.push(options.until)
   }
-  const last = db
-    .query(
-      `SELECT date FROM messages_cache INDEXED BY ${index}
-       ${range.length ? `WHERE ${range.join(' AND ')}` : ''}
-       ORDER BY date DESC LIMIT 1 OFFSET ?`,
-    )
-    .get(...rangeParams, window - 1) as { date: number } | null
+  const where = range.length ? `WHERE ${range.join(' AND ')}` : ''
 
+  // The window: the first `window` messages in range of an index that,
+  // scanned forward, gives them newest first and, within a second, in rowid
+  // order. That is a prefix of the order of the page, even when it ends
+  // inside a second, so a full page found there is the right one. Ordering
+  // by the window's columns keeps its order without sorting, and the walk
+  // stops once the page is full
   const { conditions, params } = searchFilter(options)
-  if (last) {
-    conditions.push('m.date >= ?')
-    params.push(last.date)
-  }
   conditions.push(`EXISTS (
     SELECT 1 FROM message_search s
     WHERE s.message_search MATCH ? AND s.rowid = m.rowid)`)
   params.push(match)
-
   const rows = db
     .query(
       `SELECT ${MESSAGE_ROW_COLUMNS}
-       FROM messages_cache m INDEXED BY ${index}
+       FROM (
+         SELECT date, rowid AS id FROM messages_cache INDEXED BY ${index}
+         ${where}
+         ORDER BY date DESC, rowid
+         LIMIT ?
+       ) w
+       CROSS JOIN messages_cache m ON m.rowid = w.id
        ${MESSAGE_ROW_JOINS}
        WHERE ${conditions.join(' AND ')}
-       ORDER BY ${NEWEST_FIRST}
+       ORDER BY w.date DESC, w.id
        LIMIT ? OFFSET ?`,
     )
-    .all(...params, limit, offset) as MessageSearchRow[]
+    .all(...rangeParams, window, ...params, limit, offset) as MessageSearchRow[]
+  if (rows.length === limit) return { rows, way: 'messages' }
 
   // A range shorter than the window was gone through whole
-  if (rows.length === limit || !last) return { rows, way: 'messages' }
+  const longer = db
+    .query(
+      `SELECT 1 FROM messages_cache INDEXED BY ${index} ${where}
+       ORDER BY date DESC, rowid LIMIT 1 OFFSET ?`,
+    )
+    .get(...rangeParams, window)
+  if (!longer) return { rows, way: 'messages' }
   return sorted()
 }
 

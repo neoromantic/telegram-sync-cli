@@ -275,22 +275,29 @@ Messages sent in the same second go in rowid order, the order they were cached, 
 of `--offset` never overlap.
 
 This query reads every match and its message before it sorts them: a word in 30% of 10M
-messages took seconds. So the newest page comes one of three ways
+messages took seconds. So when a query has many matches, the newest page comes another way
 ([#118](https://github.com/neoromantic/telegram-sync-cli/issues/118)), with the same rows in the
-same order:
+same order. For a page of P (`--limit` plus `--offset`) of N messages:
 
-- **Few matches.** tg reads them from the index, then their messages, and sorts them, as the
-  query above does. For a page of P with M of N messages matching, "few" is under
-  √(40 × P × N): 141,000 for a page of 50 at 10M. Reading the index stops there, so it is cheap
-  either way.
-- **Many matches.** tg goes through the newest messages, from `--until` back, by
+- **Counting.** tg counts the matches in the index, up to T = √(900 × P × N): 212,000 for a
+  page of 50 at 1M messages, 671,000 at 10M. With fewer than T, it sorts them as the query
+  above does; for a phrase or several words, from the rowids it has just read, without asking
+  the index again.
+- **Walking.** With T or more, tg goes through the newest messages, from `--until` back, by
   `idx_messages_cache_newest` (`messages_cache(date DESC)`, or `idx_messages_cache_date` with
-  `--chat`), and asks the index of each whether it matches, until the page is full. Asking about
-  one message costs about as much as 40 matches of the query above, hence the 40. It goes
-  through at most twice the messages expected at that point; when a filter such as `--sender`
-  leaves too few matches there, it falls back to the query above.
+  `--chat`), and asks the index of each whether it matches, until the page is full. It goes
+  through at most P × N / T messages (236 for a page of 50 at 1M), as many as a page needs when
+  T of N messages match. That index gives them newest first and, within a second, in rowid
+  order, so a page found there is the right one even when it ends inside a second. When a
+  filter such as `--sender` leaves too few matches there, or the matches are older, tg runs the
+  query above.
 - **A prefix** (`word*`) always uses the query above: asking about one message would read every
   word the prefix starts.
+
+Asking the index about one message costs as much as sorting tens to hundreds of matches of the
+query above, so the walk pays only when matches are many. When it finds too few, counting and
+walking add at most about 30% to the query above: on made-up caches, a word only in the oldest
+messages took 55 ms instead of 43 ms at 1M messages and 98 ms instead of 82 ms at 10M.
 
 `--sort relevance` and `--count` still read every match.
 

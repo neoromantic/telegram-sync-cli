@@ -1,7 +1,8 @@
 /**
  * The newest page of a common query (#118) goes through messages in date
  * order instead of sorting every match. It must return the same rows in the
- * same order as sorting every match by date, then rowid.
+ * same order as sorting every match by date, then rowid. The cache is too
+ * small to walk at the default threshold, so most checks pass a lower one.
  */
 import { Database } from 'bun:sqlite'
 import { beforeAll, describe, expect, it } from 'bun:test'
@@ -26,7 +27,10 @@ function mulberry32(seed: number): () => number {
 }
 
 const MESSAGES = 12_000
+// The newest messages, all sent in one second: more than a window holds
+const SAME_SECOND = 3_000
 const BASE_DATE = 1_700_000_000
+const WALK = 40
 const CHATS = [-1001000000001, -1001000000002, -200, 300, 301, 302]
 // Most messages in the first chats; the last one has a few dozen
 const CHAT_WEIGHTS = [0.45, 0.25, 0.15, 0.1, 0.045, 0.005]
@@ -52,6 +56,11 @@ function messageText(): string {
   if (random() < 0.1) text.push('often')
   if (random() < 0.002) text.push('rare')
   return text.join(' ')
+}
+
+/** Like messageText, with a word only the oldest messages have */
+function oldMessageText(page: number): string {
+  return page >= 105 ? `${messageText()} ancient` : messageText()
 }
 
 describe('search newest first (#118)', () => {
@@ -92,11 +101,21 @@ describe('search newest first (#118)', () => {
             pickChat(),
             id,
             sender as number,
-            messageText(),
+            oldMessageText(page),
             random() < 0.03 ? 1 : 0,
             top - Math.floor(random() * 400),
           )
         }
+      }
+      for (let i = 0; i < SAME_SECOND; i++) {
+        insert.run(
+          pickChat(),
+          MESSAGES + i + 1,
+          pick(SENDERS.slice(0, 19)) as number,
+          messageText(),
+          random() < 0.03 ? 1 : 0,
+          BASE_DATE + 5000,
+        )
       }
     })()
   })
@@ -164,8 +183,8 @@ describe('search newest first (#118)', () => {
 
   it('returns the same page as sorting every match, for random queries and filters', () => {
     const search = createMessagesSearch(db)
-    const ways = { matches: 0, messages: 0, sort: 0 }
-    for (let run = 0; run < 300; run++) {
+    const ways = { messages: 0, sort: 0 }
+    for (let run = 0; run < 200; run++) {
       const query = pick([
         'common',
         'common',
@@ -185,36 +204,66 @@ describe('search newest first (#118)', () => {
         context,
         rows: expected,
       })
+      const walked = searchNewestFirst(db, query, options, WALK)
+      expect({ context, rows: keys(walked.rows) }).toEqual({
+        context,
+        rows: expected,
+      })
       expect({ context, n: search.count(query, options) }).toEqual({
         context,
         n: all.length,
       })
 
-      ways[searchNewestFirst(db, query, options).way]++
+      ways[walked.way]++
     }
-    // Every way ran
-    expect(ways.matches).toBeGreaterThan(30)
+    // Both ways ran
     expect(ways.messages).toBeGreaterThan(30)
-    expect(ways.sort).toBeGreaterThan(10)
-  })
+    expect(ways.sort).toBeGreaterThan(30)
+  }, 20_000)
 
   it('goes through the messages for a common word and sorts the matches of a rare one', () => {
-    expect(searchNewestFirst(db, 'common').way).toBe('messages')
-    expect(searchNewestFirst(db, 'common', { chatId: CHATS[0] }).way).toBe(
-      'messages',
-    )
-    expect(searchNewestFirst(db, 'rare').way).toBe('matches')
-    expect(searchNewestFirst(db, 'nothing').rows).toEqual([])
-    expect(searchNewestFirst(db, 'comm*').way).toBe('sort')
+    expect(searchNewestFirst(db, 'common').way).toBe('sort')
+    expect(searchNewestFirst(db, 'common', {}, WALK).way).toBe('messages')
+    expect(
+      searchNewestFirst(db, 'common', { chatId: CHATS[0] }, WALK).way,
+    ).toBe('messages')
+    expect(searchNewestFirst(db, 'rare', {}, WALK).way).toBe('sort')
+    expect(searchNewestFirst(db, 'nothing', {}, WALK).rows).toEqual([])
+    expect(searchNewestFirst(db, 'comm*', {}, WALK).way).toBe('sort')
+  })
+
+  it('finds the page inside a second with more messages than the window', () => {
+    for (const options of [
+      {},
+      { offset: 30, limit: 20 },
+      { chatId: CHATS[1] },
+      { includeDeleted: true },
+    ]) {
+      const { rows, way } = searchNewestFirst(db, 'common', options, WALK)
+      expect(way).toBe('messages')
+      expect(rows.every((row) => row.date === BASE_DATE + 5000)).toBe(true)
+      const offset = options.offset ?? 0
+      expect(keys(rows)).toEqual(
+        sortedMatches('common', options).slice(
+          offset,
+          offset + (options.limit ?? 50),
+        ),
+      )
+    }
   })
 
   it('falls back to sorting when the window has too few matches', () => {
     // The rarest sender has a handful of messages, most of them older than
     // the window of the newest messages
     const options = { senderId: SENDERS[19] }
-    const { rows, way } = searchNewestFirst(db, 'common', options)
+    const { rows, way } = searchNewestFirst(db, 'common', options, WALK)
     expect(way).toBe('sort')
     expect(keys(rows)).toEqual(sortedMatches('common', options).slice(0, 50))
+
+    // Every match older than the newest second, which fills the window
+    const old = searchNewestFirst(db, 'ancient', {}, 1)
+    expect(old.way).toBe('sort')
+    expect(keys(old.rows)).toEqual(sortedMatches('ancient', {}).slice(0, 50))
   })
 
   it('has pages with ties in date, so the order above covers them', () => {
