@@ -84,9 +84,12 @@ const { createMessagesSearch } = await import('../src/db/messages-search')
 const { createHistoryRanges } = await import('../src/db/history-ranges')
 const { readCacheSize } = await import('../src/db/cache-maintenance')
 const { rebuildMessageSearchIndex } = await import('../src/db/sync-schema')
-const { readMigrationStatus, registerBackgroundMigrations } = await import(
-  '../src/db/background-migrations'
-)
+const {
+  readMigrationStatus,
+  registerBackgroundMigrations,
+  runPendingMigrations,
+} = await import('../src/db/background-migrations')
+const { searchNamesMigration } = await import('../src/db/search-reindex')
 const { cacheHistoryResponse, getMessageWithContext, listHistory } =
   await import('../src/commands/messages/history')
 const { messageItemReader } = await import('../src/commands/messages/helpers')
@@ -785,8 +788,24 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   }
 
   // ── Maintenance ───────────────────────────────────────────────────────
-  log('rebuilding the search index')
+  // The one-off re-index of names (#93), as an upgraded cache runs it: in
+  // batches, each its own transaction
+  log('re-indexing names')
+  db.run(
+    `DELETE FROM cache_migrations WHERE name = '${searchNamesMigration.name}'`,
+  )
+  registerBackgroundMigrations(db)
+  const queued = (
+    db.query('SELECT COUNT(*) AS n FROM search_reindex_queue').get() as {
+      n: number
+    }
+  ).n
   let start = performance.now()
+  const reindexed = await runPendingMigrations(db, {}, [searchNamesMigration])
+  const reindexSeconds = (performance.now() - start) / 1000
+
+  log('rebuilding the search index')
+  start = performance.now()
   rebuildMessageSearchIndex(db)
   const rebuildSeconds = (performance.now() - start) / 1000
   db.run('PRAGMA wal_checkpoint(TRUNCATE)')
@@ -831,6 +850,12 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
     queries,
     cli: cliTimes,
     maintenance: {
+      names_reindex: {
+        messages: reindexed,
+        queued_by_writes: queued,
+        seconds: round(reindexSeconds, 2),
+        messages_per_s: Math.round(reindexed / reindexSeconds),
+      },
       search_rebuild: {
         seconds: round(rebuildSeconds, 2),
         index_bytes_before: size.tables.message_search?.bytes ?? 0,
@@ -1039,7 +1064,7 @@ function markdown(
   const v = r.maintenance.vacuum
   lines.push(
     '',
-    `Search index rebuild ${r.maintenance.search_rebuild.seconds} s. \`tg db vacuum\` ${v.seconds} s, ${mb(v.bytes_before)} → ${mb(v.bytes_after)}, peak extra disk ${mb(v.peak_extra_disk_bytes)}. Whole run ${r.total_seconds} s.`,
+    `Names re-index (#93) ${n(r.maintenance.names_reindex.messages)} messages in ${r.maintenance.names_reindex.seconds} s, ${n(r.maintenance.names_reindex.messages_per_s)} messages/s (${n(r.maintenance.names_reindex.queued_by_writes)} peers queued by the writes). Search index rebuild ${r.maintenance.search_rebuild.seconds} s. \`tg db vacuum\` ${v.seconds} s, ${mb(v.bytes_before)} → ${mb(v.bytes_after)}, peak extra disk ${mb(v.peak_extra_disk_bytes)}. Whole run ${r.total_seconds} s.`,
   )
   return lines.join('\n')
 }
