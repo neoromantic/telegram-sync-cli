@@ -112,7 +112,8 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
     )
   `)
 
-  keepDeletedRowsUntilMerge(db)
+  // Only contentless-delete tables (SQLite 3.43+) know deletemerge
+  if (contentless) keepDeletedRowsUntilMerge(db)
   createSearchMetaTable(db)
 
   // Search triggers (keep FTS index in sync)
