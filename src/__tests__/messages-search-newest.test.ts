@@ -9,10 +9,15 @@ import { beforeAll, describe, expect, it } from 'bun:test'
 import {
   createMessagesSearch,
   type MessageSearchOptions,
+  type NewestFirstWay,
   searchNewestFirst,
   toFts5Query,
 } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
+import {
+  buildChatSearchExpr,
+  buildSenderSearchExpr,
+} from '../db/search-reindex'
 import { initSyncSchema } from '../db/sync-schema'
 
 /** A seeded PRNG, so a failure repeats */
@@ -30,7 +35,9 @@ const MESSAGES = 12_000
 // The newest messages, all sent in one second: more than a window holds
 const SAME_SECOND = 3_000
 const BASE_DATE = 1_700_000_000
-const WALK = 40
+/** The walk's clock stands still, so no walk runs out of time */
+const FROZEN = { now: () => 0 }
+const WALK = { ...FROZEN, walkThreshold: 10 }
 const CHATS = [-1001000000001, -1001000000002, -200, 300, 301, 302]
 // Most messages in the first chats; the last one has a few dozen
 const CHAT_WEIGHTS = [0.45, 0.25, 0.15, 0.1, 0.045, 0.005]
@@ -181,10 +188,11 @@ describe('search newest first (#118)', () => {
     return options
   }
 
-  it('returns the same page as sorting every match, for random queries and filters', () => {
+  /** Random queries and filters: each way gives the page of sortedMatches */
+  function checkRandomQueries(runs: number): Record<NewestFirstWay, number> {
     const search = createMessagesSearch(db)
     const ways = { messages: 0, sort: 0 }
-    for (let run = 0; run < 200; run++) {
+    for (let run = 0; run < runs; run++) {
       const query = pick([
         'common',
         'common',
@@ -216,14 +224,20 @@ describe('search newest first (#118)', () => {
 
       ways[walked.way]++
     }
+    return ways
+  }
+
+  it('returns the same page as sorting every match, for random queries and filters', () => {
+    const ways = checkRandomQueries(200)
     // Both ways ran
     expect(ways.messages).toBeGreaterThan(30)
     expect(ways.sort).toBeGreaterThan(30)
   }, 20_000)
 
   it('goes through the messages for a common word and sorts the matches of a rare one', () => {
-    expect(searchNewestFirst(db, 'common').way).toBe('sort')
-    expect(searchNewestFirst(db, 'common', {}, WALK).way).toBe('messages')
+    // At the default threshold, a word in 60% of 15,000 messages, not 10%
+    expect(searchNewestFirst(db, 'common', {}, FROZEN).way).toBe('messages')
+    expect(searchNewestFirst(db, 'often', {}, FROZEN).way).toBe('sort')
     expect(
       searchNewestFirst(db, 'common', { chatId: CHATS[0] }, WALK).way,
     ).toBe('messages')
@@ -261,7 +275,12 @@ describe('search newest first (#118)', () => {
     expect(keys(rows)).toEqual(sortedMatches('common', options).slice(0, 50))
 
     // Every match older than the newest second, which fills the window
-    const old = searchNewestFirst(db, 'ancient', {}, 1)
+    const old = searchNewestFirst(
+      db,
+      'ancient',
+      {},
+      { ...FROZEN, walkThreshold: 1 },
+    )
     expect(old.way).toBe('sort')
     expect(keys(old.rows)).toEqual(sortedMatches('ancient', {}).slice(0, 50))
   })
@@ -273,4 +292,49 @@ describe('search newest first (#118)', () => {
     )
     expect(ties.length).toBeGreaterThan(50)
   })
+
+  it('sorts once the walk has taken its time budget', () => {
+    // Each chunk takes a second on this clock
+    let clock = 0
+    const slow = { ...WALK, now: () => (clock += 1_000) }
+    for (const query of ['common', 'often']) {
+      const { rows, way } = searchNewestFirst(db, query, {}, slow)
+      expect(way).toBe('sort')
+      expect(keys(rows)).toEqual(sortedMatches(query, {}).slice(0, 50))
+    }
+  })
+
+  it('returns the same pages from an index that keeps the old entries of every message', () => {
+    // A re-index of every message with no merge after it, as #149 found
+    const bytes = () =>
+      (
+        db
+          .query('SELECT SUM(LENGTH(block)) AS n FROM message_search_data')
+          .get() as { n: number }
+      ).n
+    const before = bytes()
+    const rowids = (
+      db.query('SELECT rowid FROM messages_cache').all() as { rowid: number }[]
+    ).map((row) => row.rowid)
+    const remove = db.query('DELETE FROM message_search WHERE rowid = ?')
+    const insert = db.query(`
+      INSERT INTO message_search(rowid, text, sender, chat, files)
+      SELECT rowid, COALESCE(text, ''), ${buildSenderSearchExpr('m')},
+        ${buildChatSearchExpr('m')}, ''
+      FROM messages_cache m WHERE rowid = ?
+    `)
+    for (let i = 0; i < rowids.length; i += 500) {
+      db.transaction(() => {
+        for (const rowid of rowids.slice(i, i + 500)) {
+          remove.run(rowid)
+          insert.run(rowid)
+        }
+      })()
+    }
+    expect(bytes()).toBeGreaterThan(1.5 * before)
+
+    const ways = checkRandomQueries(100)
+    expect(ways.messages).toBeGreaterThan(15)
+    expect(ways.sort).toBeGreaterThan(15)
+  }, 20_000)
 })

@@ -326,25 +326,45 @@ messages took seconds. So when a query has many matches, the newest page comes a
 ([#118](https://github.com/neoromantic/telegram-sync-cli/issues/118)), with the same rows in the
 same order. For a page of P (`--limit` plus `--offset`) of N messages:
 
-- **Counting.** tg counts the matches in the index, up to T = √(900 × P × N): 212,000 for a
-  page of 50 at 1M messages, 671,000 at 10M. With fewer than T, it sorts them as the query
-  above does; for a phrase or several words, from the rowids it has just read, without asking
-  the index again.
+- **Counting.** tg counts the matches in the index, up to T = √(20 × P × N): 31,600 for a page
+  of 50 at 1M messages, 100,000 at 10M, so a word in about 3% of 1M messages or 1% of 10M
+  counts as many. With fewer than T, it sorts them as the query above does; for a phrase or
+  several words, from the rowids it has just read, without asking the index again.
 - **Walking.** With T or more, tg goes through the newest messages, from `--until` back, by
   `idx_messages_cache_newest` (`messages_cache(date DESC)`, or `idx_messages_cache_date` with
-  `--chat`), and asks the index of each whether it matches, until the page is full. It goes
-  through at most P × N / T messages (236 for a page of 50 at 1M), as many as a page needs when
-  T of N messages match. That index gives them newest first and, within a second, in rowid
-  order, so a page found there is the right one even when it ends inside a second. When a
+  `--chat`), in chunks, until the page is full. For each chunk it asks the index which of its
+  messages match, one question (`rowid BETWEEN`) per run of rowids at most 32 apart: history
+  pages give a chat's newest messages nearby rowids, and so does the daemon to live messages.
+  It goes through at most P × N / T messages (1,600 for a page of 50 at 1M), as many as a page
+  needs when T of N messages match. That index gives them newest first and, within a second, in
+  rowid order, so a page found there is the right one even when it ends inside a second. When a
   filter such as `--sender` leaves too few matches there, or the matches are older, tg runs the
   query above.
-- **A prefix** (`word*`) always uses the query above: asking about one message would read every
+- **A time budget.** The walk stops and runs the query above once it has taken 0.25 µs for each
+  of the T matches, a quarter of the least that query takes for them (about 1 µs a match). The
+  first chunk has 4 messages; each next one is as many as the rest of the budget pays for at the
+  pace so far. So an index that answers slowly, such as one that still holds the old entries of
+  re-indexed messages ([above](#keeping-the-index-merged)), costs a quarter more at most.
+- **A prefix** (`word*`) always uses the query above: asking about the messages would read every
   word the prefix starts.
 
-Asking the index about one message costs as much as sorting tens to hundreds of matches of the
-query above, so the walk pays only when matches are many. When it finds too few, counting and
-walking add at most about 30% to the query above: on made-up caches, a word only in the oldest
-messages took 55 ms instead of 43 ms at 1M messages and 98 ms instead of 82 ms at 10M.
+On the merged index of a 1M made-up cache, going through a message costs a few µs, so the walk
+pays from a few percent of matches on. The same cache file, 0.11.1 against now:
+
+| `tg messages search`, 1M messages | 0.11.1 | Now |
+|---|---:|---:|
+| A word in 30% of messages | 7.2 ms | 3.0 ms |
+| A word in 7% | 85 ms | 6.7 ms |
+| A word in 4.4% | 54 ms | 9.2 ms |
+| A word in 30%, `--offset 200` | 278 ms | 6.4 ms |
+| A word in 30%, `--chat`, the biggest chat | 7.5 ms | 1.1 ms |
+| Worst case: a word in 7%, `--sender` with no recent messages | 64 ms | 72 ms |
+| Worst case: a word in 4.4%, `--sender` with no recent messages | 41 ms | 49 ms |
+| A word in 30%, on the index 0.11.1 left after its re-index (#149) | 488 ms | 363 ms |
+| A word in 4.4%, the same | 74 ms | 82 ms |
+
+In the worst cases the walk finds no match and the query above runs after it: 1.1 to 1.2 times
+as long as 0.11.1, which sorted at once.
 
 `--sort relevance` and `--count` still read every match.
 
