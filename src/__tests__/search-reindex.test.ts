@@ -21,6 +21,7 @@ import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache, type UserCacheInput } from '../db/users-cache'
 
 const CHAT_ID = -1009000000001
+const CHANNEL_ID = -1009000000002
 const USER_ID = 5001
 const MESSAGES = 10
 const SMALL = { maxRows: 4, maxMs: 1_000 }
@@ -66,6 +67,29 @@ function seedMessages(db: Database): void {
       text: `note ${i + 1} about the roses`,
       message_type: 'text',
       date: 1_760_000_000 + i,
+      raw_json: '{}',
+    })),
+  )
+}
+
+const channel: CachedChatInput = {
+  ...chat,
+  chat_id: String(CHANNEL_ID),
+  type: 'channel',
+  title: 'Rose News',
+  username: 'rosenews',
+}
+
+/** Posts of the channel as itself: 3 in the channel, 1 in the group */
+function seedChannelPosts(db: Database): void {
+  createMessagesCache(db).upsertBatch(
+    [CHANNEL_ID, CHANNEL_ID, CHANNEL_ID, CHAT_ID].map((chatId, i) => ({
+      chat_id: chatId,
+      message_id: 200 + i,
+      from_id: CHANNEL_ID,
+      text: `bulletin ${i + 1}`,
+      message_type: 'text',
+      date: 1_760_002_000 + i,
       raw_json: '{}',
     })),
   )
@@ -151,6 +175,25 @@ describe('the re-index queue', () => {
     expect(matches(db, 'chat:garden')).toBe(0)
     // The text is indexed as before
     expect(matches(db, 'text:roses')).toBe(MESSAGES)
+  })
+
+  it('finds a channel that posts as itself by its name', async () => {
+    const db = open()
+    seedChannelPosts(db)
+    const chats = createChatsCache(db)
+    chats.upsert(channel)
+    expect(queue(db)).toEqual([
+      { kind: 'chat', peer_id: CHANNEL_ID, cursor: 0 },
+      { kind: 'sender', peer_id: CHANNEL_ID, cursor: 0 },
+    ])
+    await drain(db)
+    expect(matches(db, 'sender:rosenews')).toBe(4)
+
+    chats.upsert({ ...channel, title: 'Garden Bulletin', fetched_at: 2 })
+    await drain(db)
+    expect(matches(db, 'sender:"garden bulletin"')).toBe(4)
+    expect(matches(db, 'sender:news')).toBe(0)
+    expect(matches(db, 'chat:"garden bulletin"')).toBe(3)
   })
 
   it('leaves messages written after the rename alone', async () => {
@@ -304,5 +347,38 @@ describe('search disabled by an older SQLite', () => {
 
     expect(await drain(db)).toBe(0)
     expect(namesState(db)).toBe('pending')
+  })
+})
+
+describe('the index of a cache from before #93', () => {
+  /** A message trigger of 0.10.0: senders only from users_cache */
+  const oldTrigger = (name: string, event: string) => `
+    CREATE TRIGGER ${name} AFTER ${event} ON messages_cache
+    BEGIN
+      INSERT INTO message_search(rowid, text, sender, chat, files)
+      VALUES (new.rowid, COALESCE(new.text, ''), COALESCE(CAST(new.from_id AS TEXT), ''), '', '');
+    END
+  `
+  const triggerSql = (db: Database, name: string) =>
+    (
+      db.query(`SELECT sql FROM sqlite_master WHERE name = ?`).get(name) as {
+        sql: string
+      }
+    ).sql
+
+  it('gets message triggers that read channel names', () => {
+    const db = open()
+    db.run('DROP TRIGGER messages_cache_ai')
+    db.run('DROP TRIGGER messages_cache_au')
+    db.run(oldTrigger('messages_cache_ai', 'INSERT'))
+    db.run(oldTrigger('messages_cache_au', 'UPDATE OF text'))
+
+    initSyncSchema(db)
+    expect(triggerSql(db, 'messages_cache_ai')).toContain('chats_cache')
+    expect(triggerSql(db, 'messages_cache_au')).toContain('chats_cache')
+
+    createChatsCache(db).upsert(channel)
+    seedChannelPosts(db)
+    expect(matches(db, 'sender:rosenews')).toBe(4)
   })
 })

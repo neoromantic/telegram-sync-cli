@@ -15,6 +15,7 @@ import {
   buildSenderSearchExpr,
   createSearchReindexSchema,
   REINDEX_TRIGGERS,
+  readsChannelSenders,
 } from './search-reindex'
 
 const SEARCH_INDEX_VERSION = 1
@@ -113,25 +114,8 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
 
   createSearchMetaTable(db)
 
-  const senderExprNew = buildSenderSearchExpr('new')
-  const chatExprNew = buildChatSearchExpr('new')
-
   // Search triggers (keep FTS index in sync)
-  db.run(`
-    CREATE TRIGGER IF NOT EXISTS messages_cache_ai
-    AFTER INSERT ON messages_cache
-    BEGIN
-      INSERT INTO message_search(rowid, text, sender, chat, files)
-      VALUES (
-        new.rowid,
-        COALESCE(new.text, ''),
-        ${senderExprNew},
-        ${chatExprNew},
-        COALESCE(new.media_path, '')
-      );
-    END;
-  `)
-
+  createSearchInsertTrigger(db)
   db.run(`
     CREATE TRIGGER IF NOT EXISTS messages_cache_ad
     AFTER DELETE ON messages_cache
@@ -142,6 +126,23 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
 
   createSearchUpdateTrigger(db)
   createSearchReindexSchema(db)
+}
+
+function createSearchInsertTrigger(db: Database): void {
+  db.run(`
+    CREATE TRIGGER IF NOT EXISTS messages_cache_ai
+    AFTER INSERT ON messages_cache
+    BEGIN
+      INSERT INTO message_search(rowid, text, sender, chat, files)
+      VALUES (
+        new.rowid,
+        COALESCE(new.text, ''),
+        ${buildSenderSearchExpr('new')},
+        ${buildChatSearchExpr('new')},
+        COALESCE(new.media_path, '')
+      );
+    END;
+  `)
 }
 
 /**
@@ -171,44 +172,56 @@ function createSearchUpdateTrigger(db: Database): void {
 }
 
 /**
- * What a cache from 0.5.0 and older needs: its update trigger re-indexes a
- * message on every write, and it has an index on fetched_at that no query
- * reads
+ * What an older cache needs. From 0.5.0 and older: its update trigger
+ * re-indexes a message on every write, and it has an index on fetched_at
+ * that no query reads. Before #93: its message triggers index a channel
+ * that posts as itself under its ID, not its name.
  */
 function messagesCacheWritesWork(db: Database): {
-  trigger: boolean
+  insertTrigger: boolean
+  updateTrigger: boolean
   index: boolean
 } {
   const rows = db
     .query(
-      `SELECT type, sql FROM sqlite_master
-       WHERE (type = 'trigger' AND name = 'messages_cache_au')
+      `SELECT name, sql FROM sqlite_master
+       WHERE (type = 'trigger' AND name IN ('messages_cache_ai', 'messages_cache_au'))
           OR (type = 'index' AND name = 'idx_messages_cache_fetched')`,
     )
-    .all() as Array<{ type: string; sql: string | null }>
-  const trigger = rows.find((row) => row.type === 'trigger')
+    .all() as Array<{ name: string; sql: string | null }>
+  const sql = (name: string) => rows.find((row) => row.name === name)?.sql
+  const insert = sql('messages_cache_ai')
+  const update = sql('messages_cache_au')
   return {
-    trigger:
-      trigger !== undefined &&
-      !/AFTER\s+UPDATE\s+OF\b/i.test(trigger.sql ?? ''),
-    index: rows.some((row) => row.type === 'index'),
+    insertTrigger: insert != null && !readsChannelSenders(insert),
+    updateTrigger:
+      update != null &&
+      (!/AFTER\s+UPDATE\s+OF\b/i.test(update) || !readsChannelSenders(update)),
+    index: sql('idx_messages_cache_fetched') !== undefined,
   }
 }
 
 /**
- * Give a cache from 0.5.0 and older the update trigger that re-indexes only
- * changed messages, and drop its fetched_at index. One-time work, so it runs
+ * Give an older cache the message triggers of this version (the update one
+ * re-indexes only changed messages, both read channel names) and drop its
+ * fetched_at index. One-time work, so it runs
  * under the write lock and is checked again there; a cache that needs
  * nothing is only read.
  */
 function upgradeMessagesCacheWrites(db: Database): void {
   const pending = messagesCacheWritesWork(db)
-  if (!pending.trigger && !pending.index) return
+  if (!pending.insertTrigger && !pending.updateTrigger && !pending.index) {
+    return
+  }
 
   withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
     db.transaction(() => {
       const work = messagesCacheWritesWork(db)
-      if (work.trigger) {
+      if (work.insertTrigger) {
+        db.run('DROP TRIGGER messages_cache_ai')
+        createSearchInsertTrigger(db)
+      }
+      if (work.updateTrigger) {
         db.run('DROP TRIGGER messages_cache_au')
         createSearchUpdateTrigger(db)
       }

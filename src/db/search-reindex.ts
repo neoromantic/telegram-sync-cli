@@ -15,7 +15,24 @@ import type {
   BatchResult,
 } from './background-migrations'
 
-/** The names of a message's sender, from users_cache, else its ID */
+/** A chat's title, username and ID, from chats_cache */
+function chatNamesExpr(id: string, onlyIf = ''): string {
+  return `
+    SELECT trim(
+      COALESCE(title, '') || ' ' ||
+      COALESCE(username, '') || ' ' ||
+      COALESCE(chat_id, '')
+    )
+    FROM chats_cache
+    WHERE ${onlyIf}chat_id = CAST(${id} AS TEXT)
+  `
+}
+
+/**
+ * The names of a message's sender, else its ID: a user's from users_cache,
+ * a channel or group that posts as itself (a negative, marked ID) from
+ * chats_cache
+ */
 export function buildSenderSearchExpr(prefix: string): string {
   return `
     COALESCE(
@@ -30,6 +47,7 @@ export function buildSenderSearchExpr(prefix: string): string {
         FROM users_cache
         WHERE user_id = CAST(${prefix}.from_id AS TEXT)
       ),
+      (${chatNamesExpr(`${prefix}.from_id`, `${prefix}.from_id < 0 AND `)}),
       COALESCE(CAST(${prefix}.from_id AS TEXT), '')
     )
   `
@@ -39,18 +57,18 @@ export function buildSenderSearchExpr(prefix: string): string {
 export function buildChatSearchExpr(prefix: string): string {
   return `
     COALESCE(
-      (
-        SELECT trim(
-          COALESCE(title, '') || ' ' ||
-          COALESCE(username, '') || ' ' ||
-          COALESCE(chat_id, '')
-        )
-        FROM chats_cache
-        WHERE chat_id = CAST(${prefix}.chat_id AS TEXT)
-      ),
+      (${chatNamesExpr(`${prefix}.chat_id`)}),
       COALESCE(CAST(${prefix}.chat_id AS TEXT), '')
     )
   `
+}
+
+/**
+ * Whether a message trigger reads the names of channels that post as
+ * themselves: the triggers of older caches don't (buildSenderSearchExpr)
+ */
+export function readsChannelSenders(triggerSql: string): boolean {
+  return /from_id < 0/.test(triggerSql)
 }
 
 /** The triggers on users_cache and chats_cache that fill the queue */
@@ -69,12 +87,13 @@ function queueStatements(
   kind: 'sender' | 'chat',
   peerId: string,
   column: string,
+  onlyIf = '',
 ): string {
   return `
     DELETE FROM search_reindex_queue WHERE kind = '${kind}' AND peer_id = ${peerId};
     INSERT INTO search_reindex_queue (kind, peer_id, end_rowid)
     SELECT '${kind}', ${peerId}, (SELECT MAX(rowid) FROM messages_cache)
-    WHERE EXISTS (SELECT 1 FROM messages_cache WHERE ${column} = ${peerId});
+    WHERE ${onlyIf}EXISTS (SELECT 1 FROM messages_cache WHERE ${column} = ${peerId});
   `
 }
 
@@ -99,11 +118,12 @@ export function createSearchReindexSchema(db: Database): void {
     'CAST(new.user_id AS INTEGER)',
     'from_id',
   )
-  const chat = queueStatements(
-    'chat',
-    'CAST(new.chat_id AS INTEGER)',
-    'chat_id',
-  )
+  // A chat's messages, and those it posted as itself in any chat: only
+  // channels and groups (negative, marked IDs) post as themselves
+  const chatId = 'CAST(new.chat_id AS INTEGER)'
+  const chat =
+    queueStatements('chat', chatId, 'chat_id') +
+    queueStatements('sender', chatId, 'from_id', `${chatId} < 0 AND `)
   db.run(`
     CREATE TRIGGER IF NOT EXISTS users_cache_search_ai
     AFTER INSERT ON users_cache

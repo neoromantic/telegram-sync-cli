@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `chat:` used to match only the names at the time a message was indexed. A rename queues a
   re-index of that peer's messages, which the daemon or `tg db migrate` does in short batches;
   existing caches re-index every message once, as the background migration
-  `message_search_names` shown by `tg status` (#93).
+  `message_search_names` shown by `tg status`. `sender:` also finds a channel or group that
+  posts as itself by its title or username (#93).
 
 ## [0.10.0] - 2026-10-31
 

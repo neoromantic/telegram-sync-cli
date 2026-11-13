@@ -590,7 +590,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         sender: {
           description:
-            'Indexed sender tokens (username, name, id); a rename reaches older messages through search_reindex_queue',
+            'Indexed sender tokens (username, name, id; title, username, id for a channel or group posting as itself); a rename reaches older messages through search_reindex_queue',
           nullable: true,
         },
         chat: {
@@ -613,7 +613,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       columns: {
         kind: {
           description:
-            'sender: the messages with this from_id (users_cache); chat: the messages of this chat (chats_cache)',
+            'sender: the messages with this from_id (a user in users_cache, or a channel or group that posts as itself in chats_cache); chat: the messages of this chat (chats_cache)',
           nullable: false,
           semanticType: 'enum',
           enumValues: ['sender', 'chat'],

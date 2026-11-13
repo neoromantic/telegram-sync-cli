@@ -62,7 +62,7 @@ message again, those cached in between too.
 | Column | Purpose |
 |--------|---------|
 | `text` | Message text |
-| `sender` | Username + name + user_id search blob |
+| `sender` | Username + name + user_id search blob; a channel or group that posts as itself: its title + username + chat_id |
 | `chat` | Chat title + username + chat_id search blob (groups and channels too) |
 | `files` | Media path (when available) |
 
@@ -167,6 +167,9 @@ index catches up in the background (#93):
   `chats_cache` row does the same for its chat's messages when it is inserted or its title or
   username changes. So a rename, and a sender or chat cached after their messages (before 0.9.0
   the daemon didn't cache the senders of history pages, #126), both reach the index.
+- A channel or group that posts as itself has its marked ID as `from_id`: `sender:` matches its
+  title and username from `chats_cache`, and its insert or rename also queues the messages it
+  posted, in any chat.
 - An upsert that changes none of those names (every dialog pass rewrites thousands of rows)
   queues nothing, and neither does a peer with no cached messages.
 - Only the messages cached so far are queued: those written later read the new names already.

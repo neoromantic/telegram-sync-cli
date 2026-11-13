@@ -359,13 +359,15 @@ CREATE TABLE search_meta (
 Senders and chats whose cached messages wait for a re-index with their current names
 ([search.md](search.md#names-after-a-rename), #93). The triggers `users_cache_search_ai`/`_au`
 and `chats_cache_search_ai`/`_au` add a row when a peer with cached messages is inserted or
-one of the names the index reads changes; an upsert that changes no name adds none. The daemon
+one of the names the index reads changes; an upsert that changes no name adds none. A chat
+queues its messages as `chat` and, if it's a channel or group (negative ID), the messages it
+posted as itself as `sender`. The daemon
 and `tg db migrate` drain it in batches, like the background migrations, and delete each row
 when its messages are done. A search index rebuild empties it.
 
 ```sql
 CREATE TABLE search_reindex_queue (
-  kind       TEXT NOT NULL,              -- sender (users_cache) or chat (chats_cache)
+  kind       TEXT NOT NULL,              -- sender (by from_id) or chat (by chat_id)
   peer_id    INTEGER NOT NULL,           -- from_id or marked chat_id of the messages
   cursor     INTEGER NOT NULL DEFAULT 0, -- last done: rowid (sender) or message_id (chat)
   end_rowid  INTEGER NOT NULL,           -- messages_cache's largest rowid when queued
