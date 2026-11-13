@@ -50,8 +50,9 @@ auto_vacuum ([cli-commands.md](cli-commands.md#cache-maintenance)). Stop the dae
 upgrading, so that the old daemon doesn't write while the new tg moves the index.
 
 If an older SQLite opens a cache that has the contentless table (the same data directory used
-from a newer macOS, say), it can't read that table: it drops only the three `messages_cache_a*`
-triggers and sets `search_index_version` to `0`. Messages are still cached, and
+from a newer macOS, say), it can't read that table: it drops only the triggers that write it (the three
+`messages_cache_a*` and those that fill `search_reindex_queue`) and sets
+`search_index_version` to `0`. Messages are still cached, and
 `tg messages search` fails with SQLite's error (`GENERAL_ERROR`). The next open on a SQLite
 with `contentless_delete` recreates the triggers and rebuilds the index, so search finds every
 message again, those cached in between too.
@@ -61,7 +62,7 @@ message again, those cached in between too.
 | Column | Purpose |
 |--------|---------|
 | `text` | Message text |
-| `sender` | Username + name + user_id search blob |
+| `sender` | Username + name + user_id search blob; a channel or group that posts as itself: its title + username + chat_id |
 | `chat` | Chat title + username + chat_id search blob (groups and channels too) |
 | `files` | Media path (when available) |
 
@@ -79,13 +80,6 @@ every column, hence the `WHEN` clause. The rest leaves the index alone:
   its index row.
 - Marking a message deleted sets `is_deleted` and keeps its index row; search filters on
   `is_deleted`.
-
-The `sender` and `chat` columns copy names from `users_cache` and `chats_cache` when a message
-is indexed. Up to 0.5.0 every re-fetch re-indexed the message and so refreshed them; now a
-renamed user or chat shows its new name in the index only for messages indexed after the
-rename, or whose text or sender changes. Results still show the current names, which search
-reads from those tables. Re-indexing after a rename is tracked in
-[#93](https://github.com/neoromantic/telegram-sync-cli/issues/93).
 
 A cache created by 0.5.0 or older gets the new `messages_cache_au` on its first open by a newer
 version ([database-schema.md](database-schema.md#migrations)).
@@ -162,6 +156,62 @@ BEGIN
 END;
 ```
 
+### Names after a rename
+
+The `sender` and `chat` columns copy names from `users_cache` and `chats_cache` when a message
+is indexed. Results always show the current names, which search reads from those tables; the
+index catches up in the background (#93):
+
+- When a `users_cache` row is inserted, or its username, first, last or display name changes,
+  triggers queue a re-index of that sender's messages in `search_reindex_queue`. A
+  `chats_cache` row does the same for its chat's messages when it is inserted or its title or
+  username changes. So a rename, and a sender or chat cached after their messages (before 0.9.0
+  the daemon didn't cache the senders of history pages, #126), both reach the index.
+- A channel or group that posts as itself has its marked ID as `from_id`: `sender:` matches its
+  title and username from `chats_cache`, and its insert or rename also queues the messages it
+  posted, in any chat.
+- An upsert that changes none of those names (every dialog pass rewrites thousands of rows)
+  queues nothing, and neither does a peer with no cached messages.
+- Only the messages cached so far are queued: those written later read the new names already.
+  A peer renamed again before its re-index ends starts over.
+- The daemon drains the queue after its sync work, a few batches per tick, each its own short
+  write transaction, like the [background migrations](database-schema.md#background-migrations):
+  at most 500 messages (2,500 for `tg db migrate` next to the daemon), and none started after
+  50 ms. Without the daemon, `tg db migrate` drains it. Until then a
+  search by the new name misses the older messages, and one by the old name still finds them.
+- On an older SQLite that disables search (see [above](#a-contentless-index)), the queue and the
+  one-off re-index below wait; the next open on a newer SQLite rebuilds the index with the
+  current names, which empties the queue.
+- A sender with no `users_cache` row at all stays indexed under its numeric ID: tg doesn't ask
+  Telegram for it.
+- Caches written before this queue existed get a one-off re-index of every message, the
+  background migration `message_search_names` (shown by `tg status`, finished by
+  `tg db migrate`). `tg db migrate` does 1M messages in about 27 s; the daemon, at 250 ms a
+  second, should take about 2 minutes ([storage.md](storage.md#6-big-caches)).
+
+A re-index deletes rows of the index and inserts them again, and FTS5 handles that its own way:
+
+- It merges a segment of the index once 10% of its rows are deleted (its `deletemerge` option),
+  inside the insert that flushes the index to disk. tg sets `deletemerge` to 0 on every cache:
+  deleted rows leave the index when their segments merge as it grows, as FTS5 merges them
+  anyway. Until then the index is larger: right after the one-off re-index of the made-up
+  caches of [storage.md](storage.md), 19.7 MB instead of 11.8 MB at 100,000 messages and
+  106 MB instead of 104 MB at 1M.
+- It writes its pending rows to disk as a new segment at every statement savepoint, and SQLite
+  opens one for an `INSERT … SELECT`, which may write many rows, but not for an
+  `INSERT … VALUES` of one row. So the re-index reads the names first and inserts plain values:
+  a batch writes one segment, not one per message, which halved the time of the re-index.
+
+On 100,000 made-up messages of one sender, every word repeated in each, the re-index of that
+sender took 9.1 s with batches of up to 0.55 s before; it takes 1.0 s, with batches of 41 ms at
+most. On the 1M cache of storage.md the one-off re-index went from 70 s to 27–36 s; 14 of its
+2,070 batches took more than 100 ms (up to 179 ms), and one run had a batch of 1.04 s. Those
+are FTS5 merging its big segments a common word at a time, which no batch size splits.
+History writes hit the same: writing that cache in pages of 100 messages, 4 of the 10,050
+pages took more than 100 ms (up to 253 ms), and right after the re-index the merges it left
+made 16 of the next 100 pages take 104–212 ms (up to 0.73 s in another run), then none of the
+2,900 after them.
+
 ## Index Versioning & Rebuild
 
 A `search_index_version` key in `search_meta` tracks schema compatibility.
@@ -172,7 +222,8 @@ On startup, `initSyncSchema()` checks:
 
 If a column is missing, or the table is the full-content one where a contentless one is
 supported, it drops and recreates `message_search` and its triggers;
-if either check fails, it rebuilds the index from `messages_cache`. That work runs
+if either check fails, it rebuilds the index from `messages_cache` (with the names cached now,
+so it empties `search_reindex_queue`). That work runs
 in one transaction under the write lock and checks again there, so when several
 processes open the cache at once (the daemon and a command after the first login),
 one builds the index while the others wait and then find nothing to do. An

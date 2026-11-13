@@ -105,11 +105,17 @@ describe('background migrations of a 0.5.0 cache', () => {
         .all() as { raw_json: string }[]
     ).map((row) => extractAttachment(row.raw_json))
 
-    const rows = await migrateAll(db)
+    // raw_json and message_type aren't columns the search index reads
+    const [reencode] = BACKGROUND_MIGRATIONS
+    await runPendingMigrations(db, { limits: SMALL }, [reencode!])
+    expect(searchIndexPages(db)).toEqual(indexBefore)
 
-    // The messages twice: the re-encode, then the refetch check (#130)
+    const rows = MESSAGES + (await migrateAll(db))
+
+    // The messages three times: the re-encode, the refetch check (#130) and
+    // the re-index of names (#93)
     expect(rows).toBe(
-      2 * MESSAGES + oldFormUsers().length + oldFormChats().length,
+      3 * MESSAGES + oldFormUsers().length + oldFormChats().length,
     )
     const after = snapshot(db)
     for (const [i, message] of originals.entries()) {
@@ -152,8 +158,6 @@ describe('background migrations of a 0.5.0 cache', () => {
       )
     }
 
-    // raw_json and message_type aren't columns the search index reads
-    expect(searchIndexPages(db)).toEqual(indexBefore)
     // The rewrite isn't a change of the message
     expect(
       after.messages.map((m) => (m as { updated_at: number }).updated_at),
@@ -487,7 +491,7 @@ const MIGRATE_SCRIPT = `
   import { Database } from 'bun:sqlite'
   const { foregroundPacing, runPendingMigrations } = await import(process.env.MIGRATE_MODULE)
   const { BACKGROUND_MIGRATIONS } = await import(process.env.MIGRATIONS_MODULE)
-  const [messages, ...others] = BACKGROUND_MIGRATIONS
+  const [messages] = BACKGROUND_MIGRATIONS
   let batchStarted = 0
   let longestBatchMs = 0
   const slowMessages = {
@@ -510,7 +514,7 @@ const MIGRATE_SCRIPT = `
         longestBatchMs = Math.max(longestBatchMs, performance.now() - batchStarted)
       },
     },
-    [slowMessages, ...others],
+    [slowMessages],
   )
   db.close()
   console.log(JSON.stringify({ longestBatchMs }))

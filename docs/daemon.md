@@ -256,7 +256,9 @@ wait for one batch at most. Then the loop sleeps for a second, so a write of ano
 batch rolls back, is logged as a warning and recorded in `cache_migrations.last_error`, and that
 account's migrations wait a minute before the next try.
 When a migration finishes, the daemon logs `[Account <id>] Migration <name> done: <rows> rows`.
-Once an account has none left, the daemon doesn't look again until it restarts. `tg status`
+In the same batches and budget it then re-indexes the messages of senders and chats whose names
+changed ([search.md](search.md#names-after-a-rename)); that queue fills at any time, so the
+daemon checks every account each tick, a few reads when there is nothing to do. `tg status`
 shows the progress; `tg db migrate` finishes them in the foreground, also while the daemon runs:
 then it pauses 150 ms after each batch, longer than SQLite's busy handler sleeps between tries,
 so a daemon write that waits for the lock gets it after one batch

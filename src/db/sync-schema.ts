@@ -10,15 +10,26 @@ import type { Database } from 'bun:sqlite'
 import { registerBackgroundMigrations } from './background-migrations'
 import { createMessageSearchTextView } from './messages-search'
 import { migratePeerIds } from './peer-id-migration'
+import {
+  buildChatSearchExpr,
+  buildSenderSearchExpr,
+  createSearchReindexSchema,
+  REINDEX_TRIGGERS,
+  readsChannelSenders,
+} from './search-reindex'
 
 const SEARCH_INDEX_VERSION = 1
 const MESSAGE_SEARCH_COLUMNS = ['text', 'sender', 'chat', 'files'] as const
 
-/** The triggers on messages_cache that keep message_search in sync */
+/**
+ * The triggers that keep message_search in sync: on messages_cache, and on
+ * users_cache and chats_cache for the names (src/db/search-reindex.ts)
+ */
 const SEARCH_TRIGGERS = [
   'messages_cache_ai',
   'messages_cache_ad',
   'messages_cache_au',
+  ...REINDEX_TRIGGERS,
 ] as const
 
 /** The first SQLite with FTS5's contentless_delete option */
@@ -49,42 +60,6 @@ export function isContentlessSearch(db: Database): boolean {
     )
     .get() as { sql: string | null } | null
   return /contentless_delete\s*=\s*1/i.test(row?.sql ?? '')
-}
-
-function buildSenderSearchExpr(prefix: string): string {
-  return `
-    COALESCE(
-      (
-        SELECT trim(
-          COALESCE(username, '') || ' ' ||
-          COALESCE(first_name, '') || ' ' ||
-          COALESCE(last_name, '') || ' ' ||
-          COALESCE(display_name, '') || ' ' ||
-          COALESCE(user_id, '')
-        )
-        FROM users_cache
-        WHERE user_id = CAST(${prefix}.from_id AS TEXT)
-      ),
-      COALESCE(CAST(${prefix}.from_id AS TEXT), '')
-    )
-  `
-}
-
-function buildChatSearchExpr(prefix: string): string {
-  return `
-    COALESCE(
-      (
-        SELECT trim(
-          COALESCE(title, '') || ' ' ||
-          COALESCE(username, '') || ' ' ||
-          COALESCE(chat_id, '')
-        )
-        FROM chats_cache
-        WHERE chat_id = CAST(${prefix}.chat_id AS TEXT)
-      ),
-      COALESCE(CAST(${prefix}.chat_id AS TEXT), '')
-    )
-  `
 }
 
 function dropMessageSearchSchema(db: Database): void {
@@ -137,27 +112,12 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
     )
   `)
 
+  // Only contentless-delete tables (SQLite 3.43+) know deletemerge
+  if (contentless) keepDeletedRowsUntilMerge(db)
   createSearchMetaTable(db)
 
-  const senderExprNew = buildSenderSearchExpr('new')
-  const chatExprNew = buildChatSearchExpr('new')
-
   // Search triggers (keep FTS index in sync)
-  db.run(`
-    CREATE TRIGGER IF NOT EXISTS messages_cache_ai
-    AFTER INSERT ON messages_cache
-    BEGIN
-      INSERT INTO message_search(rowid, text, sender, chat, files)
-      VALUES (
-        new.rowid,
-        COALESCE(new.text, ''),
-        ${senderExprNew},
-        ${chatExprNew},
-        COALESCE(new.media_path, '')
-      );
-    END;
-  `)
-
+  createSearchInsertTrigger(db)
   db.run(`
     CREATE TRIGGER IF NOT EXISTS messages_cache_ad
     AFTER DELETE ON messages_cache
@@ -167,6 +127,42 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
   `)
 
   createSearchUpdateTrigger(db)
+  createSearchReindexSchema(db)
+}
+
+/**
+ * A re-index (search-reindex.ts) deletes and inserts rows already in the
+ * index. FTS5 merges a segment once 10% of its rows are deleted
+ * ('deletemerge'), and it does so inside the insert that flushes: on 100,000
+ * messages one insert took up to 0.5 s, so one batch held the write lock that
+ * long. With 0, deleted rows go when their segments merge as they grow
+ * (docs/search.md). Set once; a cache that has it is only read.
+ */
+function keepDeletedRowsUntilMerge(db: Database): void {
+  const row = db
+    .query(`SELECT v FROM message_search_config WHERE k = 'deletemerge'`)
+    .get() as { v: number } | null
+  if (row?.v === 0) return
+  db.run(
+    `INSERT INTO message_search(message_search, rank) VALUES('deletemerge', 0)`,
+  )
+}
+
+function createSearchInsertTrigger(db: Database): void {
+  db.run(`
+    CREATE TRIGGER IF NOT EXISTS messages_cache_ai
+    AFTER INSERT ON messages_cache
+    BEGIN
+      INSERT INTO message_search(rowid, text, sender, chat, files)
+      VALUES (
+        new.rowid,
+        COALESCE(new.text, ''),
+        ${buildSenderSearchExpr('new')},
+        ${buildChatSearchExpr('new')},
+        COALESCE(new.media_path, '')
+      );
+    END;
+  `)
 }
 
 /**
@@ -196,44 +192,56 @@ function createSearchUpdateTrigger(db: Database): void {
 }
 
 /**
- * What a cache from 0.5.0 and older needs: its update trigger re-indexes a
- * message on every write, and it has an index on fetched_at that no query
- * reads
+ * What an older cache needs. From 0.5.0 and older: its update trigger
+ * re-indexes a message on every write, and it has an index on fetched_at
+ * that no query reads. Before #93: its message triggers index a channel
+ * that posts as itself under its ID, not its name.
  */
 function messagesCacheWritesWork(db: Database): {
-  trigger: boolean
+  insertTrigger: boolean
+  updateTrigger: boolean
   index: boolean
 } {
   const rows = db
     .query(
-      `SELECT type, sql FROM sqlite_master
-       WHERE (type = 'trigger' AND name = 'messages_cache_au')
+      `SELECT name, sql FROM sqlite_master
+       WHERE (type = 'trigger' AND name IN ('messages_cache_ai', 'messages_cache_au'))
           OR (type = 'index' AND name = 'idx_messages_cache_fetched')`,
     )
-    .all() as Array<{ type: string; sql: string | null }>
-  const trigger = rows.find((row) => row.type === 'trigger')
+    .all() as Array<{ name: string; sql: string | null }>
+  const sql = (name: string) => rows.find((row) => row.name === name)?.sql
+  const insert = sql('messages_cache_ai')
+  const update = sql('messages_cache_au')
   return {
-    trigger:
-      trigger !== undefined &&
-      !/AFTER\s+UPDATE\s+OF\b/i.test(trigger.sql ?? ''),
-    index: rows.some((row) => row.type === 'index'),
+    insertTrigger: insert != null && !readsChannelSenders(insert),
+    updateTrigger:
+      update != null &&
+      (!/AFTER\s+UPDATE\s+OF\b/i.test(update) || !readsChannelSenders(update)),
+    index: sql('idx_messages_cache_fetched') !== undefined,
   }
 }
 
 /**
- * Give a cache from 0.5.0 and older the update trigger that re-indexes only
- * changed messages, and drop its fetched_at index. One-time work, so it runs
+ * Give an older cache the message triggers of this version (the update one
+ * re-indexes only changed messages, both read channel names) and drop its
+ * fetched_at index. One-time work, so it runs
  * under the write lock and is checked again there; a cache that needs
  * nothing is only read.
  */
 function upgradeMessagesCacheWrites(db: Database): void {
   const pending = messagesCacheWritesWork(db)
-  if (!pending.trigger && !pending.index) return
+  if (!pending.insertTrigger && !pending.updateTrigger && !pending.index) {
+    return
+  }
 
   withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
     db.transaction(() => {
       const work = messagesCacheWritesWork(db)
-      if (work.trigger) {
+      if (work.insertTrigger) {
+        db.run('DROP TRIGGER messages_cache_ai')
+        createSearchInsertTrigger(db)
+      }
+      if (work.updateTrigger) {
         db.run('DROP TRIGGER messages_cache_au')
         createSearchUpdateTrigger(db)
       }
@@ -242,7 +250,10 @@ function upgradeMessagesCacheWrites(db: Database): void {
   })
 }
 
-/** Fill the search index again from messages_cache, in one transaction */
+/**
+ * Fill the search index again from messages_cache, in one transaction. It
+ * reads the names cached now, so no queued re-index is left.
+ */
 export function rebuildMessageSearchIndex(db: Database): void {
   const senderExpr = buildSenderSearchExpr('m')
   const chatExpr = buildChatSearchExpr('m')
@@ -264,6 +275,7 @@ export function rebuildMessageSearchIndex(db: Database): void {
         COALESCE(m.media_path, '')
       FROM messages_cache m
     `)
+    db.run('DELETE FROM search_reindex_queue')
 
     setSearchIndexVersion(db, SEARCH_INDEX_VERSION)
   })()

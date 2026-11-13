@@ -1,12 +1,13 @@
 /**
- * The daemon's share of the background migrations (#89): a few batches per
- * tick, after the tick's sync work, with the event loop free between
- * batches, so live updates and sync jobs never wait for more than one.
+ * The daemon's share of the background migrations (#89) and of the queued
+ * search re-index (#93): a few batches per tick, after the tick's sync
+ * work, with the event loop free between batches, so live updates and sync
+ * jobs never wait for more than one. The queue fills at any time, so every
+ * account is checked each tick; with nothing to do that is a few reads.
  */
 import {
   type BatchLimits,
   DEFAULT_BATCH_LIMITS,
-  hasPendingMigrations,
   runPendingMigrations,
 } from '../db/background-migrations'
 import type { DaemonContext } from './daemon-context'
@@ -18,14 +19,12 @@ export const MIGRATION_TICK_BUDGET_MS = 250
 export const MIGRATION_RETRY_DELAY_MS = 60_000
 
 export interface MigrationsState {
-  /** Accounts with nothing left to migrate: never checked again */
-  finished: Set<number>
   /** Per account: no batch before this time, after a failed one */
   retryAt: Map<number, number>
 }
 
 export function createMigrationsState(): MigrationsState {
-  return { finished: new Set(), retryAt: new Map() }
+  return { retryAt: new Map() }
 }
 
 function yieldToEventLoop(): Promise<void> {
@@ -51,7 +50,6 @@ export async function runMigrationsTick(
 
   for (const rt of ctx.runtime.accounts.values()) {
     if (outOfTime()) return
-    if (state.finished.has(rt.accountId)) continue
     if ((state.retryAt.get(rt.accountId) ?? 0) > now()) continue
 
     try {
@@ -67,7 +65,6 @@ export async function runMigrationsTick(
           }
         },
       })
-      if (!hasPendingMigrations(rt.db)) state.finished.add(rt.accountId)
     } catch (err) {
       ctx.logger.warn(
         `[Account ${rt.accountId}] Background migration failed, retrying in ${MIGRATION_RETRY_DELAY_MS / 1000}s: ${formatError(err)}`,

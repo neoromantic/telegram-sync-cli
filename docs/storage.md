@@ -28,6 +28,7 @@ The tables themselves are in [database-schema.md](database-schema.md), search in
 | CLI run: `tg messages search`, rare word | 92 ms | 98 ms | 102 ms |
 | CLI run: `tg messages search`, common word | 122 ms | 423 ms | 3.4 s |
 | `tg db migrate` on rows written by 0.5.0, rows/s | 58,828 | 53,393 | not run |
+| Re-index of names, once per cache (#93), messages/s | 53,719 | 37,741 | not run |
 | Search index rebuild | 0.8 s | 9.3 s | 1.8 min |
 | `tg db vacuum`, daemon stopped | 0.6 s | 5.3 s | 1.4 min |
 | `tg db vacuum`, extra disk at its peak | 314 MB | 3.37 GB | 30.62 GB |
@@ -200,7 +201,7 @@ numbers show no wall to move away from.
 **Decision.** Migrations that rewrite every row run in the background in small batches (#89).
 Integrity checks and backups: [#91](https://github.com/neoromantic/telegram-sync-cli/issues/91).
 Word forms in search: [#92](https://github.com/neoromantic/telegram-sync-cli/issues/92). Names
-in the index after a rename: [#93](https://github.com/neoromantic/telegram-sync-cli/issues/93).
+in the index after a rename re-index in the same batches (#93).
 Edit history: [#96](https://github.com/neoromantic/telegram-sync-cli/issues/96).
 
 **Numbers.**
@@ -217,6 +218,20 @@ Edit history: [#96](https://github.com/neoromantic/telegram-sync-cli/issues/96).
   31.0 min by itself, and the rate is about the same at 100,000 and 1M. Before #89 every
   migration ran in one transaction on open; a full pass that holds the write lock is like the
   search index rebuild below.
+- **Names in the index.** The one-off re-index of names (`message_search_names`, #93) does a
+  message at a time, a delete and an insert in the index, in the same batches as the other
+  migrations: 53,719 messages/s at 100,000 (1.9 s) and 37,741 messages/s at 1M (27 s alone, as
+  `tg db migrate` runs it). The daemon gives migrations 250 ms of each second, so there it should
+  take about four times as long, some 2 minutes for 1M; that wasn't measured. The longest batch
+  took 139 ms at 100,000 and 1.04 s at 1M: FTS5 merging the big segments of its index, which
+  history writes hit too ([search.md](search.md#names-after-a-rename)). Right after it the index
+  took 19.7 MB instead of 11.8 MB at 100,000 and 106 MB instead of 104 MB at 1M, until its
+  segments merge. A rename re-indexes
+  only that peer's messages, at the same rate. The history writes queued no peer: a page caches
+  its senders before its messages. The triggers that queue a rename cost about 9 µs per
+  `users_cache` upsert even when they queue nothing: the same pages fetched again unchanged went
+  from about 26,000 to 21,000 messages/s at 100,000; history pages and live messages showed no
+  difference beyond the noise.
 - **Search index.** A full rebuild (one transaction, holding the write lock) took 0.8 s at
   100,000, 9.3 s at 1M and 1.8 min at 10M. It shrank the index by 4% at 100,000, 1% at 1M and 1%
   at 10M: the index the triggers keep up to date doesn't bloat. That rebuild time is what a
@@ -290,7 +305,8 @@ Median of the in-process runs, with p95 in parentheses:
   median and p95. `tg sql` goes through a read-only connection, as the command opens it. CLI
   rows start `bun src/index.ts` as a new process each time, `--cli-runs` times (5, or 3 at
   10M).
-- **Maintenance.** `rebuildMessageSearchIndex` in process; `tg db vacuum` and `tg db migrate` as
+- **Maintenance.** The one-off re-index of names (`message_search_names`) in process, as
+  `tg db migrate` runs it with the daemon stopped; `rebuildMessageSearchIndex` in process; `tg db vacuum` and `tg db migrate` as
   CLI runs, with free disk and the WAL size read every 25 ms while they run.
 - **Machine.** macOS 27 (Darwin 27.0), arm64, Bun 1.4.4, SQLite 3.54.0 (on macOS Bun uses the
   system SQLite). The queries ran right after the file was written, so they are warm-cache
@@ -326,7 +342,8 @@ twice that again for `tg db vacuum` at the end.
 
 Time on the machine above: 21.6 s at 100,000, 3.4 min at 1M, 31.0 min at 10M (21.0 min of it
 writing the history); with `--old-form` 15.1 s and 2.8 min. The 10M cache took 15.55 GB and
-30.62 GB more during the VACUUM.
+30.62 GB more during the VACUUM. The re-index of names (#93) came later and adds its own time:
+the 1M run took 4.0 min with it.
 
 Compare runs on the same machine only. To measure a change, run the same `--messages` and
 `--seed` before and after it.
@@ -338,7 +355,6 @@ Open:
 - [#90](https://github.com/neoromantic/telegram-sync-cli/issues/90) tg status --sizes: cache size per chat
 - [#91](https://github.com/neoromantic/telegram-sync-cli/issues/91) tg db check and tg db backup
 - [#92](https://github.com/neoromantic/telegram-sync-cli/issues/92) Search: find other word forms without a manual prefix
-- [#93](https://github.com/neoromantic/telegram-sync-cli/issues/93) Search: re-index older messages after a person or chat is renamed
 - [#94](https://github.com/neoromantic/telegram-sync-cli/issues/94) Search attachment names, kinds and text derived from attachments
 - [#96](https://github.com/neoromantic/telegram-sync-cli/issues/96) Keep earlier versions of edited messages
 - [#97](https://github.com/neoromantic/telegram-sync-cli/issues/97) raw_json: measure zstd with a trained dictionary
