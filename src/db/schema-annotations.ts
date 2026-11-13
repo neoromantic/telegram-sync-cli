@@ -541,6 +541,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         idx_messages_cache_pinned: 'Find pinned messages',
         idx_messages_cache_message_id:
           'Find the chat of a message ID that a delete without chat context names',
+        idx_messages_cache_newest:
+          'Every chat newest first: the newest page of a common search query',
       },
     },
 

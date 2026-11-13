@@ -232,6 +232,7 @@ CREATE INDEX idx_messages_cache_reply ON messages_cache(chat_id, reply_to_id) WH
 CREATE INDEX idx_messages_cache_type ON messages_cache(chat_id, message_type) WHERE has_media = 1;
 CREATE INDEX idx_messages_cache_pinned ON messages_cache(chat_id) WHERE is_pinned = 1;
 CREATE INDEX idx_messages_cache_message_id ON messages_cache(message_id);
+CREATE INDEX idx_messages_cache_newest ON messages_cache(date DESC);
 ```
 
 `message_type` is `text`, `service`, or the kind of media: `photo`, `video`, `document`,
@@ -620,10 +621,11 @@ The schema is created with `CREATE TABLE IF NOT EXISTS` on startup, indexes with
 `sync_jobs.next_run_at`) are added with `ALTER TABLE … ADD COLUMN` when missing; a "duplicate
 column name" error is ignored, because the CLI and the daemon can both run the migration on the
 first start. Older binaries ignore
-the new columns. `idx_messages_cache_message_id` is built on the first open of a cache
-that lacks it. The build reads the whole table under the write lock, so that open, and any
+the new columns. `idx_messages_cache_message_id` and `idx_messages_cache_newest` (for the
+newest page of a common search query, #118) are built on the first open of a cache that
+lacks them. The build reads the whole table under the write lock, so that open, and any
 other process opening the cache meanwhile, waits up to 60 seconds for the lock instead of 5;
-the process that waited finds the index built. Opens of a cache that has it only read.
+the process that waited finds the index built. Opens of a cache that has them only read.
 
 `message_attachments` (with its index) and `chat_content_protection` are created on the first
 open of a cache that lacks them. They start empty, so the step rewrites nothing and takes no

@@ -576,6 +576,9 @@ export function initSyncSchema(
   `)
   // A delete without chat context names only message IDs (#7)
   ensureIndex(db, 'idx_messages_cache_message_id', 'messages_cache(message_id)')
+  // Every chat's messages newest first: the newest page of a common search
+  // query goes through it instead of sorting every match (#118)
+  ensureIndex(db, 'idx_messages_cache_newest', 'messages_cache(date DESC)')
 
   createMessageAttachmentsSchema(db)
   createChatContentProtectionSchema(db)
