@@ -13,6 +13,7 @@ import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createDaemonStatusService } from '../db/daemon-status'
 import { createMessagesCache } from '../db/messages-cache'
 import { SyncJobType, type SyncMode, SyncPriority } from '../db/sync-schema'
+import { createUsersCache } from '../db/users-cache'
 import { VERSION } from '../version'
 import { runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
@@ -528,6 +529,78 @@ describe('E2E: status, history progress and API calls', () => {
     expect(out).toMatch(/History Pace\s+0\.01 calls\/s\n/)
     expect(out).toMatch(/group chat:-4242 → 200 \/ 1,000 msgs/)
     expect(out).toMatch(/API Calls \(1m\)\s+1/)
+  })
+})
+
+describe('E2E: status, senders missing from the cache (#143)', () => {
+  let env: TestEnvironment
+
+  beforeEach(() => {
+    env = createTestEnvironment('status-senders')
+    env.initDatabase()
+    env.seedAccounts([{ phone: '+15550000001', is_active: true }])
+    const cacheDb = env.openCacheDb(1)
+
+    // Three senders of a basic group, one of them cached; Telegram was
+    // asked for another one and didn't return them
+    createMessagesCache(cacheDb).upsertBatch(
+      [7001, 7002, 7003].map((fromId, i) => ({
+        chat_id: -4242,
+        message_id: i + 1,
+        from_id: fromId,
+        text: `made-up note ${i}`,
+        message_type: 'text',
+        date: 1_760_000_000 + i,
+        raw_json: '{}',
+      })),
+    )
+    createUsersCache(cacheDb).upsert({
+      user_id: '7001',
+      first_name: 'Ann',
+      fetched_at: 1,
+      raw_json: '{}',
+    })
+    cacheDb.run(
+      `INSERT INTO sender_lookups (sender_id, chat_id, message_id, asked_at)
+       VALUES (7002, -4242, 2, ?)`,
+      [Date.now()],
+    )
+  })
+
+  afterEach(() => {
+    env.cleanup()
+  })
+
+  function options() {
+    return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } }
+  }
+
+  it('counts them in total and per account', async () => {
+    const result = await runCliSuccess(['status'], options())
+    const { data } = result.json as {
+      data: {
+        progress: { senders: unknown }
+        accounts: { accounts: Array<{ progress: { senders: unknown } }> }
+      }
+    }
+
+    expect(data.progress.senders).toEqual({ missing: 2, not_found: 1 })
+    expect(data.accounts.accounts[0]?.progress.senders).toEqual({
+      missing: 2,
+      not_found: 1,
+    })
+  })
+
+  it('shows them in pretty output', async () => {
+    const result = await runCliSuccess(
+      ['status', '--format', 'pretty'],
+      options(),
+    )
+    const out = stripAnsi(result.stdout)
+
+    expect(out).toMatch(
+      /Senders Missing\s+2 \(1 not found, asked again in 30 days\)/,
+    )
   })
 })
 

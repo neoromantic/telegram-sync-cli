@@ -37,6 +37,7 @@ import {
   readHistoryProgress,
 } from '../db/history-progress'
 import { createRateLimitsService } from '../db/rate-limits'
+import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { historyDoneSql, type SyncMode } from '../db/sync-schema'
 import { cacheUnavailableSuggestion } from '../utils/account-cache'
@@ -185,6 +186,17 @@ export type StatusHistoryProgress = Omit<HistoryProgress, 'largest_pending'> & {
   largest_pending: StatusPendingChat[]
 }
 
+/**
+ * Users with cached messages and no users_cache row (#143); the daemon
+ * fetches them at low priority
+ */
+export interface StatusSenders {
+  /** Users with cached messages and no users_cache row */
+  missing: number
+  /** Of those, the ones Telegram was asked for and didn't return */
+  not_found: number
+}
+
 export interface StatusFloodWait {
   account_id: number
   method: string
@@ -226,6 +238,7 @@ export interface AccountStatusSnapshot {
     messages_cached: number
     sample_chats: StatusSampleChat[]
     history: StatusHistoryProgress
+    senders: StatusSenders
   }
   rate_limits: {
     api_calls_last_minute: number
@@ -260,6 +273,7 @@ function emptyAccountSnapshot(accountId: number): AccountStatusSnapshot {
       messages_cached: 0,
       sample_chats: [],
       history: { ...emptyHistoryProgress(), pacing: null, largest_pending: [] },
+      senders: { missing: 0, not_found: 0 },
     },
     rate_limits: {
       api_calls_last_minute: 0,
@@ -376,6 +390,7 @@ function readOpenAccountStatus(
   }
 
   // Progress
+  const senderLookups = createSenderLookups(cacheDb)
   const sampleChatsRows = cacheDb
     .query(
       `SELECT chat_id, chat_type, synced_messages, history_complete, forward_cursor, backward_cursor, sync_priority
@@ -431,6 +446,10 @@ function readOpenAccountStatus(
       sync_priority: row.sync_priority,
     })),
     history: withAccountId(readHistoryProgress(cacheDb), accountId),
+    senders: {
+      missing: senderLookups.countMissing(),
+      not_found: senderLookups.countNotFound(),
+    },
   }
 
   return snapshot
@@ -665,6 +684,7 @@ function accountBreakdown(
       chats_history_pending: snapshot.progress.chats_history_pending,
       messages_cached: snapshot.progress.messages_cached,
       history: historySummary(snapshot.progress.history),
+      senders: snapshot.progress.senders,
     },
     rate_limits: {
       api_calls_last_minute: snapshot.rate_limits.api_calls_last_minute,
@@ -824,6 +844,10 @@ export async function collectStatus(
       )
       .slice(0, 5),
     history: sumHistoryProgress(snapshots.map((s) => s.progress.history)),
+    senders: {
+      missing: sum((s) => s.progress.senders.missing),
+      not_found: sum((s) => s.progress.senders.not_found),
+    },
   }
 
   const accountsStatus = {

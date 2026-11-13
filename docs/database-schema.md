@@ -449,7 +449,7 @@ CREATE INDEX idx_chat_sync_state_incomplete
 CREATE TABLE sync_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   chat_id INTEGER NOT NULL,
-  job_type TEXT NOT NULL,         -- forward_catchup, initial_load, backward_history, full_sync, refetch_messages
+  job_type TEXT NOT NULL,         -- forward_catchup, initial_load, backward_history, full_sync, refetch_messages, fetch_senders
   priority INTEGER NOT NULL DEFAULT 3,
   status TEXT NOT NULL DEFAULT 'pending',
   cursor_start INTEGER,
@@ -494,6 +494,27 @@ CREATE TABLE refetch_chats (
 The chats the background migration `messages_refetch_empty_raw_json` queued a
 `refetch_messages` job for (#130), each once: a later batch of the pass doesn't queue the chat
 again, whatever became of its job, so messages Telegram no longer has are asked for once.
+
+### Table: sender_lookups
+
+```sql
+CREATE TABLE sender_lookups (
+  sender_id  INTEGER PRIMARY KEY,
+  chat_id    INTEGER NOT NULL,
+  message_id INTEGER NOT NULL,
+  asked_at   INTEGER
+);
+
+CREATE INDEX idx_sender_lookups_waiting ON sender_lookups(chat_id) WHERE asked_at IS NULL;
+```
+
+Users who sent cached messages but have no `users_cache` row (#143), each with their newest
+cached message that Telegram can be asked for (not deleted; in a private chat, a basic group, or
+a channel or supergroup whose access hash is cached). The daemon fills it on start and once a
+day, and a `fetch_senders` job asks for up to 100 of a chat's messages by ID; a row goes once its
+sender is cached. `asked_at` is `NULL` while the sender waits, else when Telegram was asked and
+didn't return them; such a sender is listed again, with their newest message then, 30 days
+later ([daemon.md](daemon.md#missing-senders)).
 
 ### Table: daemon_status
 

@@ -27,6 +27,7 @@ import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
+import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
 import {
   initSyncSchema,
@@ -182,6 +183,7 @@ describe('job budget with 500 chats', () => {
       rateLimits: createRateLimitsService(db),
       chatsCache: createChatsCache(db),
       usersCache: createUsersCache(db),
+      senderLookups: createSenderLookups(db),
     })
   }
 
@@ -473,6 +475,7 @@ describe('job budget with two accounts', () => {
         rateLimits: createRateLimitsService(db),
         chatsCache: createChatsCache(db),
         usersCache: createUsersCache(db),
+        senderLookups: createSenderLookups(db),
       }),
     })
     ctx.state.accounts.set(accountId, {

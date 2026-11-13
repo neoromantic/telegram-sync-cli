@@ -111,8 +111,9 @@ the next run after the wait resumes it ([media.md](media.md#download)).
 
 ## Daemon Sync Jobs
 
-The daemon's sync jobs make one `messages.getHistory` call each, one job at a time per
-account, shared by the account's three lanes (catch-up, first pages, history; see
+The daemon's sync jobs make one `messages.getHistory` call each (a refetch or a sender fetch:
+one `getMessages`), one job at a time per account, shared by the account's lanes (catch-up,
+first pages, history, and sender fetches when those three are empty; see
 [sync-strategy.md](sync-strategy.md#job-lanes)). How often a job starts is the account's pace
 (see [Pacing](#pacing)). While a FLOOD_WAIT on `messages.getHistory` lasts, no lane of that
 account runs a job; the other accounts' jobs go on. The job that hit it doesn't fail: it waits

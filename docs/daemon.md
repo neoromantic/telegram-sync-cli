@@ -141,7 +141,8 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
   the change at its next refresh
 - Backward history for older messages
 - Three lanes (catch-up, first pages, history) that take turns, so history makes progress
-  next to catch-up; inside a lane, small chats go first
+  next to catch-up; inside a lane, small chats go first. Sender fetches
+  ([Missing senders](#missing-senders)) run only when all three are empty
 - A refresh every ~30 seconds (daemon loop) and after each reconnect's dialog pass queues
   the work that is due again, such as chats first seen live
 - Each account runs its own jobs: one at a time, at its own pace, counted from each job's
@@ -178,6 +179,38 @@ Key files:
 - `src/daemon/sync-worker-real-jobs.ts`
 - `src/daemon/sync-worker-real-context.ts`
 - `src/daemon/sync-retry.ts` (backoff and permanent errors)
+
+### Missing senders
+
+A cached message whose sender has no `users_cache` row shows only the sender's ID, and
+`sender:name` doesn't find it (#143). Caches synced before 0.9.0 have many (#126: about 3% of
+the messages of a 1.16M-message cache, from about 3,000 senders), and a live message still
+leaves one when Telegram sends its sender as a "min" user, whose record the cache doesn't keep.
+
+- **Finding them:** on start and then once a day, each account's scheduler lists the users with
+  cached messages and no `users_cache` row in `sender_lookups`
+  ([database-schema.md](database-schema.md#table-sender_lookups)), each with their newest message
+  that Telegram can be asked for. The query walks the `from_id` index from one sender to the
+  next: about 6 ms for 40,000 senders of 1.16M messages. Channels that post as themselves are
+  left out: `chats_cache` keeps only the account's own chats.
+- **Fetching them:** one `fetch_senders` job per chat with senders waiting, at priority 4,
+  whether the chat syncs or not. Each asks for up to 100 of those messages by ID
+  (`channels.getMessages` in a channel or supergroup, `messages.getMessages` in private chats
+  and basic groups) and caches the full user records the reply carries, with their access
+  hashes; the messages themselves aren't written again. The new rows re-index the senders'
+  messages ([search.md](search.md#names-after-a-rename)). Their lane runs only when catch-up,
+  first pages and history have nothing due, at the pace of a job every 3 seconds. Asking by ID
+  takes the fewest calls: on a made-up cache shaped like the one above (1.16M messages, 2,960
+  senders missing in 341 chats), 349 calls, 0.12 per sender, about 17 minutes. A history page
+  around each sender's message would take one call per sender at worst, and `users.getUsers`
+  needs the access hash the cache lacks.
+- **Senders Telegram doesn't return** (a message deleted since, a chat left or private, a
+  "min" record) are asked again 30 days later, with their newest message then. A chat that
+  fails for good marks its senders the same way. `tg status` counts the senders still missing
+  and those Telegram didn't return ([cli-commands.md](cli-commands.md)).
+
+Key files: `src/db/sender-lookups.ts`, `src/daemon/scheduler.ts`,
+`src/daemon/sync-worker-real-jobs.ts`
 
 ### Contacts sync
 

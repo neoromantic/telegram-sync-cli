@@ -29,6 +29,7 @@ import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
+import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
@@ -389,6 +390,7 @@ describe('sync-worker real helpers/context', () => {
         rateLimits,
         chatsCache: createChatsCache(db),
         usersCache: createUsersCache(db),
+        senderLookups: createSenderLookups(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -408,6 +410,7 @@ describe('sync-worker real helpers/context', () => {
         rateLimits,
         chatsCache: createChatsCache(db),
         usersCache: createUsersCache(db),
+        senderLookups: createSenderLookups(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -430,6 +433,7 @@ describe('sync-worker real helpers/context', () => {
         rateLimits,
         chatsCache: createChatsCache(db),
         usersCache: createUsersCache(db),
+        senderLookups: createSenderLookups(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -448,6 +452,7 @@ describe('sync-worker real helpers/context', () => {
         rateLimits,
         chatsCache: createChatsCache(db),
         usersCache: createUsersCache(db),
+        senderLookups: createSenderLookups(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -472,6 +477,7 @@ describe('sync-worker real helpers/context', () => {
         rateLimits,
         chatsCache: createChatsCache(db),
         usersCache: createUsersCache(db),
+        senderLookups: createSenderLookups(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 
@@ -517,6 +523,7 @@ describe('sync-worker real helpers/context', () => {
         rateLimits: createRateLimitsService(db),
         chatsCache,
         usersCache: createUsersCache(db),
+        senderLookups: createSenderLookups(db),
         config: { apiMethod: 'messages.getHistory', batchSize: 1 },
       }
 

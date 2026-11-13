@@ -12,6 +12,7 @@ import type { ChatsCache } from '../db/chats-cache'
 import type { HistoryRanges } from '../db/history-ranges'
 import type { MessagesCache } from '../db/messages-cache'
 import type { RateLimitsService } from '../db/rate-limits'
+import type { SenderLookups } from '../db/sender-lookups'
 import type { SyncJobsService } from '../db/sync-jobs'
 import type { SyncJobRow } from '../db/sync-schema'
 import type { UsersCache } from '../db/users-cache'
@@ -90,6 +91,7 @@ describe('createRealSyncWorker', () => {
       rateLimits: rateLimits as unknown as RateLimitsService,
       chatsCache: {} as unknown as ChatsCache,
       usersCache: {} as unknown as UsersCache,
+      senderLookups: {} as unknown as SenderLookups,
     })
 
     const result = await worker.runOnceReal()
@@ -127,6 +129,7 @@ describe('createRealSyncWorker', () => {
       rateLimits: rateLimits as unknown as RateLimitsService,
       chatsCache: {} as unknown as ChatsCache,
       usersCache: {} as unknown as UsersCache,
+      senderLookups: {} as unknown as SenderLookups,
     })
 
     const result = await worker.runOnceReal()
@@ -155,6 +158,7 @@ describe('createRealSyncWorker', () => {
       rateLimits: rateLimits as unknown as RateLimitsService,
       chatsCache: {} as unknown as ChatsCache,
       usersCache: {} as unknown as UsersCache,
+      senderLookups: {} as unknown as SenderLookups,
       config: {
         apiMethod: 'messages.search',
         batchSize: 5,
@@ -189,6 +193,7 @@ describe('createRealSyncWorker', () => {
       > as unknown as RateLimitsService,
       chatsCache: {} as unknown as ChatsCache,
       usersCache: {} as unknown as UsersCache,
+      senderLookups: {} as unknown as SenderLookups,
     })
 
     const job = { id: 1, chat_id: 1, job_type: 'forward_catchup' } as SyncJobRow

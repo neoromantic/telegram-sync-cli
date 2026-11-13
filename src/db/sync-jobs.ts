@@ -4,6 +4,7 @@
  */
 import type { Database } from 'bun:sqlite'
 import {
+  CHAT_INDEPENDENT_JOB_TYPES_SQL,
   historyAllowedSql,
   SyncJobRow,
   SyncJobStatus,
@@ -119,13 +120,16 @@ export interface SyncJobsService {
   getFailedJobs(limit: number): SyncJobRow[]
   /** Count jobs by status */
   countJobs(): SyncJobCounts
-  /** Cancel pending jobs for a chat, except a refetch: it doesn't depend on the mode */
+  /**
+   * Cancel pending jobs for a chat, except a refetch or a sender fetch: they
+   * don't depend on the mode
+   */
   cancelPendingForChat(chatId: number): number
   /** Delete every pending job of a type */
   deletePendingOfType(jobType: SyncJobType): number
   /**
    * Delete pending jobs of chats that are disabled or have no sync state,
-   * except refetches
+   * except refetches and sender fetches
    */
   deletePendingForInactiveChats(): number
   /**
@@ -212,13 +216,13 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       WHERE id = $id AND status = $expected_status
     `),
 
-    // A refetch runs whether its chat syncs or not
+    // A refetch or a sender fetch runs whether its chat syncs or not
     failIfEnabled: db.prepare(`
       UPDATE sync_jobs
       SET status = $status, error_message = $error, completed_at = $now,
           attempts = attempts + 1
       WHERE id = $id AND status = $expected_status
-        AND (job_type = '${SyncJobType.RefetchMessages}' OR EXISTS (
+        AND (job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
           SELECT 1 FROM chat_sync_state s
           WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
         ))
@@ -226,12 +230,12 @@ export function createSyncJobsService(db: Database): SyncJobsService {
 
     // The chat's mode may have changed while the job ran, and tg chats sync
     // cancels only pending jobs, so the retry takes the chat's lane priority
-    // now, like alignPendingPriorities. A refetch keeps its own.
+    // now, like alignPendingPriorities. A refetch or a sender fetch keeps its own.
     retryLater: db.prepare(`
       UPDATE sync_jobs
       SET status = $pending_status, attempts = attempts + $inc,
           next_run_at = $run_at, error_message = $error, started_at = NULL,
-          priority = CASE WHEN job_type = '${SyncJobType.RefetchMessages}'
+          priority = CASE WHEN job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
             THEN priority
             ELSE COALESCE((
               SELECT CASE
@@ -243,7 +247,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
             ), priority)
           END
       WHERE id = $id AND status = $running_status
-        AND (job_type = '${SyncJobType.RefetchMessages}' OR EXISTS (
+        AND (job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
           SELECT 1 FROM chat_sync_state s
           WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
         ))
@@ -320,7 +324,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     cancelPendingForChat: db.prepare(`
       DELETE FROM sync_jobs
       WHERE chat_id = $chat_id AND status = $status
-        AND job_type != '${SyncJobType.RefetchMessages}'
+        AND job_type NOT IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
     `),
 
     deletePendingOfType: db.prepare(`
@@ -331,7 +335,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     deletePendingForInactiveChats: db.prepare(`
       DELETE FROM sync_jobs
       WHERE status = $status
-        AND job_type != '${SyncJobType.RefetchMessages}'
+        AND job_type NOT IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
         AND NOT EXISTS (
           SELECT 1 FROM chat_sync_state s
           WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
@@ -359,7 +363,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         WHERE s.chat_id = sync_jobs.chat_id
       )
       WHERE status = $status
-        AND job_type != '${SyncJobType.RefetchMessages}'
+        AND job_type NOT IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
         AND EXISTS (
           SELECT 1 FROM chat_sync_state s WHERE s.chat_id = sync_jobs.chat_id
         )

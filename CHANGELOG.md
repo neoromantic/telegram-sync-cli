@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The daemon fetches the senders that cached messages name but the cache lacks, so
+  `sender:name` finds their messages and `tg messages` shows their names. Caches synced before
+  0.9.0 have many (about 3% of the messages of a 1.16M-message cache), and a live message still
+  leaves one now and then. Once a day the daemon asks Telegram for one message of each such
+  sender by ID, up to 100 per request, only when it has no other sync work: on a made-up cache of
+  that shape, 349 requests for 2,960 senders. A sender Telegram doesn't return is asked again
+  30 days later. `tg status` shows how many senders are still missing (#143).
+
 ## [0.12.0] - 2026-11-13
 
 The search index stays merged, and a common word is found without sorting every match: on a

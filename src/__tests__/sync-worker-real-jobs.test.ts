@@ -24,6 +24,7 @@ import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
+import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
@@ -51,6 +52,7 @@ describe('sync-worker real jobs', () => {
       rateLimits: createRateLimitsService(db),
       chatsCache: createChatsCache(db),
       usersCache: createUsersCache(db),
+      senderLookups: createSenderLookups(db),
       config: {
         apiMethod: 'messages.getHistory',
         batchSize: 2,
@@ -627,6 +629,7 @@ describe('sync-worker real jobs', () => {
           rateLimits: ctx.rateLimits,
           chatsCache: ctx.chatsCache,
           usersCache: ctx.usersCache,
+          senderLookups: ctx.senderLookups,
           config: ctx.config,
           signal: shutdown.signal,
         })

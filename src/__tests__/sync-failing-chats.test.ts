@@ -28,6 +28,7 @@ import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
+import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
@@ -152,6 +153,7 @@ describe('chats whose sync pages keep failing', () => {
         rateLimits: createRateLimitsService(db),
         chatsCache,
         usersCache: createUsersCache(db),
+        senderLookups: createSenderLookups(db),
       }),
     })
     ctx.state.accounts.set(1, {
@@ -391,6 +393,7 @@ describe('a chat that fails in one account', () => {
         rateLimits: createRateLimitsService(db),
         chatsCache: createChatsCache(db),
         usersCache: createUsersCache(db),
+        senderLookups: createSenderLookups(db),
       }),
     })
     ctx.state.accounts.set(accountId, {
