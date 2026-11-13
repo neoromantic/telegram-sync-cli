@@ -19,6 +19,7 @@
 import type { Database } from 'bun:sqlite'
 
 import { BACKGROUND_MIGRATIONS } from './raw-json-migrations'
+import { isSearchMergeDue, runSearchMergeBatch } from './search-merge'
 import {
   hasQueuedReindex,
   isSearchEnabled,
@@ -389,17 +390,27 @@ export function foregroundPacing(
 
 /**
  * Run pending migrations in registry order, then the queued search
- * re-index (src/db/search-reindex.ts), until each is done or `shouldStop`
- * says so. While search is disabled, the work on its index waits. Returns
- * the rows done.
+ * re-index (src/db/search-reindex.ts), then merge the search index
+ * (src/db/search-merge.ts), until each is done or `shouldStop` says so.
+ * Between two batches that write the index, one merge batch keeps its
+ * segments from piling up ('bulk'); at the end the index merges as it does
+ * after any write ('rest'). While search is disabled, the work on its index
+ * waits. Returns the rows the migrations and the re-index did.
  */
 export async function runPendingMigrations(
   db: Database,
   options: RunOptions = {},
   migrations: readonly BackgroundMigration[] = BACKGROUND_MIGRATIONS,
 ): Promise<number> {
+  const limits = options.limits ?? DEFAULT_BATCH_LIMITS
   let total = 0
   const search = isSearchEnabled(db)
+  const mergeBetweenBatches = async () => {
+    if (!isSearchMergeDue(db, 'bulk')) return
+    runSearchMergeBatch(db, limits, 'bulk')
+    await options.yieldBetweenBatches?.()
+  }
+
   for (const migration of migrations) {
     if (migration.writesSearch && !search) continue
     for (;;) {
@@ -412,14 +423,22 @@ export async function runPendingMigrations(
       }
       if (batch.finished) break
       await options.yieldBetweenBatches?.()
+      if (migration.writesSearch) await mergeBetweenBatches()
     }
   }
   // Checked first, outside the write lock: the queue is empty most ticks
   while (search && hasQueuedReindex(db)) {
     if (options.shouldStop?.()) return total
-    const batch = runReindexBatch(db, options.limits ?? DEFAULT_BATCH_LIMITS)
+    const batch = runReindexBatch(db, limits)
     total += batch.rows
-    if (batch.finished) return total
+    if (batch.finished) break
+    await options.yieldBetweenBatches?.()
+    await mergeBetweenBatches()
+  }
+  // The same: one read while nothing was written since the last merge
+  while (search && isSearchMergeDue(db)) {
+    if (options.shouldStop?.()) return total
+    if (runSearchMergeBatch(db, limits).finished) break
     await options.yieldBetweenBatches?.()
   }
   return total

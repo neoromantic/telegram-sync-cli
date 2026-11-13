@@ -85,11 +85,14 @@ const { createHistoryRanges } = await import('../src/db/history-ranges')
 const { readCacheSize } = await import('../src/db/cache-maintenance')
 const { rebuildMessageSearchIndex } = await import('../src/db/sync-schema')
 const {
+  DEFAULT_BATCH_LIMITS,
   readMigrationStatus,
   registerBackgroundMigrations,
-  runPendingMigrations,
+  runMigrationBatch,
 } = await import('../src/db/background-migrations')
 const { searchNamesMigration } = await import('../src/db/search-reindex')
+const { configureSearchMerges, isSearchMergeDue, runSearchMergeBatch } =
+  await import('../src/db/search-merge')
 const { cacheHistoryResponse, getMessageWithContext, listHistory } =
   await import('../src/commands/messages/history')
 const { messageItemReader } = await import('../src/commands/messages/helpers')
@@ -157,6 +160,136 @@ async function time<T>(
     samples.push(performance.now() - start)
   }
   return { timing: summarize(samples, first), result }
+}
+
+/** Durations of one kind of write transaction */
+function writeTimes() {
+  const stats = { count: 0, ms: 0, max_ms: 0, over_100ms: 0 }
+  return {
+    time<T>(fn: () => T): T {
+      const start = performance.now()
+      const result = fn()
+      const ms = performance.now() - start
+      stats.count += 1
+      stats.ms += ms
+      stats.max_ms = Math.max(stats.max_ms, ms)
+      if (ms > 100) stats.over_100ms += 1
+      return result
+    },
+    report() {
+      return {
+        count: stats.count,
+        seconds: round(stats.ms / 1000, 2),
+        max_ms: round(stats.max_ms, 1),
+        over_100ms: stats.over_100ms,
+      }
+    },
+  }
+}
+
+type WriteTimes = ReturnType<typeof writeTimes>
+
+/**
+ * A merge batch of the search index when one is due, as the daemon runs it
+ * after its writes, or between the batches of a re-index ('bulk')
+ */
+function backgroundMerge(
+  db: Database,
+  merges: WriteTimes,
+  mode: 'rest' | 'bulk' = 'rest',
+): void {
+  if (!isSearchMergeDue(db, mode)) return
+  merges.time(() => runSearchMergeBatch(db, DEFAULT_BATCH_LIMITS, mode))
+}
+
+/** Merge batches until nothing is left to merge */
+function mergeAll(db: Database, merges: WriteTimes): void {
+  while (isSearchMergeDue(db)) {
+    if (
+      merges.time(() => runSearchMergeBatch(db, DEFAULT_BATCH_LIMITS)).finished
+    ) {
+      return
+    }
+  }
+}
+
+/**
+ * The search index's size and segments, and what asking it whether one
+ * message has `word` costs, over the 2,000 newest messages (#149)
+ */
+function measureIndex(db: Database, cachePath: string, word: string) {
+  db.run('PRAGMA wal_checkpoint(TRUNCATE)')
+  const size = readCacheSize(db, cachePath, { tables: true })
+  // Rows of message_search_data name their segment in the upper bits
+  const segments = count(
+    db,
+    'SELECT COUNT(DISTINCT id >> 37) AS n FROM message_search_data WHERE (id >> 37) BETWEEN 1 AND 65535',
+  )
+  const rowids = (
+    db
+      .query(
+        'SELECT rowid FROM messages_cache INDEXED BY idx_messages_cache_newest ORDER BY date DESC LIMIT 2000',
+      )
+      .all() as { rowid: number }[]
+  ).map((row) => row.rowid)
+  const probe = db.query(
+    'SELECT EXISTS (SELECT 1 FROM message_search WHERE message_search MATCH ? AND rowid = ?) AS hit',
+  )
+  const match = `"${word}"`
+  for (const rowid of rowids.slice(0, 100)) probe.get(match, rowid)
+  const start = performance.now()
+  for (const rowid of rowids) probe.get(match, rowid)
+  return {
+    bytes: size.tables?.message_search ?? 0,
+    segments,
+    probe_us: round(((performance.now() - start) * 1000) / rowids.length, 1),
+  }
+}
+
+/**
+ * The one-off re-index of names (#93), batch by batch as the runners do
+ * it, with a merge batch after each and merges at the end; or as 0.9.0 to
+ * 0.11.1 did it, with FTS5 merging inside the writes and no merge of
+ * deleted entries, in batches of 250 messages as the daemon's are cut at
+ * 50 ms (#149)
+ */
+function reindexNames(db: Database, merge: boolean) {
+  db.run(
+    `DELETE FROM cache_migrations WHERE name = '${searchNamesMigration.name}'`,
+  )
+  registerBackgroundMigrations(db)
+  const options = merge
+    ? {}
+    : { automerge: 4, usermerge: 4, crisismerge: 16, deletemerge: 0 }
+  for (const [option, value] of Object.entries(options)) {
+    db.query(
+      'INSERT INTO message_search(message_search, rank) VALUES(?, ?)',
+    ).run(option, value)
+  }
+  const limits = merge ? DEFAULT_BATCH_LIMITS : { maxRows: 250, maxMs: 50 }
+  const batches = writeTimes()
+  const merges = writeTimes()
+  const start = performance.now()
+  let messages = 0
+  for (;;) {
+    const batch = batches.time(() =>
+      runMigrationBatch(db, searchNamesMigration, limits),
+    )
+    messages += batch.rows
+    if (batch.finished) break
+    if (merge) backgroundMerge(db, merges, 'bulk')
+  }
+  if (merge) mergeAll(db, merges)
+  // This version's options again, as opening the cache sets them
+  else configureSearchMerges(db, true)
+  const seconds = (performance.now() - start) / 1000
+  return {
+    messages,
+    seconds: round(seconds, 2),
+    messages_per_s: Math.round(messages / seconds),
+    batches: batches.report(),
+    merges: merges.report(),
+  }
 }
 
 function fileBytes(path: string): number {
@@ -362,7 +495,8 @@ function writeOldFormPage(
 
 /** Every chat's pages newest first, as history sync fetches them */
 function writeHistory(db: Database, data: Dataset, oldForm: boolean) {
-  let ms = 0
+  const pages = writeTimes()
+  const merges = writeTimes()
   let written = 0
   const reportEvery = Math.max(100_000, Math.round(MESSAGES / 10))
   let nextReport = reportEvery
@@ -370,18 +504,19 @@ function writeHistory(db: Database, data: Dataset, oldForm: boolean) {
     for (let p = 0; p < pagesOf(chat); p++) {
       const page = historyPage(data, chat, p)
       const users = pageUsers(data, page.messages)
-      const start = performance.now()
-      if (oldForm) writeOldFormPage(db, chat, page, users)
-      else {
-        cacheHistoryResponse(
-          db,
-          chat.chatId,
-          page.messages,
-          users as unknown as PageUsers,
-          page.bounds,
-        )
-      }
-      ms += performance.now() - start
+      pages.time(() => {
+        if (oldForm) writeOldFormPage(db, chat, page, users)
+        else {
+          cacheHistoryResponse(
+            db,
+            chat.chatId,
+            page.messages,
+            users as unknown as PageUsers,
+            page.bounds,
+          )
+        }
+      })
+      backgroundMerge(db, merges)
       written += page.messages.length
       if (written >= nextReport) {
         log(`  ${written.toLocaleString('en-US')} messages`)
@@ -389,10 +524,14 @@ function writeHistory(db: Database, data: Dataset, oldForm: boolean) {
       }
     }
   }
+  const writes = pages.report()
   return {
     messages: written,
-    seconds: round(ms / 1000, 2),
-    messages_per_s: Math.round(written / (ms / 1000)),
+    seconds: writes.seconds,
+    messages_per_s: Math.round(written / writes.seconds),
+    longest_ms: writes.max_ms,
+    over_100ms: writes.over_100ms,
+    merges: merges.report(),
   }
 }
 
@@ -585,7 +724,8 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   const messagesCache = createMessagesCache(db)
   const liveChats = data.chats.slice(1, 11)
   const liveCount = Math.min(5000, Math.max(500, Math.round(MESSAGES / 200)))
-  let liveMs = 0
+  const liveWrites = writeTimes()
+  const liveMerges = writeTimes()
   for (let n = 0; n < liveCount; n++) {
     const chat = liveChats[n % liveChats.length]!
     const raw = generateLiveMessage(
@@ -593,11 +733,13 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
       chat,
       Math.floor(n / liveChats.length),
     )
-    const start = performance.now()
-    const input = parseRawMessage(raw, chat.chatId)
-    if (input) messagesCache.upsert(input)
-    liveMs += performance.now() - start
+    liveWrites.time(() => {
+      const input = parseRawMessage(raw, chat.chatId)
+      if (input) messagesCache.upsert(input)
+    })
+    backgroundMerge(db, liveMerges)
   }
+  const live = liveWrites.report()
 
   log('marking deleted messages')
   markDeletions(db, data)
@@ -620,6 +762,13 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   // Latin words match one form; Cyrillic stems take endings, for `stem*`
   const latin = wordsOf(data, false)
   const common = latin[0]!
+  // In about 7% of the messages
+  const midWord = latin[6]!
+  // The sender with the fewest messages: none among the newest
+  const rareSender = count(
+    db,
+    'SELECT from_id AS n FROM messages_cache WHERE from_id IS NOT NULL GROUP BY from_id ORDER BY COUNT(*), from_id LIMIT 1',
+  )
   const twoWords = `${latin[10]} ${latin[100]}`
   const rare = latin[5000]!
   const stem = wordsOf(data, true)[25]!
@@ -664,6 +813,12 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   const cases: Array<[string, string, () => unknown]> = [
     ['search_rare_word', rare, () => runSearch(rare)],
     ['search_common_word', common, () => runSearch(common)],
+    ['search_mid_word', midWord, () => runSearch(midWord)],
+    [
+      'search_mid_word_rare_sender',
+      `${midWord} --sender <fewest messages>`,
+      () => runSearch(midWord, { senderId: rareSender }),
+    ],
     [
       'search_common_offset',
       `${common} --offset 200`,
@@ -793,36 +948,44 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   }
 
   // ── Maintenance ───────────────────────────────────────────────────────
+  // The index as the writes above left it, merged in the background
+  const indexKept = measureIndex(db, cachePath, common)
+
   // The one-off re-index of names (#93), as an upgraded cache runs it: in
-  // batches, each its own transaction
+  // batches, each its own transaction, with merges between them (#149)
   log('re-indexing names')
-  db.run(
-    `DELETE FROM cache_migrations WHERE name = '${searchNamesMigration.name}'`,
-  )
-  registerBackgroundMigrations(db)
-  const queued = (
-    db.query('SELECT COUNT(*) AS n FROM search_reindex_queue').get() as {
-      n: number
-    }
-  ).n
+  const queued = count(db, 'SELECT COUNT(*) AS n FROM search_reindex_queue')
+  const reindex = reindexNames(db, true)
+  const indexAfterReindex = measureIndex(db, cachePath, common)
+
+  // The same as 0.11.1 did it, which left the caches #149 found: every
+  // message's old entries kept in segments whose entries are all deleted.
+  // Then the search of such an index, and the merges that clean it up
+  log('re-indexing names as 0.11.1 did')
+  const unmergedReindex = reindexNames(db, false)
+  const indexUnmerged = measureIndex(db, cachePath, common)
+  const unmergedQueries: Record<string, Timing & { query: string }> = {}
+  for (const [name, query, options] of [
+    ['search_common_word', common, {}],
+    ['search_mid_word', midWord, {}],
+    [
+      'search_mid_word_rare_sender',
+      `${midWord} --sender <fewest messages>`,
+      { senderId: rareSender },
+    ],
+  ] as const) {
+    const word = query.split(' ')[0]!
+    const { timing } = await time(Math.min(RUNS, 5), () =>
+      runSearch(word, options),
+    )
+    unmergedQueries[name] = { query, ...timing }
+  }
+  log('merging the index')
+  const cleanup = writeTimes()
   let start = performance.now()
-  // Batches run back to back, so the time between two is one batch
-  let batchEnd = start
-  let maxBatchMs = 0
-  const reindexed = await runPendingMigrations(
-    db,
-    {
-      onBatch: () => {
-        const now = performance.now()
-        maxBatchMs = Math.max(maxBatchMs, now - batchEnd)
-        batchEnd = now
-      },
-    },
-    [searchNamesMigration],
-  )
-  const reindexSeconds = (performance.now() - start) / 1000
-  db.run('PRAGMA wal_checkpoint(TRUNCATE)')
-  const afterReindex = readCacheSize(db, cachePath, { tables: true })
+  mergeAll(db, cleanup)
+  const cleanupSeconds = (performance.now() - start) / 1000
+  const indexCleaned = measureIndex(db, cachePath, common)
 
   log('rebuilding the search index')
   start = performance.now()
@@ -862,21 +1025,29 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
       },
       live_single: {
         messages: liveCount,
-        seconds: round(liveMs / 1000, 2),
-        messages_per_s: Math.round(liveCount / (liveMs / 1000)),
+        seconds: live.seconds,
+        messages_per_s: Math.round(liveCount / live.seconds),
+        longest_ms: live.max_ms,
+        over_100ms: live.over_100ms,
+        merges: liveMerges.report(),
       },
     },
     size: { ...size, raw_json_compression: compression },
     queries,
     cli: cliTimes,
     maintenance: {
+      index_kept: indexKept,
       names_reindex: {
-        messages: reindexed,
+        ...reindex,
         queued_by_writes: queued,
-        seconds: round(reindexSeconds, 2),
-        messages_per_s: Math.round(reindexed / reindexSeconds),
-        max_batch_ms: round(maxBatchMs, 1),
-        index_bytes_after: afterReindex.tables?.message_search ?? 0,
+        index_after: indexAfterReindex,
+      },
+      unmerged: {
+        reindex: unmergedReindex,
+        index: indexUnmerged,
+        queries: unmergedQueries,
+        cleanup: { ...cleanup.report(), seconds: round(cleanupSeconds, 2) },
+        index_after_cleanup: indexCleaned,
       },
       search_rebuild: {
         seconds: round(rebuildSeconds, 2),
@@ -1027,6 +1198,17 @@ function n(value: number): string {
 }
 
 type Size = ReturnType<typeof measureSize>
+
+function mergeLine(merges: ReturnType<WriteTimes['report']>): string {
+  return `${n(merges.count)} batches, ${merges.seconds} s, longest ${merges.max_ms} ms (${merges.over_100ms} over 100 ms)`
+}
+
+function indexLine(
+  label: string,
+  index: ReturnType<typeof measureIndex>,
+): string {
+  return `| ${label} | ${mb(index.bytes)} | ${index.segments} | ${index.probe_us} |`
+}
 type Head = ReturnType<typeof describe>
 
 function heading(r: Head): string {
@@ -1059,12 +1241,19 @@ function markdown(
   )) {
     lines.push(`| ${name} | ${n(bytes)} |`)
   }
-  lines.push('', '| Write | Messages | Messages/s |', '|---|---:|---:|')
+  lines.push(
+    '',
+    '| Write | Messages | Messages/s | Longest write | Writes over 100 ms | Index merges after them |',
+    '|---|---:|---:|---:|---:|---|',
+  )
   for (const [name, w] of Object.entries(r.writes)) {
     const extra =
       'rows_rewritten' in w ? ` (${n(w.rows_rewritten)} rows rewritten)` : ''
+    const longest = 'longest_ms' in w ? `${w.longest_ms} ms` : ''
+    const over = 'over_100ms' in w ? n(w.over_100ms) : ''
+    const merges = 'merges' in w ? mergeLine(w.merges) : ''
     lines.push(
-      `| ${name}${extra} | ${n(w.messages)} | ${n(w.messages_per_s)} |`,
+      `| ${name}${extra} | ${n(w.messages)} | ${n(w.messages_per_s)} | ${longest} | ${over} | ${merges} |`,
     )
   }
   lines.push(
@@ -1083,10 +1272,33 @@ function markdown(
   for (const [name, q] of Object.entries(r.cli)) {
     lines.push(`| ${name} | ${q.median_ms} | ${q.p95_ms} |`)
   }
-  const v = r.maintenance.vacuum
+  const m = r.maintenance
+  const v = m.vacuum
+  const reindex = m.names_reindex
+  const unmerged = m.unmerged
   lines.push(
     '',
-    `Names re-index (#93) ${n(r.maintenance.names_reindex.messages)} messages in ${r.maintenance.names_reindex.seconds} s, ${n(r.maintenance.names_reindex.messages_per_s)} messages/s, longest batch ${r.maintenance.names_reindex.max_batch_ms} ms, index ${mb(r.maintenance.names_reindex.index_bytes_after)} after it (${n(r.maintenance.names_reindex.queued_by_writes)} peers queued by the writes). Search index rebuild ${r.maintenance.search_rebuild.seconds} s. \`tg db vacuum\` ${v.seconds} s, ${mb(v.bytes_before)} → ${mb(v.bytes_after)}, peak extra disk ${mb(v.peak_extra_disk_bytes)}. Whole run ${r.total_seconds} s.`,
+    '| Search index | Size | Segments | One question, µs |',
+    '|---|---:|---:|---:|',
+    indexLine('after the writes above', m.index_kept),
+    indexLine('after the re-index of names, merged', reindex.index_after),
+    indexLine('after a re-index as 0.11.1 did it (#149)', unmerged.index),
+    indexLine(
+      'after the merges that clean it up',
+      unmerged.index_after_cleanup,
+    ),
+    '',
+    `Names re-index (#93) ${n(reindex.messages)} messages in ${reindex.seconds} s, ${n(reindex.messages_per_s)} messages/s, longest batch ${reindex.batches.max_ms} ms (${reindex.batches.over_100ms} over 100 ms), index merges ${mergeLine(reindex.merges)} (${n(reindex.queued_by_writes)} peers queued by the writes). As 0.11.1 did it: longest batch ${unmerged.reindex.batches.max_ms} ms (${unmerged.reindex.batches.over_100ms} over 100 ms); cleaning up after it: ${mergeLine(unmerged.cleanup)}.`,
+    '',
+    '| Query on the index 0.11.1 left | Median ms | p95 ms |',
+    '|---|---:|---:|',
+  )
+  for (const [name, q] of Object.entries(unmerged.queries)) {
+    lines.push(`| ${name} | ${q.median_ms} | ${q.p95_ms} |`)
+  }
+  lines.push(
+    '',
+    `Search index rebuild ${m.search_rebuild.seconds} s. \`tg db vacuum\` ${v.seconds} s, ${mb(v.bytes_before)} → ${mb(v.bytes_after)}, peak extra disk ${mb(v.peak_extra_disk_bytes)}. Whole run ${r.total_seconds} s.`,
   )
   return lines.join('\n')
 }

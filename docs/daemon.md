@@ -258,7 +258,11 @@ account's migrations wait a minute before the next try.
 When a migration finishes, the daemon logs `[Account <id>] Migration <name> done: <rows> rows`.
 In the same batches and budget it then re-indexes the messages of senders and chats whose names
 changed ([search.md](search.md#names-after-a-rename)); that queue fills at any time, so the
-daemon checks every account each tick, a few reads when there is nothing to do. `tg status`
+daemon checks every account each tick, a few reads when there is nothing to do. Last, in the
+same budget, it merges the segments of each account's search index that the tick's writes
+added, and drops deleted entries once they make a tenth of it
+([search.md](search.md#keeping-the-index-merged)); with no write since its last merge that is
+one read. `tg status`
 shows the progress; `tg db migrate` finishes them in the foreground, also while the daemon runs:
 then it pauses 150 ms after each batch, longer than SQLite's busy handler sleeps between tries,
 so a daemon write that waits for the lock gets it after one batch

@@ -1,9 +1,11 @@
 /**
- * The daemon's share of the background migrations (#89) and of the queued
- * search re-index (#93): a few batches per tick, after the tick's sync
- * work, with the event loop free between batches, so live updates and sync
- * jobs never wait for more than one. The queue fills at any time, so every
- * account is checked each tick; with nothing to do that is a few reads.
+ * The daemon's share of the background migrations (#89), of the queued
+ * search re-index (#93) and of merging the search index after its writes
+ * (#149): a few batches per tick, after the tick's sync work, with the
+ * event loop free between batches, so live updates and sync jobs never wait
+ * for more than one. The queue fills and the index takes writes at any
+ * time, so every account is checked each tick; with nothing to do that is a
+ * few reads.
  */
 import {
   type BatchLimits,
