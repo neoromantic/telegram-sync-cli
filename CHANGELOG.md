@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Homebrew formula is updated again. 0.11.0 reached npm and GitHub Releases but not
+  `neoromantic/tap/tg`: the release check of the formula failed, because Homebrew now loads
+  formulae only from official or trusted taps.
+
 ## [0.11.0] - 2026-11-13
 
 Search finds people and chats by their current names, and the newest page of a common word

@@ -29,6 +29,7 @@ audit=
 cleanup() {
 	rm -rf "$work"
 	if [ -n "$audit" ]; then
+		brew untrust --tap "$audit" >/dev/null 2>&1 || true
 		brew untap "$audit" >/dev/null 2>&1 || true
 	fi
 }
@@ -80,6 +81,8 @@ fi
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ANALYTICS=1
 audit=ci/tgcli
 brew tap-new --no-git "$audit" >/dev/null
+# Homebrew loads formulae only from official or trusted taps
+brew trust --tap "$audit" >/dev/null
 cp "$work/tg.rb" "$(brew --repo "$audit")/Formula/tg.rb"
 brew audit --strict --online --formula "$audit/tg"
 
