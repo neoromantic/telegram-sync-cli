@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-13
+
+The search index stays merged, and a common word is found without sorting every match: on a
+real account cache of 1.16M messages, `tg messages search` for a word in 9–19% of the messages
+took 180–290 ms with 0.11.1 and now takes about 60 ms, most of it starting `tg` (#149).
+
 ### Changed
 
 - `tg messages search` returns the newest page of a word in a few percent of the messages
@@ -866,7 +872,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.9.0...v0.10.0
