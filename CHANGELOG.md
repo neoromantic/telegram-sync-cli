@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `tg messages search` returns the newest page of a word in a few percent of the messages
+  without sorting every match: from a word in about 3% of 1M messages or 1% of 10M, instead of
+  21% and 7%. It asks the index about runs of the newest messages instead of one message at a
+  time, and gives up and sorts once it has taken a quarter of what sorting takes, so a word whose
+  matches are all old takes at most about 1.2 times as long as before. On a made-up cache of 1M
+  messages a word in 7% of them took 85 ms and now takes 6.7 ms; the fifth page of a common
+  word (`--offset 200`) 278 ms and 6.4 ms. Results and their order don't change (#149).
+
 ### Fixed
 
 - The search index no longer keeps the old entries of re-indexed and deleted messages. After

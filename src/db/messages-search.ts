@@ -216,15 +216,44 @@ function searchFilter(options: MessageSearchOptions): {
  * The walk below runs when a query has at least T = sqrt(WALK_THRESHOLD * P
  * * N) matches, for a page of P (limit + offset) of N messages, and goes
  * through at most P * N / T messages, as many as a page needs at that share
- * of matches. Asking the search index about one message costs as much as
- * sorting tens to hundreds of matches (made-up caches of 1M and 10M
- * messages), so when the walk finds too few matches, counting and walking
- * add at most about 30% to the sort it falls back to (docs/search.md).
+ * of matches. Sorting costs about 1 µs a match and the walk a few µs a
+ * message (made-up caches of 1M messages, #149), so a walk through the
+ * whole window costs about a fifth of the least the sort can cost
+ * (docs/search.md).
  */
-const WALK_THRESHOLD = 900
+const WALK_THRESHOLD = 20
+
+/**
+ * The walk stops and sorts once it has taken this share of the least the
+ * sort can take: about 1 µs for each of at least T matches. So a walk that
+ * finds too few matches adds at most about a quarter to the sort, even on
+ * an index that still holds many deleted entries, which answers in
+ * milliseconds instead of microseconds.
+ */
+const WALK_BUDGET_US_PER_MATCH = 0.25
+
+/** Messages in the walk's first chunk; later chunks are what the budget left pays for */
+const FIRST_CHUNK = 4
+
+/**
+ * One question to the index covers a run of rowids at most this far apart:
+ * it costs as much as reading tens of entries of a word. History pages give
+ * a chat's newest messages nearby rowids, and live messages too
+ */
+const ROWID_RUN_GAP = 32
+
+/** Lower WALK_THRESHOLD, and the clock of the walk's budget, for tests */
+export interface NewestFirstTuning {
+  walkThreshold?: number
+  now?: () => number
+}
 
 /** Newest first; messages sent in the same second in the order they were cached */
 const NEWEST_FIRST = 'm.date DESC, m.rowid'
+
+/** The FROM of a search of the messages with the rowids of a JSON array */
+const ROWIDS_FROM =
+  'FROM json_each(?) AS j CROSS JOIN messages_cache m ON m.rowid = j.value'
 
 /** The FROM of a search that reads every match from the index */
 const MATCHES_FROM =
@@ -266,19 +295,20 @@ export type NewestFirstWay = 'messages' | 'sort'
  * The newest page of a search. Sorting every match reads each one's
  * message, so a common query would take seconds; instead, when a query has
  * many matches, go through the newest messages (of the chat, between
- * --since and --until) in date order and ask the search index of each
- * whether it matches, until the page is full. The walk goes through a fixed
- * number of messages, the window; a page found there is the one sorting
- * every match gives, and a page that isn't full falls back to sorting. A
- * prefix query is always sorted. Tests pass a lower `walkThreshold` to
- * walk small caches.
+ * --since and --until) in date order, in chunks, and ask the search index
+ * which of them match, until the page is full. The walk goes through at
+ * most a fixed number of messages, the window, and stops at the budget of
+ * its time; a page found there is the one sorting every match gives, and a
+ * walk that ends without a full page falls back to sorting. A prefix query
+ * is always sorted.
  */
 export function searchNewestFirst(
   db: Database,
   query: string,
   options: MessageSearchOptions = {},
-  walkThreshold = WALK_THRESHOLD,
+  tuning: NewestFirstTuning = {},
 ): { rows: MessageSearchRow[]; way: NewestFirstWay } {
+  const now = tuning.now ?? (() => performance.now())
   const limit = options.limit ?? 50
   const offset = options.offset ?? 0
   const match = toFts5Query(query, { phrase: options.phrase })
@@ -286,8 +316,8 @@ export function searchNewestFirst(
     rows: sortedPage(db, MATCHES_FROM, match, options, NEWEST_FIRST),
     way: 'sort' as const,
   })
-  // A prefix stands for every word it starts, so asking the index about one
-  // message reads all of them
+  // A prefix stands for every word it starts, so asking the index about a
+  // few messages reads all of them
   if (match.includes('*')) return sorted()
 
   // max(rowid) is about the number of messages, and instant
@@ -297,7 +327,9 @@ export function searchNewestFirst(
   const pageTimesMessages = (limit + offset) * (maxRowid ?? 0)
   const enough = Math.max(
     1,
-    Math.ceil(Math.sqrt(walkThreshold * pageTimesMessages)),
+    Math.ceil(
+      Math.sqrt((tuning.walkThreshold ?? WALK_THRESHOLD) * pageTimesMessages),
+    ),
   )
 
   // Reading matches from the index alone costs a fraction of sorting them,
@@ -314,17 +346,12 @@ export function searchNewestFirst(
     .get(match, enough) as { matches: number; rowids: string | null }
   if (matches < enough) {
     if (rowids === null) return sorted()
-    const rows = sortedPage(
-      db,
-      'FROM json_each(?) AS j CROSS JOIN messages_cache m ON m.rowid = j.value',
-      rowids,
-      options,
-      NEWEST_FIRST,
-    )
+    const rows = sortedPage(db, ROWIDS_FROM, rowids, options, NEWEST_FIRST)
     return { rows, way: 'sort' }
   }
 
   const window = Math.ceil(pageTimesMessages / enough)
+  const budgetMs = (enough * WALK_BUDGET_US_PER_MATCH) / 1000
   const index =
     options.chatId === undefined
       ? 'idx_messages_cache_newest'
@@ -345,43 +372,71 @@ export function searchNewestFirst(
   }
   const where = range.length ? `WHERE ${range.join(' AND ')}` : ''
 
-  // The window: the first `window` messages in range of an index that,
+  // A chunk: the messages from `walked` on in the order of an index that,
   // scanned forward, gives them newest first and, within a second, in rowid
-  // order. That is a prefix of the order of the page, even when it ends
-  // inside a second, so a full page found there is the right one. Ordering
-  // by the window's columns keeps its order without sorting, and the walk
-  // stops once the page is full
-  const { conditions, params } = searchFilter(options)
-  conditions.push(`EXISTS (
-    SELECT 1 FROM message_search s
-    WHERE s.message_search MATCH ? AND s.rowid = m.rowid)`)
-  params.push(match)
-  const rows = db
-    .query(
-      `SELECT ${MESSAGE_ROW_COLUMNS}
-       FROM (
-         SELECT date, rowid AS id FROM messages_cache INDEXED BY ${index}
-         ${where}
-         ORDER BY date DESC, rowid
-         LIMIT ?
-       ) w
-       CROSS JOIN messages_cache m ON m.rowid = w.id
-       ${MESSAGE_ROW_JOINS}
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY w.date DESC, w.id
-       LIMIT ? OFFSET ?`,
-    )
-    .all(...rangeParams, window, ...params, limit, offset) as MessageSearchRow[]
-  if (rows.length === limit) return { rows, way: 'messages' }
+  // order. The chunks one after another are a prefix of the order of the
+  // page, even when one ends inside a second, so a full page found there is
+  // the right one
+  const chunkRowids = db.query(
+    `SELECT rowid FROM messages_cache INDEXED BY ${index} ${where}
+     ORDER BY date DESC, rowid LIMIT ? OFFSET ?`,
+  )
+  const matchesBetween = db.query(
+    'SELECT rowid FROM message_search WHERE message_search MATCH ? AND rowid BETWEEN ? AND ?',
+  )
+  /** The rowids among `rowids` that match, one question to the index per run of nearby rowids */
+  const matching = (rowids: number[]): Set<number> => {
+    const runs: Array<[number, number]> = []
+    for (const rowid of [...rowids].sort((a, b) => a - b)) {
+      const run = runs.at(-1)
+      if (run && rowid - run[1] <= ROWID_RUN_GAP) run[1] = rowid
+      else runs.push([rowid, rowid])
+    }
+    const hits = new Set<number>()
+    for (const [low, high] of runs) {
+      for (const [rowid] of matchesBetween.values(match, low, high)) {
+        hits.add(rowid as number)
+      }
+    }
+    return hits
+  }
 
-  // A range shorter than the window was gone through whole
-  const longer = db
-    .query(
-      `SELECT 1 FROM messages_cache INDEXED BY ${index} ${where}
-       ORDER BY date DESC, rowid LIMIT 1 OFFSET ?`,
+  const wanted = limit + offset
+  const found: MessageSearchRow[] = []
+  const started = now()
+  let walked = 0
+  let chunk = FIRST_CHUNK
+  while (walked < window) {
+    const size = Math.min(chunk, window - walked)
+    const rowids = chunkRowids
+      .values(...rangeParams, size, walked)
+      .map(([rowid]) => rowid as number)
+    walked += size
+    const hits = matching(rowids)
+    const matched = rowids.filter((rowid) => hits.has(rowid))
+    // The matches in the order of the chunk, which sorting keeps
+    if (matched.length > 0) {
+      found.push(
+        ...sortedPage(
+          db,
+          ROWIDS_FROM,
+          JSON.stringify(matched),
+          { ...options, limit: wanted - found.length, offset: 0 },
+          NEWEST_FIRST,
+        ),
+      )
+    }
+    // A range shorter than the window was gone through whole
+    if (found.length === wanted || rowids.length < size) {
+      return { rows: found.slice(offset), way: 'messages' }
+    }
+    const spent = now() - started
+    if (spent >= budgetMs) return sorted()
+    chunk = Math.max(
+      FIRST_CHUNK,
+      spent > 0 ? Math.floor(((budgetMs - spent) * walked) / spent) : walked,
     )
-    .get(...rangeParams, window)
-  if (!longer) return { rows, way: 'messages' }
+  }
   return sorted()
 }
 
