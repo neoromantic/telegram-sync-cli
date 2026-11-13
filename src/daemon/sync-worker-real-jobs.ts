@@ -498,6 +498,59 @@ export async function processRefetchMessagesReal(
   }
 }
 
+/**
+ * Fetch senders missing from the cache (#143): ask Telegram for one message
+ * of each of up to 100 of the chat's senders, by ID, and cache the senders
+ * its reply carries; the messages themselves aren't written again. Senders
+ * it doesn't return wait 30 days, as do those of a chat it refuses for good
+ * (left, private). A chat with more senders waiting gets its next job at the
+ * scheduler's next refresh.
+ */
+export async function processFetchSendersReal(
+  ctx: RealSyncWorkerContext,
+  job: SyncJobRow,
+): Promise<RealJobResult> {
+  const batch = ctx.senderLookups.nextBatch(job.chat_id, REFETCH_BATCH_SIZE)
+  if (batch.length === 0) return { success: true, messagesFetched: 0 }
+
+  if (!canMakeApiCall(ctx)) {
+    return {
+      success: false,
+      messagesFetched: 0,
+      rateLimited: true,
+      waitSeconds: getWaitTime(ctx),
+    }
+  }
+
+  const senderIds = batch.map((lookup) => lookup.sender_id)
+  const inputPeer = getInputPeer(ctx, job.chat_id)
+  if (!inputPeer) {
+    ctx.senderLookups.finish(senderIds, Date.now())
+    return {
+      success: false,
+      messagesFetched: 0,
+      error: `Could not build InputPeer for chat ${job.chat_id}`,
+      permanent: true,
+    }
+  }
+
+  try {
+    const page = await fetchMessagesByIdRaw(
+      ctx.client,
+      inputPeer,
+      batch.map((lookup) => lookup.message_id),
+      ctx.signal,
+    )
+    cachePageUsers(ctx.usersCache, page.users)
+    ctx.senderLookups.finish(senderIds, Date.now())
+    return { success: true, messagesFetched: 0 }
+  } catch (err) {
+    const result = resolveJobError(ctx, err)
+    if (result.permanent) ctx.senderLookups.finish(senderIds, Date.now())
+    return result
+  }
+}
+
 async function processFullSyncReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
@@ -520,6 +573,7 @@ const JOB_HANDLERS: Partial<
   [SyncJobType.InitialLoad]: processInitialLoadReal,
   [SyncJobType.FullSync]: processFullSyncReal,
   [SyncJobType.RefetchMessages]: processRefetchMessagesReal,
+  [SyncJobType.FetchSenders]: processFetchSendersReal,
 }
 
 export async function processJobReal(

@@ -934,12 +934,43 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
+    sender_lookups: {
+      description:
+        'Users with cached messages and no users_cache row (#143), each with one recent message of theirs: a fetch_senders job asks Telegram for up to 100 of those messages of one chat, and the reply caches their senders. Listed by the daemon on start and once a day; a row goes once its sender is cached.',
+      primaryKey: 'sender_id',
+      columns: {
+        sender_id: {
+          description: 'User ID of the sender, as in messages_cache.from_id',
+          nullable: false,
+        },
+        chat_id: {
+          description:
+            'Marked peer ID of the chat of the message to ask for, as in messages_cache',
+          nullable: false,
+        },
+        message_id: {
+          description:
+            "The sender's newest cached message that Telegram can be asked for",
+          nullable: false,
+        },
+        asked_at: {
+          description:
+            'When Telegram was asked and did not return the sender (the message was deleted, the chat left or private), in ms since the epoch; asked again 30 days later. NULL while it waits for its job',
+          semanticType: 'timestamp',
+          nullable: true,
+        },
+      },
+      indexes: {
+        idx_sender_lookups_waiting: 'Find the chats with senders waiting',
+      },
+    },
+
     // -------------------------------------------------------------------------
     // Sync Jobs Table
     // -------------------------------------------------------------------------
     sync_jobs: {
       description:
-        'Job queue for background message synchronization. Jobs run in three lanes that take turns (catch-up, first pages, history), by priority inside a lane.',
+        'Job queue for background message synchronization. Jobs run in three lanes that take turns (catch-up, first pages, history), by priority inside a lane; sender fetches run only when those lanes are empty.',
       primaryKey: 'id',
       columns: {
         id: {
@@ -959,13 +990,14 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
             'backward_history',
             'full_sync',
             'refetch_messages',
+            'fetch_senders',
           ],
           semanticType: 'enum',
           nullable: false,
         },
         priority: {
           description:
-            "Priority inside the job's lane (lower runs first): the chat's sync tier, 0 for the first page of a chat turned on with tg chats sync, 4 for refetch_messages",
+            "Priority inside the job's lane (lower runs first): the chat's sync tier, 0 for the first page of a chat turned on with tg chats sync, 4 for refetch_messages and fetch_senders",
           defaultValue: 3,
         },
         status: {

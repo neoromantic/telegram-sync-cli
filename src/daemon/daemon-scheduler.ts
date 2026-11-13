@@ -6,6 +6,7 @@ import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
+import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
@@ -44,6 +45,7 @@ function createAccountSyncWorker(
     rateLimits: createRateLimitsService(cacheDb),
     chatsCache: createChatsCache(cacheDb),
     usersCache: createUsersCache(cacheDb),
+    senderLookups: createSenderLookups(cacheDb),
   })
 }
 

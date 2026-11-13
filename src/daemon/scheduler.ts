@@ -1,11 +1,13 @@
 /**
  * Sync scheduler for managing background synchronization jobs
  * Queues the work that is due and hands out jobs in three lanes that take
- * turns: forward catch-up, first pages and history.
+ * turns: forward catch-up, first pages and history. A fourth lane, sender
+ * fetches (#143), gets a slot only when the other three are empty.
  */
 import type { Database } from 'bun:sqlite'
 import type { ChatSyncStateService } from '../db/chat-sync-state'
 import type { MessagesCache } from '../db/messages-cache'
+import { createSenderLookups } from '../db/sender-lookups'
 import type { SyncJobsService } from '../db/sync-jobs'
 import {
   type ChatSyncStateRow,
@@ -95,6 +97,9 @@ export const SYNC_LANES = {
   // A refetch (#130) is one small request per chat, at the lowest priority
   firstPage: [SyncJobType.InitialLoad, SyncJobType.RefetchMessages],
   history: [SyncJobType.BackwardHistory, SyncJobType.FullSync],
+  // Senders missing from the cache (#143): never in the cycle, only a slot
+  // the other lanes leave empty
+  senders: [SyncJobType.FetchSenders],
 } as const satisfies Record<string, readonly SyncJobType[]>
 
 export type SyncLane = keyof typeof SYNC_LANES
@@ -115,7 +120,11 @@ const SYNC_LANE_FALLBACK: readonly SyncLane[] = [
   'catchup',
   'firstPage',
   'history',
+  'senders',
 ]
+
+/** How often the scheduler looks for senders missing from the cache */
+export const SENDER_SCAN_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 /**
  * Create sync scheduler
@@ -123,8 +132,13 @@ const SYNC_LANE_FALLBACK: readonly SyncLane[] = [
 class SyncSchedulerImpl implements SyncScheduler {
   /** Position in SYNC_SLOT_CYCLE; in memory, so it restarts with the daemon */
   private slot = 0
+  /** When it last looked for missing senders; in memory, so a start looks */
+  private sendersScannedAt: number | null = null
+  private readonly senderLookups
 
-  constructor(private readonly options: SyncSchedulerOptions) {}
+  constructor(private readonly options: SyncSchedulerOptions) {
+    this.senderLookups = createSenderLookups(options.db)
+  }
 
   private get jobsService() {
     return this.options.jobsService
@@ -254,6 +268,36 @@ class SyncSchedulerImpl implements SyncScheduler {
     // History for every enabled chat that had its first page, in any tier.
     for (const chat of this.chatSyncState.getHistoryDue()) {
       this.queueBackwardHistory(chat.chat_id)
+    }
+
+    this.queueSenderFetches()
+  }
+
+  /**
+   * Senders missing from the cache (#143): listed on start and then once a
+   * day, then one job per chat that has some, in any mode. Their lane runs
+   * only when the other lanes are empty.
+   */
+  private queueSenderFetches(): void {
+    const now = Date.now()
+    if (
+      this.sendersScannedAt === null ||
+      now - this.sendersScannedAt >= SENDER_SCAN_INTERVAL_MS
+    ) {
+      this.senderLookups.scan(now)
+      this.sendersScannedAt = now
+    }
+    for (const chatId of this.senderLookups.chatsDue()) {
+      if (
+        this.jobsService.hasActiveJobForChat(chatId, SyncJobType.FetchSenders)
+      ) {
+        continue
+      }
+      this.jobsService.create({
+        chat_id: chatId,
+        job_type: SyncJobType.FetchSenders,
+        priority: SyncPriority.Background,
+      })
     }
   }
 

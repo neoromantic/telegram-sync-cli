@@ -144,6 +144,11 @@ Implemented in `SyncJobType`:
   or a live message cached while it ran), it queues the next job above them, so each row is
   asked for once. `tg chats sync` and the startup cleanup keep it: it doesn't depend on
   the chat's mode.
+- `fetch_senders` — ask Telegram for one message of each of up to 100 senders of the chat that
+  have no `users_cache` row, by ID, and cache the senders the reply carries (#143). Queued at
+  priority 4 for every chat with senders waiting in `sender_lookups`, whether the chat syncs or
+  not; like a refetch, `tg chats sync` and the startup cleanup keep it. See
+  [daemon.md](daemon.md#missing-senders).
 
 Job status values:
 - `pending`, `running`, `completed`, `failed`
@@ -294,8 +299,8 @@ Every sync page (first page, catch-up and history) also caches the page's sender
 index has the sender's name and `--sender` finds the message. Only full user records are cached:
 a "min" user lacks fields, and its access hash works only in the update that carried it. Chats a
 page names (a forward's source channel, say) are not cached: `chats_cache` lists the account's
-own chats. Messages that older versions synced without their sender keep their index entry
-without the sender's name until they are re-indexed (#93).
+own chats. Messages that older versions synced without their sender get it from a
+`fetch_senders` job (#143), and the new row re-indexes them (#93).
 
 A page also gives the chat's message count on the server, which goes to
 `chat_sync_state.total_messages`; the newest count wins. A catch-up page above a cursor gives
@@ -350,11 +355,13 @@ lane turns at any pace. An account's jobs are split into three lanes:
 | catch-up | `forward_catchup` |
 | first page | `initial_load`, `refetch_messages` |
 | history | `backward_history`, `full_sync` |
+| senders | `fetch_senders` |
 
 The lanes take turns in a fixed cycle of four slots: catch-up, first page, catch-up, history.
 When every lane has work, catch-up gets half the jobs and first pages and history a quarter
 each. A slot whose lane is empty goes to the first lane with work, in the order catch-up, first
-page, history, so no slot is wasted. A slot is used only when a job runs: a tick without a job
+page, history, senders, so no slot is wasted. The senders lane has no slot of its own: it runs
+only when the other three have nothing due, at the pace of a job every 3 seconds. A slot is used only when a job runs: a tick without a job
 or without a worker that may call the API moves nothing. The position in the cycle is kept in
 memory and starts over on restart.
 
@@ -398,6 +405,7 @@ Rate limits are tracked per API method:
 - `src/db/chat-sync-state.ts`
 - `src/daemon/scheduler.ts`
 - `src/daemon/sync-retry.ts`
+- `src/db/sender-lookups.ts`
 - `src/daemon/sync-worker-core.ts`
 - `src/daemon/sync-worker-real-jobs.ts`
 - `src/daemon/daemon-bootstrap.ts`

@@ -4,6 +4,7 @@ import type { ChatsCache } from '../db/chats-cache'
 import type { HistoryRanges } from '../db/history-ranges'
 import type { MessagesCache } from '../db/messages-cache'
 import type { RateLimitsService } from '../db/rate-limits'
+import type { SenderLookups } from '../db/sender-lookups'
 import type { SyncJobsService } from '../db/sync-jobs'
 import type { UsersCache } from '../db/users-cache'
 import type { JobResult, SyncWorkerConfig } from './sync-worker-core'
@@ -18,6 +19,8 @@ export interface RealSyncWorkerDeps {
   chatsCache: ChatsCache
   /** Where the senders of history pages go */
   usersCache: UsersCache
+  /** Senders missing from users_cache, for fetch_senders jobs (#143) */
+  senderLookups: SenderLookups
   config?: Partial<SyncWorkerConfig>
   /** The daemon's stop signal: it ends the request a job waits on */
   signal?: AbortSignal
@@ -39,6 +42,8 @@ export interface RealSyncWorkerContext {
   chatsCache: ChatsCache
   /** Where the senders of history pages go */
   usersCache: UsersCache
+  /** Senders missing from users_cache, for fetch_senders jobs (#143) */
+  senderLookups: SenderLookups
   config: SyncWorkerConfig
   /** The daemon's stop signal: it ends the request a job waits on */
   signal?: AbortSignal

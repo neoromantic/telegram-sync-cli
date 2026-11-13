@@ -18,6 +18,7 @@ import {
   REINDEX_TRIGGERS,
   readsChannelSenders,
 } from './search-reindex'
+import { createSenderLookupsSchema } from './sender-lookups'
 
 const SEARCH_INDEX_VERSION = 1
 const MESSAGE_SEARCH_COLUMNS = ['text', 'sender', 'chat', 'files'] as const
@@ -683,6 +684,9 @@ export function initSyncSchema(
     )
   `)
 
+  // Senders missing from users_cache and the message to ask for (#143)
+  createSenderLookupsSchema(db)
+
   // Daemon status table - key-value store for daemon state
   db.run(`
     CREATE TABLE IF NOT EXISTS daemon_status (
@@ -811,7 +815,15 @@ export enum SyncJobType {
    * SyncPriority.Background, whether the chat syncs or not
    */
   RefetchMessages = 'refetch_messages',
+  /**
+   * Fetch the senders missing from users_cache through one message of
+   * each (#143), at SyncPriority.Background, whether the chat syncs or not
+   */
+  FetchSenders = 'fetch_senders',
 }
+
+/** Job types that run whether their chat syncs or not, at their own priority */
+export const CHAT_INDEPENDENT_JOB_TYPES_SQL = `('${SyncJobType.RefetchMessages}', '${SyncJobType.FetchSenders}')`
 
 /** Sync job status */
 export enum SyncJobStatus {

@@ -24,6 +24,7 @@ import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { BACKGROUND_MIGRATIONS } from '../db/raw-json-migrations'
 import { createTestCacheDatabase } from '../db/schema'
+import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
 import {
   initSyncSchema,
@@ -95,6 +96,7 @@ beforeEach(() => {
     rateLimits: createRateLimitsService(db),
     chatsCache: createChatsCache(db),
     usersCache: createUsersCache(db),
+    senderLookups: createSenderLookups(db),
     config: { apiMethod: 'messages.getHistory', batchSize: 100 },
   }
 })

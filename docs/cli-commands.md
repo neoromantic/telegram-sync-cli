@@ -377,6 +377,12 @@ part counts the daemon's sync jobs and lists some of them:
   are sums, and `mode` is `history` if any account's is. Pretty output shows History Cached,
   History Left with the time left, History Pace (measured, then the target, the mode and any
   FLOOD_WAITs), and the chats.
+- `progress.senders` counts the users who sent cached messages but have no `users_cache` row
+  (#143): `missing`, and `not_found`, those of them Telegram was asked for and didn't return
+  (asked again 30 days later). Their messages show the sender's ID only and `sender:name`
+  misses them until the daemon fetches them ([daemon.md](daemon.md#missing-senders)).
+  Channels that post as themselves aren't counted. Pretty output shows a Senders Missing row
+  while any are missing.
 - `rate_limits.api_calls_last_minute` and `calls_by_method` count the API calls of the last 60
   seconds, from the `api_activity` log: the CLI's calls and every request of the daemon (sync
   pages, contacts checks, dialog passes, `getMe` health checks, mtcute's update requests). A
@@ -389,8 +395,8 @@ part counts the daemon's sync jobs and lists some of them:
   reason, offline_ms, chats }` with `reason` `reconnect`, `wake` or `new_client` and `chats`
   the chats it left to catch up, or `null` before the first), `sync`
   (`pending_jobs`, `running_jobs`, `failed_jobs`, `retrying_jobs`), `progress`
-  (`chats_enabled`, `chats_history_complete`, `chats_history_pending`, `messages_cached` and
-  `history`, the account's `progress.history` without `largest_pending`) and
+  (`chats_enabled`, `chats_history_complete`, `chats_history_pending`, `messages_cached`,
+  `history`, the account's `progress.history` without `largest_pending`, and `senders`) and
   `rate_limits` (`api_calls_last_minute`, `active_flood_waits`, a count). With several
   accounts, pretty output prints a line with these under each account.
 - `accounts.accounts[].cache.size` is the cache's size, or `null` for a missing cache or one

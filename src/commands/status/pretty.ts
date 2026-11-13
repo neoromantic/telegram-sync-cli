@@ -255,6 +255,18 @@ function printSyncProgressSection(status: StatusSnapshot): void {
 
   printHistoryProgress(status)
 
+  const senders = status.progress.senders
+  if (senders.missing > 0) {
+    const notFound =
+      senders.not_found > 0
+        ? ` ${c.dim(`(${senders.not_found.toLocaleString()} not found, asked again in 30 days)`)}`
+        : ''
+    printRow(
+      'Senders Missing',
+      `${c.number(senders.missing.toLocaleString())}${notFound}`,
+    )
+  }
+
   if (status.progress.sample_chats.length > 0) {
     console.log()
     console.log(c.label('  Sample Chats:'))
@@ -419,6 +431,11 @@ function accountSummary(acc: StatusAccount): string {
     ...(acc.progress.history.messages_left > 0
       ? [
           `${c.number(acc.progress.history.messages_left.toLocaleString())} left`,
+        ]
+      : []),
+    ...(acc.progress.senders.missing > 0
+      ? [
+          `${c.number(acc.progress.senders.missing.toLocaleString())} senders missing`,
         ]
       : []),
     `${c.number(acc.rate_limits.api_calls_last_minute)} calls/min`,
