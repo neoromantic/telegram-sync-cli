@@ -107,7 +107,7 @@ describe('background migrations of a 0.5.0 cache', () => {
 
     // raw_json and message_type aren't columns the search index reads
     const [reencode] = BACKGROUND_MIGRATIONS
-    await runPendingMigrations(db, { limits: SMALL }, [reencode!])
+    while (!runMigrationBatch(db, reencode!, SMALL).finished) {}
     expect(searchIndexPages(db)).toEqual(indexBefore)
 
     const rows = MESSAGES + (await migrateAll(db))

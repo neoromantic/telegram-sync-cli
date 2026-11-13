@@ -323,8 +323,9 @@ Maintained via triggers on `messages_cache` and rebuilt when schema versions cha
 SQLite 3.43 and newer it is contentless: it holds only the index, its columns read as `NULL`,
 and search joins `messages_cache` by rowid for the text ([search.md](search.md#a-contentless-index)).
 With an older SQLite it is the full-content table, without the `content` options. Its FTS5
-option `deletemerge` is 0: deleted rows leave the index when their segments merge, not in a
-merge of their own ([search.md](search.md#names-after-a-rename)).
+options `automerge` 0 and `deletemerge` 0 keep merges out of writes: the daemon and `tg db
+migrate` merge its segments in short batches instead, and drop the entries of deleted and
+re-indexed messages ([search.md](search.md#keeping-the-index-merged)).
 
 ```sql
 CREATE VIRTUAL TABLE message_search USING fts5(

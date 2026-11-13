@@ -189,28 +189,75 @@ index catches up in the background (#93):
   `tg db migrate`). `tg db migrate` does 1M messages in about 27 s; the daemon, at 250 ms a
   second, should take about 2 minutes ([storage.md](storage.md#6-big-caches)).
 
-A re-index deletes rows of the index and inserts them again, and FTS5 handles that its own way:
+A re-index deletes rows of the index and inserts them again. FTS5 writes its pending rows to
+disk as a new segment at every statement savepoint, and SQLite opens one for an
+`INSERT … SELECT`, which may write many rows, but not for an `INSERT … VALUES` of one row. So
+the re-index reads the names first and inserts plain values: a batch writes one segment, not one
+per message, which halved the time of the re-index. On 100,000 made-up messages of one sender,
+every word repeated in each, the re-index of that sender took 9.1 s with batches of up to 0.55 s
+before 0.11.0; it takes 1.0 s, with batches of 41 ms at most. The old entries of the messages
+stay in the index until their segments merge ([below](#keeping-the-index-merged)).
 
-- It merges a segment of the index once 10% of its rows are deleted (its `deletemerge` option),
-  inside the insert that flushes the index to disk. tg sets `deletemerge` to 0 on every cache:
-  deleted rows leave the index when their segments merge as it grows, as FTS5 merges them
-  anyway. Until then the index is larger: right after the one-off re-index of the made-up
-  caches of [storage.md](storage.md), 19.7 MB instead of 11.8 MB at 100,000 messages and
-  106 MB instead of 104 MB at 1M.
-- It writes its pending rows to disk as a new segment at every statement savepoint, and SQLite
-  opens one for an `INSERT … SELECT`, which may write many rows, but not for an
-  `INSERT … VALUES` of one row. So the re-index reads the names first and inserts plain values:
-  a batch writes one segment, not one per message, which halved the time of the re-index.
+### Keeping the index merged
 
-On 100,000 made-up messages of one sender, every word repeated in each, the re-index of that
-sender took 9.1 s with batches of up to 0.55 s before; it takes 1.0 s, with batches of 41 ms at
-most. On the 1M cache of storage.md the one-off re-index went from 70 s to 27–36 s; 14 of its
-2,070 batches took more than 100 ms (up to 179 ms), and one run had a batch of 1.04 s. Those
-are FTS5 merging its big segments a common word at a time, which no batch size splits.
-History writes hit the same: writing that cache in pages of 100 messages, 4 of the 10,050
-pages took more than 100 ms (up to 253 ms), and right after the re-index the merges it left
-made 16 of the next 100 pages take 104–212 ms (up to 0.73 s in another run), then none of the
-2,900 after them.
+FTS5 keeps the index as segments on levels. A write adds a segment: a transaction's rows, or a
+message's when a trigger writes it, since each statement flushes them. Merging segments drops
+the entries of deleted and re-indexed messages, which stay in their segment until then. Up to
+0.11, FTS5 merged inside the writes, a level once it had four segments; a merge step ends only
+after a word's whole list of entries, so on a big cache an ordinary write sometimes held the
+write lock for hundreds of ms
+([#142](https://github.com/neoromantic/telegram-sync-cli/issues/142)). And a level with three
+segments waits for a fourth: after the one-off re-index of names, caches kept the old entries
+of every message in segments whose entries were all deleted, which doubled the index and made
+asking it whether one message matches take milliseconds instead of microseconds
+([#149](https://github.com/neoromantic/telegram-sync-cli/issues/149)).
+
+Now writes don't merge (the FTS5 option `automerge` is 0, set on the first open of a
+cache), and the background runners merge instead (`src/db/search-merge.ts`): the daemon after
+the sync work of each tick, in the budget of the
+[background migrations](daemon.md#background-migrations), and `tg db migrate` at the end of its
+run. Each batch is a short write transaction of FTS5 `merge` steps of 16 pages, none started
+after 50 ms; FTS5 records a merge in progress, so a stop loses nothing. The runner keeps the
+index's list of segments from its last merge that found nothing to do, so with no write since
+the check is one read. It merges in one of two ways:
+
+- **After writes**, a level of two segments merges (`usermerge` 2): fewer segments make each
+  question to the index cheaper, about 3 µs a segment on the 1M cache of
+  [storage.md](storage.md), which the newest-first walk [below](#query-pattern) relies on. Once
+  a tenth of the entries in the index are deleted, every segment merges into one (a negative
+  FTS5 `merge`), which drops them all. The share comes from FTS5's structure record, which
+  counts the deleted entries of each segment.
+- **Between the batches of a re-index** (the one-off migration or the rename queue), only a
+  level of four, so no level reaches 16 segments, when FTS5 still merges inside a write
+  (`crisismerge`). Merging at each second segment, or at each tenth of deleted entries, rewrote
+  the index many times over: on 1M messages the re-index took 55–86 s instead of about 30 s.
+  The merges after writes clean up once the re-index ends.
+
+FTS5's own merge of a level with many deleted entries (`deletemerge`) stays off: on a level
+whose entries are all deleted a step writes nothing, and a step ends only once it has written its
+pages, so one step read the whole level, 1.3 s at 1M. Merging every segment into one writes the
+entries that stay as it goes.
+
+Measured with `bun run bench:storage` on 1M made-up messages, 0.11.1 against now:
+
+| | 0.11.1 | Now |
+|---|---:|---:|
+| One-off re-index of names: longest write | 997 ms | 32 ms (merges between its batches: 90 ms) |
+| One-off re-index of names: time, merges included | 28.3 s | 28.4 s |
+| Index after it | 106 MB, or 202 MB with batches of 250 | 104 MB, 2 segments |
+| Asking the index whether one message has a common word | 3.8 ms after the 202 MB re-index | 9.6 µs |
+| Cleaning up the index 0.11.1 left (202 MB, 14 segments) | none comes | 2.6 s in 33 batches, longest 110 ms: 104 MB, 1 segment, 8.8 µs |
+| Live messages, one per write | 4,676/s | 6,849/s, longest 17 ms |
+| History pages of 100 | 7,062 messages/s | 7,879 messages/s, plus 19.6 s of merges after them |
+
+0.11.1's re-index left 106 MB in the benchmark's batches of 500 messages, because its merges
+happened to reach the old entries; with batches of 250, as the daemon cuts them at 50 ms, it
+left 202 MB with 14 segments, the state #149 found on a real cache. A step of a merge still
+copies a word's whole entry list, so the longest merge batches are those of the most common
+words: 90–145 ms at 1M. They are background writes between other work, and another writer waits
+for one at most. A few history pages took over 100 ms in 0.11.1 and now alike (6 and 2 of
+10,486 when only the history was written, 5 in the benchmark's run, up to 282 ms), also with WAL
+checkpoints off: those aren't index merges.
 
 ## Index Versioning & Rebuild
 

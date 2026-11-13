@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The search index no longer keeps the old entries of re-indexed and deleted messages. After
+  the one-off re-index of names in 0.11.0, a cache could keep the old entry of every message: an
+  index twice its size, and asking it whether a message matches took milliseconds instead of
+  microseconds. The daemon and `tg db migrate` now merge the index in short batches after
+  writes, and merge it whole once a tenth of its entries are deleted; a cache left that way is
+  cleaned once (2.6 s for 1M messages, 202 MB to 104 MB) (#149).
+- Writes no longer merge the search index themselves, which sometimes held the write lock for
+  hundreds of ms on a big cache, up to 1 s during the one-off re-index of names. On 1M
+  messages the longest batch of that re-index took 32 ms instead of 997 ms, and live messages
+  are written about 45% faster; the merges run in the background between other writes (#142).
+
 ## [0.11.1] - 2026-11-13
 
 ### Fixed

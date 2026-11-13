@@ -583,7 +583,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     // -------------------------------------------------------------------------
     message_search: {
       description:
-        'Full-text search index for messages_cache (FTS5 virtual table). On SQLite 3.43+ it is contentless: its columns read as NULL. Query the view message_search_text for matches with their text.',
+        'Full-text search index for messages_cache (FTS5 virtual table). On SQLite 3.43+ it is contentless: its columns read as NULL. Query the view message_search_text for matches with their text. Writes never merge its segments (FTS5 option automerge 0): the daemon and tg db migrate merge them in short batches.',
       primaryKey: 'rowid',
       columns: {
         text: {

@@ -10,6 +10,7 @@ import type { Database } from 'bun:sqlite'
 import { registerBackgroundMigrations } from './background-migrations'
 import { createMessageSearchTextView } from './messages-search'
 import { migratePeerIds } from './peer-id-migration'
+import { configureSearchMerges } from './search-merge'
 import {
   buildChatSearchExpr,
   buildSenderSearchExpr,
@@ -112,8 +113,7 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
     )
   `)
 
-  // Only contentless-delete tables (SQLite 3.43+) know deletemerge
-  if (contentless) keepDeletedRowsUntilMerge(db)
+  configureSearchMerges(db, contentless)
   createSearchMetaTable(db)
 
   // Search triggers (keep FTS index in sync)
@@ -128,24 +128,6 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
 
   createSearchUpdateTrigger(db)
   createSearchReindexSchema(db)
-}
-
-/**
- * A re-index (search-reindex.ts) deletes and inserts rows already in the
- * index. FTS5 merges a segment once 10% of its rows are deleted
- * ('deletemerge'), and it does so inside the insert that flushes: on 100,000
- * messages one insert took up to 0.5 s, so one batch held the write lock that
- * long. With 0, deleted rows go when their segments merge as they grow
- * (docs/search.md). Set once; a cache that has it is only read.
- */
-function keepDeletedRowsUntilMerge(db: Database): void {
-  const row = db
-    .query(`SELECT v FROM message_search_config WHERE k = 'deletemerge'`)
-    .get() as { v: number } | null
-  if (row?.v === 0) return
-  db.run(
-    `INSERT INTO message_search(message_search, rank) VALUES('deletemerge', 0)`,
-  )
 }
 
 function createSearchInsertTrigger(db: Database): void {

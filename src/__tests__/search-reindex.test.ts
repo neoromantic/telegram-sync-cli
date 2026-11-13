@@ -365,26 +365,41 @@ describe('the index of a cache from before #93', () => {
         sql: string
       }
     ).sql
-  const deleteMerge = (db: Database) =>
-    db
-      .query(`SELECT v FROM message_search_config WHERE k = 'deletemerge'`)
-      .get()
+  const mergeOptions = (db: Database) =>
+    Object.fromEntries(
+      (
+        db
+          .query(
+            `SELECT k, v FROM message_search_config WHERE k IN ('automerge', 'deletemerge', 'usermerge')`,
+          )
+          .all() as { k: string; v: number }[]
+      ).map((row) => [row.k, row.v]),
+    )
 
-  it('gets message triggers that read channel names, and keeps deleted rows until a merge', () => {
+  it('gets message triggers that read channel names, and merges only in the background', () => {
     const db = open()
     db.run('DROP TRIGGER messages_cache_ai')
     db.run('DROP TRIGGER messages_cache_au')
     db.run(oldTrigger('messages_cache_ai', 'INSERT'))
     db.run(oldTrigger('messages_cache_au', 'UPDATE OF text'))
-    // FTS5's default, which a cache from before #93 has
-    db.run(
-      `INSERT INTO message_search(message_search, rank) VALUES('deletemerge', 10)`,
-    )
+    // What 0.9.0 to 0.11.1 set (#141); automerge is FTS5's default, 4
+    for (const [option, value] of [
+      ['deletemerge', 0],
+      ['automerge', 4],
+    ] as const) {
+      db.query(
+        `INSERT INTO message_search(message_search, rank) VALUES(?, ?)`,
+      ).run(option, value)
+    }
 
     initSyncSchema(db)
     expect(triggerSql(db, 'messages_cache_ai')).toContain('chats_cache')
     expect(triggerSql(db, 'messages_cache_au')).toContain('chats_cache')
-    expect(deleteMerge(db)).toEqual({ v: 0 })
+    expect(mergeOptions(db)).toEqual({
+      automerge: 0,
+      deletemerge: 0,
+      usermerge: 2,
+    })
 
     createChatsCache(db).upsert(channel)
     seedChannelPosts(db)
