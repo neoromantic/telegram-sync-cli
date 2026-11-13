@@ -197,6 +197,30 @@ describe('senders missing from the cache (#143)', () => {
     ])
   })
 
+  it('takes the newest message, not the one cached last: history is written newest first', () => {
+    const ELENA = 7005
+    seed(GROUP, 900, ELENA)
+    seed(GROUP, 20, ELENA)
+    ctx.senderLookups.scan(Date.now())
+    expect(lookupRows()).toContainEqual({
+      sender_id: ELENA,
+      chat_id: GROUP,
+      message_id: 900,
+      asked_at: null,
+    })
+  })
+
+  it('makes no job for a chat whose senders were cached after the scan', () => {
+    ctx.senderLookups.scan(Date.now())
+    ctx.usersCache.upsert({
+      user_id: String(ALICIA),
+      first_name: 'Alicia',
+      fetched_at: 1,
+      raw_json: '{}',
+    })
+    expect(ctx.senderLookups.chatsDue()).toEqual([BASIC])
+  })
+
   it('caches the senders of the messages asked for, and search finds their older messages by name', async () => {
     runPendingMigrations(db)
     const search = createMessagesSearch(db)

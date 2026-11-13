@@ -107,7 +107,7 @@ export function createSenderLookups(db: Database): SenderLookups {
       JOIN messages_cache m ON m.rowid = (
         SELECT r.rowid FROM messages_cache r
         WHERE r.from_id = missing.id AND r.is_deleted = 0 AND ${reachable}
-        ORDER BY r.rowid DESC
+        ORDER BY r.date DESC, r.message_id DESC
         LIMIT 1
       )
       WHERE true
@@ -120,9 +120,11 @@ export function createSenderLookups(db: Database): SenderLookups {
     countWaiting: db.query(
       'SELECT COUNT(*) AS count FROM sender_lookups WHERE asked_at IS NULL',
     ),
-    chatsDue: db.query(
-      'SELECT DISTINCT chat_id FROM sender_lookups WHERE asked_at IS NULL',
-    ),
+    // A sender cached since the scan, by history or a live message, makes no job
+    chatsDue: db.query(`
+      SELECT DISTINCT chat_id FROM sender_lookups
+      WHERE asked_at IS NULL AND NOT ${cachedUserSql('sender_id')}
+    `),
     nextBatch: db.query(`
       SELECT sender_id, message_id FROM sender_lookups
       WHERE chat_id = $chat_id AND asked_at IS NULL
