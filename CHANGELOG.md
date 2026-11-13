@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-13
+
+Search finds people and chats by their current names, and the newest page of a common word
+on a big cache in milliseconds instead of seconds (#93, #118).
+
 ### Changed
 
 - `tg messages search` returns the newest page of a common word without sorting every match:
@@ -830,7 +835,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.7.0...v0.8.0
