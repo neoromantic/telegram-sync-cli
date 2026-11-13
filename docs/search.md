@@ -267,9 +267,32 @@ JOIN messages_cache m ON m.rowid = message_search.rowid
 LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT)
 LEFT JOIN users_cache u ON u.user_id = CAST(m.from_id AS TEXT)
 WHERE message_search MATCH ?
-ORDER BY m.date DESC
+ORDER BY m.date DESC, m.rowid
 LIMIT ? OFFSET ?;
 ```
+
+Messages sent in the same second go in rowid order, the order they were cached, so the pages
+of `--offset` never overlap.
+
+This query reads every match and its message before it sorts them: a word in 30% of 10M
+messages took seconds. So the newest page comes one of three ways
+([#118](https://github.com/neoromantic/telegram-sync-cli/issues/118)), with the same rows in the
+same order:
+
+- **Few matches.** tg reads them from the index, then their messages, and sorts them, as the
+  query above does. For a page of P with M of N messages matching, "few" is under
+  √(40 × P × N): 141,000 for a page of 50 at 10M. Reading the index stops there, so it is cheap
+  either way.
+- **Many matches.** tg goes through the newest messages, from `--until` back, by
+  `idx_messages_cache_newest` (`messages_cache(date DESC)`, or `idx_messages_cache_date` with
+  `--chat`), and asks the index of each whether it matches, until the page is full. Asking about
+  one message costs about as much as 40 matches of the query above, hence the 40. It goes
+  through at most twice the messages expected at that point; when a filter such as `--sender`
+  leaves too few matches there, it falls back to the query above.
+- **A prefix** (`word*`) always uses the query above: asking about one message would read every
+  word the prefix starts.
+
+`--sort relevance` and `--count` still read every match.
 
 ## CLI Command
 
@@ -430,7 +453,8 @@ describes each column.
 
 - Search is cache-only. Results depend on what the daemon has synced.
 - Deleted messages are excluded unless `--includeDeleted` (or `--include-deleted`) is set.
-- Results are ordered by message date (descending), or by relevance with `--sort relevance`.
+- Results are ordered by message date (descending), or by relevance with `--sort relevance`;
+  messages sent in the same second go in the order they were cached.
 - Read a hit in context with `tg messages get --chat <chatId> --id <messageId> --context 5`;
   `chatId` and `messageId` come from the result.
 
