@@ -13,6 +13,9 @@ The caching system prioritizes **responsiveness** over absolute freshness. Users
 3. **Configurable staleness thresholds** — Different TTLs for different data types
 4. **Lazy initialization** — Cache database initialized on first use for faster startup
 5. **Messages are eternal** — Message records are not expired, only marked deleted
+6. **Groups need participation** — a group adds new messages only while the account sent an
+   ordinary message there in the last 90 days; what is cached stays
+   ([sync-strategy.md](sync-strategy.md#group-participation))
 
 ## Staleness Rules
 
@@ -112,8 +115,12 @@ that ran out of older messages covers down to message 1. Messages from live upda
    the range reaches the chat's first message (paging back) or `--before` (paging forward):
    return them with `source: "cache"`. `--before 1` is always an empty page.
 3. Otherwise fetch that window with `messages.getHistory`, store the messages (and their senders
-   in `users_cache`) with `raw_json` and `fetched_at`, record the range, and return the page read
-   back from the cache with `source: "api"`
+   in `users_cache`) with `raw_json` and `fetched_at`, record the range, and return the page with
+   `source: "api"`, in the same shape as a cached page
+
+In a group the account doesn't take part in (no own ordinary message in the last 90 days, see
+[sync-strategy.md](sync-strategy.md#group-participation)), step 3 still returns Telegram's page,
+but stores only the messages already cached; a page with any message left out records no range.
 
 So a page never skips a gap, and a short page past the newest cached message asks Telegram.
 Messages that arrived live after a chat's last catch-up have no range yet, so while the daemon
@@ -141,8 +148,10 @@ tg send --to me -m "Note to self"
 with the same marked `chat_id` as the daemon and `chats_cache` (see
 [database-schema.md](database-schema.md#peer-ids)). Telegram doesn't push an update
 for it to the session that sent it, and the daemon shares that session, so
-without this the message would reach the cache only on a later sync. If the
-cache write fails, the send still reports success.
+without this the message would reach the cache only on a later sync. A message
+sent to a group counts as participation before it is written, so a group that
+was off takes it and new messages again without the daemon. If the cache write
+fails, the send still reports success.
 
 ### Cache-Only Commands
 

@@ -19,7 +19,7 @@ import {
 import type { AccountsDbInterface } from '../../db'
 import type { ChatsCache } from '../../db/chats-cache'
 import { createHistoryRanges, type PageBounds } from '../../db/history-ranges'
-import { createMessagesCache } from '../../db/messages-cache'
+import { createMessagesCache, type MessageInput } from '../../db/messages-cache'
 import { createMessagesHistory } from '../../db/messages-history'
 import type { MessageSearchRow } from '../../db/messages-search'
 import { createUsersCache, type UsersCache } from '../../db/users-cache'
@@ -31,6 +31,7 @@ import { resolveSelfId } from '../send/sent-message-cache'
 import {
   type HistoryClient,
   MessageNotFoundError,
+  type MessageRow,
   messageItemReader,
   messageRowsToItems,
 } from './helpers'
@@ -99,9 +100,14 @@ export function historyRequest({ limit, before, after }: HistoryWindow) {
 
 /**
  * Write a getHistory page to the cache in one transaction, with the range
- * it covers, and return the IDs of the messages it stored. Full (non-min)
- * senders go in first, because the search index reads sender names when a
- * message row is written. Sync cursors stay where the daemon left them.
+ * it covers, and return its rows, newest first, as the cache would read
+ * them back. Full (non-min) senders go in first, because the search index
+ * reads sender names when a message row is written. Sync cursors stay where
+ * the daemon left them.
+ *
+ * A group the account doesn't take part in keeps its new messages out of
+ * the cache (src/db/group-participation.ts), so the rows come from the page
+ * itself, and a page with any message kept out records no range.
  */
 export function cacheHistoryResponse(
   cacheDb: Database,
@@ -109,7 +115,7 @@ export function cacheHistoryResponse(
   messages: unknown[],
   users: tl.TypeUser[],
   bounds: PageBounds,
-): number[] {
+): MessageRow[] {
   const usersCache = createUsersCache(cacheDb)
   const messagesCache = createMessagesCache(cacheDb)
   const { inputs } = createMessageInputs(
@@ -119,17 +125,75 @@ export function cacheHistoryResponse(
     0,
   )
 
-  cacheDb.transaction(() => {
-    cachePageUsers(usersCache, users)
-    messagesCache.upsertBatch(inputs)
-    createHistoryRanges(cacheDb).recordPage(
-      chatId,
-      messages.map(rawMessageId),
-      bounds,
-    )
-  })()
+  // It reads before it writes, so it takes the write lock first
+  cacheDb
+    .transaction(() => {
+      cachePageUsers(usersCache, users)
+      const { skipped } = messagesCache.upsertBatch(inputs)
+      if (skipped === 0) {
+        createHistoryRanges(cacheDb).recordPage(
+          chatId,
+          messages.map(rawMessageId),
+          bounds,
+        )
+      }
+    })
+    .immediate()
 
-  return inputs.map((input) => input.message_id)
+  return pageRows(cacheDb, inputs)
+}
+
+/**
+ * Rows for messages of a page, with the chat and sender joins of
+ * MESSAGE_ROW_COLUMNS, newest first: the same rows the cache reads back for
+ * messages it stored
+ */
+function pageRows(cacheDb: Database, inputs: MessageInput[]): MessageRow[] {
+  const chat = cacheDb.query<
+    { title: string | null; username: string | null; type: string | null },
+    [string]
+  >('SELECT title, username, type FROM chats_cache WHERE chat_id = ?')
+  const sender = cacheDb.query<
+    {
+      username: string | null
+      first_name: string | null
+      last_name: string | null
+    },
+    [string]
+  >('SELECT username, first_name, last_name FROM users_cache WHERE user_id = ?')
+  const fetchedAt = Date.now()
+
+  return inputs
+    .map((input): MessageRow => {
+      const c = chat.get(String(input.chat_id))
+      const u = input.from_id != null ? sender.get(String(input.from_id)) : null
+      return {
+        chat_id: input.chat_id,
+        message_id: input.message_id,
+        from_id: input.from_id ?? null,
+        text: input.text ?? null,
+        message_type: input.message_type,
+        has_media: input.has_media ? 1 : 0,
+        media_path: input.media_path ?? null,
+        is_outgoing: input.is_outgoing ? 1 : 0,
+        is_edited: input.is_edited ? 1 : 0,
+        is_pinned: input.is_pinned ? 1 : 0,
+        is_deleted: input.is_deleted ? 1 : 0,
+        reply_to_id: input.reply_to_id ?? null,
+        forward_from_id: input.forward_from_id ?? null,
+        edit_date: input.edit_date ?? null,
+        date: input.date,
+        fetched_at: fetchedAt,
+        chat_title: c?.title ?? null,
+        chat_username: c?.username ?? null,
+        chat_type: c?.type ?? null,
+        sender_username: u?.username ?? null,
+        sender_first_name: u?.first_name ?? null,
+        sender_last_name: u?.last_name ?? null,
+        raw_json: input.raw_json,
+      }
+    })
+    .sort((a, b) => b.message_id - a.message_id)
 }
 
 const PEER_HINT = 'run tg chats list --fresh or pass the @username'
@@ -194,8 +258,7 @@ export async function fetchHistoryPage(
       ? { before: window.before, reachedStart: short }
       : { after: window.after, before: short ? window.before : undefined }
 
-  const ids = cacheHistoryResponse(cacheDb, chat.chatId, page, users, bounds)
-  return createMessagesHistory(cacheDb).getMany(chat.chatId, ids)
+  return cacheHistoryResponse(cacheDb, chat.chatId, page, users, bounds)
 }
 
 export interface ListHistoryOptions {
@@ -380,10 +443,9 @@ export async function fetchMessageAround(
   const page = messages.filter((message) => keep.has(rawMessageId(message)))
   // The page is a run of consecutive messages; with fewer older messages
   // than asked for, it reaches the first message of the chat
-  const stored = cacheHistoryResponse(cacheDb, chat.chatId, page, users, {
+  const rows = cacheHistoryResponse(cacheDb, chat.chatId, page, users, {
     reachedStart: older.length < context,
   })
-  const rows = createMessagesHistory(cacheDb).getMany(chat.chatId, stored)
 
   const message = rows.find((row) => row.message_id === messageId)
   if (!message) {

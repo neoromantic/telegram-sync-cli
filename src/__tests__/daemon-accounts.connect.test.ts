@@ -30,6 +30,7 @@ import {
   addAccountRuntime,
   createAccountCacheDb,
 } from './helpers/daemon-runtime'
+import { takePartIn } from './helpers/participation'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 type AccountCreateInput = Parameters<AccountsDbInterface['create']>[0]
@@ -272,6 +273,17 @@ describe('daemon-accounts: connection + event wiring', () => {
     testCacheDb = new Database(':memory:')
     initCacheSchema(testCacheDb)
     initSyncSchema(testCacheDb)
+    takePartIn(
+      testCacheDb,
+      -222,
+      -4001,
+      -4242,
+      -5151,
+      -1000000000333,
+      -1000000001000,
+      -1000000002000,
+      -1001234567890,
+    )
 
     nextGetMe = { id: 555, firstName: 'Test', lastName: 'User' }
     startError = null
@@ -530,6 +542,17 @@ describe('daemon-accounts: connection + event wiring', () => {
     const historyDb = new Database(':memory:')
     initCacheSchema(historyDb)
     initSyncSchema(historyDb)
+    takePartIn(
+      historyDb,
+      -222,
+      -4001,
+      -4242,
+      -5151,
+      -1000000000333,
+      -1000000001000,
+      -1000000002000,
+      -1001234567890,
+    )
 
     const senders = messages.map((raw) => {
       const msg = new mtcute.Message(raw, peers)

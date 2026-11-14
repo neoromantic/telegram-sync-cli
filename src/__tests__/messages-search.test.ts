@@ -13,6 +13,7 @@ import {
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema, isContentlessSearch } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { takePartIn } from './helpers/participation'
 
 describe('MessagesSearch', () => {
   let db: Database
@@ -24,6 +25,7 @@ describe('MessagesSearch', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
+    takePartIn(db, -200, -300, -1001234567890)
     messagesCache = createMessagesCache(db)
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
@@ -401,6 +403,7 @@ describe('MessagesSearch on a contentless and a regular index', () => {
     const db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db, { contentlessSearch })
+    takePartIn(db, -200, -300, -1001234567890)
     const now = 1_760_000_000_000
     const users = createUsersCache(db)
     const chats = createChatsCache(db)
@@ -560,6 +563,7 @@ describe('MessagesSearch on a contentless and a regular index', () => {
     const db = buildCache(false)
     // A newer SQLite drops the full-content table and builds a contentless one
     initSyncSchema(db, { contentlessSearch: true })
+    takePartIn(db, -200, -300, -1001234567890)
     expect(isContentlessSearch(db)).toBe(true)
 
     const rows = db

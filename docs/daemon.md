@@ -117,7 +117,9 @@ runs only on that account's client, with that account's access hashes and rate l
 
 Real-time handlers update `messages_cache`, `chat_sync_state` and, for contacts,
 `users_cache` in the receiving account's cache:
-- New message → insert/update message row
+- New message → insert/update message row; in a group the account doesn't take part in (no
+  own ordinary message in the last 90 days), only the chat and its sync state are updated
+  ([sync-strategy.md](sync-strategy.md#group-participation))
 - Edit message → update text/edit_date
 - Delete message → mark `is_deleted = 1` (without a chat: the one private chat or basic group
   with that ID; see [real-time.md](real-time.md#deletes))
@@ -139,6 +141,10 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
 - A first page (`initial_load`) for chats without a forward cursor
 - Large groups and channels only when turned on with `tg chats sync`; the daemon picks up
   the change at its next refresh
+- Groups only while the account takes part in them, in any mode: after each dialog pass one
+  `check_group_participation` job per group searches for the account's newest own message of
+  the last 90 days, in the catch-up lane after the chats' own catch-up
+  ([sync-strategy.md](sync-strategy.md#group-participation))
 - Backward history for older messages
 - Three lanes (catch-up, first pages, history) that take turns, so history makes progress
   next to catch-up; inside a lane, small chats go first. Sender fetches

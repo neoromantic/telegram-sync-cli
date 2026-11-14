@@ -10,6 +10,7 @@ import type { MessagesCache } from '../db/messages-cache'
 import { createSenderLookups } from '../db/sender-lookups'
 import type { SyncJobsService } from '../db/sync-jobs'
 import {
+  CHAT_INDEPENDENT_JOB_TYPES,
   type ChatSyncStateRow,
   isHistoryAllowed,
   type SyncJobRow,
@@ -93,7 +94,9 @@ export interface SyncSchedulerOptions {
  * example catch-up after a restart) can't starve the others.
  */
 export const SYNC_LANES = {
-  catchup: [SyncJobType.ForwardCatchup],
+  // A participation check is one search per group, at the lowest priority,
+  // so the chats' own catch-up goes first
+  catchup: [SyncJobType.ForwardCatchup, SyncJobType.CheckGroupParticipation],
   // A refetch (#130) is one small request per chat, at the lowest priority
   firstPage: [SyncJobType.InitialLoad, SyncJobType.RefetchMessages],
   history: [SyncJobType.BackwardHistory, SyncJobType.FullSync],
@@ -135,9 +138,11 @@ class SyncSchedulerImpl implements SyncScheduler {
   /** When it last looked for missing senders; in memory, so a start looks */
   private sendersScannedAt: number | null = null
   private readonly senderLookups
+  private readonly participation
 
   constructor(private readonly options: SyncSchedulerOptions) {
     this.senderLookups = createSenderLookups(options.db)
+    this.participation = options.messagesCache.participation
   }
 
   private get jobsService() {
@@ -148,10 +153,32 @@ class SyncSchedulerImpl implements SyncScheduler {
     return this.options.chatSyncState
   }
 
-  /** The chat's sync state, if it exists and sync is on */
+  /**
+   * The chat's sync state, if it exists, sync is on and the chat takes new
+   * messages: a group only while the account takes part in it
+   */
   private enabledState(chatId: number): ChatSyncStateRow | null {
     const state = this.chatSyncState.get(chatId)
-    return state?.sync_enabled ? state : null
+    if (!state?.sync_enabled) return null
+    return this.participation.captures(chatId) ? state : null
+  }
+
+  /**
+   * Delete the pending catch-up, first page and history jobs, retries
+   * included, of the groups the account no longer takes part in
+   */
+  private dropJobsOfPausedGroups(): void {
+    const chats = new Set(
+      this.jobsService
+        .getPendingJobs()
+        .filter((job) => !CHAT_INDEPENDENT_JOB_TYPES.includes(job.job_type))
+        .map((job) => job.chat_id),
+    )
+    for (const chatId of chats) {
+      if (!this.participation.captures(chatId)) {
+        this.jobsService.cancelPendingForChat(chatId)
+      }
+    }
   }
 
   /**
@@ -251,6 +278,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     // account, which gets no older history (#131): its pending history jobs
     // go, its cached messages stay.
     this.jobsService.deletePendingHistoryOfFirstPageOnlyChats()
+    this.dropJobsOfPausedGroups()
 
     // Catch-up only for chats whose newest message is above the cursor or
     // unknown. Live updates don't move the cursor or the top, so a chat

@@ -934,6 +934,53 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
+    group_participation: {
+      description:
+        'The newest own message known in each group (basic group or supergroup). A group adds messages to messages_cache only while it is under 90 days old; reading a group does not count. Filled from own messages as they are written and from check_group_participation searches after each dialog pass.',
+      primaryKey: 'chat_id',
+      columns: {
+        chat_id: {
+          description: 'Marked peer ID of the group, as in messages_cache',
+          nullable: false,
+        },
+        last_own_date: {
+          description:
+            'Date of the newest own ordinary message known (not a service message, not one sent as a channel or anonymous admin), in Unix seconds. Never lowered',
+          semanticType: 'timestamp_sec',
+          nullable: true,
+        },
+        initialized_at: {
+          description:
+            "When the first participation check answered, or a fresh own message was seen, in Unix seconds. NULL: the group's state is unknown and it takes no new messages",
+          semanticType: 'timestamp_sec',
+          nullable: true,
+        },
+      },
+    },
+
+    group_capture_gaps: {
+      description:
+        'Periods a group was known to be paused: from the day its newest own message turned 90 days old (or the first check that found none) to the next own message. Messages dated inside one are never added to messages_cache, so catch-up and history after a return skip them.',
+      primaryKey: ['chat_id', 'start_date'],
+      columns: {
+        chat_id: {
+          description: 'Marked peer ID of the group, as in messages_cache',
+          nullable: false,
+        },
+        start_date: {
+          description: 'Start of the pause (inclusive), in Unix seconds',
+          semanticType: 'timestamp_sec',
+          nullable: false,
+        },
+        end_date: {
+          description:
+            'End of the pause (exclusive): the date of the own message that ended it, in Unix seconds',
+          semanticType: 'timestamp_sec',
+          nullable: false,
+        },
+      },
+    },
+
     sender_lookups: {
       description:
         'Users with cached messages and no users_cache row (#143), each with one recent message of theirs: a fetch_senders job asks Telegram for up to 100 of those messages of one chat, and the reply caches their senders. Listed by the daemon on start and once a day; a row goes once its sender is cached.',
@@ -991,13 +1038,14 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
             'full_sync',
             'refetch_messages',
             'fetch_senders',
+            'check_group_participation',
           ],
           semanticType: 'enum',
           nullable: false,
         },
         priority: {
           description:
-            "Priority inside the job's lane (lower runs first): the chat's sync tier, 0 for the first page of a chat turned on with tg chats sync, 4 for refetch_messages and fetch_senders",
+            "Priority inside the job's lane (lower runs first): the chat's sync tier, 0 for the first page of a chat turned on with tg chats sync, 4 for refetch_messages, fetch_senders and check_group_participation",
           defaultValue: 3,
         },
         status: {

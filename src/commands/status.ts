@@ -30,6 +30,7 @@ import {
   type DaemonInfo,
   summarizeDaemonStatus,
 } from '../db/daemon-status'
+import { capturesSql } from '../db/group-participation'
 import {
   emptyHistoryProgress,
   type HistoryProgress,
@@ -395,7 +396,7 @@ function readOpenAccountStatus(
     .query(
       `SELECT chat_id, chat_type, synced_messages, history_complete, forward_cursor, backward_cursor, sync_priority
        FROM chat_sync_state
-       WHERE sync_enabled = 1
+       WHERE sync_enabled = 1 AND ${capturesSql('chat_sync_state')}
        ORDER BY history_complete ASC, synced_messages DESC
        LIMIT 5`,
     )
@@ -416,15 +417,15 @@ function readOpenAccountStatus(
     ),
     chats_enabled: count(
       cacheDb,
-      'SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1',
+      `SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND ${capturesSql('chat_sync_state')}`,
     ),
     chats_history_complete: count(
       cacheDb,
-      `SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND ${historyDoneSql('chat_sync_state')}`,
+      `SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND ${capturesSql('chat_sync_state')} AND ${historyDoneSql('chat_sync_state')}`,
     ),
     chats_history_pending: count(
       cacheDb,
-      `SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND NOT ${historyDoneSql('chat_sync_state')}`,
+      `SELECT COUNT(*) as count FROM chat_sync_state WHERE sync_enabled = 1 AND ${capturesSql('chat_sync_state')} AND NOT ${historyDoneSql('chat_sync_state')}`,
     ),
     chats_cached: count(cacheDb, 'SELECT COUNT(*) as count FROM chats_cache'),
     messages_tracked: count(

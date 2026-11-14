@@ -13,6 +13,7 @@ import {
 import { createMessagesCache } from '../db/messages-cache'
 import { createTestCacheDatabase } from '../db/schema'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { takePartIn } from './helpers/participation'
 
 const NOW = 1_760_000_000_000
 const MINUTE = 60_000
@@ -22,6 +23,7 @@ let db: Database
 beforeEach(() => {
   db = createTestCacheDatabase().db
   initSyncSchema(db)
+  takePartIn(db, -4242)
 })
 
 afterEach(() => {

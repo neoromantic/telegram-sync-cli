@@ -1,10 +1,11 @@
 import type { Database } from 'bun:sqlite'
 import { defineCommand } from 'citty'
 import {
+  chatSyncView,
   createChatSyncStateService,
-  syncReason,
 } from '../../db/chat-sync-state'
 import { type CachedChat, createChatsCache } from '../../db/chats-cache'
+import { createGroupParticipation } from '../../db/group-participation'
 import { createSyncJobsService } from '../../db/sync-jobs'
 import {
   determineSyncPolicy,
@@ -151,7 +152,7 @@ export const syncChatCommand = defineCommand({
     off: {
       type: 'boolean',
       description:
-        'Stop catch-up and history for the chat (live messages are still cached)',
+        'Stop catch-up and history for the chat (live messages are still cached; in a group, only while you take part in it)',
       default: false,
     },
     auto: {
@@ -217,8 +218,9 @@ export const syncChatCommand = defineCommand({
       title: chat.title,
       username: chat.username,
       mode: state.sync_mode,
-      syncEnabled: state.sync_enabled === 1,
-      syncReason: syncReason(state),
+      // A group takes new messages only while the account takes part in it,
+      // whatever the mode
+      ...chatSyncView(createGroupParticipation(db), chat.peerId, state),
       historyComplete: state.history_complete === 1,
       syncedMessages: state.synced_messages,
       changed,

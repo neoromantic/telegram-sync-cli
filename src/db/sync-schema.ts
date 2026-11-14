@@ -8,6 +8,7 @@
  */
 import type { Database } from 'bun:sqlite'
 import { registerBackgroundMigrations } from './background-migrations'
+import { createGroupParticipationSchema } from './group-participation'
 import { createMessageSearchTextView } from './messages-search'
 import { migratePeerIds } from './peer-id-migration'
 import { configureSearchMerges } from './search-merge'
@@ -700,6 +701,10 @@ export function initSyncSchema(
   // under bare IDs (#18)
   migratePeerIds(db, rebuildMessageSearchIndex)
 
+  // Which groups the account takes part in, and their pauses
+  // (src/db/group-participation.ts)
+  createGroupParticipationSchema(db)
+
   // Rewrites of every row run later, in batches (src/db/background-migrations.ts)
   registerBackgroundMigrations(db)
 }
@@ -820,10 +825,22 @@ export enum SyncJobType {
    * each (#143), at SyncPriority.Background, whether the chat syncs or not
    */
   FetchSenders = 'fetch_senders',
+  /**
+   * Search a group for the newest own message of the last 90 days, after
+   * each dialog pass, at SyncPriority.Background, whether the group syncs
+   * or not (src/db/group-participation.ts)
+   */
+  CheckGroupParticipation = 'check_group_participation',
 }
 
 /** Job types that run whether their chat syncs or not, at their own priority */
-export const CHAT_INDEPENDENT_JOB_TYPES_SQL = `('${SyncJobType.RefetchMessages}', '${SyncJobType.FetchSenders}')`
+export const CHAT_INDEPENDENT_JOB_TYPES: readonly string[] = [
+  SyncJobType.RefetchMessages,
+  SyncJobType.FetchSenders,
+  SyncJobType.CheckGroupParticipation,
+]
+
+export const CHAT_INDEPENDENT_JOB_TYPES_SQL = `(${CHAT_INDEPENDENT_JOB_TYPES.map((type) => `'${type}'`).join(', ')})`
 
 /** Sync job status */
 export enum SyncJobStatus {

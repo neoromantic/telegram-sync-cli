@@ -93,12 +93,17 @@ export function cacheFetchedMessage(
   if (!input) return
   const usersCache = createUsersCache(cacheDb)
   const messagesCache = createMessagesCache(cacheDb)
-  cacheDb.transaction(() => {
-    for (const user of users) {
-      if (user._ === 'user' && !user.min) {
-        usersCache.upsert(apiUserToCacheInput(user))
+  // A group the account doesn't take part in keeps a message it lacks out
+  // of the cache (src/db/group-participation.ts). The write reads before it
+  // writes, so the transaction takes the write lock first.
+  cacheDb
+    .transaction(() => {
+      for (const user of users) {
+        if (user._ === 'user' && !user.min) {
+          usersCache.upsert(apiUserToCacheInput(user))
+        }
       }
-    }
-    messagesCache.upsert(input)
-  })()
+      messagesCache.upsert(input)
+    })
+    .immediate()
 }

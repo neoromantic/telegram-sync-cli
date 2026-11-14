@@ -61,6 +61,9 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Read-only daemon for real-time sync and history backfill that keeps the contact list current;
   catch-up and history for large groups and channels on request (`tg chats sync`); the CLI does
   all mutations (`tg send`)
+- Groups are cached only while you take part: a group adds new messages only if you sent a
+  message there in the last 90 days; what is cached stays
+  ([sync strategy](docs/sync-strategy.md#group-participation))
 - Full Telegram API access through `tg api <method>`
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
 - Chat history with cursor paging (`tg messages list`) and a message in context

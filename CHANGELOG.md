@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A group (basic group or supergroup) adds new messages to the cache only while you take part
+  in it: you sent an ordinary message there in the last 90 days. Reading a group doesn't count,
+  and the rule holds for live updates, the dialog pass, every sync job, `tg messages list` and
+  `get` (with `--fresh` too, which still return Telegram's page) and every `tg chats sync`
+  mode. Messages already cached stay; private chats and channels are unchanged. After each
+  dialog pass the daemon asks Telegram once per group for your newest message of the last 90
+  days, in the sync queue at the lowest priority. Your next message in a group, from any
+  device or with `tg send`, turns it back on; the messages of the pause aren't fetched later.
+  `tg chats list` and `tg chats sync` show such a group with `syncEnabled: false`, the reason
+  `group_participation_required` or `group_participation_unknown` and `lastOwnMessageAt`, and
+  `tg status` leaves it out of the chats with sync on and of the history progress.
+
 ### Fixed
 
 - `tg status` no longer counts a sender whose every cached message is deleted as missing:

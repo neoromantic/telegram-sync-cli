@@ -1,3 +1,4 @@
+import type { Database } from 'bun:sqlite'
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import {
   dialogToCacheInput,
@@ -9,11 +10,15 @@ import {
 } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import type { CatchUpReason } from '../db/daemon-status'
+import { isOwnOrdinaryMessage } from '../db/group-participation'
 import { createMessagesCache, type MessageInput } from '../db/messages-cache'
+import { createSyncJobsService } from '../db/sync-jobs'
 import {
   determineSyncPolicy,
   rawUserPolicy,
   type SyncChatType,
+  SyncJobType,
+  SyncPriority,
 } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { apiUserToCacheInput } from '../utils/telegram-mappers'
@@ -55,6 +60,11 @@ function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
  * newest message, which the dialog list carries anyway: its cache stays
  * current to the last pass at no extra request.
  *
+ * A group's own newest message counts as participation, and every group,
+ * archived ones too, gets a participation check queued after the pass: a
+ * group takes new messages only while the account takes part in it
+ * (src/db/group-participation.ts).
+ *
  * Telegram lists joined communities apart from the dialogs, so the pass
  * caches them with one more request (#58). A community has no messages of
  * its own, so it gets no sync state. A failure of that request, a
@@ -87,6 +97,7 @@ export async function syncAccountDialogs(
   const chatsBatch = [] as ReturnType<typeof dialogToCacheInput>[]
   const usersBatch = [] as ReturnType<typeof apiUserToCacheInput>[]
   const messagesBatch: MessageInput[] = []
+  const groups: number[] = []
   let dialogsCount = 0
   let archivedCount = 0
   let usersCount = 0
@@ -111,10 +122,17 @@ export async function syncAccountDialogs(
     }
   }
 
-  /** Keep the dialog's newest message: the chat gets no catch-up */
-  const keepNewestMessage = (dialog: Dialog, chatId: number) => {
+  const newestMessage = (dialog: Dialog, chatId: number) => {
     const newest = dialog.lastMessage?.raw
-    const input = newest ? parseRawMessage(newest, chatId) : null
+    return newest ? parseRawMessage(newest, chatId) : null
+  }
+
+  /**
+   * Keep the dialog's newest message: the chat gets no catch-up. A group
+   * the account doesn't take part in keeps none (src/db/group-participation.ts).
+   */
+  const keepNewestMessage = (dialog: Dialog, chatId: number) => {
+    const input = newestMessage(dialog, chatId)
     if (!input) return
     messagesBatch.push(input)
     if (messagesBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushMessages()
@@ -134,6 +152,16 @@ export async function syncAccountDialogs(
     // chats_cache and chat_sync_state share the marked peer ID
     const chatId = Number(chatInput.chat_id)
     visited.add(chatId)
+
+    // Every group, archived ones too, gets a participation check after the
+    // pass; its own newest message counts at once
+    if (chatInput.type === 'group' || chatInput.type === 'supergroup') {
+      groups.push(chatId)
+      const newest = newestMessage(dialog, chatId)
+      if (newest && isOwnOrdinaryMessage(newest)) {
+        messagesCache.participation.observeOwnMessage(chatId, newest.date)
+      }
+    }
 
     const existing = chatSyncState.get(chatId)
     if (dialog.isArchived) {
@@ -247,6 +275,8 @@ export async function syncAccountDialogs(
     }
   }
 
+  if (!stopped) queueParticipationChecks(cacheDb, groups)
+
   if (complete) {
     const elapsedMs = Date.now() - start
     info(
@@ -259,6 +289,30 @@ export async function syncAccountDialogs(
   }
 
   return { visited, complete, stopped }
+}
+
+/**
+ * One participation check per group the pass listed, unless one is queued
+ * (src/db/group-participation.ts). They run in the catch-up lane after the
+ * chats' own catch-up, at the account's pace; a group that syncs nothing
+ * needs them too, so a missed own message turns it back on.
+ */
+function queueParticipationChecks(cacheDb: Database, groups: number[]): void {
+  const jobs = createSyncJobsService(cacheDb)
+  cacheDb.transaction(() => {
+    for (const chatId of groups) {
+      if (
+        jobs.hasActiveJobForChat(chatId, SyncJobType.CheckGroupParticipation)
+      ) {
+        continue
+      }
+      jobs.create({
+        chat_id: chatId,
+        job_type: SyncJobType.CheckGroupParticipation,
+        priority: SyncPriority.Background,
+      })
+    }
+  })()
 }
 
 /**

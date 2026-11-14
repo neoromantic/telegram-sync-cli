@@ -40,6 +40,7 @@ import {
 } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { takePartIn } from './helpers/participation'
 
 /** A supergroup whose access hash is cached */
 const GROUP = -1_000_000_003_003
@@ -145,6 +146,7 @@ beforeEach(() => {
   setSystemTime(new Date(START))
   db = createTestCacheDatabase().db
   initSyncSchema(db)
+  takePartIn(db, GROUP, BASIC, NO_HASH)
   requests = []
   ctx = {
     client: {} as TelegramClient,
