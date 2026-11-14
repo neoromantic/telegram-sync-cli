@@ -119,8 +119,9 @@ A group (basic group or supergroup) adds new messages to the cache only while th
 part in it: it sent an ordinary message there in the last 90 days. Reading a group doesn't
 count. The rule holds for every writer (live updates, the dialog pass, every sync job and the
 CLI) and whatever the group's size or `tg chats sync` mode; `on` still asks for full history,
-but only while the account takes part. Private chats and channels don't fall under it. Messages
-already cached stay, and edits, deletes and repairs of them still apply. Implemented in
+but only while the account takes part. Private chats and channels don't fall under it; a
+`-100…` chat of unknown type counts as a group, so resolving a `@username` caches the chat's type
+first. Messages already cached stay, and edits, deletes and repairs of them still apply. Implemented in
 `src/db/group-participation.ts`; every write goes through `MessagesCache`, which applies it.
 
 - **What counts**: an outgoing message from the account's own user: text, a file, a voice

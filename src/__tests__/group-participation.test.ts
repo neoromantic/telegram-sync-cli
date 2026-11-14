@@ -18,7 +18,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { RpcCallOptions, TelegramClient, tl } from '@mtcute/bun'
 
-import { fetchHistoryPage } from '../commands/messages/history'
+import {
+  fetchHistoryPage,
+  listHistory,
+  resolveHistoryChat,
+} from '../commands/messages/history'
+import { createDmLookup } from '../commands/send/peer-resolver'
 import { cacheSentMessage } from '../commands/send/sent-message-cache'
 import { createUpdateHandlers } from '../daemon/handlers'
 import { createSyncScheduler } from '../daemon/scheduler'
@@ -793,6 +798,72 @@ describe('the CLI under the participation rule', () => {
     })
     expect(count(db, 'SELECT COUNT(*) AS n FROM messages_cache')).toBe(0)
     expect(count(db, 'SELECT COUNT(*) AS n FROM history_ranges')).toBe(0)
+  })
+
+  it('caches the first page of a channel resolved by username, but not of a supergroup', async () => {
+    // Neither chat is cached yet: resolving the username gives its type
+    const read = async (
+      username: string,
+      channelId: number,
+      megagroup: boolean,
+    ) => {
+      const channel = {
+        _: 'channel',
+        id: channelId,
+        broadcast: !megagroup,
+        megagroup,
+        title: `Made-up ${username}`,
+        username,
+        accessHash: toLong(777),
+        photo: { _: 'chatPhotoEmpty' },
+        date: NOW - DAY,
+      }
+      const peer = { _: 'peerChannel', channelId }
+      const client = {
+        call: async (request: { _: string }) =>
+          request._ === 'contacts.resolveUsername'
+            ? { _: 'contacts.resolvedPeer', peer, chats: [channel], users: [] }
+            : {
+                _: 'messages.channelMessages',
+                messages: [
+                  {
+                    _: 'message',
+                    id: 1,
+                    date: NOW - 10,
+                    peerId: peer,
+                    fromId: peer,
+                    message: 'made-up post',
+                  },
+                ],
+                chats: [channel],
+                users: [],
+              },
+      } as unknown as TelegramClient
+      const chat = await resolveHistoryChat(client, `@${username}`, {
+        usersCache: createUsersCache(db),
+        chatsCache: createChatsCache(db),
+        dms: createDmLookup(db),
+        accounts: {} as never,
+        accountId: 1,
+      })
+      const { items } = await listHistory({
+        cacheDb: db,
+        client,
+        chat,
+        window: { limit: 20 },
+        includeDeleted: false,
+        fresh: true,
+      })
+      expect(items.map((item) => item.messageId)).toEqual([1])
+      return db
+        .query('SELECT message_id FROM messages_cache WHERE chat_id = ?')
+        .all(chat.chatId)
+    }
+
+    expect(await read('made_up_broadcast', 9_100_000_004, false)).toEqual([
+      { message_id: 1 },
+    ])
+    expect(await read('made_up_supergroup', 9_100_000_005, true)).toEqual([])
   })
 
   it('caches a message tg send sent, and the group takes messages again', async () => {
