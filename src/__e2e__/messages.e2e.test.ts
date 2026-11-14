@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
 import { LEGACY } from '../__tests__/helpers/legacy-cache'
 import { videoMessage } from '../__tests__/helpers/media-messages'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
 import { photoMessage } from '../__tests__/helpers/photo-message'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
@@ -376,6 +377,8 @@ function seedCacheData(db: Database): void {
       fakeDialog({ kind: 'user', id: 10, title: 'Alice Able' }),
     ].map(dialogToCacheInput),
   )
+
+  takePartIn(db, -4242, -1001234567890, -1001555000001, -1002222222222)
 
   createMessagesCache(db).upsertBatch([
     syncedMessage(TEAM_CHAT_PEER, 1, 'hello team', ALICE_PEER),
@@ -926,6 +929,7 @@ describe('E2E: Message attachments', () => {
     const [textInput, photoInput, videoInput] = [text, photo, video].map(
       (raw) => parseRawMessage(raw, LAKE_CLUB_ID)!,
     )
+    takePartIn(db, -4242, -1001234567890, -1001555000001, -1002222222222)
     createMessagesCache(db).upsertBatch([
       textInput!,
       photoInput!,
@@ -1009,6 +1013,7 @@ describe('E2E: Message attachments', () => {
 function seedHistory(db: Database): void {
   const now = Date.now()
   const usersCache = createUsersCache(db)
+  takePartIn(db, -4242, -1001234567890, -1001555000001, -1002222222222)
   const messagesCache = createMessagesCache(db)
 
   usersCache.upsert({
@@ -1108,6 +1113,7 @@ function seedHistory(db: Database): void {
 
 /** The second account's own cache: a page of its Saved Messages */
 function seedSecondAccount(db: Database): void {
+  takePartIn(db, -4242, -1001234567890, -1001555000001, -1002222222222)
   createMessagesCache(db).upsertBatch([
     {
       chat_id: SECOND_SELF_ID,

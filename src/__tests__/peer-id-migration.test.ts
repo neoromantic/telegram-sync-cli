@@ -32,6 +32,7 @@ import {
   rawMessage,
   seedLegacyCache,
 } from './helpers/legacy-cache'
+import { takePartIn } from './helpers/participation'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 import { photoMessage } from './helpers/photo-message'
 
@@ -92,6 +93,22 @@ describe('peer ID migration', () => {
   beforeEach(() => {
     db = new Database(':memory:')
     initLegacySchema(db)
+    takePartIn(
+      db,
+      -222,
+      -4001,
+      -4003,
+      -4004,
+      -4242,
+      -1000000000333,
+      -1000000004002,
+      -1000000004005,
+      -1001111111111,
+      -1001234567890,
+      -1002222222222,
+      -1003333333333,
+      -1005555555555,
+    )
   })
 
   afterEach(() => {

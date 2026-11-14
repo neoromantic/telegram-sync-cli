@@ -4,11 +4,15 @@ import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
 import {
   type ChatSyncStateService,
+  type ChatSyncView,
+  chatSyncView,
   createChatSyncStateService,
-  type SyncReason,
-  syncReason,
 } from '../../db/chat-sync-state'
 import { type CachedChatInput, createChatsCache } from '../../db/chats-cache'
+import {
+  createGroupParticipation,
+  type GroupParticipation,
+} from '../../db/group-participation'
 import type { ChatType } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
@@ -86,24 +90,18 @@ export async function fetchChatsFromApi(
   return chatInputs
 }
 
-export interface ChatListItem extends ChatItem {
-  /** Whether the daemon syncs the chat's messages */
-  syncEnabled: boolean
-  /** Why it syncs or not; null for a chat without sync state (#131) */
-  syncReason: SyncReason | null
-}
+export interface ChatListItem extends ChatItem, ChatSyncView {}
 
-/** A chat with its sync state, one primary key lookup per listed chat */
+/** A chat with its sync state, a few primary key lookups per listed chat */
 function withSync(
   chatSyncState: ChatSyncStateService,
+  participation: GroupParticipation,
   chat: Parameters<typeof chatRowToItem>[0],
 ): ChatListItem {
   const item = chatRowToItem(chat)
-  const state = chatSyncState.get(item.id)
   return {
     ...item,
-    syncEnabled: state?.sync_enabled === 1,
-    syncReason: state ? syncReason(state) : null,
+    ...chatSyncView(participation, item.id, chatSyncState.get(item.id)),
   }
 }
 
@@ -156,8 +154,9 @@ export const listChatsCommand = defineCommand({
     try {
       const chatsCache = createChatsCache(cacheDb)
       const chatSyncState = createChatSyncStateService(cacheDb)
+      const participation = createGroupParticipation(cacheDb)
       const toItem = (chat: Parameters<typeof chatRowToItem>[0]) =>
-        withSync(chatSyncState, chat)
+        withSync(chatSyncState, participation, chat)
       const cacheConfig = await getResolvedCacheConfig()
 
       if (!fresh) {

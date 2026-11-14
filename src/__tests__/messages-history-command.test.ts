@@ -62,6 +62,7 @@ import {
   range,
   rawMessage,
 } from './helpers/fake-history'
+import { takePartIn } from './helpers/participation'
 import { photoMessage } from './helpers/photo-message'
 
 const SELF_ID = 999
@@ -89,6 +90,7 @@ function createCacheDb(): Database {
   const db = new Database(':memory:')
   initCacheSchema(db)
   initSyncSchema(db)
+  takePartIn(db, TEAM_CHAT_ID, BOOK_CLUB_ID)
   return db
 }
 
@@ -569,7 +571,7 @@ describe('cacheHistoryResponse', () => {
       fromId: { _: 'peerUser', userId: ALICE_ID },
     }
 
-    const ids = cacheHistoryResponse(
+    const rows = cacheHistoryResponse(
       cacheDb,
       TEAM_CHAT_ID,
       [message, { _: 'messageEmpty', id: 8 }],
@@ -577,7 +579,7 @@ describe('cacheHistoryResponse', () => {
       {},
     )
 
-    expect(ids).toEqual([7])
+    expect(rows.map((row) => row.message_id)).toEqual([7])
     expect(storedRanges(cacheDb)).toEqual([{ low: 7, high: 8 }])
     const usersCache = createUsersCache(cacheDb)
     expect(usersCache.getById(String(ALICE_ID))).toMatchObject({

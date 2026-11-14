@@ -234,15 +234,18 @@ async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
   )
   ensureChatCached(deps.chatsCache, data.chatId, data.rawChat)
 
-  const input = liveMessageInput(deps, data)
-  deps.messagesCache.upsert(input)
+  // A group the account doesn't take part in keeps its chat and sync state
+  // up to date, but not the message (src/db/group-participation.ts); an
+  // own message counts as participation before it is written
+  const { inserted } = deps.messagesCache.upsert(liveMessageInput(deps, data))
+  if (inserted === 0) return
 
   // The forward cursor means "every message up to here is cached", so live
   // updates leave it to the sync jobs: messages that arrived while the
   // daemon was stopped may sit between the cursor and this one.
-  deps.chatSyncState.incrementSyncedMessages(data.chatId, 1)
+  deps.chatSyncState.incrementSyncedMessages(data.chatId, inserted)
   deps.chatSyncState.updateLastSync(data.chatId, 'forward')
-  deps.onMessagesSynced?.(1)
+  deps.onMessagesSynced?.(inserted)
 }
 
 async function handleEditMessageImpl(deps: HandlerDeps, data: EditMessageData) {
@@ -306,12 +309,16 @@ function processChatBatch(
   ensureSyncState(deps.chatSyncState, chatId, chatType, memberCount)
 
   const inputs = chatMessages.map(toMessageInput)
-  deps.messagesCache.upsertBatch(inputs)
+  const { inserted } = deps.messagesCache.upsertBatch(inputs)
 
-  const messageIds = chatMessages.map((m) => m.messageId)
-  updateCursorsForBatch(deps.chatSyncState, chatId, messageIds)
-  deps.chatSyncState.incrementSyncedMessages(chatId, chatMessages.length)
-  deps.onMessagesSynced?.(chatMessages.length)
+  // A group that takes no new messages keeps its cursors, so its pages are
+  // read again once it does
+  if (deps.messagesCache.participation.captures(chatId)) {
+    const messageIds = chatMessages.map((m) => m.messageId)
+    updateCursorsForBatch(deps.chatSyncState, chatId, messageIds)
+  }
+  deps.chatSyncState.incrementSyncedMessages(chatId, inserted)
+  deps.onMessagesSynced?.(inserted)
 }
 
 async function handleBatchMessagesImpl(

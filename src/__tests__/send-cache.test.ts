@@ -24,6 +24,7 @@ import { toLong } from '../utils/long'
 import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { pdfDocumentMessage } from './helpers/media-messages'
+import { takePartIn } from './helpers/participation'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 const SELF_ID = 5550001
@@ -332,6 +333,7 @@ describe('cacheSentMessage', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
+    takePartIn(db, -100, -4440001, -1000003330001)
   })
 
   it('upserts the message with fetched_at and makes it searchable', async () => {

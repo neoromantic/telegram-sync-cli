@@ -1,11 +1,16 @@
 import type { tl } from '@mtcute/bun'
-import type { MessageInput } from '../db/messages-cache'
+import {
+  isOwnOrdinaryMessage,
+  nowSeconds,
+  PARTICIPATION_WINDOW_SECONDS,
+} from '../db/group-participation'
 import {
   type SyncJobRow,
   SyncJobStatus,
   SyncJobType,
   SyncPriority,
 } from '../db/sync-schema'
+import { toLong } from '../utils/long'
 import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import {
   canMakeApiCall,
@@ -29,15 +34,13 @@ import type {
 } from './sync-worker-real-types'
 import { processJobWithHandlers } from './sync-worker-utils'
 
-function countUncached(
-  ctx: RealSyncWorkerContext,
-  chatId: number,
-  inputs: MessageInput[],
-): number {
-  return inputs.filter(
-    (input) => ctx.messagesCache.get(chatId, input.message_id) === null,
-  ).length
-}
+/**
+ * A group stopped taking new messages while its page was in flight
+ * (src/db/group-participation.ts). Its cached messages on the page were
+ * updated; the job ends without moving a cursor and without a retry, so
+ * the page is read again once the group takes messages.
+ */
+const PAUSED: RealJobResult = { success: true, messagesFetched: 0 }
 
 /**
  * Fetch one history page for a job, and cache what it says besides its
@@ -119,6 +122,7 @@ export async function processForwardCatchupReal(
       forwardPageRequest(cursor, ctx.config.batchSize),
     )
 
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
     // Guard against a server that returns messages at or below the cursor.
     const above = messages.filter((message) => rawMessageId(message) > floor)
 
@@ -143,18 +147,21 @@ export async function processForwardCatchupReal(
     const { inputs } = createMessageInputs(above, chatId, floor, floor)
 
     // Live updates already counted the messages they cached.
-    const newCount = countUncached(ctx, chatId, inputs)
+    const write = ctx.messagesCache.upsertBatch(inputs)
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
+    const newCount = write.inserted
 
-    if (inputs.length > 0) {
-      ctx.messagesCache.upsertBatch(inputs)
+    // The cursor moves past the messages of a group's pauses, but a page
+    // with any of them skipped records no range: the cache lacks them
+    if (write.skipped === 0) {
+      ctx.historyRanges.recordPage(
+        chatId,
+        above.map(rawMessageId),
+        cursor !== null
+          ? { after: cursor }
+          : { reachedStart: messages.length < ctx.config.batchSize },
+      )
     }
-    ctx.historyRanges.recordPage(
-      chatId,
-      above.map(rawMessageId),
-      cursor !== null
-        ? { after: cursor }
-        : { reachedStart: messages.length < ctx.config.batchSize },
-    )
 
     const hasMore = cursor !== null && above.length >= ctx.config.batchSize
     ctx.chatSyncState.recordCatchupPage(chatId, {
@@ -246,6 +253,7 @@ export async function processBackwardHistoryReal(
       reachedStart: messages.length < ctx.config.batchSize,
     }
 
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
     if (messages.length === 0) {
       ctx.historyRanges.recordPage(chatId, [], bounds)
       ctx.chatSyncState.markHistoryComplete(chatId)
@@ -258,12 +266,13 @@ export async function processBackwardHistoryReal(
       const { inputs } = createMessageInputs(messages, chatId, minId, minId)
 
       // The first page, live updates and pages the CLI cached may hold some
-      const newCount = countUncached(ctx, chatId, inputs)
+      const write = ctx.messagesCache.upsertBatch(inputs)
+      if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
+      const newCount = write.inserted
 
-      if (inputs.length > 0) {
-        ctx.messagesCache.upsertBatch(inputs)
+      if (write.skipped === 0) {
+        ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), bounds)
       }
-      ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), bounds)
 
       ctx.chatSyncState.updateCursors(chatId, { backward_cursor: minId })
       ctx.chatSyncState.incrementSyncedMessages(chatId, newCount)
@@ -346,6 +355,7 @@ export async function processInitialLoadReal(
     // Empty messages hold no data, but they still count for the cursors.
     const ids = messages.map(rawMessageId).filter((id) => id > 0)
 
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
     if (ids.length === 0) {
       ctx.chatSyncState.recordFirstPage(chatId, {
         forward_cursor: 0,
@@ -367,16 +377,16 @@ export async function processInitialLoadReal(
     const { inputs } = createMessageInputs(messages, chatId, minId, maxId)
 
     // Live updates already counted the messages they cached.
-    const newCount = countUncached(ctx, chatId, inputs)
-
-    if (inputs.length > 0) {
-      ctx.messagesCache.upsertBatch(inputs)
-    }
+    const write = ctx.messagesCache.upsertBatch(inputs)
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
+    const newCount = write.inserted
 
     const historyComplete = minId <= 1 || messages.length < ctx.config.batchSize
-    ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), {
-      reachedStart: historyComplete,
-    })
+    if (write.skipped === 0) {
+      ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), {
+        reachedStart: historyComplete,
+      })
+    }
 
     ctx.chatSyncState.recordFirstPage(chatId, {
       forward_cursor: maxId,
@@ -469,12 +479,13 @@ export async function processRefetchMessagesReal(
       )
       .map((message) => parseRawMessage(message, chatId))
       .filter((input) => input !== null)
-    if (inputs.length > 0) ctx.messagesCache.upsertBatch(inputs)
+    // Only rows cached already: a refetch repairs them and adds none
+    const { accepted } = ctx.messagesCache.upsertBatch(inputs)
 
     const last = Math.max(...ids)
     ctx.jobsService.updateProgress(job.id, {
       cursor_start: last,
-      messages_fetched: inputs.length,
+      messages_fetched: accepted.length,
     })
     const more = ctx.messagesCache.listEmptyRawJsonIds(chatId, last, 1)
     const queued = ctx.jobsService
@@ -492,7 +503,7 @@ export async function processRefetchMessagesReal(
         cursor_start: last,
       })
     }
-    return { success: true, messagesFetched: inputs.length }
+    return { success: true, messagesFetched: accepted.length }
   } catch (err) {
     return resolveJobError(ctx, err)
   }
@@ -551,6 +562,77 @@ export async function processFetchSendersReal(
   }
 }
 
+/** Search results a participation check asks for */
+const PARTICIPATION_SEARCH_LIMIT = 10
+
+/**
+ * Search the group for the account's own messages of the last 90 days and
+ * record the newest ordinary one, or that there is none
+ * (src/db/group-participation.ts). Only the date is kept: the messages go
+ * through no write here. An error records nothing, so the state stays as
+ * it was; the job is retried like any other.
+ */
+export async function processCheckGroupParticipationReal(
+  ctx: RealSyncWorkerContext,
+  job: SyncJobRow,
+): Promise<RealJobResult> {
+  const chatId = job.chat_id
+  if (!canMakeApiCall(ctx)) {
+    return {
+      success: false,
+      messagesFetched: 0,
+      rateLimited: true,
+      waitSeconds: getWaitTime(ctx),
+    }
+  }
+
+  const inputPeer = getInputPeer(ctx, chatId)
+  if (!inputPeer) {
+    return {
+      success: false,
+      messagesFetched: 0,
+      error: `Could not build InputPeer for chat ${chatId}`,
+      permanent: true,
+    }
+  }
+
+  try {
+    ctx.signal?.throwIfAborted()
+    const since = nowSeconds() - PARTICIPATION_WINDOW_SECONDS
+    const request: tl.messages.RawSearchRequest = {
+      _: 'messages.search',
+      peer: inputPeer,
+      q: '',
+      fromId: { _: 'inputPeerSelf' },
+      filter: { _: 'inputMessagesFilterEmpty' },
+      minDate: since,
+      maxDate: 0,
+      offsetId: 0,
+      addOffset: 0,
+      // A few, in case the newest is a service message
+      limit: PARTICIPATION_SEARCH_LIMIT,
+      maxId: 0,
+      minId: 0,
+      hash: toLong(0),
+    }
+    const result = ctx.signal
+      ? await ctx.client.call(request, { abortSignal: ctx.signal })
+      : await ctx.client.call(request)
+    const found = ('messages' in result ? result.messages : [])
+      .map((message) => parseRawMessage(message, chatId))
+      .filter(
+        (input) =>
+          input !== null && isOwnOrdinaryMessage(input) && input.date >= since,
+      )
+      .map((input) => input!.date)
+    const newest = found.length > 0 ? Math.max(...found) : null
+    ctx.messagesCache.participation.recordCheck(chatId, newest)
+    return { success: true, messagesFetched: 0 }
+  } catch (err) {
+    return resolveJobError(ctx, err)
+  }
+}
+
 async function processFullSyncReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
@@ -574,13 +656,29 @@ const JOB_HANDLERS: Partial<
   [SyncJobType.FullSync]: processFullSyncReal,
   [SyncJobType.RefetchMessages]: processRefetchMessagesReal,
   [SyncJobType.FetchSenders]: processFetchSendersReal,
+  [SyncJobType.CheckGroupParticipation]: processCheckGroupParticipationReal,
 }
+
+/** The jobs that add a chat's messages: a group runs them only while captured */
+const CAPTURE_JOB_HANDLERS = new Set<string>([
+  SyncJobType.ForwardCatchup,
+  SyncJobType.BackwardHistory,
+  SyncJobType.InitialLoad,
+  SyncJobType.FullSync,
+])
 
 export async function processJobReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
 ): Promise<RealJobResult> {
-  return processJobWithHandlers(ctx, job, JOB_HANDLERS, (jobType) => ({
+  // A group the account stopped taking part in after the job was queued:
+  // the job ends without a request
+  const handlers =
+    CAPTURE_JOB_HANDLERS.has(job.job_type) &&
+    !ctx.messagesCache.participation.captures(job.chat_id)
+      ? { [job.job_type]: async () => PAUSED }
+      : JOB_HANDLERS
+  return processJobWithHandlers(ctx, job, handlers, (jobType) => ({
     success: false,
     messagesFetched: 0,
     error: `Unknown job type: ${jobType}`,

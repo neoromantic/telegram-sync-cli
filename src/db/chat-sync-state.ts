@@ -3,6 +3,7 @@
  * Manages per-chat synchronization state with dual cursors
  */
 import type { Database } from 'bun:sqlite'
+import type { GroupParticipation } from './group-participation'
 import {
   ChatSyncStateRow,
   determineSyncPolicy,
@@ -86,9 +87,52 @@ export interface ResetSyncStateOptions {
 
 /**
  * Why a chat syncs or not, as `tg chats list` shows it: the user's choice
- * from `tg chats sync`, else the policy's reason (#131)
+ * from `tg chats sync`, else the policy's reason (#131). A group the account
+ * doesn't take part in, or whose participation isn't checked yet, takes no
+ * new messages at all, whatever the mode (src/db/group-participation.ts).
  */
-export type SyncReason = SyncPolicyReason | 'on_by_hand' | 'off_by_hand'
+export type SyncReason =
+  | SyncPolicyReason
+  | 'on_by_hand'
+  | 'off_by_hand'
+  | 'group_participation_required'
+  | 'group_participation_unknown'
+
+/** A chat's sync as `tg chats list` and `tg chats sync` show it */
+export interface ChatSyncView {
+  /** The daemon syncs the chat: its mode allows it and it takes new messages */
+  syncEnabled: boolean
+  /** Why it syncs or not; null for a chat without sync state that takes messages */
+  syncReason: SyncReason | null
+  /** A group's newest own message known, in ms since the epoch; else null */
+  lastOwnMessageAt: number | null
+}
+
+export function chatSyncView(
+  participation: GroupParticipation,
+  chatId: number,
+  state: ChatSyncStateRow | null,
+): ChatSyncView {
+  const group = participation.isGroup(chatId)
+  const last = group ? participation.lastOwnDate(chatId) : null
+  const lastOwnMessageAt = last === null ? null : last * 1000
+  const status = group ? participation.status(chatId) : 'active'
+  if (status !== 'active') {
+    return {
+      syncEnabled: false,
+      syncReason:
+        status === 'unknown'
+          ? 'group_participation_unknown'
+          : 'group_participation_required',
+      lastOwnMessageAt,
+    }
+  }
+  return {
+    syncEnabled: state?.sync_enabled === 1,
+    syncReason: state ? syncReason(state) : null,
+    lastOwnMessageAt,
+  }
+}
 
 export function syncReason(
   state: Pick<

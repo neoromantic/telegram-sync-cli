@@ -19,6 +19,7 @@ import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { takePartIn } from './helpers/participation'
 
 describe('MessagesCache', () => {
   let db: Database
@@ -28,6 +29,7 @@ describe('MessagesCache', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
+    takePartIn(db, -5151, -1001234567890, -1009876543210)
     cache = createMessagesCache(db)
   })
 
@@ -773,6 +775,7 @@ describe('MessagesCache writes and the search index', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
+    takePartIn(db, -5151, -1001234567890, -1009876543210)
     cache = createMessagesCache(db)
     renameSender('Archer')
     cache.upsert(message)

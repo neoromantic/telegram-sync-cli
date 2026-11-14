@@ -64,21 +64,29 @@ export function messageRowToItem(
  */
 export function messageItemReader(
   db: Database,
-): (row: MessageSearchRow) => MessageSearchItem {
+): (row: MessageRow) => MessageSearchItem {
   const rawJson = db.query<{ raw_json: string }, [number, number]>(
     'SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?',
   )
   return (row) => {
     const raw =
-      row.has_media === 1 ? rawJson.get(row.chat_id, row.message_id) : null
-    return messageRowToItem(row, raw ? extractAttachment(raw.raw_json) : null)
+      row.has_media !== 1
+        ? null
+        : (row.raw_json ?? rawJson.get(row.chat_id, row.message_id)?.raw_json)
+    return messageRowToItem(row, raw ? extractAttachment(raw) : null)
   }
 }
+
+/**
+ * A message row; one built from a Telegram page carries its raw_json,
+ * since the cache may not hold the message
+ */
+export type MessageRow = MessageSearchRow & { raw_json?: string }
 
 /** Items for rows, each with its attachment (see messageItemReader) */
 export function messageRowsToItems(
   db: Database,
-  rows: MessageSearchRow[],
+  rows: MessageRow[],
 ): MessageSearchItem[] {
   return rows.map(messageItemReader(db))
 }

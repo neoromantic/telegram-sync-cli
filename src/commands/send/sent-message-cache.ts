@@ -113,9 +113,11 @@ export async function cacheSentMessage(
       verbose(`Sent message not cached: no message in ${result._}`)
       return 0
     }
-    createMessagesCache(deps.cacheDb).upsertBatch(inputs)
-    verbose(`Cached ${inputs.length} sent message(s)`)
-    return inputs.length
+    // The own message counts as participation in its group first, so the
+    // group takes it and new messages again, even without a daemon update
+    const { accepted } = createMessagesCache(deps.cacheDb).upsertBatch(inputs)
+    verbose(`Cached ${accepted.length} sent message(s)`)
+    return accepted.length
   } catch (err) {
     verbose(`Could not cache the sent message: ${getErrorMessage(err)}`)
     return 0

@@ -31,6 +31,7 @@ import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { createFakeHistory, range, rawMessage } from './helpers/fake-history'
 import { waitLikeFloodWait } from './helpers/flood-wait'
+import { takePartIn } from './helpers/participation'
 
 describe('sync-worker real jobs', () => {
   let db: Database
@@ -40,6 +41,7 @@ describe('sync-worker real jobs', () => {
     const testDb = createTestCacheDatabase()
     db = testDb.db
     initSyncSchema(db)
+    takePartIn(db, -100, -4242, -1000000000123, -1009876543210)
 
     ctx = {
       client: {

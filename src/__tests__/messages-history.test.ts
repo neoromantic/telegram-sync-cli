@@ -11,6 +11,7 @@ import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { takePartIn } from './helpers/participation'
 
 const CHAT_ID = -1001234567890
 const OTHER_CHAT_ID = 10
@@ -25,6 +26,7 @@ describe('MessagesHistory', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
+    takePartIn(db, -4242, -1001234567890)
     history = createMessagesHistory(db)
 
     const now = Date.now()

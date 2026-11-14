@@ -28,7 +28,13 @@ export interface FakeDialogInput {
   /** A user dialog with a deleted account */
   deleted?: boolean
   /** The dialog's newest message, as the dialog list carries it */
-  lastMessage?: { id: number; text?: string; date?: number }
+  lastMessage?: {
+    id: number
+    text?: string
+    date?: number
+    /** Sent by the account, as this user */
+    fromSelf?: number
+  }
 }
 
 export function fakeDialog(input: FakeDialogInput): Dialog {
@@ -83,6 +89,10 @@ export function fakeDialog(input: FakeDialogInput): Dialog {
             peerId: rawPeer,
             message: last.text ?? '',
             date: last.date ?? 1_700_000_000,
+            ...(last.fromSelf !== undefined && {
+              out: true,
+              fromId: { _: 'peerUser', userId: last.fromSelf },
+            }),
           },
           date: new Date((last.date ?? 1_700_000_000) * 1000),
         }

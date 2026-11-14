@@ -15,6 +15,7 @@ import {
   SyncJobType,
   SyncPriority,
 } from '../db/sync-schema'
+import { takePartIn } from './helpers/participation'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -40,6 +41,7 @@ describe('SyncScheduler', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
+    takePartIn(db, -4001, -4002, -1001234567890)
     jobsService = createSyncJobsService(db)
     chatSyncState = createChatSyncStateService(db)
     messagesCache = createMessagesCache(db)
