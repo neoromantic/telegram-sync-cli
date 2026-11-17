@@ -12,6 +12,23 @@ import {
   SyncPriority,
 } from './sync-schema'
 
+// The priority of a job's chat lane: an initial load of a fully synced chat
+// goes first. NULL when the chat has no sync state.
+const LANE_PRIORITY_SQL = `(
+  SELECT CASE
+    WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
+    ELSE s.sync_priority
+  END
+  FROM chat_sync_state s
+  WHERE s.chat_id = sync_jobs.chat_id
+)`
+
+// A refetch or a sender fetch runs whether its chat syncs or not
+const RUNS_FOR_CHAT_SQL = `(job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
+  SELECT 1 FROM chat_sync_state s
+  WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
+))`
+
 /**
  * Input for creating a sync job
  */
@@ -195,41 +212,26 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       WHERE id = $id AND status = $expected_status
     `),
 
-    // A refetch or a sender fetch runs whether its chat syncs or not
     failIfEnabled: db.prepare(`
       UPDATE sync_jobs
       SET status = $status, error_message = $error, completed_at = $now,
           attempts = attempts + 1
       WHERE id = $id AND status = $expected_status
-        AND (job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
-          SELECT 1 FROM chat_sync_state s
-          WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
-        ))
+        AND ${RUNS_FOR_CHAT_SQL}
     `),
 
-    // The chat's mode may have changed while the job ran, and tg chats sync
-    // cancels only pending jobs, so the retry takes the chat's lane priority
-    // now, like alignPendingPriorities. A refetch or a sender fetch keeps its own.
+    // The chat's mode may have changed while the job ran, so the retry takes
+    // the chat's lane priority now. A refetch or a sender fetch keeps its own.
     retryLater: db.prepare(`
       UPDATE sync_jobs
       SET status = $pending_status, attempts = attempts + $inc,
           next_run_at = $run_at, error_message = $error, started_at = NULL,
           priority = CASE WHEN job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
             THEN priority
-            ELSE COALESCE((
-              SELECT CASE
-                WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
-                ELSE s.sync_priority
-              END
-              FROM chat_sync_state s
-              WHERE s.chat_id = sync_jobs.chat_id
-            ), priority)
+            ELSE COALESCE(${LANE_PRIORITY_SQL}, priority)
           END
       WHERE id = $id AND status = $running_status
-        AND (job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
-          SELECT 1 FROM chat_sync_state s
-          WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
-        ))
+        AND ${RUNS_FOR_CHAT_SQL}
     `),
 
     deleteRunning: db.prepare(`
@@ -304,11 +306,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     deletePendingForInactiveChats: db.prepare(`
       DELETE FROM sync_jobs
       WHERE status = $status
-        AND job_type NOT IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
-        AND NOT EXISTS (
-          SELECT 1 FROM chat_sync_state s
-          WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
-        )
+        AND NOT ${RUNS_FOR_CHAT_SQL}
     `),
 
     deletePendingHistoryOfFirstPageOnlyChats: db.prepare(`
@@ -323,14 +321,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
 
     alignPendingPriorities: db.prepare(`
       UPDATE sync_jobs
-      SET priority = (
-        SELECT CASE
-          WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
-          ELSE s.sync_priority
-        END
-        FROM chat_sync_state s
-        WHERE s.chat_id = sync_jobs.chat_id
-      )
+      SET priority = ${LANE_PRIORITY_SQL}
       WHERE status = $status
         AND job_type NOT IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
         AND EXISTS (
