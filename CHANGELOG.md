@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `tg auth login-qr` draws its QR code with [uqr](https://github.com/unjs/uqr) instead of
+  `qrcode-terminal`, which has had no release since 2018. The code is black on white with the
+  standard four-module quiet zone, so it scans in dark and light terminal themes, and it goes to
+  stderr with its status lines, so they no longer mix with the JSON result on stdout (#10).
+
 ### Fixed
 
 - `tg db migrate` with the daemon stopped no longer locks other `tg` commands out of the cache: it
