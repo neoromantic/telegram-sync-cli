@@ -17,9 +17,9 @@ import {
   rawMessageId,
 } from '../../daemon/sync-worker-real-helpers'
 import type { AccountsDbInterface } from '../../db'
-import type { ChatsCache } from '../../db/chats-cache'
+import { type ChatsCache, createChatsCache } from '../../db/chats-cache'
 import { createHistoryRanges, type PageBounds } from '../../db/history-ranges'
-import { createMessagesCache, type MessageInput } from '../../db/messages-cache'
+import { createMessagesCache } from '../../db/messages-cache'
 import { createMessagesHistory } from '../../db/messages-history'
 import type { MessageSearchRow } from '../../db/messages-search'
 import { createUsersCache, type UsersCache } from '../../db/users-cache'
@@ -140,33 +140,12 @@ export function cacheHistoryResponse(
     })
     .immediate()
 
-  return pageRows(cacheDb, inputs)
-}
-
-/**
- * Rows for messages of a page, with the chat and sender joins of
- * MESSAGE_ROW_COLUMNS, newest first: the same rows the cache reads back for
- * messages it stored
- */
-function pageRows(cacheDb: Database, inputs: MessageInput[]): MessageRow[] {
-  const chat = cacheDb.query<
-    { title: string | null; username: string | null; type: string | null },
-    [string]
-  >('SELECT title, username, type FROM chats_cache WHERE chat_id = ?')
-  const sender = cacheDb.query<
-    {
-      username: string | null
-      first_name: string | null
-      last_name: string | null
-    },
-    [string]
-  >('SELECT username, first_name, last_name FROM users_cache WHERE user_id = ?')
+  const chat = createChatsCache(cacheDb).getById(String(chatId))
   const fetchedAt = Date.now()
-
   return inputs
     .map((input): MessageRow => {
-      const c = chat.get(String(input.chat_id))
-      const u = input.from_id != null ? sender.get(String(input.from_id)) : null
+      const u =
+        input.from_id != null ? usersCache.getById(String(input.from_id)) : null
       return {
         chat_id: input.chat_id,
         message_id: input.message_id,
@@ -184,9 +163,9 @@ function pageRows(cacheDb: Database, inputs: MessageInput[]): MessageRow[] {
         edit_date: input.edit_date ?? null,
         date: input.date,
         fetched_at: fetchedAt,
-        chat_title: c?.title ?? null,
-        chat_username: c?.username ?? null,
-        chat_type: c?.type ?? null,
+        chat_title: chat?.title ?? null,
+        chat_username: chat?.username ?? null,
+        chat_type: chat?.type ?? null,
         sender_username: u?.username ?? null,
         sender_first_name: u?.first_name ?? null,
         sender_last_name: u?.last_name ?? null,
@@ -222,9 +201,10 @@ async function callHistory(
 }
 
 /**
- * Fetch one window from Telegram, cache it and read it back from the cache,
- * so API items are exactly cache items. Messages outside the window are
- * dropped, and a long page keeps the `limit` messages closest to its anchor.
+ * Fetch one window from Telegram and cache it. Its rows come back in the
+ * cache's row shape, so API items are exactly cache items. Messages outside
+ * the window are dropped, and a long page keeps the `limit` messages closest
+ * to its anchor.
  */
 export async function fetchHistoryPage(
   client: CallClient,
@@ -414,8 +394,8 @@ function closest(ids: number[], to: number, side: 1 | -1, count: number) {
 }
 
 /**
- * Fetch a message and `context` messages on each side from Telegram, cache
- * them and read them back from the cache.
+ * Fetch a message and `context` messages on each side from Telegram and
+ * cache them. Their rows come back in the cache's row shape.
  */
 export async function fetchMessageAround(
   client: CallClient,
@@ -501,7 +481,7 @@ function readAroundFromCache(
   includeDeleted: boolean,
 ): CachedAround | null {
   const history = createMessagesHistory(cacheDb)
-  const [message] = history.getMany(chatId, [messageId])
+  const message = history.get(chatId, messageId)
   if (!message) return null
   if (context === 0) {
     return { around: { message, newer: [], older: [] }, complete: true }

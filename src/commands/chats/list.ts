@@ -3,16 +3,12 @@ import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
 import {
-  type ChatSyncStateService,
   type ChatSyncView,
   chatSyncView,
   createChatSyncStateService,
 } from '../../db/chat-sync-state'
 import { type CachedChatInput, createChatsCache } from '../../db/chats-cache'
-import {
-  createGroupParticipation,
-  type GroupParticipation,
-} from '../../db/group-participation'
+import { createGroupParticipation } from '../../db/group-participation'
 import type { ChatType } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
@@ -92,19 +88,6 @@ export async function fetchChatsFromApi(
 
 export interface ChatListItem extends ChatItem, ChatSyncView {}
 
-/** A chat with its sync state, a few primary key lookups per listed chat */
-function withSync(
-  chatSyncState: ChatSyncStateService,
-  participation: GroupParticipation,
-  chat: Parameters<typeof chatRowToItem>[0],
-): ChatListItem {
-  const item = chatRowToItem(chat)
-  return {
-    ...item,
-    ...chatSyncView(participation, item.id, chatSyncState.get(item.id)),
-  }
-}
-
 export const listChatsCommand = defineCommand({
   meta: {
     name: 'list',
@@ -155,8 +138,15 @@ export const listChatsCommand = defineCommand({
       const chatsCache = createChatsCache(cacheDb)
       const chatSyncState = createChatSyncStateService(cacheDb)
       const participation = createGroupParticipation(cacheDb)
-      const toItem = (chat: Parameters<typeof chatRowToItem>[0]) =>
-        withSync(chatSyncState, participation, chat)
+      const toItem = (
+        chat: Parameters<typeof chatRowToItem>[0],
+      ): ChatListItem => {
+        const item = chatRowToItem(chat)
+        return {
+          ...item,
+          ...chatSyncView(participation, item.id, chatSyncState.get(item.id)),
+        }
+      }
       const cacheConfig = await getResolvedCacheConfig()
 
       if (!fresh) {

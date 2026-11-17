@@ -26,7 +26,7 @@ describe('MessagesHistory', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
-    takePartIn(db, -4242, -1001234567890)
+    takePartIn(db, CHAT_ID)
     history = createMessagesHistory(db)
 
     const now = Date.now()
@@ -130,18 +130,6 @@ describe('MessagesHistory', () => {
     })
   })
 
-  describe('getMany', () => {
-    it('returns the given ids newest first, deleted ones included', () => {
-      const rows = history.getMany(CHAT_ID, [2, 9, 5, 404])
-      expect(ids(rows)).toEqual([9, 5, 2])
-      expect(rows[0]?.is_deleted).toBe(1)
-    })
-
-    it('returns nothing for no ids', () => {
-      expect(history.getMany(CHAT_ID, [])).toEqual([])
-    })
-  })
-
   it('returns exactly the rows that search returns for the same message', () => {
     const search = createMessagesSearch(db)
     const [searchRow] = search.search('team message 4')
@@ -150,8 +138,10 @@ describe('MessagesHistory', () => {
     expect(history.list(CHAT_ID, { limit: 1, before: 5 })[0]).toEqual(
       searchRow!,
     )
-    expect(history.getMany(CHAT_ID, [4])[0]).toEqual(searchRow!)
-    expect(history.getMany(OTHER_CHAT_ID, [5])[0]).toEqual(otherSearchRow!)
+    expect(history.get(CHAT_ID, 4)).toEqual(searchRow!)
+    expect(history.get(OTHER_CHAT_ID, 5)).toEqual(otherSearchRow!)
+    expect(history.get(CHAT_ID, 9)?.is_deleted).toBe(1)
+    expect(history.get(CHAT_ID, 404)).toBeNull()
     expect(otherSearchRow?.chat_title).toBe('Alice Able')
     expect(searchRow?.sender_first_name).toBe('Alice')
   })
