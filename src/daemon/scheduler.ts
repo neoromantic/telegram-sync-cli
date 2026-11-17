@@ -48,8 +48,7 @@ export interface SyncScheduler {
   refreshQueues(): void
   /**
    * Next job to process, taking lane turns into account. Only looks: call
-   * recordJobRun after running it (non-atomic, use claimNextJob for
-   * concurrent safety)
+   * recordJobRun after running it
    */
   getNextJob(): SyncJobRow | null
   /**
@@ -59,22 +58,8 @@ export interface SyncScheduler {
   hasHistoryDue(): boolean
   /** Move to the next lane slot after a job ran */
   recordJobRun(job: SyncJobRow): void
-  /** Atomically claim and start the next pending job (prevents race conditions) */
-  claimNextJob(): SyncJobRow | null
-  /** Mark job as running */
-  startJob(jobId: number): boolean
-  /** Mark job as completed */
-  completeJob(jobId: number): boolean
-  /** Mark job as failed */
-  failJob(jobId: number, errorMessage: string): boolean
-  /** Update job progress */
-  updateProgress(jobId: number, messagesFetched: number, cursor?: number): void
   /** Get scheduler status */
   getStatus(): SchedulerStatus
-  /** Delete completed and failed jobs older than maxAgeMs (default 24 h) */
-  cleanup(maxAgeMs?: number): number
-  /** Cancel all pending jobs for a chat */
-  cancelJobsForChat(chatId: number): number
   /** Recover jobs that were running when daemon crashed */
   recoverCrashedJobs(): number
 }
@@ -363,33 +348,6 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.slot = (this.slot + 1) % SYNC_SLOT_CYCLE.length
   }
 
-  claimNextJob(): SyncJobRow | null {
-    return this.jobsService.claimNextJob()
-  }
-
-  startJob(jobId: number): boolean {
-    return this.jobsService.markRunning(jobId)
-  }
-
-  completeJob(jobId: number): boolean {
-    return this.jobsService.markCompleted(jobId)
-  }
-
-  failJob(jobId: number, errorMessage: string): boolean {
-    return this.jobsService.markFailed(jobId, errorMessage)
-  }
-
-  updateProgress(
-    jobId: number,
-    messagesFetched: number,
-    cursor?: number,
-  ): void {
-    this.jobsService.updateProgress(jobId, {
-      messages_fetched: messagesFetched,
-      cursor_end: cursor,
-    })
-  }
-
   getStatus(): SchedulerStatus {
     const runningJobs = this.jobsService.getRunningJobs()
     const pendingJobs = this.jobsService.getPendingJobs()
@@ -408,17 +366,6 @@ class SyncSchedulerImpl implements SyncScheduler {
       jobsByType,
       jobsByPriority,
     }
-  }
-
-  cleanup(maxAgeMs = 24 * 60 * 60 * 1000): number {
-    return (
-      this.jobsService.cleanupCompleted(maxAgeMs) +
-      this.jobsService.cleanupFailed(maxAgeMs)
-    )
-  }
-
-  cancelJobsForChat(chatId: number): number {
-    return this.jobsService.cancelPendingForChat(chatId)
   }
 
   recoverCrashedJobs(): number {

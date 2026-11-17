@@ -18,6 +18,7 @@ import {
 import { processJobs } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import { createRealSyncWorker } from '../daemon/sync-worker'
+import { pruneCache } from '../db/cache-maintenance'
 import {
   type ChatSyncStateService,
   createChatSyncStateService,
@@ -31,6 +32,7 @@ import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
 import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { getDefaultRetentionConfig } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
 import { addAccountRuntime } from './helpers/daemon-runtime'
@@ -292,9 +294,9 @@ describe('chats whose sync pages keep failing', () => {
     expect(callsFor(PRIVATE_CHANNEL)).toHaveLength(1)
     expectNoDuplicateRows()
 
-    // The daily cleanup deletes the failed row, so the chat gets one more try
+    // Pruning deletes the failed row a day later, so the chat gets one more try
     now = T0 + DAY + MINUTE
-    scheduler.cleanup()
+    pruneCache(db, { ...getDefaultRetentionConfig(), failedJobs: DAY }, { now })
     await refreshCycles()
     expect(callsFor(PRIVATE_CHANNEL)).toHaveLength(2)
     expect(rowsFor(PRIVATE_CHANNEL)).toMatchObject([

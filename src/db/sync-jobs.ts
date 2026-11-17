@@ -79,8 +79,6 @@ export interface SyncJobsService {
   getNextPending(): SyncJobRow | null
   /** Get the next due pending job of the given types (highest priority, oldest first) */
   getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null
-  /** Atomically claim the next due pending job (prevents race conditions) */
-  claimNextJob(): SyncJobRow | null
   /** Get all pending jobs, including those waiting for a retry */
   getPendingJobs(): SyncJobRow[]
   /** Mark job as running */
@@ -110,10 +108,6 @@ export interface SyncJobsService {
    * failed job holds its chat's slot for that job type until it is deleted.
    */
   hasActiveJobForChat(chatId: number, jobType: SyncJobType): boolean
-  /** Clean up old completed jobs */
-  cleanupCompleted(olderThanMs: number): number
-  /** Clean up old failed jobs */
-  cleanupFailed(olderThanMs: number): number
   /** Delete failed jobs of one chat, or of every chat, whatever their age */
   deleteFailed(chatId?: number): number
   /** The newest failed jobs */
@@ -171,21 +165,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       WHERE status = $status AND next_run_at <= $now
       ORDER BY priority ASC, created_at ASC, id ASC
       LIMIT 1
-    `)
-      .as(SyncJobRow),
-
-    claimNextJob: db
-      .query(`
-      UPDATE sync_jobs
-      SET status = $newStatus, started_at = $now
-      WHERE id = (
-        SELECT id FROM sync_jobs
-        WHERE status = $pendingStatus AND next_run_at <= $now
-        ORDER BY priority ASC, created_at ASC, id ASC
-        LIMIT 1
-      )
-      AND status = $pendingStatus
-      RETURNING *
     `)
       .as(SyncJobRow),
 
@@ -283,16 +262,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         AND job_type = $job_type
         AND status IN ($pending_status, $running_status, $failed_status)
       LIMIT 1
-    `),
-
-    cleanupCompleted: db.prepare(`
-      DELETE FROM sync_jobs
-      WHERE status = $status AND completed_at < $before
-    `),
-
-    cleanupFailed: db.prepare(`
-      DELETE FROM sync_jobs
-      WHERE status = $status AND completed_at < $before
     `),
 
     deleteFailed: db.prepare(`
@@ -456,16 +425,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       )
     },
 
-    claimNextJob(): SyncJobRow | null {
-      return (
-        stmts.claimNextJob.get({
-          $pendingStatus: SyncJobStatus.Pending,
-          $newStatus: SyncJobStatus.Running,
-          $now: Date.now(),
-        }) ?? null
-      )
-    },
-
     getPendingJobs(): SyncJobRow[] {
       return stmts.getPendingJobs.all({ $status: SyncJobStatus.Pending })
     },
@@ -550,24 +509,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         $failed_status: SyncJobStatus.Failed,
       })
       return result !== null
-    },
-
-    cleanupCompleted(olderThanMs: number): number {
-      const before = Date.now() - olderThanMs
-      const result = stmts.cleanupCompleted.run({
-        $status: SyncJobStatus.Completed,
-        $before: before,
-      })
-      return result.changes
-    },
-
-    cleanupFailed(olderThanMs: number): number {
-      const before = Date.now() - olderThanMs
-      const result = stmts.cleanupFailed.run({
-        $status: SyncJobStatus.Failed,
-        $before: before,
-      })
-      return result.changes
     },
 
     deleteFailed(chatId?: number): number {

@@ -68,19 +68,12 @@ function createMockScheduler(
     getNextJob: () => null,
     hasHistoryDue: () => false,
     recordJobRun: () => {},
-    claimNextJob: () => null,
-    startJob: () => false,
-    completeJob: () => false,
-    failJob: () => false,
-    updateProgress: () => {},
     getStatus: () => ({
       pendingJobs: 0,
       runningJobs: 0,
       jobsByType: {},
       jobsByPriority: {},
     }),
-    cleanup: () => 0,
-    cancelJobsForChat: () => 0,
     recoverCrashedJobs: () => 0,
   }
   return { ...base, ...overrides }
