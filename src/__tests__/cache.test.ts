@@ -246,6 +246,14 @@ describe('UsersCache', () => {
       expect(retrieved?.display_name).toBe('Test')
     })
 
+    it('should handle user with only last name', () => {
+      usersCache.upsert(createTestUser({ first_name: null }))
+
+      const retrieved = usersCache.getById('123456')
+
+      expect(retrieved?.display_name).toBe('User')
+    })
+
     it('should handle user with no names', () => {
       usersCache.upsert(createTestUser({ first_name: null, last_name: null }))
 
@@ -392,6 +400,14 @@ describe('UsersCache', () => {
 
       expect(results.length).toBe(1)
       expect(results[0]?.last_name).toBe('Brown')
+    })
+
+    it('should find users by phone', () => {
+      usersCache.upsert(createTestUser({ user_id: '5', phone: '5550001111' }))
+
+      const results = usersCache.search('555000')
+
+      expect(results.map((u) => u.user_id)).toEqual(['5'])
     })
 
     it('should find users by display name', () => {
