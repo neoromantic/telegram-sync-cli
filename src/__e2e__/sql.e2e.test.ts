@@ -207,7 +207,7 @@ describe('E2E: SQL Command', () => {
 
   it('reads search matches with their text from the message_search_text view', async () => {
     const db = env.openCacheDb(1)
-    takePartIn(db, -4242, -1001234567890, -1002222222222)
+    takePartIn(db, -1001234567890)
     createMessagesCache(db).upsertBatch(
       [
         [1, 'the deploy failed'],
@@ -248,7 +248,6 @@ describe('E2E: SQL Command', () => {
     const photo = photoMessage({ _: 'peerUser', userId: 10 }, 1)
 
     beforeEach(() => {
-      takePartIn(env.openCacheDb(1), -4242, -1001234567890, -1002222222222)
       createMessagesCache(env.openCacheDb(1)).upsert(
         parseRawMessage(photo, 10)!,
       )

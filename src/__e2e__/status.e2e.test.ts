@@ -441,7 +441,7 @@ describe('E2E: status, history progress and API calls', () => {
       sync_enabled: true,
     })
     state.setTotalMessages(-4242, 1000)
-    takePartIn(cacheDb, -4242, -1001234567890)
+    takePartIn(cacheDb, -4242)
     createMessagesCache(cacheDb).upsertBatch(
       Array.from({ length: 200 }, (_, i) => ({
         chat_id: -4242,
@@ -544,7 +544,7 @@ describe('E2E: status, senders missing from the cache (#143)', () => {
 
     // Three senders of a basic group, one of them cached; Telegram was
     // asked for another one and didn't return them
-    takePartIn(cacheDb, -4242, -1001234567890)
+    takePartIn(cacheDb, -4242)
     createMessagesCache(cacheDb).upsertBatch(
       [7001, 7002, 7003].map((fromId, i) => ({
         chat_id: -4242,
@@ -837,7 +837,6 @@ describe('E2E: status cache size', () => {
       { phone: '+15550000002' },
     ])
     // Account 2 has no cache file
-    takePartIn(env.openCacheDb(1), -4242, -1001234567890)
     createMessagesCache(env.openCacheDb(1)).upsertBatch([
       {
         chat_id: 101,
@@ -925,7 +924,6 @@ describe('E2E: status cache size', () => {
     const db = env.openCacheDb(1)
     db.run('PRAGMA auto_vacuum = NONE')
     db.run('VACUUM')
-    takePartIn(db, -4242, -1001234567890)
     createMessagesCache(db).upsertBatch(
       Array.from({ length: 600 }, (_, i) => ({
         chat_id: 101,

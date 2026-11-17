@@ -378,7 +378,7 @@ function seedCacheData(db: Database): void {
     ].map(dialogToCacheInput),
   )
 
-  takePartIn(db, -4242, -1001234567890, -1001555000001, -1002222222222)
+  takePartIn(db, -4242, -1001234567890)
 
   createMessagesCache(db).upsertBatch([
     syncedMessage(TEAM_CHAT_PEER, 1, 'hello team', ALICE_PEER),
@@ -929,7 +929,7 @@ describe('E2E: Message attachments', () => {
     const [textInput, photoInput, videoInput] = [text, photo, video].map(
       (raw) => parseRawMessage(raw, LAKE_CLUB_ID)!,
     )
-    takePartIn(db, -4242, -1001234567890, -1001555000001, -1002222222222)
+    takePartIn(db, LAKE_CLUB_ID)
     createMessagesCache(db).upsertBatch([
       textInput!,
       photoInput!,
@@ -1169,7 +1169,7 @@ describe('E2E: Service message actions', () => {
 function seedHistory(db: Database): void {
   const now = Date.now()
   const usersCache = createUsersCache(db)
-  takePartIn(db, -4242, -1001234567890, -1001555000001, -1002222222222)
+  takePartIn(db, -4242, -1001234567890)
   const messagesCache = createMessagesCache(db)
 
   usersCache.upsert({
@@ -1269,7 +1269,6 @@ function seedHistory(db: Database): void {
 
 /** The second account's own cache: a page of its Saved Messages */
 function seedSecondAccount(db: Database): void {
-  takePartIn(db, -4242, -1001234567890, -1001555000001, -1002222222222)
   createMessagesCache(db).upsertBatch([
     {
       chat_id: SECOND_SELF_ID,

@@ -333,7 +333,7 @@ describe('cacheSentMessage', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
-    takePartIn(db, -100, -4440001, -1000003330001)
+    takePartIn(db, CHANNEL_PEER_ID)
   })
 
   it('upserts the message with fetched_at and makes it searchable', async () => {

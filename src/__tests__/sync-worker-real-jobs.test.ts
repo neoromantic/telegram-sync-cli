@@ -41,7 +41,7 @@ describe('sync-worker real jobs', () => {
     const testDb = createTestCacheDatabase()
     db = testDb.db
     initSyncSchema(db)
-    takePartIn(db, -100, -4242, -1000000000123, -1009876543210)
+    takePartIn(db, -4242, -1000000000123)
 
     ctx = {
       client: {

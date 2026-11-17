@@ -279,7 +279,6 @@ describe('draining in batches', () => {
       `UPDATE search_meta SET value = '0' WHERE key = 'search_index_version'`,
     )
     initSyncSchema(db)
-    takePartIn(db, -1009000000001, -1009000000002)
     expect(queue(db)).toEqual([])
     expect(matches(db, 'sender:ann')).toBe(MESSAGES)
   })
@@ -325,7 +324,6 @@ describe('search disabled by an older SQLite', () => {
   it('leaves the re-index for a newer SQLite, which rebuilds the index', async () => {
     const db = cacheWithReindexWork()
     initSyncSchema(db, { contentlessSearch: false })
-    takePartIn(db, -1009000000001, -1009000000002)
 
     expect(await drain(db)).toBe(0)
     expect(namesState(db)).toBe('pending')
@@ -333,7 +331,6 @@ describe('search disabled by an older SQLite', () => {
 
     initSyncSchema(db)
 
-    takePartIn(db, -1009000000001, -1009000000002)
     expect(queue(db)).toEqual([])
     expect(matches(db, 'sender:ann')).toBe(MESSAGES)
   })
@@ -350,7 +347,6 @@ describe('search disabled by an older SQLite', () => {
     }
     db.run('DROP TABLE search_reindex_queue')
     initSyncSchema(db, { contentlessSearch: false })
-    takePartIn(db, -1009000000001, -1009000000002)
 
     expect(await drain(db)).toBe(0)
     expect(namesState(db)).toBe('pending')
@@ -401,7 +397,6 @@ describe('the index of a cache from before #93', () => {
 
     initSyncSchema(db)
 
-    takePartIn(db, -1009000000001, -1009000000002)
     expect(triggerSql(db, 'messages_cache_ai')).toContain('chats_cache')
     expect(triggerSql(db, 'messages_cache_au')).toContain('chats_cache')
     expect(mergeOptions(db)).toEqual({

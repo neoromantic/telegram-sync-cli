@@ -775,7 +775,6 @@ describe('MessagesCache writes and the search index', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
-    takePartIn(db, -5151, -1001234567890, -1009876543210)
     cache = createMessagesCache(db)
     renameSender('Archer')
     cache.upsert(message)
