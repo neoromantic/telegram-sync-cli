@@ -91,23 +91,7 @@ const createWorkerStub = (
       success: true,
       messagesFetched: 0,
     })),
-    processForwardCatchupReal: mock(async () => ({
-      success: true,
-      messagesFetched: 0,
-    })),
-    processBackwardHistoryReal: mock(async () => ({
-      success: true,
-      messagesFetched: 0,
-    })),
-    processInitialLoadReal: mock(async () => ({
-      success: true,
-      messagesFetched: 0,
-    })),
-    runOnceReal: mock(async () => null),
     canMakeApiCall: () => true,
-    getWaitTime: () => 0,
-    buildInputPeer: mock((_chatId: number) => null),
-    parseRawMessage: mock((_msg: unknown, _chatId: number) => null),
     ...overrides,
   } satisfies RealSyncWorker
 
