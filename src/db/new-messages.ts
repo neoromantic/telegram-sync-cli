@@ -17,6 +17,8 @@ export interface NewMessagesOptions {
   chatId?: number
   /** With `chatId`: the messages newer than this ID count, cached ones too */
   after?: number
+  /** Without `chatId`: only these chats' messages (allowedChats) */
+  chatIds?: number[]
 }
 
 export interface NewMessagesFeed {
@@ -40,9 +42,14 @@ export function oldestFirst(a: MessageSearchRow, b: MessageSearchRow): number {
 
 export function createNewMessagesFeed(
   db: Database,
-  { chatId, after }: NewMessagesOptions = {},
+  { chatId, after, chatIds }: NewMessagesOptions = {},
 ): NewMessagesFeed {
-  const chatFilter = chatId === undefined ? '' : 'AND m.chat_id = $chat'
+  const chatFilter =
+    chatId !== undefined
+      ? 'AND m.chat_id = $chat'
+      : chatIds !== undefined
+        ? 'AND m.chat_id IN (SELECT value FROM json_each($chats))'
+        : ''
   const dataVersion = db.query<{ data_version: number }, []>(
     'PRAGMA data_version',
   )
@@ -51,7 +58,7 @@ export function createNewMessagesFeed(
   )
   const storedRows = db.query<
     FeedRow,
-    { $last: number; $max: number; $chat?: number }
+    { $last: number; $max: number; $chat?: number; $chats?: string }
   >(`
     SELECT m.rowid AS row_id, ${MESSAGE_ROW_COLUMNS}
     FROM messages_cache m
@@ -120,6 +127,8 @@ export function createNewMessagesFeed(
           $last: lastRowid,
           $max: max,
           ...(chatId !== undefined && { $chat: chatId }),
+          ...(chatId === undefined &&
+            chatIds !== undefined && { $chats: JSON.stringify(chatIds) }),
         })
         lastRowid = max
         return stored

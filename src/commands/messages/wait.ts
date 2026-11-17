@@ -11,6 +11,7 @@ import { type Account, ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success, verbose } from '../../utils/output'
+import { allowedChatIds } from '../access'
 import {
   CHAT_ARG_DESCRIPTION,
   MAX_MESSAGE_ID,
@@ -74,7 +75,13 @@ async function openFeed(
       reportHistoryError(err, 'resolve the chat')
     }
   }
-  const feed = createNewMessagesFeed(db, { chatId, after })
+  // Without --chat, every chat's messages: keep to allowedChats
+  const allowed = chatId === undefined ? await allowedChatIds(account.id) : null
+  const feed = createNewMessagesFeed(db, {
+    chatId,
+    after,
+    chatIds: allowed === null ? undefined : [...allowed],
+  })
   verbose(`Waiting for messages${chatId === undefined ? '' : ` in ${chatId}`}`)
   return { feed, toItem: messageItemReader(db) }
 }

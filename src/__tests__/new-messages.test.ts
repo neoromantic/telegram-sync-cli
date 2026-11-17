@@ -78,6 +78,17 @@ describe('createNewMessagesFeed', () => {
     expect(feed.poll()).toEqual([])
   })
 
+  it('keeps only the chats of chatIds', () => {
+    const feed = createNewMessagesFeed(reader, { chatIds: [CHAT] })
+    store(OTHER, [1])
+    store(CHAT, [2])
+    expect(ids(feed.poll())).toEqual([[CHAT, 2]])
+
+    const none = createNewMessagesFeed(reader, { chatIds: [] })
+    store(CHAT, [3])
+    expect(none.poll()).toEqual([])
+  })
+
   it('leaves out deleted messages and keeps to --chat', () => {
     const feed = createNewMessagesFeed(reader, { chatId: CHAT })
     store(CHAT, [1], { is_deleted: true })

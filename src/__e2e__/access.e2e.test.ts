@@ -4,6 +4,8 @@
  * command is covered as soon as COMMAND_ACCESS classifies it.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { rmSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
 import { main } from '../cli'
@@ -11,6 +13,7 @@ import { COMMAND_ACCESS, runnableCommands } from '../commands/access'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createChatsCache } from '../db/chats-cache'
+import { createDaemonStatusService } from '../db/daemon-status'
 import { createMessagesCache } from '../db/messages-cache'
 import { createUsersCache } from '../db/users-cache'
 import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
@@ -19,6 +22,7 @@ import {
   NO_CREDENTIALS,
   runCli,
   runCliSuccess,
+  spawnCli,
 } from './helpers/cli'
 import { FAKE_CLIENT_CLI } from './helpers/fake-client-cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
@@ -48,6 +52,9 @@ function message(
     toPeerIdFromRawPeer(peer)!,
   )!
 }
+
+/** Every chat's one cached message is unread */
+const UNREAD = { unreadCount: 1, readInboxMaxId: 0 }
 
 interface CommandArg {
   type?: string
@@ -111,9 +118,15 @@ describe('E2E: read-only mode and allowedChats', () => {
           title: 'Team Chat',
           username: 'teamchat',
           membersCount: 3,
+          ...UNREAD,
         }),
-        fakeDialog({ kind: 'group', id: 4242, title: 'Book Club' }),
-        fakeDialog({ kind: 'user', id: ALICE_ID, title: 'Alice Able' }),
+        fakeDialog({ kind: 'group', id: 4242, title: 'Book Club', ...UNREAD }),
+        fakeDialog({
+          kind: 'user',
+          id: ALICE_ID,
+          title: 'Alice Able',
+          ...UNREAD,
+        }),
       ].map(dialogToCacheInput),
     )
     createMessagesCache(db).upsertBatch([
@@ -142,7 +155,12 @@ describe('E2E: read-only mode and allowedChats', () => {
 
     it('enumerates the write commands from the tree', () => {
       expect(writes).toEqual(
-        expect.arrayContaining(['send', 'auth logout', 'auth login']),
+        expect.arrayContaining([
+          'send',
+          'messages read',
+          'auth logout',
+          'auth login',
+        ]),
       )
     })
 
@@ -210,6 +228,10 @@ describe('E2E: read-only mode and allowedChats', () => {
           'messages list',
           'messages get',
           'messages search',
+          'messages wait',
+          'messages watch',
+          'messages unread',
+          'messages read',
           'media download',
         ]),
       )
@@ -272,6 +294,70 @@ describe('E2E: read-only mode and allowedChats', () => {
       ).data
       expect(data.results.map((m) => m.chatId)).toEqual([TEAM_ID])
       expect(data.count).toBe(1)
+    })
+
+    it('lists unread messages and chats of allowed chats only', async () => {
+      const list = await runCliSuccess(
+        ['chats', 'list', '--unread'],
+        options(ALLOWED),
+      )
+      const listed = (list.json as { data: { items: { id: number }[] } }).data
+      expect(listed.items.map((chat) => chat.id)).toEqual([TEAM_ID])
+
+      const unread = await runCliSuccess(
+        ['messages', 'unread'],
+        options(ALLOWED),
+      )
+      const data = (
+        unread.json as {
+          data: {
+            chats: { chat: { id: number }; items: { messageId: number }[] }[]
+          }
+        }
+      ).data
+      expect(
+        data.chats.map((chat) => [
+          chat.chat.id,
+          chat.items.map((m) => m.messageId),
+        ]),
+      ).toEqual([[TEAM_ID, [1]]])
+    })
+
+    it('tg messages wait without --chat returns only an allowed chat new message', async () => {
+      // The test runner is alive: its PID and daemon rows make a running daemon
+      const pidPath = join(env.dataDir, 'daemon.pid')
+      await Bun.write(pidPath, String(process.pid))
+      createDaemonStatusService(env.openCacheDb(1)).setDaemonRunning(
+        process.pid,
+        'test',
+      )
+      try {
+        const proc = spawnCli(['messages', 'wait', '--timeout', '10'], {
+          env: { ...options(ALLOWED).env, VERBOSE: '1' },
+        })
+        const stdout = new Response(proc.stdout).text()
+        // Wait for the start point, then store a message in each chat at once
+        const reader = proc.stderr.getReader()
+        let stderr = ''
+        while (!stderr.includes('Waiting for messages')) {
+          const { value, done } = await reader.read()
+          if (done) throw new Error(`wait exited: ${stderr}`)
+          stderr += new TextDecoder().decode(value)
+        }
+        createMessagesCache(env.openCacheDb(1)).upsertBatch([
+          message(CLUB_PEER, 20, 'club news'),
+          message(TEAM_PEER, 21, 'team news'),
+        ])
+        expect(await proc.exited).toBe(0)
+        const result = JSON.parse(await stdout) as {
+          data: { messages: { chatId: number; messageId: number }[] }
+        }
+        expect(
+          result.data.messages.map((m) => [m.chatId, m.messageId]),
+        ).toEqual([[TEAM_ID, 21]])
+      } finally {
+        rmSync(pidPath, { force: true })
+      }
     })
 
     it('refuses tg sql and tg api while the list is set', async () => {

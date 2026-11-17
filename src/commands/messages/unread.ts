@@ -6,6 +6,7 @@ import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { success } from '../../utils/output'
 import { wrapClientCallWithRateLimits } from '../../utils/telegram-rate-limits'
+import { allowedChatIds } from '../access'
 import { fetchChatsFromApi } from '../chats/list'
 import {
   CHAT_ARG_DESCRIPTION,
@@ -105,15 +106,19 @@ export const unreadMessagesCommand = defineCommand({
           )
           await fetchChatsFromApi(dialogsClient, cacheDb)
         }
-        // LIMIT -1: every chat with unread messages
-        targets = chatsCache.list({ unread: true, limit: -1 }).map((row) => ({
-          chat: chatInfo(Number(row.chat_id), row),
-          state: {
-            unreadCount: row.unread_count ?? 0,
-            readInboxMaxId: row.read_inbox_max_id ?? 0,
-          },
-          resolve: () => resolveHistoryChat(client, row.chat_id, deps),
-        }))
+        const allowed = await allowedChatIds(account.id)
+        // LIMIT -1: every chat with unread messages, of allowedChats if set
+        targets = chatsCache
+          .list({ unread: true, limit: -1 })
+          .filter((row) => allowed === null || allowed.has(Number(row.chat_id)))
+          .map((row) => ({
+            chat: chatInfo(Number(row.chat_id), row),
+            state: {
+              unreadCount: row.unread_count ?? 0,
+              readInboxMaxId: row.read_inbox_max_id ?? 0,
+            },
+            resolve: () => resolveHistoryChat(client, row.chat_id, deps),
+          }))
       }
 
       success(await readUnread(cacheDb, client, targets, limit, fresh))
