@@ -30,6 +30,11 @@ With `--raw` the command prints only the result and exits 0, so a script can pip
 call prints the usual error JSON to stderr and exits with its code. Either way `tg api` closes
 its Telegram connection before it exits.
 
+In [read-only mode](configuration.md#read-only-mode-and-allowed-chats) only methods named
+`get…`, `search…`, `resolve…` or `check…` after the namespace run; others fail with `READ_ONLY`
+before connecting. While `allowedChats` is set, `tg api` fails with `CHAT_NOT_ALLOWED`: a raw
+call can name any chat.
+
 This maps directly to mtcute's `client.call()`:
 ```typescript
 await client.call({ _: 'account.checkUsername', username: 'myuser' })
@@ -255,6 +260,15 @@ next run. A download stopped with Ctrl-C or SIGTERM exits 130 and prints no JSON
 `tg messages wait` and `watch` when the daemon doesn't run for the account, with
 `details: { account_id }` and a suggestion to start it
 ([cli-commands.md](cli-commands.md#waiting-for-new-messages)).
+
+[Read-only mode and allowed chats](configuration.md#read-only-mode-and-allowed-chats) add two
+codes, both exit 1, checked before the command connects:
+
+- `READ_ONLY`: read-only mode is on and the command changes something on Telegram;
+  `details: { command }`, plus `method` for `tg api`.
+- `CHAT_NOT_ALLOWED`: the chat is not in `allowedChats`, `details: { chat, id }` (as given, and
+  its marked ID); or the command is `tg sql` or `tg api`, which can't be limited to chats,
+  `details: { command }`.
 
 `DAEMON_ALREADY_RUNNING` (exit 1) is returned by `tg db vacuum` for a cache that only a full
 VACUUM can compact while the daemon runs, with `details: { account_id, auto_vacuum: "none" }`

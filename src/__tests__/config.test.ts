@@ -11,6 +11,7 @@ import {
   getConfigPath,
   getConfigValue,
   getResolvedCacheConfig,
+  loadAccessSettings,
   loadConfig,
   loadDaemonConfig,
   parseConfigValue,
@@ -198,6 +199,72 @@ describe('config', () => {
       await expect(loadConfig({ dataDir, strict: true })).rejects.toThrow(
         'Config file has invalid values',
       )
+    })
+  })
+
+  describe('readOnly and allowedChats', () => {
+    const writeConfig = (value: unknown) =>
+      Bun.write(getConfigPath(dataDir), JSON.stringify(value))
+
+    it('parses a comma-separated chat list and rejects other entries', () => {
+      expect(
+        parseConfigValue('allowedChats', '@team_chat, -1001234567890,me'),
+      ).toEqual(['@team_chat', '-1001234567890', 'me'])
+      expect(parseConfigValue('allowedChats', '')).toEqual([])
+      expect(parseConfigValue('readOnly', 'true')).toBe(true)
+      for (const bad of ['team chat', '+15550000000', '0', '@', 'me,,@a']) {
+        expect(() => parseConfigValue('allowedChats', bad)).toThrow(ConfigError)
+      }
+    })
+
+    it('rejects a bad readOnly or allowedChats in config.json in strict mode', async () => {
+      await writeConfig({ readOnly: 'yes', allowedChats: ['@ok', 12.5] })
+      const error = await loadConfig({ dataDir, strict: true }).catch((e) => e)
+      expect(error).toBeInstanceOf(ConfigError)
+      expect((error as ConfigError).issues.map((i) => i.path)).toEqual([
+        'readOnly',
+        'allowedChats',
+      ])
+    })
+
+    it('reads both from config.json; no allowlist when the key is missing', async () => {
+      expect(await loadAccessSettings({ dataDir, env: {} })).toEqual({
+        readOnly: false,
+        allowedChats: null,
+      })
+      await writeConfig({ readOnly: true, allowedChats: [' @team ', '-4242'] })
+      expect(await loadAccessSettings({ dataDir, env: {} })).toEqual({
+        readOnly: true,
+        allowedChats: ['@team', '-4242'],
+      })
+    })
+
+    it('TELEGRAM_SYNC_CLI_READ_ONLY turns read-only on, but never off', async () => {
+      for (const value of ['1', 'true', 'yes', 'ON']) {
+        const env = { TELEGRAM_SYNC_CLI_READ_ONLY: value }
+        expect((await loadAccessSettings({ dataDir, env })).readOnly).toBe(true)
+      }
+      for (const value of ['', '0', 'false', 'off']) {
+        const env = { TELEGRAM_SYNC_CLI_READ_ONLY: value }
+        expect((await loadAccessSettings({ dataDir, env })).readOnly).toBe(
+          false,
+        )
+      }
+      await writeConfig({ readOnly: true })
+      const env = { TELEGRAM_SYNC_CLI_READ_ONLY: '0' }
+      expect((await loadAccessSettings({ dataDir, env })).readOnly).toBe(true)
+    })
+
+    it('TELEGRAM_SYNC_CLI_ALLOWED_CHATS replaces the list, even when empty', async () => {
+      await writeConfig({ allowedChats: ['@team'] })
+      const read = (value: string) =>
+        loadAccessSettings({
+          dataDir,
+          env: { TELEGRAM_SYNC_CLI_ALLOWED_CHATS: value },
+        })
+      expect((await read('me, -4242')).allowedChats).toEqual(['me', '-4242'])
+      expect((await read('')).allowedChats).toEqual([])
+      await expect(read('team chat')).rejects.toBeInstanceOf(ConfigError)
     })
   })
 

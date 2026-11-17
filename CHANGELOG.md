@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   set; the daemon raises the count for each new incoming message and takes reads on any device
   from Telegram's read updates, so the counts stay current between dialog passes. A cache from
   an older version has no counts until the daemon's next start or `tg chats list --fresh`.
+- Read-only mode and a chat allowlist for agents (#26). `readOnly` in `config.json` or
+  `TELEGRAM_SYNC_CLI_READ_ONLY=1` refuses, before connecting, every command that changes
+  something on Telegram with the new code `READ_ONLY` (exit 1): `tg send`, `tg api` methods
+  not named `get…`, `search…`, `resolve…` or `check…`, and `tg auth login`, `login-qr` and
+  `logout`. `allowedChats` (or `TELEGRAM_SYNC_CLI_ALLOWED_CHATS`, which replaces it for one
+  process) limits commands to those chats: one that names another chat fails with
+  `CHAT_NOT_ALLOWED` (exit 1), `tg chats list`, `tg chats search` and `tg messages search` show
+  only allowed chats, and `tg sql` and `tg api` are off. `tg status` shows both under `access`.
+  They guard against mistakes and are not a security boundary.
 
 ### Changed
 
@@ -52,7 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.2] - 2026-11-17
 
-### Fixed
 
 - `tg sql "SELECT 1 AS one" -f json` runs the query: the value of `-f`/`--format` after a positional
   query was added to the SQL (`SELECT 1 AS one json`, a syntax error), and after `--query` it was

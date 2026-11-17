@@ -6,6 +6,7 @@ import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success } from '../../utils/output'
+import { allowedChatIds } from '../access'
 import { chatRowToItem } from './helpers'
 
 export const searchChatsCommand = defineCommand({
@@ -32,13 +33,21 @@ export const searchChatsCommand = defineCommand({
   async run({ args }) {
     const query = args.query
     const limit = Number.parseInt(args.limit ?? '20', 10)
-    const { db: cacheDb } = openAccountCache(args.account)
+    const { account, db: cacheDb } = openAccountCache(args.account)
+    const allowed = await allowedChatIds(account.id)
 
     try {
       const chatsCache = createChatsCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
-      const results = chatsCache.search(query, limit)
+      // With allowedChats, search every chat (-1: no limit), then keep the allowed
+      const results =
+        allowed === null
+          ? chatsCache.search(query, limit)
+          : chatsCache
+              .search(query, -1)
+              .filter((chat) => allowed.has(Number(chat.chat_id)))
+              .slice(0, limit)
 
       if (results.length > 0) {
         const anyStale = results.some((c) =>

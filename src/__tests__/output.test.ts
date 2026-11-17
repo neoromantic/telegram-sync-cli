@@ -188,6 +188,11 @@ describe('Output Utilities', () => {
       }
     })
 
+    it('should return 1 for READ_ONLY and CHAT_NOT_ALLOWED', () => {
+      expect(getExitCode(ErrorCodes.READ_ONLY)).toBe(1)
+      expect(getExitCode(ErrorCodes.CHAT_NOT_ALLOWED)).toBe(1)
+    })
+
     it('should return 1 for unknown error codes', () => {
       expect(getExitCode('UNKNOWN_ERROR' as ErrorCode)).toBe(1)
     })

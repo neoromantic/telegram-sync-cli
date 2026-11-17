@@ -161,3 +161,17 @@ export const outputFormatArg = {
   options: ['json', 'pretty', 'quiet'],
   default: 'json',
 }
+
+/**
+ * A chat given as a positional arg (`tg chats sync <chat>`). The parser reads
+ * a marked ID such as -100… as flags and takes the value of a flag it doesn't
+ * know (the global --format pretty) as the positional, so a marked ID in
+ * rawArgs wins.
+ */
+export function positionalChat(
+  value: unknown,
+  rawArgs: string[],
+): string | undefined {
+  const input = rawArgs.find((arg) => /^-\d+$/.test(arg)) ?? value
+  return typeof input === 'string' ? input.trim() : undefined
+}

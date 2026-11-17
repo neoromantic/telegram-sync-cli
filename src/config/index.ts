@@ -18,7 +18,8 @@ import {
 
 /**
  * `positiveDuration` is a duration above 0, such as a retention; `rate` is
- * a number of calls per second above 0 and at most MAX_CALLS_PER_SECOND
+ * a number of calls per second above 0 and at most MAX_CALLS_PER_SECOND;
+ * `chats` is a list of chats (isChatEntry)
  */
 type ConfigValueType =
   | 'number'
@@ -26,6 +27,7 @@ type ConfigValueType =
   | 'duration'
   | 'positiveDuration'
   | 'rate'
+  | 'chats'
 
 /** The fastest `sync.pacing.maxCallsPerSecond` accepts */
 const MAX_CALLS_PER_SECOND = 2
@@ -36,10 +38,13 @@ const TYPE_DESCRIPTIONS: Record<ConfigValueType, string> = {
   duration: 'duration',
   positiveDuration: 'duration above 0',
   rate: `number above 0 and at most ${MAX_CALLS_PER_SECOND}`,
+  chats: 'list of chats: @username, a chat ID as tg prints it, or me',
 }
 
 export type ConfigLeafKey =
   | 'activeAccount'
+  | 'readOnly'
+  | 'allowedChats'
   | 'cache.staleness.peers'
   | 'cache.staleness.dialogs'
   | 'cache.staleness.fullInfo'
@@ -54,6 +59,8 @@ export type ConfigLeafKey =
 
 const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   activeAccount: 'number',
+  readOnly: 'boolean',
+  allowedChats: 'chats',
   'cache.staleness.peers': 'duration',
   'cache.staleness.dialogs': 'duration',
   'cache.staleness.fullInfo': 'duration',
@@ -114,6 +121,8 @@ export interface SyncConfigFile {
 
 export interface ConfigFile {
   activeAccount?: number
+  readOnly?: boolean
+  allowedChats?: string[]
   cache?: CacheConfigFile
   sync?: SyncConfigFile
 }
@@ -217,6 +226,19 @@ function isValidRate(value: unknown): value is number {
   )
 }
 
+/** An allowedChats entry: @username, a marked chat or user ID, or me */
+function isChatEntry(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  const entry = value.trim()
+  return (
+    entry.toLowerCase() === 'me' ||
+    /^@\w+$/.test(entry) ||
+    (/^-?\d+$/.test(entry) &&
+      Number.isSafeInteger(Number(entry)) &&
+      Number(entry) !== 0)
+  )
+}
+
 function validateValue(type: ConfigValueType, value: unknown): boolean {
   switch (type) {
     case 'number':
@@ -231,6 +253,8 @@ function validateValue(type: ConfigValueType, value: unknown): boolean {
       )
     case 'rate':
       return isValidRate(value)
+    case 'chats':
+      return Array.isArray(value) && value.every(isChatEntry)
     default:
       return false
   }
@@ -259,7 +283,9 @@ function sanitizeConfig(raw: Record<string, unknown>): {
       (type === 'duration' || type === 'positiveDuration') &&
       typeof value === 'string'
         ? normalizeDuration(value)
-        : value
+        : type === 'chats'
+          ? (value as string[]).map((entry) => entry.trim())
+          : value
     setPathValue(
       config as Record<string, unknown>,
       path.split('.'),
@@ -390,6 +416,61 @@ export function parseConfigValue(
       }
       return parsed
     }
+    case 'chats':
+      return parseChatList(key, trimmed)
+  }
+}
+
+/** A comma-separated list of chats, as `tg config set` and the env var take it */
+function parseChatList(path: string, value: string): string[] {
+  const entries =
+    value === '' ? [] : value.split(',').map((entry) => entry.trim())
+  const bad = entries.filter((entry) => !isChatEntry(entry))
+  if (bad.length > 0) {
+    throw new ConfigError('Invalid value', [
+      {
+        path,
+        message: `Expected a comma-separated ${TYPE_DESCRIPTIONS.chats}; got ${bad.map((entry) => JSON.stringify(entry)).join(', ')}`,
+      },
+    ])
+  }
+  return entries
+}
+
+/** Read-only mode and the chat allowlist, as config.json and the env set them */
+export interface AccessSettings {
+  readOnly: boolean
+  /** null: no allowlist, every chat is allowed */
+  allowedChats: string[] | null
+}
+
+export const READ_ONLY_ENV = 'TELEGRAM_SYNC_CLI_READ_ONLY'
+export const ALLOWED_CHATS_ENV = 'TELEGRAM_SYNC_CLI_ALLOWED_CHATS'
+
+/**
+ * readOnly and allowedChats from config.json, strictly. The env var
+ * TELEGRAM_SYNC_CLI_READ_ONLY set to anything but empty, 0, false or off
+ * turns read-only on; TELEGRAM_SYNC_CLI_ALLOWED_CHATS, when set (even
+ * empty), replaces the list.
+ */
+export async function loadAccessSettings(
+  options: { dataDir?: string; env?: Record<string, string | undefined> } = {},
+): Promise<AccessSettings> {
+  const env = options.env ?? process.env
+  const { config } = await loadConfig({
+    dataDir: options.dataDir,
+    strict: true,
+  })
+  const readOnlyEnv = (env[READ_ONLY_ENV] ?? '').trim().toLowerCase()
+  const listEnv = env[ALLOWED_CHATS_ENV]
+  return {
+    readOnly:
+      !['', '0', 'false', 'off'].includes(readOnlyEnv) ||
+      config.readOnly === true,
+    allowedChats:
+      listEnv !== undefined
+        ? parseChatList(ALLOWED_CHATS_ENV, listEnv.trim())
+        : (config.allowedChats ?? null),
   }
 }
 
