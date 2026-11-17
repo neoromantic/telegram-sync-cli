@@ -168,11 +168,9 @@ describe('bootstrapDialogs', () => {
   it('gives bots and deleted accounts the newest page only, keeping what is cached (#131)', async () => {
     // A bot an older version synced in full, with a history job pending
     seedSynced(1001, 50, 50)
-    chatSyncState.resetSyncState(1001, {
-      forward_cursor: false,
-      backward_cursor: false,
-      synced_messages: false,
-    })
+    testCacheDb.run(
+      'UPDATE chat_sync_state SET history_complete = 0 WHERE chat_id = 1001',
+    )
     const jobs = createSyncJobsService(testCacheDb)
     jobs.create({
       chat_id: 1001,
@@ -190,11 +188,9 @@ describe('bootstrapDialogs', () => {
     })
     // A bot turned on by hand keeps its full history
     seedSynced(1004, 20, 20)
-    chatSyncState.resetSyncState(1004, {
-      forward_cursor: false,
-      backward_cursor: false,
-      synced_messages: false,
-    })
+    testCacheDb.run(
+      'UPDATE chat_sync_state SET history_complete = 0 WHERE chat_id = 1004',
+    )
     chatSyncState.setSyncMode(1004, 'on')
 
     await runPass([

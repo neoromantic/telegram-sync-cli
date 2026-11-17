@@ -1875,7 +1875,12 @@ describe('sync-worker real jobs', () => {
     })
 
     it("takes a whole history's length as its count", async () => {
-      ctx.chatSyncState.resetSyncState(chatId)
+      db.run(
+        `UPDATE chat_sync_state SET forward_cursor = NULL,
+           backward_cursor = NULL, history_complete = 0, synced_messages = 0
+         WHERE chat_id = ?`,
+        [chatId],
+      )
       ctx.client = {
         call: mock(async () => ({
           _: 'messages.messages',

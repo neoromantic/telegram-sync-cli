@@ -72,20 +72,6 @@ export interface CatchupPageResult {
 }
 
 /**
- * Options for resetting sync state
- */
-export interface ResetSyncStateOptions {
-  /** Reset forward cursor to NULL (default: true) */
-  forward_cursor?: boolean
-  /** Reset backward cursor to NULL (default: true) */
-  backward_cursor?: boolean
-  /** Reset history_complete to 0 (default: true) */
-  history_complete?: boolean
-  /** Reset synced_messages to 0 (default: true) */
-  synced_messages?: boolean
-}
-
-/**
  * Why a chat syncs or not, as `tg chats list` shows it: the user's choice
  * from `tg chats sync`, else the policy's reason (#131). A group the account
  * doesn't take part in, or whose participation isn't checked yet, takes no
@@ -166,12 +152,6 @@ export interface ChatSyncStateService {
   incrementSyncedMessages(chatId: number, count: number): void
   /** Store the chat's message count on the server; the newest one wins */
   setTotalMessages(chatId: number, total: number): void
-  /** Get all enabled chats ordered by priority */
-  getEnabledChats(): ChatSyncStateRow[]
-  /** Get chats by priority level */
-  getChatsByPriority(priority: SyncPriority): ChatSyncStateRow[]
-  /** Get chats with incomplete history (for backfill) */
-  getIncompleteHistory(): ChatSyncStateRow[]
   /** Enabled chats without a forward cursor: they need their first page */
   getInitialLoadDue(): ChatSyncStateRow[]
   /**
@@ -203,16 +183,12 @@ export interface ChatSyncStateService {
   delete(chatId: number): void
   /** Update last sync timestamp */
   updateLastSync(chatId: number, type: 'forward' | 'backward'): void
-  /** Enable or disable sync for a chat */
-  setSyncEnabled(chatId: number, enabled: boolean): void
   /**
    * Set the user's choice and the sync_enabled and sync_priority it means:
    * 'on' syncs at High with full history, 'off' doesn't sync, 'auto'
    * follows the policy
    */
   setSyncMode(chatId: number, mode: SyncMode): void
-  /** Reset sync state to allow re-syncing (sets cursors to NULL) */
-  resetSyncState(chatId: number, options?: ResetSyncStateOptions): void
 }
 
 /**
@@ -251,21 +227,11 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         updated_at = excluded.updated_at
     `),
 
-    updateForwardCursor: db.prepare(`
+    updateCursors: db.prepare(`
       UPDATE chat_sync_state
-      SET forward_cursor = $cursor, updated_at = $now
-      WHERE chat_id = $chat_id
-    `),
-
-    updateBackwardCursor: db.prepare(`
-      UPDATE chat_sync_state
-      SET backward_cursor = $cursor, updated_at = $now
-      WHERE chat_id = $chat_id
-    `),
-
-    updateBothCursors: db.prepare(`
-      UPDATE chat_sync_state
-      SET forward_cursor = $forward, backward_cursor = $backward, updated_at = $now
+      SET forward_cursor = COALESCE($forward, forward_cursor),
+          backward_cursor = COALESCE($backward, backward_cursor),
+          updated_at = $now
       WHERE chat_id = $chat_id
     `),
 
@@ -286,30 +252,6 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       SET total_messages = $total, updated_at = $now
       WHERE chat_id = $chat_id
     `),
-
-    getEnabledChats: db
-      .query(`
-      SELECT * FROM chat_sync_state
-      WHERE sync_enabled = 1
-      ORDER BY sync_priority ASC, chat_id ASC
-    `)
-      .as(ChatSyncStateRow),
-
-    getChatsByPriority: db
-      .query(`
-      SELECT * FROM chat_sync_state
-      WHERE sync_priority = $priority AND sync_enabled = 1
-      ORDER BY chat_id ASC
-    `)
-      .as(ChatSyncStateRow),
-
-    getIncompleteHistory: db
-      .query(`
-      SELECT * FROM chat_sync_state
-      WHERE history_complete = 0 AND sync_enabled = 1
-      ORDER BY sync_priority ASC, chat_id ASC
-    `)
-      .as(ChatSyncStateRow),
 
     getInitialLoadDue: db
       .query(`
@@ -412,29 +354,12 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       WHERE chat_id = $chat_id
     `),
 
-    setSyncEnabled: db.prepare(`
-      UPDATE chat_sync_state
-      SET sync_enabled = $enabled, updated_at = $now
-      WHERE chat_id = $chat_id
-    `),
-
     setSyncMode: db.prepare(`
       UPDATE chat_sync_state
       SET sync_mode = $mode,
           sync_enabled = $enabled,
           sync_priority = $priority,
           updated_at = $now
-      WHERE chat_id = $chat_id
-    `),
-
-    resetSyncState: db.prepare(`
-      UPDATE chat_sync_state
-      SET
-        forward_cursor = CASE WHEN $reset_forward = 1 THEN NULL ELSE forward_cursor END,
-        backward_cursor = CASE WHEN $reset_backward = 1 THEN NULL ELSE backward_cursor END,
-        history_complete = CASE WHEN $reset_history = 1 THEN 0 ELSE history_complete END,
-        synced_messages = CASE WHEN $reset_synced = 1 THEN 0 ELSE synced_messages END,
-        updated_at = $now
       WHERE chat_id = $chat_id
     `),
   }
@@ -460,31 +385,12 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
     },
 
     updateCursors(chatId: number, options: UpdateCursorsOptions): void {
-      const now = Date.now()
-
-      if (
-        options.forward_cursor !== undefined &&
-        options.backward_cursor !== undefined
-      ) {
-        stmts.updateBothCursors.run({
-          $chat_id: chatId,
-          $forward: options.forward_cursor,
-          $backward: options.backward_cursor,
-          $now: now,
-        })
-      } else if (options.forward_cursor !== undefined) {
-        stmts.updateForwardCursor.run({
-          $chat_id: chatId,
-          $cursor: options.forward_cursor,
-          $now: now,
-        })
-      } else if (options.backward_cursor !== undefined) {
-        stmts.updateBackwardCursor.run({
-          $chat_id: chatId,
-          $cursor: options.backward_cursor,
-          $now: now,
-        })
-      }
+      stmts.updateCursors.run({
+        $chat_id: chatId,
+        $forward: options.forward_cursor ?? null,
+        $backward: options.backward_cursor ?? null,
+        $now: Date.now(),
+      })
     },
 
     markHistoryComplete(chatId: number): void {
@@ -508,18 +414,6 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $total: total,
         $now: Date.now(),
       })
-    },
-
-    getEnabledChats(): ChatSyncStateRow[] {
-      return stmts.getEnabledChats.all()
-    },
-
-    getChatsByPriority(priority: SyncPriority): ChatSyncStateRow[] {
-      return stmts.getChatsByPriority.all({ $priority: priority })
-    },
-
-    getIncompleteHistory(): ChatSyncStateRow[] {
-      return stmts.getIncompleteHistory.all()
     },
 
     getInitialLoadDue(): ChatSyncStateRow[] {
@@ -591,20 +485,11 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
     },
 
     updateLastSync(chatId: number, type: 'forward' | 'backward'): void {
-      const now = Date.now()
-      if (type === 'forward') {
-        stmts.updateLastForwardSync.run({ $chat_id: chatId, $now: now })
-      } else {
-        stmts.updateLastBackwardSync.run({ $chat_id: chatId, $now: now })
-      }
-    },
-
-    setSyncEnabled(chatId: number, enabled: boolean): void {
-      stmts.setSyncEnabled.run({
-        $chat_id: chatId,
-        $enabled: enabled ? 1 : 0,
-        $now: Date.now(),
-      })
+      const stmt =
+        type === 'forward'
+          ? stmts.updateLastForwardSync
+          : stmts.updateLastBackwardSync
+      stmt.run({ $chat_id: chatId, $now: Date.now() })
     },
 
     setSyncMode(chatId: number, mode: SyncMode): void {
@@ -623,24 +508,6 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $mode: mode,
         $enabled: enabled ? 1 : 0,
         $priority: mode === 'on' ? SyncPriority.High : policy.priority,
-        $now: Date.now(),
-      })
-    },
-
-    resetSyncState(chatId: number, options: ResetSyncStateOptions = {}): void {
-      const {
-        forward_cursor = true,
-        backward_cursor = true,
-        history_complete = true,
-        synced_messages = true,
-      } = options
-
-      stmts.resetSyncState.run({
-        $chat_id: chatId,
-        $reset_forward: forward_cursor ? 1 : 0,
-        $reset_backward: backward_cursor ? 1 : 0,
-        $reset_history: history_complete ? 1 : 0,
-        $reset_synced: synced_messages ? 1 : 0,
         $now: Date.now(),
       })
     },
