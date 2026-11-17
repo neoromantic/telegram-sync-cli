@@ -186,6 +186,7 @@ tg messages get --chat @username --id 1200 --context 3   # 3 newer and 3 older a
 tg messages search --query "hello world"           # both words, any order
 tg messages search --query '"hello world"'         # the exact phrase (or --phrase)
 tg messages search --query "error OR timeout" --chat @teamchat --sender @alice
+tg messages search --query "todo" --chat me        # Saved Messages; --sender me: your own
 tg messages search --query "квартир*" --includeDeleted   # every word form
 tg messages search --query "deploy" --since 7d --sort relevance --count --snippet
 tg messages wait --chat @username --after 1200     # the next reply after message 1200
@@ -272,7 +273,10 @@ index actions: `tg messages search` finds a service message only by its text, wh
 `tg messages search` reads only the cache. A plain query matches messages that contain every
 word, in any order; a query with FTS5 syntax (`"phrase"`, `OR`, `NOT`, `sender:alice`,
 `chat:team`, `word*`) goes to FTS5 as written, and `--phrase` matches the whole query as one
-phrase. A query FTS5 can't parse is `INVALID_ARGS` (exit 3) with a suggestion. `--since` and
+phrase. A query FTS5 can't parse is `INVALID_ARGS` (exit 3) with a suggestion. `--chat` and
+`--sender` take an ID, an `@username` or `me` (the account's own user ID, read without a
+Telegram call: Saved Messages as a chat, your own messages as a sender); any other value is
+`INVALID_ARGS`, and so is `me` when the account doesn't know its ID yet (run `tg me`). `--since` and
 `--until` take a date, a date and time or a duration back from now (`24h`, `7d`); `--sort
 relevance` puts the best matches first (bm25); `--count` adds `count`, every match over all
 pages, while `total` stays the size of the page; `--snippet` adds `snippet` to each item, the

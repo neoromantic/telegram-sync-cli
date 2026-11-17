@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tg messages search --chat me` searches Saved Messages and `--sender me` finds your own
+  messages: `me` (any case) is the account's own user ID, read from the account without a
+  Telegram call. Before, both returned nothing and still succeeded. When the account doesn't
+  know its user ID yet, `me` is `INVALID_ARGS` (exit 3) with a hint to run `tg me` once. A
+  `--chat` or `--sender` value that is neither an ID, a username nor `me` (a typo such as
+  `12abc`) is `INVALID_ARGS` naming the flag, instead of an empty success.
+
 ## [0.13.0] - 2026-11-18
 
 Commands for agents: wait for a reply, read and mark unread messages, and keep an agent
