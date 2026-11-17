@@ -103,11 +103,6 @@ export interface UpdateHandlers {
     _ctx: UpdateContext,
     data: DeleteMessagesWithoutChatData,
   ): Promise<DeleteWithoutChatResult>
-  /** Handle a batch of messages (for history sync) */
-  handleBatchMessages(
-    _ctx: UpdateContext,
-    messages: NewMessageData[],
-  ): Promise<void>
 }
 
 /**
@@ -264,82 +259,6 @@ async function handleDeleteMessagesImpl(
   deps.messagesCache.markDeleted(data.chatId, data.messageIds)
 }
 
-function groupMessagesByChat(
-  messages: NewMessageData[],
-): Map<number, NewMessageData[]> {
-  const byChatId = new Map<number, NewMessageData[]>()
-  for (const msg of messages) {
-    const existing = byChatId.get(msg.chatId) ?? []
-    existing.push(msg)
-    byChatId.set(msg.chatId, existing)
-  }
-  return byChatId
-}
-
-function updateCursorsForBatch(
-  chatSyncState: ChatSyncStateService,
-  chatId: number,
-  messageIds: number[],
-): void {
-  const state = chatSyncState.get(chatId)
-  if (!state) return
-
-  const maxId = Math.max(...messageIds)
-  const minId = Math.min(...messageIds)
-
-  if (state.forward_cursor === null || maxId > state.forward_cursor) {
-    chatSyncState.updateCursors(chatId, { forward_cursor: maxId })
-  }
-
-  if (state.backward_cursor === null || minId < state.backward_cursor) {
-    chatSyncState.updateCursors(chatId, { backward_cursor: minId })
-  }
-}
-
-function processChatBatch(
-  deps: HandlerDeps,
-  chatId: number,
-  chatMessages: NewMessageData[],
-): void {
-  const chatType =
-    chatMessages.find((message) => message.chatType)?.chatType ?? undefined
-  const memberCount = chatMessages.find(
-    (message) => message.memberCount,
-  )?.memberCount
-  ensureSyncState(deps.chatSyncState, chatId, chatType, memberCount)
-
-  const inputs = chatMessages.map(toMessageInput)
-  const { inserted } = deps.messagesCache.upsertBatch(inputs)
-
-  // A group that takes no new messages keeps its cursors, so its pages are
-  // read again once it does
-  if (deps.messagesCache.participation.captures(chatId)) {
-    const messageIds = chatMessages.map((m) => m.messageId)
-    updateCursorsForBatch(deps.chatSyncState, chatId, messageIds)
-  }
-  deps.chatSyncState.incrementSyncedMessages(chatId, inserted)
-  deps.onMessagesSynced?.(inserted)
-}
-
-async function handleBatchMessagesImpl(
-  deps: HandlerDeps,
-  messages: NewMessageData[],
-): Promise<void> {
-  if (messages.length === 0) return
-
-  const byChatId = groupMessagesByChat(messages)
-  for (const [chatId, chatMessages] of byChatId) {
-    try {
-      processChatBatch(deps, chatId, chatMessages)
-    } catch (err) {
-      const messageIds = chatMessages.map((m) => m.messageId)
-      deps.logger.error(
-        `Failed to handle batch messages: chatId=${chatId}, messageCount=${chatMessages.length}, messageIds=[${messageIds.slice(0, 5).join(',')}${messageIds.length > 5 ? '...' : ''}], error=${formatError(err)}`,
-      )
-    }
-  }
-}
-
 function createSafeHandler<T>(
   deps: HandlerDeps,
   label: string,
@@ -395,9 +314,6 @@ export function createUpdateHandlers(
     ),
     handleDeleteMessagesWithoutChat: async (_ctx, data) => {
       return deps.messagesCache.markDeletedByMessageIds(data.messageIds)
-    },
-    handleBatchMessages: async (_ctx, messages) => {
-      await handleBatchMessagesImpl(deps, messages)
     },
   }
 }
