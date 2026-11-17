@@ -84,17 +84,6 @@ describe('DaemonStatusService', () => {
     })
   })
 
-  describe('clear', () => {
-    it('removes all values', () => {
-      service.set('key1', 'value1')
-      service.set('key2', 'value2')
-
-      service.clear()
-
-      expect(service.getAll()).toEqual({})
-    })
-  })
-
   describe('convenience methods', () => {
     describe('setDaemonRunning', () => {
       it('sets daemon as running with PID and start time', () => {
@@ -198,17 +187,6 @@ describe('DaemonStatusService', () => {
       })
     })
 
-    describe('isDaemonRunning', () => {
-      it('returns true when daemon is running', () => {
-        service.setDaemonRunning(12345, '0.3.1')
-        expect(service.isDaemonRunning()).toBe(true)
-      })
-
-      it('returns false when daemon is stopped', () => {
-        expect(service.isDaemonRunning()).toBe(false)
-      })
-    })
-
     describe('writeTick', () => {
       it("writes the account's figures and last_update", () => {
         const before = Date.now()
@@ -306,29 +284,10 @@ describe('DaemonStatusService', () => {
       })
     })
 
-    describe('updateLastUpdate', () => {
-      it('updates last update timestamp', () => {
-        const before = Date.now()
-        service.updateLastUpdate()
-        const after = Date.now()
-
-        const timestamp = parseInt(service.get('last_update')!, 10)
-        expect(timestamp).toBeGreaterThanOrEqual(before)
-        expect(timestamp).toBeLessThanOrEqual(after)
-      })
-    })
-
-    describe('setMessagesSynced', () => {
-      it('sets total messages synced count', () => {
-        service.setMessagesSynced(1000)
-        expect(service.get('messages_synced')).toBe('1000')
-      })
-    })
-
     describe('getDaemonInfo', () => {
       it('returns all daemon info', () => {
         service.setDaemonRunning(12345, '0.3.1')
-        service.setMessagesSynced(1000)
+        service.set('messages_synced', '1000')
         service.set('connection_status', 'connected')
         service.set('pending_jobs', '4')
 

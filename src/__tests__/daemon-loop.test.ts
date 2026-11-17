@@ -30,12 +30,8 @@ function createMockStatusService(
     set: () => {},
     delete: () => {},
     getAll: () => ({}),
-    clear: () => {},
     setDaemonRunning: () => {},
     setDaemonStopped: () => {},
-    isDaemonRunning: () => false,
-    updateLastUpdate: () => {},
-    setMessagesSynced: () => {},
     writeTick: () => {},
     recordCatchUp: () => {},
     getDaemonInfo: () => ({
