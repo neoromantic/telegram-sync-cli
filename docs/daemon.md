@@ -177,7 +177,6 @@ Workers execute jobs and update:
 - `chat_sync_state` (cursors, progress)
 
 Key files:
-- `src/daemon/sync-worker-core.ts`
 - `src/daemon/sync-worker-real-jobs.ts`
 - `src/daemon/sync-worker-real-context.ts`
 - `src/daemon/sync-retry.ts` (backoff and permanent errors)

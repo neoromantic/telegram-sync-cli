@@ -6,10 +6,6 @@ import { describe, expect, it } from 'bun:test'
 import { _messageMediaFromTl, Long, Thumbnail, type tl } from '@mtcute/bun'
 
 import {
-  type TelegramMessage,
-  telegramMessageToInput,
-} from '../daemon/sync-worker-core'
-import {
   type AttachmentInfo,
   attachmentDefaultFileName,
   extractAttachment,
@@ -431,13 +427,11 @@ describe('extractAttachment', () => {
     })
   })
 
-  it('reads the abstract sync worker message and its raw_json', () => {
+  it('reads a message without its TL tag, but not media in another form', () => {
     const { _, ...untagged } = photoMessage(peer, 42)
     const expected = extractAttachment(photoMessage(peer, 42))
     expect(expected).not.toBeNull()
     expect(extractAttachment(untagged)).toEqual(expected)
-    const input = telegramMessageToInput(1001, untagged as TelegramMessage)
-    expect(extractAttachment(input.raw_json)).toEqual(expected)
 
     // Media not in raw TL form can't be read
     expect(

@@ -4,10 +4,6 @@
 
 import type { SyncJobRow } from '../db/sync-schema'
 import {
-  DEFAULT_SYNC_WORKER_CONFIG,
-  type SyncWorkerConfig,
-} from './sync-worker-core'
-import {
   canMakeApiCall,
   getInputPeer,
   getWaitTime,
@@ -19,10 +15,12 @@ import {
   processInitialLoadReal,
   processJobReal,
 } from './sync-worker-real-jobs'
-import type {
-  RealJobResult,
-  RealSyncWorkerContext,
-  RealSyncWorkerDeps,
+import {
+  DEFAULT_SYNC_WORKER_CONFIG,
+  type RealJobResult,
+  type RealSyncWorkerContext,
+  type RealSyncWorkerDeps,
+  type SyncWorkerConfig,
 } from './sync-worker-real-types'
 import { runOnceBase } from './sync-worker-utils'
 
