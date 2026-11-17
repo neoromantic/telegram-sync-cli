@@ -6,7 +6,7 @@
  * Database only.
  */
 import type { Database } from 'bun:sqlite'
-import { capturesSql, createGroupParticipation } from './group-participation'
+import { capturesSql } from './group-participation'
 import { historyDoneSql, SyncJobStatus, SyncJobType } from './sync-schema'
 
 /** The span the pace of history pages is measured over */
@@ -90,6 +90,7 @@ interface ChatRow {
   history_done: number
   total_messages: number | null
   cached: number
+  has_gaps: number
 }
 
 /**
@@ -152,14 +153,12 @@ export function readHistoryProgress(
     .query(
       `SELECT s.chat_id, s.chat_type, s.history_complete,
          ${historyDoneSql('s')} AS history_done, s.total_messages,
-         (SELECT COUNT(*) FROM messages_cache m WHERE m.chat_id = s.chat_id) AS cached
+         (SELECT COUNT(*) FROM messages_cache m WHERE m.chat_id = s.chat_id) AS cached,
+         EXISTS (SELECT 1 FROM group_capture_gaps g WHERE g.chat_id = s.chat_id) AS has_gaps
        FROM chat_sync_state s
        WHERE s.sync_enabled = 1 AND ${capturesSql('s', Math.floor(now / 1000))}`,
     )
     .all() as ChatRow[]
-  // A group with a pause never caches the pause's messages, so Telegram's
-  // count says nothing about what is left (src/db/group-participation.ts)
-  const participation = createGroupParticipation(db)
 
   const progress = emptyHistoryProgress()
   const pending: PendingHistoryChat[] = []
@@ -172,7 +171,9 @@ export function readHistoryProgress(
     if (
       row.total_messages === null ||
       newestPageOnly ||
-      participation.hasGaps(row.chat_id)
+      // A group with a pause never caches the pause's messages, so Telegram's
+      // count says nothing about what is left (src/db/group-participation.ts)
+      row.has_gaps === 1
     ) {
       if (pendingChat) {
         progress.chats_without_count++

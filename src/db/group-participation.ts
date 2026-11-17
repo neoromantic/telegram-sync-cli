@@ -1,27 +1,11 @@
 /**
- * Group participation: a group adds messages to the cache only while the
- * account takes part in it, that is, sent an ordinary message there in the
- * last 90 days. Reading a group doesn't count. The rule holds for every
- * writer (live updates, dialog passes, sync jobs, the CLI) and whatever
- * `tg chats sync` says; private chats and channels don't fall under it.
- * Messages already cached stay and are still updated.
- *
- * Per account cache:
- * - group_participation: the date of the newest own message known in each
- *   group, and when the first check (a search for the newest own message)
- *   answered. Without that answer and without a fresh own message the
- *   group's state is unknown, and it takes no new messages either.
- * - group_capture_gaps: the periods `[start_date, end_date)` a group was
- *   known to be paused. A pause starts when the newest own message turns 90
- *   days old (or at the first check, if that found none) and ends at the
- *   next own message. Messages dated inside a pause are never cached, so
- *   catch-up and history after a return don't fill it.
- *
- * Every change merges by the newest date, so an older fact, or one that
- * arrives late, never lowers the date or reopens a pause. Dates are Unix
- * seconds, as Telegram sends them.
+ * Group participation: a group adds new messages only while the account sent
+ * an ordinary message there in the last 90 days. Rule and tables:
+ * docs/sync-strategy.md#group-participation, docs/database-schema.md. Dates
+ * are Unix seconds; a merge keeps the newest date and never reopens a pause.
  */
 import type { Database } from 'bun:sqlite'
+import { CHANNEL_PEER_ID_OFFSET } from '../utils/telegram-peer-ids'
 import { INDEX_BUILD_BUSY_TIMEOUT_MS, withBusyTimeout } from './sync-schema'
 
 /** How long an own message keeps a group captured: 90 days */
@@ -100,8 +84,6 @@ export interface GroupParticipation {
   recordCheck(chatId: number, lastOwnDate: number | null, now?: number): void
   /** The date of the newest own message known in the chat */
   lastOwnDate(chatId: number): number | null
-  /** The chat has a recorded pause */
-  hasGaps(chatId: number): boolean
 }
 
 /**
@@ -110,15 +92,18 @@ export interface GroupParticipation {
  * messages_cache; their state stays unknown until the first check.
  */
 export function createGroupParticipationSchema(db: Database): void {
-  const exists = db
-    .query(
-      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'group_capture_gaps'`,
-    )
-    .get()
-  if (exists) return
+  const created = () =>
+    db
+      .query(
+        `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'group_capture_gaps'`,
+      )
+      .get()
+  if (created()) return
 
   withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
     db.transaction(() => {
+      // Another process may have created both tables while this one waited
+      if (created()) return
       db.run(`
         CREATE TABLE IF NOT EXISTS group_participation (
           chat_id         INTEGER PRIMARY KEY,
@@ -126,13 +111,6 @@ export function createGroupParticipationSchema(db: Database): void {
           initialized_at  INTEGER
         )
       `)
-      // Another process may have created both tables while this one waited
-      const created = db
-        .query(
-          `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'group_capture_gaps'`,
-        )
-        .get()
-      if (created) return
       db.run(`
         INSERT OR IGNORE INTO group_participation (chat_id, last_own_date)
         SELECT chat_id, MAX(date) FROM messages_cache
@@ -162,13 +140,9 @@ export function createGroupParticipation(db: Database): GroupParticipation {
       'SELECT chat_type FROM chat_sync_state WHERE chat_id = ?',
     ),
     cachedType: db.query('SELECT type FROM chats_cache WHERE chat_id = ?'),
-    upsert: db.prepare(`
-      INSERT INTO group_participation (chat_id, last_own_date, initialized_at)
-      VALUES ($chat_id, $last, $init)
-      ON CONFLICT (chat_id) DO UPDATE SET
-        last_own_date = MAX(COALESCE(last_own_date, excluded.last_own_date), COALESCE(excluded.last_own_date, last_own_date)),
-        initialized_at = COALESCE(initialized_at, excluded.initialized_at)
-    `),
+    upsert: db.prepare(
+      'INSERT OR REPLACE INTO group_participation (chat_id, last_own_date, initialized_at) VALUES ($chat_id, $last, $init)',
+    ),
     addGap: db.prepare(`
       INSERT OR IGNORE INTO group_capture_gaps (chat_id, start_date, end_date)
       VALUES ($chat_id, $start, $end)
@@ -178,9 +152,6 @@ export function createGroupParticipation(db: Database): GroupParticipation {
       WHERE chat_id = $chat_id AND start_date <= $date AND end_date > $date
       LIMIT 1
     `),
-    hasGaps: db.query(
-      'SELECT 1 FROM group_capture_gaps WHERE chat_id = ? LIMIT 1',
-    ),
     // The next refresh queues a catch-up from the old cursor
     topUnknown: db.prepare(
       'UPDATE chat_sync_state SET top_message_id = NULL, updated_at = $now WHERE chat_id = $chat_id',
@@ -199,17 +170,16 @@ export function createGroupParticipation(db: Database): GroupParticipation {
   const merge = db.transaction(
     (chatId: number, ownDate: number | null, checked: boolean, now: number) => {
       const row = getRow(chatId)
-      const before = statusOf(row, now)
       const prevLast = row?.last_own_date ?? null
       const prevInit = row?.initialized_at ?? null
 
       const newer =
         ownDate !== null && (prevLast === null || ownDate > prevLast)
       if (newer && prevInit !== null) {
-        const start =
-          prevLast === null
-            ? prevInit
-            : Math.max(prevLast + PARTICIPATION_WINDOW_SECONDS, prevInit)
+        const start = Math.max(
+          prevInit,
+          (prevLast ?? -Infinity) + PARTICIPATION_WINDOW_SECONDS,
+        )
         if (ownDate > start) {
           stmts.addGap.run({ $chat_id: chatId, $start: start, $end: ownDate })
         }
@@ -222,11 +192,7 @@ export function createGroupParticipation(db: Database): GroupParticipation {
       if (row && last === prevLast && init === prevInit) return
       stmts.upsert.run({ $chat_id: chatId, $last: last, $init: init })
 
-      if (
-        before !== 'active' &&
-        statusOf({ last_own_date: last, initialized_at: init }, now) ===
-          'active'
-      ) {
+      if (fresh && statusOf(row, now) !== 'active') {
         stmts.topUnknown.run({ $chat_id: chatId, $now: Date.now() })
       }
     },
@@ -236,7 +202,7 @@ export function createGroupParticipation(db: Database): GroupParticipation {
     isGroup(chatId) {
       if (chatId > 0) return false
       // -N is a basic group; -100… is a supergroup or a channel
-      if (chatId > -1_000_000_000_000) return true
+      if (chatId > -CHANNEL_PEER_ID_OFFSET) return true
       const type =
         (stmts.syncType.get(chatId) as { chat_type: string } | null)
           ?.chat_type ??
@@ -271,10 +237,6 @@ export function createGroupParticipation(db: Database): GroupParticipation {
 
     lastOwnDate(chatId) {
       return getRow(chatId)?.last_own_date ?? null
-    },
-
-    hasGaps(chatId) {
-      return stmts.hasGaps.get(chatId) !== null
     },
   }
   return service
