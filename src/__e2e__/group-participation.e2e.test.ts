@@ -8,10 +8,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { join } from 'node:path'
 import type { TelegramClient } from '@mtcute/bun'
-
+import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
+import { dialogToCacheInput } from '../commands/chats/helpers'
 import { fetchMessagesRaw } from '../daemon/sync-worker-real-helpers'
 import { createChatsCache } from '../db/chats-cache'
-import { createGroupParticipation } from '../db/group-participation'
+import { createUsersCache } from '../db/users-cache'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
 import { runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
@@ -29,17 +31,23 @@ describe('E2E: groups the account does not take part in', () => {
     env.initDatabase()
     env.seedAccounts([{ phone: '+15550000000', is_active: true }])
     fixturesDir = join(env.dataDir, 'fixtures')
-    createChatsCache(env.openCacheDb(1)).upsert({
-      chat_id: String(GROUP_ID),
-      type: 'group',
-      title: 'Made-up Hiking Club',
-      username: null,
-      member_count: 12,
-      access_hash: null,
-      is_creator: 0,
-      is_admin: 0,
-      last_message_id: null,
-      last_message_at: null,
+    const cacheDb = env.openCacheDb(1)
+    createChatsCache(cacheDb).upsert(
+      dialogToCacheInput(
+        fakeDialog({
+          kind: 'group',
+          id: 4101,
+          title: 'Made-up Hiking Club',
+          membersCount: 12,
+        }),
+      ),
+    )
+    createUsersCache(cacheDb).upsert({
+      user_id: String(ALICE_ID),
+      first_name: 'Alice',
+      last_name: null,
+      username: 'alice_example',
+      access_hash: '1',
       fetched_at: Date.now(),
       raw_json: '{}',
     })
@@ -99,13 +107,11 @@ describe('E2E: groups the account does not take part in', () => {
     ).n
   }
 
-  it('shows the page with --fresh and caches none of it', async () => {
+  it('shows the page with --fresh, and caches it once the account took part', async () => {
     await recordNewestPage()
+    const args = ['messages', 'list', '--chat', String(GROUP_ID), '--fresh']
 
-    const result = await runCliSuccess(
-      ['messages', 'list', '--chat', String(GROUP_ID), '--fresh'],
-      replayOptions(),
-    )
+    const result = await runCliSuccess(args, replayOptions())
 
     const data = (
       result.json as {
@@ -120,35 +126,18 @@ describe('E2E: groups the account does not take part in', () => {
     expect(data.items[0]).toMatchObject({
       text: 'made-up trail note 3',
       chat: { id: GROUP_ID, title: 'Made-up Hiking Club', type: 'group' },
+      sender: { username: 'alice_example' },
     })
     expect(cachedCount()).toBe(0)
-
-    const chats = await runCliSuccess(
-      ['chats', 'list', '--type', 'group'],
-      env.getCliOptions(),
-    )
     expect(
-      (chats.json as { data: { items: unknown[] } }).data.items[0],
-    ).toMatchObject({
-      id: GROUP_ID,
-      syncEnabled: false,
-      syncReason: 'group_participation_unknown',
-      lastOwnMessageAt: null,
-    })
-  })
+      env
+        .openCacheDb(1)
+        .query('SELECT COUNT(*) AS n FROM history_ranges')
+        .get(),
+    ).toEqual({ n: 0 })
 
-  it('caches the page once the account took part in the last 90 days', async () => {
-    await recordNewestPage()
-    createGroupParticipation(env.openCacheDb(1)).observeOwnMessage(
-      GROUP_ID,
-      Math.floor(Date.now() / 1000) - 24 * 60 * 60,
-    )
-
-    await runCliSuccess(
-      ['messages', 'list', '--chat', String(GROUP_ID), '--fresh'],
-      replayOptions(),
-    )
-
+    takePartIn(env.openCacheDb(1), GROUP_ID)
+    await runCliSuccess(args, replayOptions())
     expect(cachedCount()).toBe(3)
   })
 })

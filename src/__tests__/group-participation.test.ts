@@ -18,11 +18,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { RpcCallOptions, TelegramClient, tl } from '@mtcute/bun'
 
-import {
-  fetchHistoryPage,
-  listHistory,
-  resolveHistoryChat,
-} from '../commands/messages/history'
+import { dialogToCacheInput } from '../commands/chats/helpers'
+import { listHistory, resolveHistoryChat } from '../commands/messages/history'
 import { createDmLookup } from '../commands/send/peer-resolver'
 import { cacheSentMessage } from '../commands/send/sent-message-cache'
 import { createUpdateHandlers } from '../daemon/handlers'
@@ -44,13 +41,15 @@ import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
 import {
   initSyncSchema,
-  type SyncChatType,
   SyncJobStatus,
   SyncJobType,
   SyncPriority,
 } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { toRawJson } from '../utils/raw-json'
+import { fakeDialog } from './helpers/fake-dialogs'
+import { photoMessage } from './helpers/photo-message'
 
 const SELF = 7000
 const ALICE = 7101
@@ -72,27 +71,19 @@ function createDb(): Database {
   const db = new Database(':memory:')
   initCacheSchema(db)
   initSyncSchema(db)
-  cacheChat(db, SUPERGROUP, 'supergroup')
-  cacheChat(db, CHANNEL, 'channel')
-  cacheChat(db, BASIC, 'group')
+  createChatsCache(db).upsertMany(
+    [
+      fakeDialog({ kind: 'supergroup', id: 9_100_000_001, membersCount: 5 }),
+      fakeDialog({ kind: 'channel', id: 9_100_000_002, membersCount: 5 }),
+      fakeDialog({
+        kind: 'group',
+        id: 4101,
+        title: 'Made-up group',
+        membersCount: 5,
+      }),
+    ].map(dialogToCacheInput),
+  )
   return db
-}
-
-function cacheChat(db: Database, chatId: number, type: SyncChatType) {
-  createChatsCache(db).upsert({
-    chat_id: String(chatId),
-    type,
-    title: `Made-up ${type}`,
-    username: null,
-    member_count: 5,
-    access_hash: chatId < -1_000_000_000_000 ? '777' : null,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: Date.now(),
-    raw_json: '{}',
-  })
 }
 
 function message(
@@ -298,29 +289,12 @@ describe('GroupParticipation', () => {
 describe('MessagesCache under the participation rule', () => {
   it('keeps new messages of a group out until the account takes part', () => {
     const cache = createMessagesCache(db)
-    const photo = {
-      _: 'message',
-      id: 2,
-      date: NOW,
-      media: {
-        _: 'messageMediaPhoto',
-        photo: {
-          _: 'photo',
-          id: toLong(1),
-          accessHash: toLong(2),
-          fileReference: new Uint8Array(),
-          date: NOW,
-          sizes: [],
-          dcId: 2,
-        },
-      },
-    }
     const result = cache.upsertBatch([
       message(BASIC, 1, NOW),
       message(BASIC, 2, NOW, {
         message_type: 'photo',
         has_media: true,
-        raw_json: JSON.stringify(photo),
+        raw_json: toRawJson(photoMessage({ _: 'peerUser', userId: ALICE }, 2)),
       }),
       message(UNTYPED, 3, NOW),
       message(DM, 4, NOW),
@@ -754,49 +728,6 @@ describe('the daemon under the participation rule', () => {
 })
 
 describe('the CLI under the participation rule', () => {
-  it('shows a Telegram page of a paused group without caching it', async () => {
-    createUsersCache(db).upsert({
-      user_id: String(ALICE),
-      first_name: 'Alice',
-      last_name: null,
-      username: 'alice_example',
-      access_hash: '1',
-      fetched_at: Date.now(),
-      raw_json: '{}',
-    })
-    const client = {
-      call: async () => ({
-        _: 'messages.messages',
-        messages: [3, 2, 1].map((id) => ({
-          _: 'message',
-          id,
-          date: NOW - id,
-          peerId: { _: 'peerChat', chatId: 4101 },
-          fromId: { _: 'peerUser', userId: ALICE },
-          message: `made-up note ${id}`,
-        })),
-        users: [],
-        chats: [],
-      }),
-    }
-
-    const rows = await fetchHistoryPage(
-      client,
-      db,
-      { chatId: BASIC, inputPeer: { _: 'inputPeerChat', chatId: 4101 } },
-      { limit: 3 },
-    )
-
-    expect(rows.map((row) => row.message_id)).toEqual([3, 2, 1])
-    expect(rows[0]).toMatchObject({
-      text: 'made-up note 3',
-      chat_title: 'Made-up group',
-      sender_username: 'alice_example',
-    })
-    expect(count(db, 'SELECT COUNT(*) AS n FROM messages_cache')).toBe(0)
-    expect(count(db, 'SELECT COUNT(*) AS n FROM history_ranges')).toBe(0)
-  })
-
   it('caches the first page of a channel resolved by username, but not of a supergroup', async () => {
     // Neither chat is cached yet: resolving the username gives its type
     const read = async (
