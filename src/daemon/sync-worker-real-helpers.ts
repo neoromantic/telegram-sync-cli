@@ -232,25 +232,8 @@ export function historyTotal(
 export function createMessageInputs(
   messages: unknown[],
   chatId: number,
-  fallbackMinId: number,
-  fallbackMaxId: number,
-): { inputs: MessageInput[]; minId: number; maxId: number } {
-  const inputs: MessageInput[] = []
-  let minId = fallbackMinId
-  let maxId = fallbackMaxId
-
-  for (const msg of messages) {
-    const parsed = parseRawMessage(msg, chatId)
-    if (parsed) {
-      inputs.push(parsed)
-      if (parsed.message_id < minId) {
-        minId = parsed.message_id
-      }
-      if (parsed.message_id > maxId) {
-        maxId = parsed.message_id
-      }
-    }
-  }
-
-  return { inputs, minId, maxId }
+): MessageInput[] {
+  return messages
+    .map((message) => parseRawMessage(message, chatId))
+    .filter((input) => input !== null)
 }

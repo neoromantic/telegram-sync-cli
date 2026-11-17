@@ -213,18 +213,14 @@ describe('sync-worker real helpers/context', () => {
   })
 
   describe('createMessageInputs', () => {
-    it('creates inputs and updates min/max ids', () => {
+    it('creates inputs for the messages it can parse', () => {
       const messages = [
         { _: 'message', id: 10, date: 1700000000, message: 'new' },
         { _: 'messageEmpty', id: 0, date: 0 },
         { _: 'message', id: 5, date: 1699999999, message: 'old' },
       ]
 
-      const result = createMessageInputs(messages, 1, 999, 0)
-
-      expect(result.inputs.length).toBe(2)
-      expect(result.minId).toBe(5)
-      expect(result.maxId).toBe(10)
+      expect(createMessageInputs(messages, 1).length).toBe(2)
     })
   })
 

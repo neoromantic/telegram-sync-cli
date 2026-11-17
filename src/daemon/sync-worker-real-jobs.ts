@@ -123,7 +123,7 @@ export async function processForwardCatchupReal(
 
     // Empty messages hold no data, but the cursor still moves past them.
     const top = Math.max(...above.map(rawMessageId))
-    const { inputs } = createMessageInputs(above, chatId, floor, floor)
+    const inputs = createMessageInputs(above, chatId)
 
     // Live updates already counted the messages they cached.
     const write = ctx.messagesCache.upsertBatch(inputs)
@@ -222,7 +222,7 @@ export async function processBackwardHistoryReal(
     // Empty messages hold no data, but the cursor still moves past them.
     const ids = messages.map(rawMessageId).filter((id) => id > 0)
     const minId = ids.length > 0 ? Math.min(...ids) : backwardCursor
-    const { inputs } = createMessageInputs(messages, chatId, minId, minId)
+    const inputs = createMessageInputs(messages, chatId)
 
     // The first page, live updates and pages the CLI cached may hold some
     const write = ctx.messagesCache.upsertBatch(inputs)
@@ -319,7 +319,7 @@ export async function processInitialLoadReal(
 
     const maxId = Math.max(...ids)
     const minId = Math.min(...ids)
-    const { inputs } = createMessageInputs(messages, chatId, minId, maxId)
+    const inputs = createMessageInputs(messages, chatId)
 
     // Live updates already counted the messages they cached.
     const write = ctx.messagesCache.upsertBatch(inputs)
