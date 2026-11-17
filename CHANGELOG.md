@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `tg sql "SELECT 1" -f json` runs the query: the value of `-f`/`--format` after a positional
+  query was added to the SQL (`SELECT 1 json`, a syntax error), and after `--query` it was
+  refused as an extra argument. `tg sql -f json print-schema` prints the schema.
 - `tg messages list`, `get` and `search` say what a service message did. A call, a pin or a
   group change used to print only `messageType: "service"` with no text, so an agent reading a
   chat could not tell a call had happened. Every item now has `action`, read from `raw_json` (so it

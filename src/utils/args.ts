@@ -153,3 +153,11 @@ export function flagValues(rawArgs: string[], name: string): string[] {
   }
   return values
 }
+
+export const outputFormatArg = {
+  type: 'enum' as const,
+  alias: 'f',
+  description: 'Output format: json, pretty, or quiet',
+  options: ['json', 'pretty', 'quiet'],
+  default: 'json',
+}

@@ -6,6 +6,7 @@ import { getTableNames } from '../../db/schema-annotations'
 import { ErrorCodes } from '../../types'
 import { openAccountCache, reportCacheError } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
+import { outputFormatArg } from '../../utils/args'
 import { stringify as stringifyCsv } from '../../utils/csv'
 import { error, success } from '../../utils/output'
 import {
@@ -114,6 +115,7 @@ export const sqlQueryCommand = defineCommand({
       "Execute read-only SQL queries on an account's cache database (--account, else the active account)",
   },
   args: {
+    format: outputFormatArg,
     command: {
       type: 'positional',
       description: 'Optional subcommand (print-schema)',
