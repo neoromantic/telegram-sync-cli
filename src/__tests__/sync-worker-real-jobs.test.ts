@@ -1563,7 +1563,12 @@ describe('sync-worker real jobs', () => {
     })
 
     it('makes no call for a chat that already has a forward cursor', async () => {
-      ctx.chatSyncState.updateCursors(chatId, { forward_cursor: 1000 })
+      ctx.chatSyncState.recordFirstPage(chatId, {
+        forward_cursor: 1000,
+        backward_cursor: 1000,
+        history_complete: false,
+        new_messages: 0,
+      })
       const history = createFakeHistory(range(1, 1150))
       ctx.client = history.client
 

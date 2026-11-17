@@ -536,11 +536,12 @@ describe('SyncScheduler', () => {
     })
 
     it('does not queue initial load for chats with a forward cursor', async () => {
-      chatSyncState.updateCursors(1, {
+      chatSyncState.recordFirstPage(1, {
         forward_cursor: 100,
         backward_cursor: 1,
+        history_complete: false,
+        new_messages: 100,
       })
-      chatSyncState.incrementSyncedMessages(1, 100)
 
       await scheduler.initializeForStartup()
 

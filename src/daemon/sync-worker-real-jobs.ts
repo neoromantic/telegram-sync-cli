@@ -233,7 +233,7 @@ export async function processBackwardHistoryReal(
       ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), bounds)
     }
 
-    ctx.chatSyncState.updateCursors(chatId, { backward_cursor: minId })
+    ctx.chatSyncState.updateBackwardCursor(chatId, minId)
     ctx.chatSyncState.incrementSyncedMessages(chatId, newCount)
     ctx.chatSyncState.updateLastSync(chatId, 'backward')
 

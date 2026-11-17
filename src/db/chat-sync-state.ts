@@ -33,14 +33,6 @@ export interface ChatSyncStateInput {
 }
 
 /**
- * Options for updating cursors
- */
-export interface UpdateCursorsOptions {
-  forward_cursor?: number
-  backward_cursor?: number
-}
-
-/**
  * The result of a chat's first page (the `initial_load` job)
  */
 export interface FirstPageResult {
@@ -144,8 +136,8 @@ export interface ChatSyncStateService {
   get(chatId: number): ChatSyncStateRow | null
   /** Create or update sync state */
   upsert(input: ChatSyncStateInput): void
-  /** Update cursors for a chat */
-  updateCursors(chatId: number, options: UpdateCursorsOptions): void
+  /** Move a chat's backward (history) cursor */
+  updateBackwardCursor(chatId: number, backwardCursor: number): void
   /** Mark history as complete */
   markHistoryComplete(chatId: number): void
   /** Increment synced messages count */
@@ -227,11 +219,9 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         updated_at = excluded.updated_at
     `),
 
-    updateCursors: db.prepare(`
+    updateBackwardCursor: db.prepare(`
       UPDATE chat_sync_state
-      SET forward_cursor = COALESCE($forward, forward_cursor),
-          backward_cursor = COALESCE($backward, backward_cursor),
-          updated_at = $now
+      SET backward_cursor = $backward, updated_at = $now
       WHERE chat_id = $chat_id
     `),
 
@@ -384,11 +374,10 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       })
     },
 
-    updateCursors(chatId: number, options: UpdateCursorsOptions): void {
-      stmts.updateCursors.run({
+    updateBackwardCursor(chatId: number, backwardCursor: number): void {
+      stmts.updateBackwardCursor.run({
         $chat_id: chatId,
-        $forward: options.forward_cursor ?? null,
-        $backward: options.backward_cursor ?? null,
+        $backward: backwardCursor,
         $now: Date.now(),
       })
     },

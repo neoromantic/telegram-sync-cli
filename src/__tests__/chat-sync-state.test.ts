@@ -279,32 +279,22 @@ describe('ChatSyncStateService', () => {
     })
   })
 
-  describe('updateCursors', () => {
-    beforeEach(() => {
+  describe('updateBackwardCursor', () => {
+    it('moves the backward cursor and keeps the forward one', () => {
       service.upsert({
         chat_id: 100,
         chat_type: 'private',
         sync_priority: SyncPriority.High,
         sync_enabled: true,
       })
-    })
+      service.recordFirstPage(100, {
+        forward_cursor: 1000,
+        backward_cursor: 900,
+        history_complete: false,
+        new_messages: 100,
+      })
 
-    it('updates forward cursor', () => {
-      service.updateCursors(100, { forward_cursor: 1000 })
-
-      const state = service.get(100)
-      expect(state?.forward_cursor).toBe(1000)
-    })
-
-    it('updates backward cursor', () => {
-      service.updateCursors(100, { backward_cursor: 500 })
-
-      const state = service.get(100)
-      expect(state?.backward_cursor).toBe(500)
-    })
-
-    it('updates both cursors', () => {
-      service.updateCursors(100, { forward_cursor: 1000, backward_cursor: 500 })
+      service.updateBackwardCursor(100, 500)
 
       const state = service.get(100)
       expect(state?.forward_cursor).toBe(1000)
