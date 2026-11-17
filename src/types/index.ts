@@ -2,6 +2,7 @@
  * Type definitions for telegram-sync-cli
  */
 import type { AttachmentInfo } from '../utils/attachment'
+import type { MessageAction } from '../utils/service-action'
 
 /** Account stored in database */
 export interface Account {
@@ -70,6 +71,8 @@ export interface MessageSearchItem {
   mediaPath: string | null
   /** The message's file, read from its raw_json; null when it has none */
   attachment: AttachmentInfo | null
+  /** What a service message did (a call, a pin, a group change); null for any other message */
+  action: MessageAction | null
   isOutgoing: boolean
   isEdited: boolean
   isPinned: boolean
