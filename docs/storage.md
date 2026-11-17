@@ -226,6 +226,13 @@ Edit history: [#96](https://github.com/neoromantic/telegram-sync-cli/issues/96).
   31.0 min by itself, and the rate is about the same at 100,000 and 1M. Before #89 every
   migration ran in one transaction on open; a full pass that holds the write lock is like the
   search index rebuild below.
+- **Pauses with the daemon stopped.** Since #122 `tg db migrate` alone pauses 150 ms after each
+  second of work, so another `tg` command's write gets in within about a second; by
+  construction that adds up to 15%. On the 1M cache in the old form, with every migration of
+  this version pending (3,003,001 rows, the re-index of names and the index merges included),
+  two runs before the change took 63.5 s and 59.7 s, and two after it 68.9 s and 69.7 s, run
+  back to back (before, after, after, before) on a machine loaded with other work: 8 to 17%,
+  13% on average.
 - **Names in the index.** The one-off re-index of names (`message_search_names`, #93) does a
   message at a time, a delete and an insert in the index, in the same batches as the other
   migrations, with a batch of index merges after each: 46,915 messages/s at 100,000 (2.1 s),
