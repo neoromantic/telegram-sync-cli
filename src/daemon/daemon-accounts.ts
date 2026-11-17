@@ -9,10 +9,6 @@ import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import type { SyncChatType } from '../db/sync-schema'
 import { getDefaultConfig, validateConfig } from '../services/telegram'
-import {
-  extractForwardFromId,
-  type RawMessageFwdHeader,
-} from '../utils/message-parser'
 import { messageTypeOfMediaType } from '../utils/message-type'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
 import { apiActivityMiddleware } from './daemon-api-activity'
@@ -36,6 +32,7 @@ import {
   type UpdateContext,
 } from './handlers'
 import { formatPace } from './sync-pacing'
+import { extractForwardFromId } from './sync-worker-real-helpers'
 import type { AccountConnectionState, AccountEventHandlers } from './types'
 
 export function resolveRealtimeMessageType(msg: {
@@ -89,13 +86,6 @@ export function resolveSyncChatType(
   }
 
   return resolved
-}
-
-function resolveForwardFromId(message: {
-  raw?: { fwdFrom?: RawMessageFwdHeader }
-}): number | undefined {
-  if (!message.raw?.fwdFrom) return undefined
-  return extractForwardFromId(message.raw.fwdFrom)
 }
 
 export async function closeClientSafe(
@@ -167,11 +157,10 @@ export function setupEventHandlers(
       const ctxLocal = createContext()
       const { messageType, hasMedia } = resolveRealtimeMessageType(msg)
       const chatType = resolveSyncChatType(msg.chat)
-      const forwardFromId = resolveForwardFromId(
-        msg as {
-          raw?: { fwdFrom?: RawMessageFwdHeader }
-        },
-      )
+      const forwardFromId =
+        extractForwardFromId(
+          (msg.raw ?? {}) as unknown as Record<string, unknown>,
+        ) ?? undefined
       const data: NewMessageData = {
         chatId: msg.chat.id,
         chatType,

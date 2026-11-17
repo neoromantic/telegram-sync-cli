@@ -117,5 +117,4 @@ realtime gaps.
 - `src/daemon/daemon-accounts.ts`
 - `src/daemon/handlers.ts`
 - `src/daemon/daemon-contacts.ts` (contact updates)
-- `src/utils/message-parser.ts`
 - `src/db/messages-cache.ts`

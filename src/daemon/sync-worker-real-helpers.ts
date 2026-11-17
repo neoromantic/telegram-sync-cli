@@ -39,7 +39,9 @@ function extractReplyToId(message: Record<string, unknown>): number | null {
 type RawPeerField = Parameters<typeof toPeerIdFromRawPeer>[0]
 
 /** Marked ID of the original sender of a forwarded message */
-function extractForwardFromId(message: Record<string, unknown>): number | null {
+export function extractForwardFromId(
+  message: Record<string, unknown>,
+): number | null {
   const fwdFrom = message.fwdFrom as { fromId?: RawPeerField } | undefined
   return toPeerIdFromRawPeer(fwdFrom?.fromId)
 }
