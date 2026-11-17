@@ -15,7 +15,7 @@ import {
 } from '../db'
 import {
   createClient,
-  getClient,
+  getClientForAccount,
   isAuthorized,
   requireDefaultConfig,
 } from '../services/telegram'
@@ -130,7 +130,7 @@ export function getDefaultDependencies(): AuthDependencies {
   return {
     accountsDb: defaultAccountsDb,
     createClient,
-    getClient,
+    getClient: getClientForAccount,
     isAuthorized,
     prompt,
     promptPassword,

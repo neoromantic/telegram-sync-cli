@@ -17,8 +17,8 @@ if (!(globalThis as Record<symbol, boolean>)[timeoutPatchKey]) {
 }
 
 /**
- * Telegram client manager
- * Handles multi-account support with session persistence
+ * Telegram clients: config, the client factory and one cached client per
+ * account, each with its own session file
  */
 
 import { join } from 'node:path'
@@ -225,17 +225,8 @@ export function createClient(accountId: number): TelegramClient {
 }
 
 /**
- * Get or create a client for an account (uses global clients map)
- */
-export function getClient(accountId: number): TelegramClient {
-  const existing = clients.get(accountId)
-  if (existing) return existing
-  return createClient(accountId)
-}
-
-/**
  * Get or create the client for an account the command already resolved
  */
 export function getClientForAccount(accountId: number): TelegramClient {
-  return getClient(accountId)
+  return clients.get(accountId) ?? createClient(accountId)
 }
