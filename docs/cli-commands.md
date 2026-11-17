@@ -12,7 +12,7 @@
 | `accounts` | list, switch, remove, info |
 | `contacts` | list, search, get (cached; supports `--fresh`) |
 | `chats` | list, search (cache-only), get (@username only), sync (cache-only) |
-| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only) |
+| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only), wait and watch (new messages the daemon stores) |
 | `send` | send a message or one file (`--to`, `--message`, `--file`) |
 | `media` | download (cache-first), clean |
 | `api` | raw Telegram API calls |
@@ -181,6 +181,9 @@ tg messages search --query '"hello world"'         # the exact phrase (or --phra
 tg messages search --query "error OR timeout" --chat @teamchat --sender @alice
 tg messages search --query "квартир*" --includeDeleted   # every word form
 tg messages search --query "deploy" --since 7d --sort relevance --count --snippet
+tg messages wait --chat @username --after 1200     # the next reply after message 1200
+tg messages wait --timeout 300 --settle 3          # any chat; then 3 quiet seconds
+tg messages watch --chat @teamchat                 # one JSON line per new message
 ```
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
@@ -263,6 +266,43 @@ relevance` puts the best matches first (bm25); `--count` adds `count`, every mat
 pages, while `total` stays the size of the page; `--snippet` adds `snippet` to each item, the
 text around the first match with matched words in `**`. The rules and examples are in
 [search.md](search.md#query-rules).
+
+#### Waiting for new messages
+
+`tg messages wait [--chat <peer>] [--after <id>] [--timeout 60] [--settle 0]` blocks until the
+daemon stores a new message, then prints the new messages oldest first, as items of the same
+shape as `tg messages list`; deleted ones are left out. `tg messages watch [--chat <peer>]`
+prints each new message as one JSON line (NDJSON) as it is stored, until SIGINT or SIGTERM, and
+then exits 0. Both read only the account's cache, which they check every 200 ms, so a message
+comes back within about a second of the daemon storing it. They open no Telegram connection
+(only resolving a `--chat` the cache doesn't know asks Telegram, as in `tg messages list`), and
+the daemon stays read-only. What the daemon stores live: [real-time.md](real-time.md#how-fresh-wait-and-watch-are).
+
+- New means stored after the command started and newer than every message of its chat already
+  in the cache, so history the daemon backfills meanwhile doesn't count. Messages you send, from
+  `tg send` or another device, count too: `isOutgoing` tells them apart.
+- `--chat` takes the same forms as in `tg messages list` and keeps only that chat.
+- `--after <id>` needs `--chat` (message IDs are per chat; `INVALID_ARGS`, exit 3, otherwise).
+  The chat's cached messages newer than it come back at once; with none, `wait` waits for one.
+  To never miss a reply, pass the ID of the last message you have read or sent: a reply stored
+  before `wait` started is still returned.
+- `--timeout` is in seconds (default 60, `0` checks once).
+- `--settle N`: after the first new message, keep collecting until N seconds pass without
+  another (default 0: return at once), never past `--timeout`.
+
+```json
+{ "success": true, "data": { "messages": [ … ], "timedOut": false } }
+```
+
+When `--timeout` passes with no new message, the result is still a success (exit 0):
+
+```json
+{ "success": true, "data": { "messages": [], "timedOut": true } }
+```
+
+Both need the daemon running for the account (`tg daemon start`), since nothing else stores new
+messages. Without it they fail at once with `DAEMON_NOT_RUNNING` (exit 1),
+`details: { account_id }` and a suggestion to start it.
 
 ### Media
 

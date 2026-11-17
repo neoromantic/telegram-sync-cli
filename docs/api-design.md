@@ -93,13 +93,15 @@ tg chats search --query "query"   # cache-only
 tg chats get --id @username        # username only
 tg chats sync @examplenews         # sync a large group or channel too (--off, --auto)
 
-# Messages: chat history (cache-first) and full-text search (cache-only)
+# Messages: chat history (cache-first), full-text search and new messages (cache-only)
 tg messages list --chat @username --limit 20
 tg messages list --chat @username --before 1200
 tg messages get --chat @username --id 1200 --context 3
 tg messages search --query "hello"
 tg messages search --query "hello" --chat @teamchat --sender @alice
 tg messages search --query "hello" --includeDeleted
+tg messages wait --chat @username --after 1200 --timeout 60   # the daemon's new messages
+tg messages watch                                             # NDJSON, until Ctrl-C
 
 # Messaging
 tg send --to @username --message "Hello"
@@ -245,6 +247,11 @@ A download that stalls for 60 seconds or loses its connection is `NETWORK_ERROR`
 `details.resumable: true`; a flood wait over 10 seconds is `RATE_LIMITED` (exit 5) with
 `details: { method: "upload.getFile", wait_seconds }`. Both keep the partial download for the
 next run. A download stopped with Ctrl-C or SIGTERM exits 130 and prints no JSON.
+
+`DAEMON_NOT_RUNNING` (exit 1) is returned by `tg daemon stop` without a daemon, and by
+`tg messages wait` and `watch` when the daemon doesn't run for the account, with
+`details: { account_id }` and a suggestion to start it
+([cli-commands.md](cli-commands.md#waiting-for-new-messages)).
 
 `DAEMON_ALREADY_RUNNING` (exit 1) is returned by `tg db vacuum` for a cache that only a full
 VACUUM can compact while the daemon runs, with `details: { account_id, auto_vacuum: "none" }`

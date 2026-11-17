@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at once with `GENERAL_ERROR`, `details.reason: "disk_full"`, the bytes needed and free, and
   changes nothing, instead of failing after minutes of work. `tg status` shows the same check
   next to its vacuum hint (#119).
+- `tg messages wait` blocks until the daemon stores a new message, then returns the new messages
+  oldest first, in the same shape as `tg messages list`; `tg messages watch` prints each one as a
+  JSON line as it is stored, until Ctrl-C or SIGTERM. Both read only the cache (no second
+  Telegram session) and return within about a second of the daemon storing a message.
+  `--chat` keeps one chat, `--after <id>` returns that chat's cached messages newer than it at
+  once, `--settle N` keeps collecting until N quiet seconds, and after `--timeout` (default
+  60 s) the result is `{ "messages": [], "timedOut": true }` with exit 0. Without a running
+  daemon they fail at once with `DAEMON_NOT_RUNNING` (#24).
 
 ### Changed
 
