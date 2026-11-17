@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing is left to ask Telegram for, and search doesn't show those messages by default. On a
   1.16M-message cache, 1,125 of the 1,376 senders still missing after the first fetch were such
   senders (#143).
+- Several commands can open a new cache together without failing to initialize its search index.
 
 ## [0.12.1] - 2026-11-13
 
