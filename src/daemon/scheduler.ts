@@ -26,10 +26,6 @@ export interface SchedulerStatus {
   pendingJobs: number
   /** Number of running jobs */
   runningJobs: number
-  /** Jobs by type */
-  jobsByType: Record<string, number>
-  /** Jobs by priority */
-  jobsByPriority: Record<number, number>
 }
 
 /**
@@ -349,22 +345,9 @@ class SyncSchedulerImpl implements SyncScheduler {
   }
 
   getStatus(): SchedulerStatus {
-    const runningJobs = this.jobsService.getRunningJobs()
-    const pendingJobs = this.jobsService.getPendingJobs()
-
-    const jobsByType: Record<string, number> = {}
-    const jobsByPriority: Record<number, number> = {}
-
-    for (const job of pendingJobs) {
-      jobsByType[job.job_type] = (jobsByType[job.job_type] ?? 0) + 1
-      jobsByPriority[job.priority] = (jobsByPriority[job.priority] ?? 0) + 1
-    }
-
     return {
-      pendingJobs: pendingJobs.length,
-      runningJobs: runningJobs.length,
-      jobsByType,
-      jobsByPriority,
+      pendingJobs: this.jobsService.getPendingJobs().length,
+      runningJobs: this.jobsService.getRunningJobs().length,
     }
   }
 

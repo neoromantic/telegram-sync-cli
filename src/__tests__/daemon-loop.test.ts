@@ -71,8 +71,6 @@ function createMockScheduler(
     getStatus: () => ({
       pendingJobs: 0,
       runningJobs: 0,
-      jobsByType: {},
-      jobsByPriority: {},
     }),
     recoverCrashedJobs: () => 0,
   }
@@ -222,32 +220,29 @@ describe('mainLoop', () => {
 
   it("writes each account's tick to its own cache", async () => {
     const ctx = createContext()
-    // Account 1 has no scheduler: its queue is counted from its own cache
-    const firstDb = createAccountCacheDb()
-    for (const [chatId, status] of [
-      [101, 'pending'],
-      [102, 'running'],
-      [103, 'failed'],
-      [104, 'completed'],
-    ] as const) {
-      firstDb.run(
-        'INSERT INTO sync_jobs (chat_id, job_type, priority, status) VALUES (?, ?, ?, ?)',
-        [chatId, SyncJobType.BackwardHistory, SyncPriority.Low, status],
-      )
+    // Each account's queue is counted from its own cache, with or without a
+    // scheduler
+    const seedJobs = (
+      db: ReturnType<typeof createAccountCacheDb>,
+      statuses: string[],
+    ) => {
+      for (const [i, status] of statuses.entries()) {
+        db.run(
+          'INSERT INTO sync_jobs (chat_id, job_type, priority, status) VALUES (?, ?, ?, ?)',
+          [101 + i, SyncJobType.BackwardHistory, SyncPriority.Low, status],
+        )
+      }
     }
+    const firstDb = createAccountCacheDb()
+    seedJobs(firstDb, ['pending', 'running', 'failed', 'completed'])
     const first = addAccountRuntime(ctx, 1, firstDb, {
       messagesSynced: 40,
     })
-    const second = addAccountRuntime(ctx, 2, createAccountCacheDb(), {
+    const secondDb = createAccountCacheDb()
+    seedJobs(secondDb, ['pending', 'pending', 'pending', 'running'])
+    const second = addAccountRuntime(ctx, 2, secondDb, {
       messagesSynced: 2,
-      scheduler: createMockScheduler({
-        getStatus: () => ({
-          pendingJobs: 3,
-          runningJobs: 1,
-          jobsByType: {},
-          jobsByPriority: {},
-        }),
-      }),
+      scheduler: createMockScheduler(),
     })
     ctx.state.accounts.set(1, {
       accountId: 1,

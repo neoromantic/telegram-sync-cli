@@ -65,8 +65,6 @@ const createSchedulerStub = (
     getStatus: () => ({
       pendingJobs: 0,
       runningJobs: 0,
-      jobsByType: {},
-      jobsByPriority: {},
     }),
     recoverCrashedJobs: () => 0,
     ...overrides,
