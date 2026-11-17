@@ -18,10 +18,7 @@ export function getWaitTime(ctx: RealSyncWorkerContext): number {
   return ctx.rateLimits.getWaitTime(ctx.config.apiMethod)
 }
 
-export function handleFloodWait(
-  ctx: RealSyncWorkerContext,
-  seconds: number,
-): void {
+function handleFloodWait(ctx: RealSyncWorkerContext, seconds: number): void {
   ctx.rateLimits.setFloodWait(ctx.config.apiMethod, seconds)
 }
 
