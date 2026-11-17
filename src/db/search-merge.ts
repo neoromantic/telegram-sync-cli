@@ -72,11 +72,15 @@ export function configureSearchMerges(
   contentless: boolean,
 ): void {
   if (readOption(db, 'automerge') === 0) return
-  const set = db.query(SET_OPTION)
-  set.run('usermerge', LEVEL_SEGMENTS.rest)
-  if (contentless) set.run('deletemerge', 0)
-  // Last: a cache that has it is done
-  set.run('automerge', 0)
+  // Preparing an FTS5 write opens the virtual table. Hold the write lock
+  // first so another process cannot change its schema or settings meanwhile.
+  db.transaction(() => {
+    if (readOption(db, 'automerge') === 0) return
+    const set = db.query(SET_OPTION)
+    set.run('usermerge', LEVEL_SEGMENTS.rest)
+    if (contentless) set.run('deletemerge', 0)
+    set.run('automerge', 0)
+  }).immediate()
 }
 
 /**
