@@ -100,6 +100,17 @@ account was reconnecting are not replayed (the daemon's clients don't catch up),
 and reconnect asks for a hash check at the next look (see
 [daemon.md](daemon.md#contacts-sync)).
 
+## How fresh wait and watch are
+
+`tg messages wait` and `tg messages watch` read what the daemon stores in the account's cache
+and check it every 200 ms, so a message comes back within about a second of being stored
+([cli-commands.md](cli-commands.md#waiting-for-new-messages)). The daemon stores a message as
+soon as mtcute delivers it: every new message of a private chat or group, in a chat with sync
+off too, and the channel posts Telegram pushes (see [Channels](#channels): some channels get
+none live, and their newest post arrives with the next dialog pass). Messages sent while the
+daemon was stopped or reconnecting arrive with catch-up after the start or reconnect, in the
+chats that get it ([sync-strategy.md](sync-strategy.md)). An edit or a delete changes a stored message and is not a new one.
+
 ## Gaps / Too Long Updates
 
 Gaps are closed by forward catch-up, not by `getDifference`. On start and after each reconnect

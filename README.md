@@ -95,7 +95,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Send text | ✅ replies, silent | ✅ replies, Markdown/HTML |
 | Edit, delete, forward, pin | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)) | ✅ |
 | Send and download media | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`); sending albums and voice messages later | ✅ files, albums, voice, transcription |
-| Wait for new messages | ❌ ([#24](https://github.com/neoromantic/telegram-sync-cli/issues/24)) | ✅ |
+| Wait for new messages | ✅ `tg messages wait` (JSON, timeout, settle) and `tg messages watch` (NDJSON), from the daemon's cache | ✅ |
 | Groups, channels, admin rights | partial: via `tg api` | ✅ |
 | Contacts | list, search, get; the rest via `tg api` | ✅ add, import, block, export |
 | Reactions, polls, drafts, scheduled, folders | partial: via `tg api` | ✅ |
@@ -116,6 +116,7 @@ tg chats sync @examplenews          # also sync a large group or channel
 tg messages list --chat @username --limit 20
 tg messages get --chat @username --id 42 --context 3
 tg messages search --query "hello world" --since 7d   # both words, any order
+tg messages wait --chat @username --after 42 --timeout 60   # block until the next reply
 tg send --to @username --message "Hi there"
 tg send --to me --file ./report.pdf --caption "Q3"
 tg media download --chat me --id 42 --out ./   # into the media cache, then copied here
@@ -166,6 +167,9 @@ Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-
 - `tg skill manifest` prints a skill manifest, `tg skill validate` checks the environment and
   `tg skill install` writes the manifest to the default location.
 - The daemon never sends or edits anything, so it is safe to leave running.
+- To wait for a reply, `tg messages wait --chat @username --after <last message ID>` returns
+  the new messages as soon as the daemon stores them, or `{"messages": [], "timedOut": true}`
+  after `--timeout` seconds; `tg messages watch` streams them as NDJSON. Both need the daemon.
 - `tg status` reports each account's cache size (`--sizes` adds each table's and the media
   cache's); `tg db vacuum` prunes old bookkeeping rows and gives free space back to the disk,
   and works while the daemon runs on a cache this version created.
