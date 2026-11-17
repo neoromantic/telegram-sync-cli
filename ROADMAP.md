@@ -34,4 +34,3 @@ The list is in priority order.
 
 - [`tg status --sizes`: cache size per chat](https://github.com/neoromantic/telegram-sync-cli/issues/90)
 - [Pretty output for every command](https://github.com/neoromantic/telegram-sync-cli/issues/2)
-- [Replace qrcode-terminal](https://github.com/neoromantic/telegram-sync-cli/issues/10)

@@ -69,6 +69,6 @@
   "dependencies": {
     "@mtcute/bun": "^0.32.6",
     "citty": "^0.2.2",
-    "qrcode-terminal": "^0.12.0"
+    "uqr": "^0.1.3"
   }
 }

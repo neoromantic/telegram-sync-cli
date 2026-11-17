@@ -45,7 +45,7 @@ Available on the root command:
 
 ```bash
 tg auth login --phone +15551234567
-tg auth login-qr
+tg auth login-qr          # QR code on stderr, JSON result on stdout
 tg auth logout
 tg auth status
 ```

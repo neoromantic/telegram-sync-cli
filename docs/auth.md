@@ -38,7 +38,8 @@ tg auth login-qr --name "Personal"
 ```
 
 Flow:
-1. Generate a login QR code in the terminal.
+1. Print a login QR code, black on white, so it scans in dark and light terminal themes.
+   The code and its status lines go to stderr; the JSON result goes to stdout.
 2. Scan with Telegram mobile app: **Settings → Devices → Link Desktop Device**.
 3. Persist session and update account metadata (including label when provided).
 4. Make the account the active one, as the phone login does.

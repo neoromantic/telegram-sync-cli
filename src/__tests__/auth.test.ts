@@ -1,6 +1,7 @@
 /**
  * Authentication commands tests
  */
+import type { Mock } from 'bun:test'
 import {
   afterEach,
   beforeEach,
@@ -28,7 +29,6 @@ import {
   loginWithPhone,
   loginWithQr,
   logout,
-  type QrCodeGenerator,
 } from '../commands/auth'
 import { syncActiveAccountFromConfig } from '../config'
 import { type AccountsDbInterface, createTestDatabase } from '../db'
@@ -148,6 +148,7 @@ describe('Authentication Commands', () => {
       isAuthorized: mock(() => Promise.resolve(true)),
       prompt: mock(() => Promise.resolve('123456')),
       promptPassword: mock(() => Promise.resolve('password123')),
+      renderQr: mock(() => 'QR_CODE_HERE'),
       keepActiveAccountInConfig: mock(() => Promise.resolve()),
     }
   })
@@ -372,15 +373,17 @@ describe('Authentication Commands', () => {
   })
 
   describe('loginWithQr', () => {
-    let mockQrGenerator: QrCodeGenerator
+    let logSpy: Mock<typeof console.log>
+    let errorSpy: Mock<typeof console.error>
 
     beforeEach(() => {
-      mockQrGenerator = {
-        generate: mock((_url, _options, callback) => {
-          callback('QR_CODE_HERE')
-        }),
-      }
-      deps.qrGenerator = mockQrGenerator
+      logSpy = spyOn(console, 'log').mockImplementation(() => {})
+      errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      logSpy.mockRestore()
+      errorSpy.mockRestore()
     })
 
     it('should create new account and login via QR', async () => {
@@ -423,10 +426,12 @@ describe('Authentication Commands', () => {
       expect(accountsDb.count()).toBe(0)
     })
 
-    it('should call QR generator', async () => {
+    it('prints the QR code and its prompts to stderr, never stdout', async () => {
       await loginWithQr('test', deps)
 
-      expect(mockQrGenerator.generate).toHaveBeenCalled()
+      expect(deps.renderQr).toHaveBeenCalledWith('tg://login?token=abc')
+      expect(errorSpy).toHaveBeenCalledWith('QR_CODE_HERE')
+      expect(logSpy).not.toHaveBeenCalled()
     })
 
     it('merges duplicate user_id accounts and keeps existing', async () => {
@@ -490,7 +495,6 @@ describe('Authentication Commands', () => {
       process.env.TELEGRAM_SYNC_CLI_DATA_DIR = dataDir
       deps.keepActiveAccountInConfig =
         getDefaultDependencies().keepActiveAccountInConfig
-      deps.qrGenerator = { generate: mock(() => {}) }
       accountsDb.create({
         phone: '+15550000001',
         user_id: 999,
