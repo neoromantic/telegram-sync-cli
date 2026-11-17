@@ -600,14 +600,17 @@ senders and chats whose names changed ([search.md](search.md#names-after-a-renam
 search by a new name finds older messages without the daemon; `rows` counts those messages
 too. Last it merges the search index, which a cache written by 0.11.1 or older needs once
 ([search.md](search.md#keeping-the-index-merged)): 2.6 s on a 1M-message cache that 0.11.1 had
-re-indexed; `rows` doesn't count it. It works while the daemon runs too, and then gives way to the daemon's writes:
-each batch is followed by a 150 ms pause, so a daemon write waits for one batch at most. A
-migration batch takes at most 50 ms; one step of an index merge can't be cut short and takes
-up to about 200 ms on a 1M-message cache (a common word). That makes the run four to
-five times as long as with the daemon stopped,
-when batches go back to back: at the rates in [storage.md](storage.md), a million messages
-written by 0.5.0 take about 19 seconds alone and about 80 seconds next to the daemon, and the
-one-off re-index of names (`message_search_names`) about 27 seconds more alone. Stopping it
+re-indexed; `rows` doesn't count it. With the daemon stopped it pauses 150 ms after each
+second of work, so another `tg` command that writes the cache meanwhile (`tg messages list`
+caching a page, `tg send` caching the sent message) gets in within about a second, well inside
+its 5-second `busy_timeout`. The pauses make the run up to 15% longer: on a 1M-message cache
+written by 0.5.0, 3,003,001 rows took 60 to 64 s without them and 69 to 70 s with them
+([storage.md](storage.md#6-big-caches)). It works while the daemon runs too, and then gives
+way to the daemon's writes: each batch is followed by a 150 ms pause, so a daemon write waits
+for one batch at most. A migration batch takes at most 50 ms; one step of an index merge can't
+be cut short and takes up to about 200 ms on a 1M-message cache (a common word). That makes
+the run three to four times as long as with the daemon stopped: it works 50 ms of every 200
+instead of a second of every 1.15. Stopping it
 (Ctrl-C) loses nothing; the next run, or the daemon, goes on from there. Reads give the same
 answers before, during and after.
 

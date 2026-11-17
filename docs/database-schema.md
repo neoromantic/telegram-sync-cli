@@ -710,8 +710,9 @@ most 500 or until 50 ms have passed, and moves the cursor in the same transactio
   which rolls back, and the next run goes on from the cursor;
 - the daemon and `tg db migrate` can run at once: each batch reads the cursor under the write
   lock, so they take turns and never do a row twice;
-- another process's write waits for one batch at most, well inside the daemon's 5-second
-  `busy_timeout`.
+- another process's write gets in well inside its 5-second `busy_timeout`: next to the daemon,
+  `tg db migrate` pauses after each batch, so a daemon write waits for one batch at most; with
+  the daemon stopped it pauses after each second of work, so a write waits about a second.
 
 A migration covers the rows up to the table's largest `rowid` when it starts; rows written later
 are already in the new form. Each rewrite is idempotent: a row done twice ends the same. A full

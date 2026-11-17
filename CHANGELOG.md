@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tg db migrate` with the daemon stopped no longer locks other `tg` commands out of the cache: it
+  ran its batches back to back, and on a big cache a command that wrote meanwhile (`tg messages
+  list` caching a page, `tg send` caching the sent message) could give up with `database is
+  locked` after 5 s. It now pauses 150 ms after each second of work, so such a write gets in
+  within about a second; the run takes up to 15% longer (#122).
+
 ## [0.12.2] - 2026-11-17
 
 ### Fixed
