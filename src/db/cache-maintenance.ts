@@ -7,6 +7,8 @@
  * limit windows and finished sync jobs. Database only, no CLI or daemon.
  */
 import type { Database } from 'bun:sqlite'
+import { statfsSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { restartUnfinishedMigrations } from './background-migrations'
 import { RATE_WINDOW_SECONDS } from './rate-limits'
 import {
@@ -265,6 +267,41 @@ export interface VacuumResult {
   checkpointed: boolean
   /** Whether the VACUUM moved message rowids, so the search index was rebuilt */
   rebuilt_search: boolean
+}
+
+/**
+ * A full VACUUM's peak need of free disk, the new copy plus the WAL: up to
+ * 2.16 times the file in `bun run bench:storage` (docs/storage.md). 2.2
+ * times the file plus 64 MB covers every measured peak.
+ */
+const VACUUM_DISK_FACTOR = 2.2
+const VACUUM_DISK_MARGIN_BYTES = 64 * 1024 * 1024
+
+/** Free disk for a full VACUUM against what it needs at its peak */
+export interface VacuumDiskCheck {
+  needed_bytes: number
+  free_bytes: number
+  enough: boolean
+}
+
+/**
+ * Bytes free to this user on the file system of `dir`.
+ * TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES replaces the reading in e2e tests.
+ */
+function readFreeDiskBytes(dir: string): number {
+  const injected = process.env.TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES
+  if (injected) return Number(injected)
+  const stats = statfsSync(dir)
+  return stats.bavail * stats.bsize
+}
+
+/** Whether the disk of the cache at `path` has room for a full VACUUM */
+export function checkVacuumDisk(path: string): VacuumDiskCheck {
+  const needed_bytes = Math.ceil(
+    fileSize(path) * VACUUM_DISK_FACTOR + VACUUM_DISK_MARGIN_BYTES,
+  )
+  const free_bytes = readFreeDiskBytes(dirname(path))
+  return { needed_bytes, free_bytes, enough: free_bytes >= needed_bytes }
 }
 
 /** Pages released per incremental_vacuum step, each its own short write */

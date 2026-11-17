@@ -23,6 +23,7 @@ import {
   runPendingMigrations,
 } from '../db/background-migrations'
 import {
+  checkVacuumDisk,
   type PruneResult,
   pruneCache,
   readAutoVacuum,
@@ -36,6 +37,7 @@ import {
   ACCOUNT_SELECTOR_DESCRIPTION,
   resolveAccount,
 } from '../utils/account-selector'
+import { formatBytes } from '../utils/formatting'
 import { error, getOutputFormat, success } from '../utils/output'
 
 function sqliteCode(err: unknown): string {
@@ -121,15 +123,36 @@ const vacuumCommand = defineCommand({
     }
 
     // Refuse before writing anything
-    if (daemonRunning && readAutoVacuum(db) === 'none') {
+    const autoVacuum = readAutoVacuum(db)
+    if (daemonRunning && autoVacuum === 'none') {
       needsStoppedDaemon(account.id)
+    }
+    const path = getAccountCachePath(account.id)
+    if (!daemonRunning) {
+      const disk = checkVacuumDisk(path)
+      if (!disk.enough) {
+        const vacuum = `tg db vacuum --account ${account.id}`
+        error(
+          ErrorCodes.GENERAL_ERROR,
+          `Not enough disk space to vacuum the cache of account ${account.id}: a full VACUUM needs about ${formatBytes(disk.needed_bytes)} of free disk and only ${formatBytes(disk.free_bytes)} is free. Nothing was changed.`,
+          {
+            account_id: account.id,
+            reason: 'disk_full',
+            needed_bytes: disk.needed_bytes,
+            free_bytes: disk.free_bytes,
+          },
+          autoVacuum === 'incremental'
+            ? `Free some disk space, or start the daemon (tg daemon start) and run ${vacuum} again: then it releases the free pages in place, without a copy`
+            : `Free some disk space, then run ${vacuum} again`,
+        )
+      }
     }
 
     // Each prune batch commits on its own, so a later failure keeps it
     let pruned: PruneResult | null = null
     try {
       pruned = pruneCache(db, retention)
-      const result = vacuumCache(db, getAccountCachePath(account.id), {
+      const result = vacuumCache(db, path, {
         daemonRunning,
       })
       success({

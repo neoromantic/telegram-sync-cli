@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg db vacuum` checks the free disk before a full VACUUM (daemon stopped): it needs 2.2 times
+  the cache file plus 64 MB, as the storage benchmark measured. When the disk is short it fails
+  at once with `GENERAL_ERROR`, `details.reason: "disk_full"`, the bytes needed and free, and
+  changes nothing, instead of failing after minutes of work. `tg status` shows the same check
+  next to its vacuum hint (#119).
+
 ### Changed
 
 - `tg auth login-qr` draws its QR code with [uqr](https://github.com/unjs/uqr) instead of

@@ -436,6 +436,8 @@ part counts the daemon's sync jobs and lists some of them:
   account whose free pages are over 10% of its file, or over 1% once a background migration
   has rewritten its rows. For a cache without auto_vacuum while the daemon runs, the command
   stops the daemon first: `tg daemon stop && tg db vacuum --account <id> && tg daemon start`.
+  When that command would run a full vacuum and the disk is short of what it needs, the hint
+  says so: `needs 3.5 GB of free disk, 1.2 GB free`.
 - `migrations` lists the unfinished [background migrations](database-schema.md#background-migrations)
   of the accounts in scope, each with `account_id`, `name`, `description`, `state` (`pending`
   before it starts, `running` once it has), `done` and `total` rows (`total` is `null` until it
@@ -546,6 +548,9 @@ without a daemon too, then gives the cache's free pages back to the disk:
   and switches it to incremental auto_vacuum. It waits up to a minute for another process's
   write lock. A VACUUM may renumber the rows of `messages_cache`; if it did, the search index is
   rebuilt. Don't start the daemon while it runs: the daemon would wait for the rewrite.
+  First it checks the free disk of the file system that holds the cache: it needs 2.2 times the
+  cache file plus 64 MB ([storage.md](storage.md#6-big-caches)). When the disk is short it
+  fails at once and changes nothing (see Errors below).
 - **`incremental`**, while the daemon runs, on a cache with incremental auto_vacuum (every cache
   this version creates, and every one that had a full vacuum): the free pages are released in
   steps of 1,024 pages, each a short write, so the daemon keeps writing in between.
@@ -580,6 +585,13 @@ Output:
 or `disk_full` when the disk filled up (free space first). The VACUUM is rolled back and the
 messages are intact, but the prune commits as it goes, so rows past their retention may already
 be gone; `details.pruned` has the counts, or `null` when the prune itself failed.
+
+When the check before a full vacuum finds too little free disk, the command fails before it
+prunes or writes anything: `GENERAL_ERROR` (exit 1) with `details`
+`{ account_id, reason: "disk_full", needed_bytes, free_bytes }` (free disk, not the cache's free
+pages). The suggestion is to free some space, or, for a cache with incremental auto_vacuum, to
+start the daemon and run `tg db vacuum` again: the incremental mode releases the free pages in
+place and needs no free disk.
 
 ### tg db migrate
 

@@ -94,6 +94,105 @@ describe('E2E: db vacuum', () => {
     })
   })
 
+  describe('free disk before a full VACUUM', () => {
+    const MARGIN = 64 * 1024 * 1024
+    const withFreeDisk = (bytes: number) => ({
+      env: {
+        ...options().env,
+        TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES: String(bytes),
+      },
+    })
+    interface DiskFullOutput {
+      error: {
+        code: string
+        message: string
+        details: {
+          account_id: number
+          reason: string
+          needed_bytes: number
+          free_bytes: number
+        }
+        suggestion: string
+      }
+    }
+
+    it('runs when the disk has room for about twice the cache', async () => {
+      seedCache()
+
+      const result = await runCliSuccess(
+        ['db', 'vacuum', '--account', '1'],
+        withFreeDisk(MARGIN + 100 * 1024 * 1024),
+      )
+
+      expect((result.json as VacuumOutput).data).toMatchObject({
+        mode: 'full',
+        auto_vacuum: 'incremental',
+        free_pages_after: 0,
+      })
+    })
+
+    it('fails at once and changes nothing when the disk is short', async () => {
+      const db = seedCache()
+      const fileBytes = Bun.file(env.cachePath(1)).size
+
+      const result = await runCli(
+        ['db', 'vacuum', '--account', '1'],
+        withFreeDisk(MARGIN),
+      )
+      const output = result.json as DiskFullOutput
+
+      expect(result.exitCode).toBe(1)
+      expect(output.error.code).toBe('GENERAL_ERROR')
+      expect(output.error.details).toEqual({
+        account_id: 1,
+        reason: 'disk_full',
+        needed_bytes: Math.ceil(fileBytes * 2.2 + MARGIN),
+        free_bytes: MARGIN,
+      })
+      expect(output.error.suggestion).toBe(
+        'Free some disk space, or start the daemon (tg daemon start) and run tg db vacuum --account 1 again: then it releases the free pages in place, without a copy',
+      )
+      const activity = db
+        .query('SELECT COUNT(*) AS n FROM api_activity')
+        .get() as { n: number }
+      expect(activity.n).toBe(1)
+      const free = db.query('PRAGMA freelist_count').get() as {
+        freelist_count: number
+      }
+      expect(free.freelist_count).toBeGreaterThan(0)
+    })
+
+    it('suggests only freeing space for a cache without auto_vacuum', async () => {
+      const db = seedCache()
+      db.run('PRAGMA auto_vacuum = NONE')
+      db.run('VACUUM')
+
+      const result = await runCli(
+        ['db', 'vacuum', '--account', '1'],
+        withFreeDisk(MARGIN),
+      )
+      const output = result.json as DiskFullOutput
+
+      expect(result.exitCode).toBe(1)
+      expect(output.error.details.reason).toBe('disk_full')
+      expect(output.error.suggestion).toBe(
+        'Free some disk space, then run tg db vacuum --account 1 again',
+      )
+    })
+
+    it("doesn't check the disk for the incremental mode", async () => {
+      seedCache()
+      writeFileSync(join(env.dataDir, 'daemon.pid'), String(process.pid))
+
+      const result = await runCliSuccess(
+        ['db', 'vacuum', '--account', '1'],
+        withFreeDisk(1),
+      )
+
+      expect((result.json as VacuumOutput).data.mode).toBe('incremental')
+    })
+  })
+
   it('refuses a cache without auto_vacuum while the daemon runs', async () => {
     const db = seedCache()
     db.run('PRAGMA auto_vacuum = NONE')

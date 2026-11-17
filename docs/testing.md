@@ -199,6 +199,11 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - No interference with production data (`~/.telegram-sync-cli/`)
 - Automatic cleanup after each test
 
+`TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES` replaces the free disk that `tg db vacuum` and
+`tg status` read with `statfs` before a full VACUUM, so `src/__e2e__/db.e2e.test.ts` and
+`status.e2e.test.ts` can test a disk with enough and too little room without filling one. It
+is for tests only.
+
 ### E2E Files
 
 - `help.e2e.test.ts` — `--help`, subcommand help, invalid commands
