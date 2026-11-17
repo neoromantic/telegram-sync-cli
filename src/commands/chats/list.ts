@@ -127,6 +127,11 @@ export const listChatsCommand = defineCommand({
       type: 'string',
       description: `Filter by chat type: ${CHAT_TYPE_VALUES.join(', ')} (default: all)`,
     },
+    unread: {
+      type: 'boolean',
+      description: 'Only chats with unread messages',
+      default: false,
+    },
     account: {
       type: 'string',
       description: ACCOUNT_SELECTOR_DESCRIPTION,
@@ -141,6 +146,7 @@ export const listChatsCommand = defineCommand({
     const limit = Number.parseInt(args.limit ?? '50', 10)
     const offset = Number.parseInt(args.offset ?? '0', 10)
     const fresh = args.fresh ?? false
+    const unread = args.unread ?? false
     const rawType = args.type
     const typeFilter = rawType as ChatType | undefined
 
@@ -165,9 +171,12 @@ export const listChatsCommand = defineCommand({
           limit: 1000,
           type: typeFilter,
           orderBy: 'last_message_at',
+          unread,
         })
 
-        if (cachedChats.length > 0) {
+        // With --unread, a cache that knows unread counts answers even when
+        // no chat has unread messages
+        if (cachedChats.length > 0 || (unread && chatsCache.hasUnreadState())) {
           const response = buildCachePaginatedResponse(cachedChats, toItem, {
             offset,
             limit,
@@ -188,7 +197,9 @@ export const listChatsCommand = defineCommand({
 
       const chatInputs = await fetchChatsFromApi(client, cacheDb)
 
-      const filteredChats = filterChatsByType(chatInputs, typeFilter)
+      const filteredChats = filterChatsByType(chatInputs, typeFilter).filter(
+        (chat) => !unread || (chat.unread_count ?? 0) > 0,
+      )
       filteredChats.sort(
         (a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0),
       )

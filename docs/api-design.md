@@ -89,6 +89,7 @@ tg contacts get --id 123456789
 
 # Chats/Dialogs (with caching)
 tg chats list --limit 50 --type private
+tg chats list --unread             # only chats with unread messages
 tg chats search --query "query"   # cache-only
 tg chats get --id @username        # username only
 tg chats sync @examplenews         # sync a large group or channel too (--off, --auto)
@@ -102,6 +103,8 @@ tg messages search --query "hello" --chat @teamchat --sender @alice
 tg messages search --query "hello" --includeDeleted
 tg messages wait --chat @username --after 1200 --timeout 60   # the daemon's new messages
 tg messages watch                                             # NDJSON, until Ctrl-C
+tg messages unread --chat @username   # unread messages (cache, --fresh)
+tg messages read --chat @username     # mark read on Telegram (--max-id)
 
 # Messaging
 tg send --to @username --message "Hello"

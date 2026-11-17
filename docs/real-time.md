@@ -9,7 +9,8 @@ mtcute provides event-based update handling, which the daemon wires per account:
 - `onNewMessage`
 - `onEditMessage`
 - `onDeleteMessage`
-- `onRawUpdate`, for contact changes (see [Contacts](#contacts))
+- `onRawUpdate`, for contact changes (see [Contacts](#contacts)) and reads (see
+  [Unread counts](#unread-counts))
 
 Handlers live in:
 - `src/daemon/daemon-accounts.ts`
@@ -52,6 +53,30 @@ state:
 So a channel with sync off may get none of its posts live. Each dialog pass (on start, after a
 reconnect and after a wake) caches the newest message of every chat with sync off, from the
 dialog list it reads anyway. Older posts of such a channel come only with `tg chats sync`.
+
+### Unread counts
+
+`chats_cache` keeps each chat's unread state: `unread_count` and `read_inbox_max_id`, the read
+boundary (every incoming message up to it is read). The daemon keeps both current between
+dialog passes:
+
+- Every dialog pass (on start, after a reconnect and after a wake) and `tg chats list --fresh`
+  set both from the dialog list.
+- A new incoming message raises `unread_count` by one when it is above the read boundary and
+  above the chat's newest known message (`last_message_id`), so a message delivered twice counts
+  once. Every live message raises `last_message_id` and `last_message_at`, so `tg chats list`
+  keeps the order of recent activity between passes. An outgoing message counts nothing.
+- A read here or on another device arrives as `updateReadHistoryInbox` (private chats, basic
+  groups, Saved Messages) or `updateReadChannelInbox` (supergroups, channels), with
+  `stillUnreadCount`: both columns take its values. A read within one forum topic
+  (`topMsgId`) is skipped. `tg messages read` writes the state Telegram reports right away.
+- A chat that no dialog pass listed and a live message brings in starts with its boundary just
+  below that message, so the message counts as unread; the next pass sets the real state.
+
+So with the daemon running, the counts follow Telegram. Deletes don't lower them, and an update
+that never arrives (a channel Telegram stops sending, a gap) leaves them as they were until the
+next pass. Without a running daemon they are as old as the last dialog list; `tg chats list
+--unread --fresh` and `tg messages unread --fresh` read them from Telegram.
 
 ### Message Type Mapping
 

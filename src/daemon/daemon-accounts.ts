@@ -33,6 +33,7 @@ import {
 import {
   createUpdateHandlers,
   type NewMessageData,
+  readInboxFromUpdate,
   type UpdateContext,
 } from './handlers'
 import { formatPace } from './sync-pacing'
@@ -276,6 +277,12 @@ export function setupEventHandlers(
 
     onRawUpdate: (info) => {
       handleContactRawUpdate(ctx, accountId, cacheDb, info, Date.now())
+      const read = readInboxFromUpdate(info.update)
+      if (read) {
+        updateHandlers.handleReadInbox(createContext(), read).catch((err) => {
+          ctx.logger.error(`Error handling a read update: ${formatError(err)}`)
+        })
+      }
     },
 
     onConnectionState: (state) => {

@@ -125,6 +125,9 @@ Real-time handlers update `messages_cache`, `chat_sync_state` and, for contacts,
   `users_cache.is_contact` when the flag changed; without the full record, a hash check of the
   contact list a minute later; `updateContactsReset` → unmark every contact and check the list
   (see [real-time.md](real-time.md#contacts))
+- New incoming message, `updateReadHistoryInbox`, `updateReadChannelInbox` → the chat's
+  `chats_cache.unread_count` and `read_inbox_max_id` (see
+  [real-time.md](real-time.md#unread-counts))
 
 Handlers live in:
 - `src/daemon/handlers.ts`

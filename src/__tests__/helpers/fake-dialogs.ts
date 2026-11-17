@@ -29,6 +29,8 @@ export interface FakeDialogInput {
   deleted?: boolean
   /** The dialog's newest message, as the dialog list carries it */
   lastMessage?: { id: number; text?: string; date?: number }
+  unreadCount?: number
+  readInboxMaxId?: number
 }
 
 export function fakeDialog(input: FakeDialogInput): Dialog {
@@ -73,7 +75,13 @@ export function fakeDialog(input: FakeDialogInput): Dialog {
 
   const last = input.lastMessage
   return {
-    raw: { _: 'dialog', peer: rawPeer, topMessage: input.topMessage ?? 0 },
+    raw: {
+      _: 'dialog',
+      peer: rawPeer,
+      topMessage: input.topMessage ?? 0,
+      unreadCount: input.unreadCount,
+      readInboxMaxId: input.readInboxMaxId,
+    },
     peer,
     lastMessage: last
       ? {
