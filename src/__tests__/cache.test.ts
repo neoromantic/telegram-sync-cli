@@ -432,6 +432,15 @@ describe('UsersCache', () => {
 
       expect(results.length).toBeGreaterThanOrEqual(2)
     })
+
+    it('returns every user for an empty query', () => {
+      expect(usersCache.search('')).toHaveLength(4)
+    })
+
+    it('binds an SQL-like query as text', () => {
+      expect(usersCache.search("'; DROP TABLE users_cache; --")).toEqual([])
+      expect(usersCache.count()).toBe(4)
+    })
   })
 
   describe('upsertMany', () => {
