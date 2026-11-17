@@ -6,7 +6,7 @@ import { getTableNames } from '../../db/schema-annotations'
 import { ErrorCodes } from '../../types'
 import { openAccountCache, reportCacheError } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
-import { withoutFormatValue } from '../../utils/args'
+import { outputFormatArg } from '../../utils/args'
 import { stringify as stringifyCsv } from '../../utils/csv'
 import { error, success } from '../../utils/output'
 import {
@@ -17,6 +17,7 @@ import {
 import { printSchemaCommand } from './print-schema'
 
 type QueryArgs = {
+  command?: string
   query?: string
   output?: string
   limit?: string
@@ -24,7 +25,8 @@ type QueryArgs = {
   _?: string[]
 }
 
-function parseQueryArgs(args: QueryArgs, positionalArgs: string[]) {
+function parseQueryArgs(args: QueryArgs) {
+  const positionalArgs = args._ ?? []
   const query = (args.query ?? positionalArgs.join(' ')) || undefined
   const output = args.output ?? 'json'
   const limitStr = args.limit ?? '1000'
@@ -113,6 +115,7 @@ export const sqlQueryCommand = defineCommand({
       "Execute read-only SQL queries on an account's cache database (--account, else the active account)",
   },
   args: {
+    format: outputFormatArg,
     command: {
       type: 'positional',
       description: 'Optional subcommand (print-schema)',
@@ -144,8 +147,9 @@ export const sqlQueryCommand = defineCommand({
   },
   async run({ args, rawArgs }) {
     const sqlArgs = args as QueryArgs
-    const positionalArgs = withoutFormatValue(rawArgs ?? [], sqlArgs._ ?? [])
-    const command = positionalArgs[0]
+    const positionalArgs = sqlArgs._ ?? []
+    const command =
+      typeof sqlArgs.command === 'string' ? sqlArgs.command : positionalArgs[0]
 
     if (command === 'print-schema') {
       if (sqlArgs.query) {
@@ -172,10 +176,7 @@ export const sqlQueryCommand = defineCommand({
       )
     }
 
-    const { query, output, limit, limitStr } = parseQueryArgs(
-      sqlArgs,
-      positionalArgs,
-    )
+    const { query, output, limit, limitStr } = parseQueryArgs(sqlArgs)
     validateQueryArgs(query, output, limit, limitStr)
 
     // Each account has its own cache; ATTACH stays blocked, so a query never

@@ -1,14 +1,13 @@
 /**
  * Tests for reading `tg api` method arguments written as `--name value`,
- * every value of a repeated flag (`tg send --file`), and positionals next to
- * the main command's `-f`/`--format`
+ * and every value of a repeated flag (`tg send --file`)
  */
 import { describe, expect, it } from 'bun:test'
 import { type ArgsDef, parseArgs } from 'citty'
 
 import { apiCommand } from '../commands/api'
 import { sendCommand } from '../commands/send'
-import { flagValues, spacedFlagValues, withoutFormatValue } from '../utils/args'
+import { flagValues, spacedFlagValues } from '../utils/args'
 
 /** The values spacedFlagValues pairs for `tg api <argv>`, from citty's own parse */
 function spaced(...argv: string[]): Record<string, string> {
@@ -118,38 +117,5 @@ describe('flagValues', () => {
     >
     expect(args.file).toBe('b.png')
     expect(flagValues(argv, 'file')).toEqual(['a.pdf', 'b.png'])
-  })
-})
-
-describe('withoutFormatValue', () => {
-  it('drops the value of -f and --format after a positional', () => {
-    expect(
-      withoutFormatValue(['SELECT 1', '-f', 'json'], ['SELECT 1', 'json']),
-    ).toEqual(['SELECT 1'])
-    expect(
-      withoutFormatValue(
-        ['SELECT 1', '--format', 'pretty'],
-        ['SELECT 1', 'pretty'],
-      ),
-    ).toEqual(['SELECT 1'])
-  })
-
-  it('drops it before the positionals too', () => {
-    expect(
-      withoutFormatValue(
-        ['-f', 'json', 'print-schema'],
-        ['json', 'print-schema'],
-      ),
-    ).toEqual(['print-schema'])
-  })
-
-  it('keeps a positional that only looks like a format', () => {
-    expect(
-      withoutFormatValue(['json', '-f', 'json'], ['json', 'json']),
-    ).toEqual(['json'])
-    expect(withoutFormatValue(['SELECT', '1'], ['SELECT', '1'])).toEqual([
-      'SELECT',
-      '1',
-    ])
   })
 })

@@ -36,6 +36,7 @@ import {
 import { EVENTS_ENV } from './telemetry/background'
 import { sendHandoff } from './telemetry/send'
 import { ErrorCodes, type OutputFormat } from './types'
+import { outputFormatArg } from './utils/args'
 import { error, getOutputFormat, setOutputFormat } from './utils/output'
 import { VERSION } from './version'
 
@@ -46,13 +47,7 @@ const main = defineCommand({
     description: 'Telegram Sync CLI - Agent-friendly Telegram client',
   },
   args: {
-    format: {
-      type: 'enum',
-      alias: 'f',
-      description: 'Output format: json, pretty, or quiet',
-      options: ['json', 'pretty', 'quiet'],
-      default: 'json',
-    },
+    format: outputFormatArg,
     verbose: {
       type: 'boolean',
       alias: 'v',
