@@ -793,11 +793,11 @@ TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg chats list   # only @teamchat
 TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg messages list --chat @alice   # CHAT_NOT_ALLOWED
 ```
 
-`readOnly` refuses `tg send`, `tg api` methods that aren't `get…`, `search…`, `resolve…` or
-`check…`, and `tg auth login`, `login-qr` and `logout` with `READ_ONLY`. `allowedChats` makes
-commands that name a chat refuse others with `CHAT_NOT_ALLOWED`, makes `tg chats list`,
-`tg chats search` and `tg messages search` show only allowed chats, and turns `tg sql` and
-`tg api` off. Contacts commands aren't limited. Both are guards against mistakes, not a security
+`readOnly` refuses `tg send`, `tg messages read`, `tg api` methods that aren't `get…`,
+`search…`, `resolve…` or `check…`, and `tg auth login`, `login-qr` and `logout` with
+`READ_ONLY`. `allowedChats` makes commands that name a chat refuse others with
+`CHAT_NOT_ALLOWED`, makes `tg chats list`, `tg chats search`, `tg messages search`, `wait`,
+`watch` and `unread` show only allowed chats, and turns `tg sql` and `tg api` off. Contacts commands aren't limited. Both are guards against mistakes, not a security
 boundary; keys, variables and the full list: [configuration.md](configuration.md#read-only-mode-and-allowed-chats).
 
 ## Output Shape

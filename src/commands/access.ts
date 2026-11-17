@@ -73,6 +73,12 @@ export const COMMAND_ACCESS: Record<string, CommandAccess> = {
   'messages list': CHAT,
   'messages get': CHAT,
   'messages search': { chatArgs: ['chat'], crossChat: true },
+  // Without --chat, wait, watch and unread read every chat: they keep to allowedChats
+  'messages wait': { chatArgs: ['chat'], crossChat: true },
+  'messages watch': { chatArgs: ['chat'], crossChat: true },
+  'messages unread': { chatArgs: ['chat'], crossChat: true },
+  // Marks the chat read on Telegram
+  'messages read': { write: true, chatArgs: ['chat'] },
   'media download': CHAT,
   'media clean': LOCAL,
   api: {

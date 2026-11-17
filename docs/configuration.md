@@ -270,7 +270,7 @@ TELEGRAM_SYNC_CLI_READ_ONLY=1 TELEGRAM_SYNC_CLI_ALLOWED_CHATS="@teamchat,me" my-
 `false` or `off`; the variable turns it on, never off) refuses every command that changes
 something on Telegram, before it connects, with `READ_ONLY` (exit 1):
 
-- `tg send`;
+- `tg send`, and `tg messages read`, which marks a chat read;
 - `tg api` with a method whose name after the namespace doesn't start with `get`, `search`,
   `resolve` or `check` (`messages.getHistory`, `account.checkUsername` and `help.getConfig`
   run; `messages.sendMessage` and `messages.readHistory` don't). The rule goes by the name, so a
@@ -288,12 +288,14 @@ while it is set, even to an empty string) limit the commands that read or send t
 
 - A command that names a chat refuses one outside the list with `CHAT_NOT_ALLOWED` (exit 1,
   `details: { chat, id }`: the chat as given and its marked ID). That is `--to` of `tg send`,
-  `--chat` of `tg messages list`, `get` and `search` and of `tg media download`, `--id` of
+  `--chat` of `tg messages list`, `get`, `search`, `wait`, `watch`, `unread` and `read` and of
+  `tg media download`, `--id` of
   `tg chats get` and the chat of `tg chats sync`. The chat and the list resolve the same way,
   cache-first: `@name` and its ID are the same chat, `me` is the account's own user ID (Saved
   Messages), and an ID in the list is taken as written.
-- Commands that read across chats show only allowed ones: `tg chats list`, `tg chats search`
-  and `tg messages search` without `--chat` (its `chat:` query filter narrows within them).
+- Commands that read across chats show only allowed ones: `tg chats list` (with `--unread`
+  too), `tg chats search`, `tg messages search` (its `chat:` query filter narrows within them),
+  and `tg messages wait`, `watch` and `unread`, all without `--chat`.
 - `tg sql` and `tg api` can't be limited to some chats, so they fail with `CHAT_NOT_ALLOWED`
   (`details: { command }`) while a list is set.
 - Contacts are people, not chats: `tg contacts`, `tg user` and `tg me` aren't limited. Nor is

@@ -34,12 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an older version has no counts until the daemon's next start or `tg chats list --fresh`.
 - Read-only mode and a chat allowlist for agents (#26). `readOnly` in `config.json` or
   `TELEGRAM_SYNC_CLI_READ_ONLY=1` refuses, before connecting, every command that changes
-  something on Telegram with the new code `READ_ONLY` (exit 1): `tg send`, `tg api` methods
-  not named `get…`, `search…`, `resolve…` or `check…`, and `tg auth login`, `login-qr` and
-  `logout`. `allowedChats` (or `TELEGRAM_SYNC_CLI_ALLOWED_CHATS`, which replaces it for one
-  process) limits commands to those chats: one that names another chat fails with
-  `CHAT_NOT_ALLOWED` (exit 1), `tg chats list`, `tg chats search` and `tg messages search` show
-  only allowed chats, and `tg sql` and `tg api` are off. `tg status` shows both under `access`.
+  something on Telegram with the new code `READ_ONLY` (exit 1): `tg send`, `tg messages read`,
+  `tg api` methods not named `get…`, `search…`, `resolve…` or `check…`, and `tg auth login`,
+  `login-qr` and `logout`. `allowedChats` (or `TELEGRAM_SYNC_CLI_ALLOWED_CHATS`, which replaces
+  it for one process) limits commands to those chats: one that names another chat fails with
+  `CHAT_NOT_ALLOWED` (exit 1), `tg chats list`, `tg chats search`, `tg messages search`, `wait`,
+  `watch` and `unread` show only allowed chats, and `tg sql` and `tg api` are off. `tg status` shows both under `access`.
   They guard against mistakes and are not a security boundary.
 
 ### Changed
