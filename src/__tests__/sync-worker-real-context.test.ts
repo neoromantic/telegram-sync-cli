@@ -11,7 +11,6 @@ import {
 import { DaemonStopError } from '../daemon/daemon-utils'
 import {
   canMakeApiCall,
-  getInputPeer,
   getWaitTime,
   resolveFloodWaitResult,
   resolveJobError,
@@ -510,26 +509,6 @@ describe('sync-worker real helpers/context', () => {
         error: expect.stringContaining('CHANNEL_PRIVATE'),
         permanent: true,
       })
-    })
-
-    it('delegates getInputPeer to buildInputPeer', () => {
-      const chatsCache = createChatsCache(db)
-      const ctx: RealSyncWorkerContext = {
-        client: createMockClient(),
-        messagesCache: createMessagesCache(db),
-        historyRanges: createHistoryRanges(db),
-        chatSyncState: createChatSyncStateService(db),
-        jobsService: createSyncJobsService(db),
-        rateLimits: createRateLimitsService(db),
-        chatsCache,
-        usersCache: createUsersCache(db),
-        senderLookups: createSenderLookups(db),
-        config: { apiMethod: 'messages.getHistory', batchSize: 1 },
-      }
-
-      const inputPeer = getInputPeer(ctx, 77)
-      assertInputPeerUser(inputPeer)
-      expect(inputPeer.userId).toBe(77)
     })
   })
 })

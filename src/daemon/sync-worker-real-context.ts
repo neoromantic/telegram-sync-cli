@@ -25,11 +25,37 @@ export function handleFloodWait(
   ctx.rateLimits.setFloodWait(ctx.config.apiMethod, seconds)
 }
 
-export function getInputPeer(
+/**
+ * The chat's InputPeer for a job's request, or the job's result when it
+ * can't make one: deferred while the API method is rate limited, failed for
+ * good when the cache can't build the peer.
+ */
+export function requestPeer(
   ctx: RealSyncWorkerContext,
   chatId: number,
-): tl.TypeInputPeer | null {
-  return buildInputPeer(chatId, ctx.chatsCache)
+): { inputPeer: tl.TypeInputPeer } | { result: RealJobResult } {
+  if (!canMakeApiCall(ctx)) {
+    return {
+      result: {
+        success: false,
+        messagesFetched: 0,
+        rateLimited: true,
+        waitSeconds: getWaitTime(ctx),
+      },
+    }
+  }
+  const inputPeer = buildInputPeer(chatId, ctx.chatsCache)
+  if (!inputPeer) {
+    return {
+      result: {
+        success: false,
+        messagesFetched: 0,
+        error: `Could not build InputPeer for chat ${chatId}`,
+        permanent: true,
+      },
+    }
+  }
+  return { inputPeer }
 }
 
 export function resolveFloodWaitResult(
