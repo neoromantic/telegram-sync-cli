@@ -119,6 +119,8 @@ export interface MessageSearchOptions {
   limit?: number
   offset?: number
   chatId?: number
+  /** Only messages of these chats (allowedChats) */
+  chatIds?: number[]
   chatUsername?: string
   senderId?: number
   senderUsername?: string
@@ -182,6 +184,13 @@ function searchFilter(options: MessageSearchOptions): {
   if (options.chatId !== undefined) {
     conditions.push('m.chat_id = ?')
     params.push(options.chatId)
+  }
+
+  if (options.chatIds !== undefined) {
+    conditions.push(
+      `m.chat_id IN (${options.chatIds.map(() => '?').join(', ')})`,
+    )
+    params.push(...options.chatIds)
   }
 
   if (options.chatUsername) {

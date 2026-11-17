@@ -104,7 +104,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Contacts | list, search, get; the rest via `tg api` | ✅ add, import, block, export |
 | Reactions, polls, drafts, scheduled, folders | partial: via `tg api` | ✅ |
 | Multi-account | ✅ `--account`; one cache per account, the daemon syncs each account with its own client | ✅ |
-| Guardrails for agents | partial: daemon and SQL are read-only ([#26](https://github.com/neoromantic/telegram-sync-cli/issues/26)) | ✅ read-only mode, chat allowlist |
+| Guardrails for agents | ✅ read-only mode, chat allowlist (`readOnly`, `allowedChats`) | ✅ read-only mode, chat allowlist |
 | Install | Homebrew binary, or bun/npm with Bun | git clone + uv, pip from git, Docker |
 | Runtime, license | TypeScript on Bun ([mtcute](https://mtcute.dev)), MIT | Python ([Telethon](https://docs.telethon.dev)), Apache-2.0 |
 
@@ -146,6 +146,8 @@ with several accounts: see [per-account caches](docs/configuration.md#upgrading-
 | `TELEGRAM_PROXY` | Optional proxy URL for CLI and daemon connections |
 | `TELEGRAM_SYNC_CLI_DATA_DIR` | Override the data directory (default `~/.telegram-sync-cli`) |
 | `TELEGRAM_SYNC_CLI_TELEMETRY` | `0` turns [usage stats](#usage-stats) off |
+| `TELEGRAM_SYNC_CLI_READ_ONLY` | `1` refuses commands that change Telegram ([read-only mode](docs/configuration.md#read-only-mode-and-allowed-chats)) |
+| `TELEGRAM_SYNC_CLI_ALLOWED_CHATS` | Comma-separated chats this process may use, such as `@teamchat,me` |
 | `DO_NOT_TRACK` | `1` turns usage stats off |
 | `MTCUTE_LOG_LEVEL` | mtcute log level |
 | `VERBOSE` | Verbose logging (`1`) |
@@ -180,6 +182,11 @@ Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-
 - To wait for a reply, `tg messages wait --chat @username --after <last message ID>` returns
   the new messages as soon as the daemon stores them, or `{"messages": [], "timedOut": true}`
   after `--timeout` seconds; `tg messages watch` streams them as NDJSON. Both need the daemon.
+- `TELEGRAM_SYNC_CLI_READ_ONLY=1` refuses sends and other changes with `READ_ONLY`, and
+  `TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat,me` limits commands to those chats
+  (`CHAT_NOT_ALLOWED`); `readOnly` and `allowedChats` in `config.json` do the same for every
+  run. A guard against mistakes, not a sandbox: see
+  [read-only mode](docs/configuration.md#read-only-mode-and-allowed-chats).
 - `tg status` reports each account's cache size (`--sizes` adds each table's and the media
   cache's); `tg db vacuum` prunes old bookkeeping rows and gives free space back to the disk,
   and works while the daemon runs on a cache this version created.

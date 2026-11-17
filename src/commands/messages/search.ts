@@ -16,6 +16,7 @@ import {
 import { error, success } from '../../utils/output'
 import { buildSnippet, snippetTerms } from '../../utils/search-snippet'
 import { parseTimeBound } from '../../utils/time-bounds'
+import { allowedChatIds } from '../access'
 import { messageItemReader } from './helpers'
 
 /** A --since/--until value as Unix seconds; INVALID_ARGS when it is none */
@@ -160,7 +161,8 @@ export const searchMessagesCommand = defineCommand({
 
     const chatFilter = parseIdentifier(args.chat)
     const senderFilter = parseIdentifier(args.sender)
-    const { db: cacheDb } = openAccountCache(args.account)
+    const { account, db: cacheDb } = openAccountCache(args.account)
+    const allowed = await allowedChatIds(account.id)
 
     try {
       const search = createMessagesSearch(cacheDb)
@@ -169,6 +171,7 @@ export const searchMessagesCommand = defineCommand({
         includeDeleted: args.includeDeleted ?? false,
         phrase: args.phrase ?? false,
         chatId: chatFilter?.id,
+        chatIds: allowed === null ? undefined : [...allowed],
         chatUsername: chatFilter?.username,
         senderId: senderFilter?.id,
         senderUsername: senderFilter?.username,

@@ -625,11 +625,24 @@ function printScope(status: StatusSnapshot): void {
   )
 }
 
+/** One line for read-only mode and the chat allowlist, when either is on */
+function printAccess(status: StatusSnapshot): void {
+  const { read_only, allowed_chats } = status.access
+  const parts = [
+    ...(read_only ? ['read-only'] : []),
+    ...(allowed_chats === null
+      ? []
+      : [`only chats ${allowed_chats.join(', ') || '(none)'}`]),
+  ]
+  if (parts.length > 0) console.log(c.warning(`  ${parts.join('; ')}`))
+}
+
 export function printPrettyStatus(status: StatusSnapshot): void {
   console.log()
   console.log(c.bold('  Telegram Sync CLI Status'))
   console.log(c.dim(`  ${status.timestamp}`))
   printScope(status)
+  printAccess(status)
 
   printDaemonSection(status)
   printSyncJobsSection(status)

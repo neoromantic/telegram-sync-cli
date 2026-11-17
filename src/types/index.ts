@@ -135,6 +135,9 @@ export const ErrorCodes = {
   CONTENT_PROTECTED: 'CONTENT_PROTECTED',
   MEDIA_UNSUPPORTED: 'MEDIA_UNSUPPORTED',
   FILE_EXISTS: 'FILE_EXISTS',
+  // Read-only mode and the chat allowlist
+  READ_ONLY: 'READ_ONLY',
+  CHAT_NOT_ALLOWED: 'CHAT_NOT_ALLOWED',
 } as const
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes]

@@ -439,6 +439,9 @@ tg api messages.getHistory --peer @username --limit 10
 tg api messages.sendMessage --json '{"peer":"@user","message":"Hi"}'
 ```
 
+Read-only mode lets only `get…`, `search…`, `resolve…` and `check…` methods through, and an
+allowlist turns `tg api` off ([below](#read-only-mode-and-allowed-chats)).
+
 ### Daemon / Status / SQL
 
 ```bash
@@ -781,6 +784,21 @@ prints a summary with `--format pretty`, else JSON:
 or `default`. `on` and `off` print the same object after the change, and fail with
 `GENERAL_ERROR` when the data directory can't be written. What is sent and when:
 [configuration.md](configuration.md#usage-stats).
+
+## Read-only mode and allowed chats
+
+```bash
+TELEGRAM_SYNC_CLI_READ_ONLY=1 tg send --to me -m hi       # READ_ONLY, exit 1
+TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg chats list   # only @teamchat
+TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg messages list --chat @alice   # CHAT_NOT_ALLOWED
+```
+
+`readOnly` refuses `tg send`, `tg api` methods that aren't `get…`, `search…`, `resolve…` or
+`check…`, and `tg auth login`, `login-qr` and `logout` with `READ_ONLY`. `allowedChats` makes
+commands that name a chat refuse others with `CHAT_NOT_ALLOWED`, makes `tg chats list`,
+`tg chats search` and `tg messages search` show only allowed chats, and turns `tg sql` and
+`tg api` off. Contacts commands aren't limited. Both are guards against mistakes, not a security
+boundary; keys, variables and the full list: [configuration.md](configuration.md#read-only-mode-and-allowed-chats).
 
 ## Output Shape
 

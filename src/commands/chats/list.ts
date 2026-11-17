@@ -22,6 +22,7 @@ import {
   isRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
+import { allowedChatIds } from '../access'
 import {
   CHAT_TYPE_VALUES,
   type ChatItem,
@@ -158,6 +159,9 @@ export const listChatsCommand = defineCommand({
     }
 
     const { account, db: cacheDb } = openAccountCache(args.account)
+    const allowed = await allowedChatIds(account.id)
+    const isAllowed = (chat: { chat_id: string }) =>
+      allowed === null || allowed.has(Number(chat.chat_id))
 
     try {
       const chatsCache = createChatsCache(cacheDb)
@@ -167,12 +171,15 @@ export const listChatsCommand = defineCommand({
       const cacheConfig = await getResolvedCacheConfig()
 
       if (!fresh) {
-        const cachedChats = chatsCache.list({
-          limit: 1000,
-          type: typeFilter,
-          orderBy: 'last_message_at',
-          unread,
-        })
+        // With allowedChats, every cached chat is a candidate (-1: no limit)
+        const cachedChats = chatsCache
+          .list({
+            limit: allowed === null ? 1000 : -1,
+            type: typeFilter,
+            orderBy: 'last_message_at',
+            unread,
+          })
+          .filter(isAllowed)
 
         // With --unread, a cache that knows unread counts answers even when
         // no chat has unread messages
@@ -198,7 +205,7 @@ export const listChatsCommand = defineCommand({
       const chatInputs = await fetchChatsFromApi(client, cacheDb)
 
       const filteredChats = filterChatsByType(chatInputs, typeFilter).filter(
-        (chat) => !unread || (chat.unread_count ?? 0) > 0,
+        (chat) => (!unread || (chat.unread_count ?? 0) > 0) && isAllowed(chat),
       )
       filteredChats.sort(
         (a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0),
