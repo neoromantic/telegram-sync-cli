@@ -936,9 +936,10 @@ describe('bootstrapDialogs', () => {
         'communities.getJoinedCommunities',
         'users.getUsers',
       ])
-      const rateLimits = createRateLimitsService(testCacheDb)
-      expect(rateLimits.getActivity()).toHaveLength(3)
-      expect(rateLimits.getStatus()).toMatchObject({
+      expect(
+        testCacheDb.query('SELECT COUNT(*) AS n FROM api_activity').get(),
+      ).toEqual({ n: 3 })
+      expect(createRateLimitsService(testCacheDb).getStatus()).toMatchObject({
         totalCalls: 3,
         callsByMethod: {
           'messages.getDialogs': 1,

@@ -250,14 +250,3 @@ export class RateLimitRow {
   last_call_at!: number | null
   flood_wait_until!: number | null
 }
-
-/** API activity row class */
-export class ApiActivityRow {
-  id!: number
-  timestamp!: number
-  method!: string
-  success!: number
-  error_code!: string | null
-  response_ms!: number | null
-  context!: string | null
-}

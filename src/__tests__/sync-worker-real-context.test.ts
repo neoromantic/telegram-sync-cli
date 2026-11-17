@@ -391,7 +391,11 @@ describe('sync-worker real helpers/context', () => {
 
       expect(canMakeApiCall(ctx)).toBe(true)
       rateLimits.recordCall('messages.getHistory')
-      expect(rateLimits.getCallCount('messages.getHistory', 1)).toBe(1)
+      expect(
+        db
+          .query('SELECT call_count FROM rate_limits WHERE method = ?')
+          .all('messages.getHistory'),
+      ).toEqual([{ call_count: 1 }])
     })
 
     it('returns wait time when blocked and resolves flood waits', () => {

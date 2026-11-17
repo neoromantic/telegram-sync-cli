@@ -95,33 +95,6 @@ export type ChatType =
   | 'community'
 
 /**
- * API activity log entry
- * Maps to api_activity table
- */
-export interface ApiActivityEntry {
-  /** Auto-incremented ID */
-  id: number
-  /** Unix timestamp of the call */
-  timestamp: number
-  /** API method name */
-  method: string
-  /** Related chat ID if applicable (nullable) */
-  chat_id: number | null
-  /** 1 if successful, 0 if failed */
-  success: number
-  /** Error code if failed (nullable) */
-  error_code: number | null
-  /** Error message if failed (nullable) */
-  error_message: string | null
-  /** Response time in milliseconds */
-  response_ms: number | null
-  /** Request payload size in bytes */
-  request_size: number | null
-  /** Response payload size in bytes */
-  response_size: number | null
-}
-
-/**
  * Duration units for human-readable staleness config
  */
 export type DurationUnit = 's' | 'm' | 'h' | 'd' | 'w'

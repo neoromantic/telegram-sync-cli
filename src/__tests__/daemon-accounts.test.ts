@@ -480,14 +480,19 @@ describe('daemonNetworkMiddlewares', () => {
         await call(rpc(method))
       }
 
-      const rateLimits = createRateLimitsService(db)
-      const rows = rateLimits.getActivity()
+      const rows = db
+        .query<
+          { timestamp: number; success: number; error_code: string | null },
+          []
+        >('SELECT timestamp, success, error_code FROM api_activity')
+        .all()
       expect(rows).toHaveLength(4)
       for (const row of rows) {
         expect(row).toMatchObject({ success: 1, error_code: null })
         expect(row.timestamp).toBeGreaterThanOrEqual(before)
         expect(row.timestamp).toBeLessThanOrEqual(Date.now())
       }
+      const rateLimits = createRateLimitsService(db)
       const status = rateLimits.getStatus()
       expect(status.totalCalls).toBe(4)
       expect(status.callsByMethod).toEqual({
@@ -495,7 +500,14 @@ describe('daemonNetworkMiddlewares', () => {
         'communities.getJoinedCommunities': 1,
         'users.getUsers': 1,
       })
-      expect(rateLimits.getCallCount('messages.getDialogs', 1)).toBe(2)
+      // recordCall counts each request in its rate window too
+      expect(
+        db
+          .query(
+            'SELECT SUM(call_count) AS calls FROM rate_limits WHERE method = ?',
+          )
+          .get('messages.getDialogs'),
+      ).toEqual({ calls: 2 })
       db.close()
     })
 
@@ -519,21 +531,23 @@ describe('daemonNetworkMiddlewares', () => {
 
       expect(thrown).toBeInstanceOf(Error)
       expect(
-        createRateLimitsService(db)
-          .getActivity()
-          .sort((a, b) => a.id - b.id),
-      ).toMatchObject([
+        db
+          .query(
+            'SELECT method, success, error_code, context FROM api_activity ORDER BY id',
+          )
+          .all(),
+      ).toEqual([
         {
           method: 'channels.getMessages',
           success: 0,
-          error_code: 400,
-          error_message: 'CHANNEL_PRIVATE',
+          error_code: '400',
+          context: 'CHANNEL_PRIVATE',
         },
         {
           method: 'users.getUsers',
           success: 0,
           error_code: null,
-          error_message: 'connection reset',
+          context: 'connection reset',
         },
       ])
       db.close()
