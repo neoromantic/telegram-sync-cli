@@ -168,7 +168,11 @@ export async function fetchMessagesByIdRaw(
   inputPeer: tl.TypeInputPeer,
   ids: number[],
   signal?: AbortSignal,
-): Promise<{ messages: unknown[]; users: tl.TypeUser[] }> {
+): Promise<{
+  messages: unknown[]
+  chats: tl.TypeChat[]
+  users: tl.TypeUser[]
+}> {
   signal?.throwIfAborted()
   const id: tl.TypeInputMessage[] = ids.map((messageId) => ({
     _: 'inputMessageID',
@@ -193,6 +197,7 @@ export async function fetchMessagesByIdRaw(
     : await client.call(request)
   return {
     messages: 'messages' in result ? result.messages : [],
+    chats: 'chats' in result ? result.chats : [],
     users: 'users' in result ? result.users : [],
   }
 }
