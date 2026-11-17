@@ -33,36 +33,13 @@ import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { createAccountCacheDb } from './helpers/cache-db'
 import { communityDialog, fakeDialog } from './helpers/fake-dialogs'
+import { assertPeer, expectLongEqual } from './helpers/input-peer'
 
 type MockCall = <T extends tl.RpcMethod>(
   request: T,
 ) => Promise<tl.RpcCallReturn[T['_']]>
 
 type MockClient = Pick<TelegramClient, 'call'>
-
-function assertInputPeerUser(
-  peer: tl.TypeInputPeer | null,
-): asserts peer is tl.RawInputPeerUser {
-  if (peer?._ !== 'inputPeerUser') {
-    throw new Error(`Expected inputPeerUser, got ${peer?._ ?? 'null'}`)
-  }
-}
-
-function assertInputPeerChat(
-  peer: tl.TypeInputPeer | null,
-): asserts peer is tl.RawInputPeerChat {
-  if (peer?._ !== 'inputPeerChat') {
-    throw new Error(`Expected inputPeerChat, got ${peer?._ ?? 'null'}`)
-  }
-}
-
-function assertInputPeerChannel(
-  peer: tl.TypeInputPeer | null,
-): asserts peer is tl.RawInputPeerChannel {
-  if (peer?._ !== 'inputPeerChannel') {
-    throw new Error(`Expected inputPeerChannel, got ${peer?._ ?? 'null'}`)
-  }
-}
 
 function isGetHistoryRequest(
   request: tl.RpcMethod,
@@ -98,9 +75,9 @@ describe('sync-worker real helpers/context', () => {
       const peer = buildInputPeer(123, chatsCache)
 
       expect(peer).not.toBeNull()
-      assertInputPeerUser(peer)
+      assertPeer(peer, 'inputPeerUser')
       expect(peer.userId).toBe(123)
-      expect(peer.accessHash?.toString()).toBe(toLong(0).toString())
+      expectLongEqual(peer.accessHash, 0)
     })
 
     it('builds an uncached basic group, which needs no access hash', () => {
@@ -128,13 +105,13 @@ describe('sync-worker real helpers/context', () => {
       const groupPeer = buildInputPeer(-2, chatsCache)
       const channelPeer = buildInputPeer(-1000000000003, chatsCache)
 
-      assertInputPeerUser(privatePeer)
-      expect(privatePeer.accessHash?.toString()).toBe(toLong(777).toString())
-      assertInputPeerChat(groupPeer)
+      assertPeer(privatePeer, 'inputPeerUser')
+      expectLongEqual(privatePeer.accessHash, 777)
+      assertPeer(groupPeer, 'inputPeerChat')
       expect(groupPeer.chatId).toBe(2)
-      assertInputPeerChannel(channelPeer)
+      assertPeer(channelPeer, 'inputPeerChannel')
       expect(channelPeer.channelId).toBe(3)
-      expect(channelPeer.accessHash?.toString()).toBe(toLong(777).toString())
+      expectLongEqual(channelPeer.accessHash, 777)
       expect(buildInputPeer(-1001234567890, chatsCache)).toEqual({
         _: 'inputPeerChannel',
         channelId: 1234567890,

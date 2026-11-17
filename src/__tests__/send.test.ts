@@ -36,6 +36,7 @@ import {
   testAccount,
 } from './helpers/db-mock'
 import { fakeDialog } from './helpers/fake-dialogs'
+import { assertPeer, expectLongEqual } from './helpers/input-peer'
 
 // The send command reads the cache and the client through these modules.
 // Account 1 is active; account 2 has its own cache and client, so a test
@@ -65,10 +66,6 @@ mock.module('../db', () =>
 )
 mock.module('../services/telegram', () => ({ getClientForAccount }))
 
-function expectLongEqual(actual: tl.Long, expected: string | number | bigint) {
-  expect(actual.toString()).toBe(toLong(expected).toString())
-}
-
 type UserResult = Awaited<ReturnType<TelegramClient['getMe']>>
 
 const createUser = (overrides: Partial<UserResult> = {}): UserResult =>
@@ -78,30 +75,6 @@ const createUser = (overrides: Partial<UserResult> = {}): UserResult =>
     username: 'test',
     ...overrides,
   }) as UserResult
-
-function assertInputPeerUser(
-  peer: tl.TypeInputPeer,
-): asserts peer is tl.RawInputPeerUser {
-  if (peer._ !== 'inputPeerUser') {
-    throw new Error(`Expected inputPeerUser, got ${peer._}`)
-  }
-}
-
-function assertInputPeerChat(
-  peer: tl.TypeInputPeer,
-): asserts peer is tl.RawInputPeerChat {
-  if (peer._ !== 'inputPeerChat') {
-    throw new Error(`Expected inputPeerChat, got ${peer._}`)
-  }
-}
-
-function assertInputPeerChannel(
-  peer: tl.TypeInputPeer,
-): asserts peer is tl.RawInputPeerChannel {
-  if (peer._ !== 'inputPeerChannel') {
-    throw new Error(`Expected inputPeerChannel, got ${peer._}`)
-  }
-}
 
 // =============================================================================
 // Test Helpers
@@ -204,7 +177,7 @@ describe('Peer Resolution - By Username', () => {
         chatsCache,
       )
 
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(111)
       expectLongEqual(result.inputPeer.accessHash, '123456789')
       expect(result.name).toBe('Alice Smith')
@@ -277,7 +250,7 @@ describe('Peer Resolution - By Username', () => {
         chatsCache,
       )
 
-      assertInputPeerChannel(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerChannel')
       expect(result.inputPeer.channelId).toBe(444)
       expectLongEqual(result.inputPeer.accessHash, '555666777')
       expect(result.name).toBe('News Channel')
@@ -303,7 +276,7 @@ describe('Peer Resolution - By Username', () => {
         chatsCache,
       )
 
-      assertInputPeerChannel(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerChannel')
       expect(result.inputPeer.channelId).toBe(555)
       expect(result.name).toBe('Community Group')
     })
@@ -392,7 +365,7 @@ describe('Peer Resolution - By Username', () => {
         _: 'contacts.resolveUsername',
         username: 'johndoe',
       })
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(777)
       expect(result.name).toBe('John Doe')
     })
@@ -431,7 +404,7 @@ describe('Peer Resolution - By Username', () => {
         chatsCache,
       )
 
-      assertInputPeerChannel(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerChannel')
       expect(result.inputPeer.channelId).toBe(888)
       expect(result.name).toBe('Tech Channel')
     })
@@ -493,7 +466,7 @@ describe('Peer Resolution - By Username', () => {
       )
 
       // Should use 0n for missing accessHash
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expectLongEqual(result.inputPeer.accessHash, 0)
       expect(result.name).toBe('No Hash')
     })
@@ -533,7 +506,7 @@ describe('Peer Resolution - By Phone Number', () => {
         chatsCache,
       )
 
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(111)
     })
 
@@ -554,7 +527,7 @@ describe('Peer Resolution - By Phone Number', () => {
         chatsCache,
       )
 
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(222)
     })
   })
@@ -579,7 +552,7 @@ describe('Peer Resolution - By Phone Number', () => {
         chatsCache,
       )
 
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(333)
       expectLongEqual(result.inputPeer.accessHash, '111222333')
       expect(result.name).toBe('Phone User')
@@ -604,7 +577,7 @@ describe('Peer Resolution - By Phone Number', () => {
         usersCache,
         chatsCache,
       )
-      assertInputPeerUser(result1.inputPeer)
+      assertPeer(result1.inputPeer, 'inputPeerUser')
       expect(result1.inputPeer.userId).toBe(444)
 
       const result2 = await resolvePeer(
@@ -613,7 +586,7 @@ describe('Peer Resolution - By Phone Number', () => {
         usersCache,
         chatsCache,
       )
-      assertInputPeerUser(result2.inputPeer)
+      assertPeer(result2.inputPeer, 'inputPeerUser')
       expect(result2.inputPeer.userId).toBe(444)
 
       // Test with raw digits (no + prefix)
@@ -623,7 +596,7 @@ describe('Peer Resolution - By Phone Number', () => {
         usersCache,
         chatsCache,
       )
-      assertInputPeerUser(result3.inputPeer)
+      assertPeer(result3.inputPeer, 'inputPeerUser')
       expect(result3.inputPeer.userId).toBe(444)
     })
   })
@@ -666,7 +639,7 @@ describe('Peer Resolution - By Phone Number', () => {
         _: 'contacts.resolvePhone',
         phone: '11234567890',
       })
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(555)
       expect(result.name).toBe('API User')
     })
@@ -745,7 +718,7 @@ describe('Peer Resolution - By Numeric ID', () => {
         chatsCache,
       )
 
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(123456789)
       expectLongEqual(result.inputPeer.accessHash, '999888777')
       expect(result.name).toBe('Numeric User')
@@ -792,7 +765,7 @@ describe('Peer Resolution - By Numeric ID', () => {
         chatsCache,
       )
 
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(555666)
       expect(result.name).toBe('Private Chat')
     })
@@ -815,7 +788,7 @@ describe('Peer Resolution - By Numeric ID', () => {
         chatsCache,
       )
 
-      assertInputPeerChat(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerChat')
       expect(result.inputPeer.chatId).toBe(777888)
       expect(result.name).toBe('Group Chat')
       expect(mockClient.call).not.toHaveBeenCalled()
@@ -839,7 +812,7 @@ describe('Peer Resolution - By Numeric ID', () => {
         chatsCache,
       )
 
-      assertInputPeerChannel(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerChannel')
       expect(result.inputPeer.channelId).toBe(888999)
       expectLongEqual(result.inputPeer.accessHash, '111222333')
       expect(result.name).toBe('My Channel')
@@ -861,7 +834,7 @@ describe('Peer Resolution - By Numeric ID', () => {
         chatsCache,
       )
 
-      assertInputPeerChannel(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerChannel')
       expect(result.inputPeer.channelId).toBe(999000)
       expectLongEqual(result.inputPeer.accessHash, '777')
       expect(result.name).toBe('Supergroup')
@@ -893,7 +866,7 @@ describe('Peer Resolution - By Numeric ID', () => {
       )
 
       expect(bare).toEqual(marked)
-      assertInputPeerChannel(bare.inputPeer)
+      assertPeer(bare.inputPeer, 'inputPeerChannel')
       expect(bare.inputPeer.channelId).toBe(1234567890)
       expect(mockClient.call).not.toHaveBeenCalled()
     })
@@ -929,7 +902,7 @@ describe('Peer Resolution - By Numeric ID', () => {
         chatsCache,
       )
 
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(12345)
       expectLongEqual(result.inputPeer.accessHash, 0)
       expect(result.name).toBe('User 12345')
@@ -1326,7 +1299,7 @@ describe('Error Handling', () => {
 
       // Should have called API because cache entry has no access_hash
       expect(mockClient.call).toHaveBeenCalled()
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expectLongEqual(result.inputPeer.accessHash, '999')
     })
 
@@ -1373,7 +1346,7 @@ describe('Error Handling', () => {
 
       // Should have called API because cache entry has no access_hash
       expect(mockClient.call).toHaveBeenCalled()
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expectLongEqual(result.inputPeer.accessHash, '888')
     })
 
@@ -1394,7 +1367,7 @@ describe('Error Handling', () => {
       )
 
       // A known user stays a user, with hash 0, not basic group 333333
-      assertInputPeerUser(result.inputPeer)
+      assertPeer(result.inputPeer, 'inputPeerUser')
       expect(result.inputPeer.userId).toBe(333333)
       expectLongEqual(result.inputPeer.accessHash, 0)
     })
@@ -1530,7 +1503,7 @@ describe('Resolution Priority', () => {
     )
 
     // Should resolve to user, not channel
-    assertInputPeerUser(result.inputPeer)
+    assertPeer(result.inputPeer, 'inputPeerUser')
     expect(result.inputPeer.userId).toBe(111)
   })
 
@@ -1550,12 +1523,12 @@ describe('Resolution Priority', () => {
     const mockClient = createMockClient()
     const result = await resolvePeer(mockClient, '4242', usersCache, chatsCache)
 
-    assertInputPeerUser(result.inputPeer)
+    assertPeer(result.inputPeer, 'inputPeerUser')
     expect(result.inputPeer.userId).toBe(4242)
     expectLongEqual(result.inputPeer.accessHash, '666')
 
     const group = await resolvePeer(mockClient, '-4242', usersCache, chatsCache)
-    assertInputPeerChat(group.inputPeer)
+    assertPeer(group.inputPeer, 'inputPeerChat')
     expect(group.inputPeer.chatId).toBe(4242)
     expect(group.name).toBe('Book Club')
   })
@@ -1602,7 +1575,7 @@ describe('Resolution Priority', () => {
       chatsCache,
     )
 
-    assertInputPeerChannel(result.inputPeer)
+    assertPeer(result.inputPeer, 'inputPeerChannel')
     expect(result.inputPeer.channelId).toBe(777)
     expect(mockClient.call).not.toHaveBeenCalled()
   })
@@ -1678,7 +1651,7 @@ describe('send command', () => {
       peer: tl.TypeInputPeer
     }
     expect(request._).toBe('messages.sendMessage')
-    assertInputPeerUser(request.peer)
+    assertPeer(request.peer, 'inputPeerUser')
     expect(request.peer.userId).toBe(123456)
     expectLongEqual(request.peer.accessHash, '222')
     // The call counts against account 2's rate limits only
@@ -1713,7 +1686,7 @@ describe('send command', () => {
     const request = commandCall.mock.calls[0]?.[0] as {
       peer: tl.TypeInputPeer
     }
-    assertInputPeerUser(request.peer)
+    assertPeer(request.peer, 'inputPeerUser')
     expectLongEqual(request.peer.accessHash, '111')
     expect(apiActivity(secondCacheDb)).toEqual([])
   })
@@ -1770,7 +1743,7 @@ describe('send command', () => {
       peer: tl.TypeInputPeer
     }
     expect(request._).toBe('messages.sendMessage')
-    assertInputPeerUser(request.peer)
+    assertPeer(request.peer, 'inputPeerUser')
     expect(request.peer.userId).toBe(4242)
     expectLongEqual(request.peer.accessHash, 0)
   })

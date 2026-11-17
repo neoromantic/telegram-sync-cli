@@ -9,7 +9,7 @@ import { join } from 'node:path'
 
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createChatSyncStateService } from '../db/chat-sync-state'
-import { type CachedChatInput, createChatsCache } from '../db/chats-cache'
+import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { migratePeerIds, PEER_ID_USER_VERSION } from '../db/peer-id-migration'
@@ -24,6 +24,7 @@ import {
 import { createUsersCache } from '../db/users-cache'
 import { toRawJson } from '../utils/raw-json'
 import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
+import { chatRow } from './helpers/cache-db'
 import {
   initLegacySchema,
   LEGACY,
@@ -69,24 +70,6 @@ function senderIds(db: Database): unknown[] {
     .all()
 }
 
-function chatRow(
-  chat: Pick<CachedChatInput, 'chat_id' | 'type' | 'title'> &
-    Partial<CachedChatInput>,
-): CachedChatInput {
-  return {
-    username: null,
-    member_count: null,
-    access_hash: null,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: 1_000,
-    raw_json: '{}',
-    ...chat,
-  }
-}
-
 describe('peer ID migration', () => {
   let db: Database
 
@@ -119,9 +102,7 @@ describe('peer ID migration', () => {
     const chats = createChatsCache(db)
     chats.upsertMany([
       legacyChatRow({ kind: 'supergroup', id: 1111111111, title: 'Dialog' }),
-      chatRow({
-        chat_id: '5555555555',
-        type: 'group',
+      chatRow('5555555555', 'group', {
         title: 'Community',
         raw_json: JSON.stringify({
           _: 'community',
@@ -129,24 +110,15 @@ describe('peer ID migration', () => {
           title: 'Community',
         }),
       }),
-      chatRow({ chat_id: '4001', type: 'group', title: 'No raw' }),
-      chatRow({ chat_id: '4002', type: 'channel', title: 'Channel, no raw' }),
+      chatRow('4001', 'group', { title: 'No raw' }),
+      chatRow('4002', 'channel', { title: 'Channel, no raw' }),
       // raw_json that names another chat doesn't count
-      chatRow({
-        chat_id: '4003',
-        type: 'group',
+      chatRow('4003', 'group', {
         title: 'Wrong raw',
         raw_json: JSON.stringify({ _: 'channel', id: 9 }),
       }),
-      chatRow({
-        chat_id: '4004',
-        type: 'group',
-        title: 'Malformed raw',
-        raw_json: '{"_":',
-      }),
-      chatRow({
-        chat_id: '4005',
-        type: 'channel',
+      chatRow('4004', 'group', { title: 'Malformed raw', raw_json: '{"_":' }),
+      chatRow('4005', 'channel', {
         title: 'User raw',
         raw_json: JSON.stringify({ _: 'user', id: 4005 }),
       }),
@@ -172,14 +144,8 @@ describe('peer ID migration', () => {
   ] as const) {
     it(`keeps the ${newer} row when it is newer than the ${older} one`, () => {
       const rows = {
-        bare: chatRow({
-          chat_id: '1234567890',
-          type: 'supergroup',
-          title: 'Bare row',
-        }),
-        marked: chatRow({
-          chat_id: '-1001234567890',
-          type: 'supergroup',
+        bare: chatRow('1234567890', 'supergroup', { title: 'Bare row' }),
+        marked: chatRow('-1001234567890', 'supergroup', {
           title: 'Marked row',
         }),
       }
@@ -548,9 +514,7 @@ describe('peer ID migration', () => {
       raw_json: '{}',
     })
     createChatsCache(db).upsertMany([
-      chatRow({
-        chat_id: String(LEGACY.news.marked),
-        type: 'channel',
+      chatRow(String(LEGACY.news.marked), 'channel', {
         title: LEGACY.news.title,
       }),
     ])

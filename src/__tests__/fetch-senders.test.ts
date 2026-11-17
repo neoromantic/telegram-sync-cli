@@ -23,7 +23,7 @@ import { processJobReal } from '../daemon/sync-worker-real-jobs'
 import type { RealSyncWorkerContext } from '../daemon/sync-worker-real-types'
 import { runPendingMigrations } from '../db/background-migrations'
 import { createChatSyncStateService } from '../db/chat-sync-state'
-import { type CachedChatInput, createChatsCache } from '../db/chats-cache'
+import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
@@ -38,7 +38,7 @@ import {
 } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
-import { createAccountCacheDb } from './helpers/cache-db'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
 import { takePartIn } from './helpers/participation'
 
 /** A supergroup whose access hash is cached */
@@ -59,23 +59,6 @@ const START = new Date('2026-03-01T00:00:00Z').getTime()
 let db: Database
 let ctx: RealSyncWorkerContext
 let requests: Record<string, unknown>[]
-
-function chatRow(chatId: number, accessHash: string | null): CachedChatInput {
-  return {
-    chat_id: String(chatId),
-    type: 'supergroup',
-    title: `Made-up group ${chatId}`,
-    username: null,
-    member_count: 500,
-    access_hash: accessHash,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: 1,
-    raw_json: '{}',
-  }
-}
 
 function seed(
   chatId: number,
@@ -158,8 +141,18 @@ beforeEach(() => {
     senderLookups: createSenderLookups(db),
     config: { apiMethod: 'messages.getHistory', batchSize: 100 },
   }
-  createChatsCache(db).upsert(chatRow(GROUP, '4242'))
-  createChatsCache(db).upsert(chatRow(NO_HASH, null))
+  for (const [chatId, accessHash] of [
+    [GROUP, '4242'],
+    [NO_HASH, null],
+  ] as const) {
+    createChatsCache(db).upsert(
+      chatRow(chatId, 'supergroup', {
+        member_count: 500,
+        access_hash: accessHash,
+        fetched_at: 1,
+      }),
+    )
+  }
   // An older cache: history synced without its senders (#126)
   for (const id of [10, 11, 12]) seed(GROUP, id, ALICIA)
   seed(GROUP, 13, BORIS)

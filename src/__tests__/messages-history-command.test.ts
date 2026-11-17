@@ -47,7 +47,6 @@ import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { createRateLimitsService } from '../db/rate-limits'
 import { SyncPriority } from '../db/sync-schema'
-import type { ChatType } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { extractAttachment } from '../utils/attachment'
 import { toLong } from '../utils/long'
@@ -55,7 +54,7 @@ import {
   RateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
-import { createAccountCacheDb } from './helpers/cache-db'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeHistory,
   type GetHistoryRequest,
@@ -90,30 +89,6 @@ function createCacheDb(): Database {
   const db = createAccountCacheDb()
   takePartIn(db, TEAM_CHAT_ID, BOOK_CLUB_ID)
   return db
-}
-
-function cacheChat(
-  db: Database,
-  chatId: string,
-  type: ChatType,
-  title: string,
-  username: string | null,
-  accessHash: string | null,
-) {
-  createChatsCache(db).upsert({
-    chat_id: chatId,
-    type,
-    title,
-    username,
-    member_count: null,
-    access_hash: accessHash,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: Date.now(),
-    raw_json: '{}',
-  })
 }
 
 function cacheMessages(db: Database, chatId: number, ids: number[]) {
@@ -267,16 +242,19 @@ describe('resolveHistoryChat', () => {
       fetched_at: Date.now(),
       raw_json: '{}',
     })
-    cacheChat(cacheDb, '10', 'private', 'Alice Able', 'alice', '1111')
-    cacheChat(
-      cacheDb,
-      String(TEAM_CHAT_ID),
-      'supergroup',
-      'Team Chat',
-      'teamchat',
-      '2222',
-    )
-    cacheChat(cacheDb, String(BOOK_CLUB_ID), 'group', 'Book Club', null, null)
+    createChatsCache(cacheDb).upsertMany([
+      chatRow(10, 'private', {
+        title: 'Alice Able',
+        username: 'alice',
+        access_hash: '1111',
+      }),
+      chatRow(TEAM_CHAT_ID, 'supergroup', {
+        title: 'Team Chat',
+        username: 'teamchat',
+        access_hash: '2222',
+      }),
+      chatRow(BOOK_CLUB_ID, 'group', { title: 'Book Club' }),
+    ])
     // A private chat the daemon cached with no users_cache or chats_cache row
     const newDm = [NEW_USER_ID, LONG_NEW_USER_ID]
     for (const chatId of [

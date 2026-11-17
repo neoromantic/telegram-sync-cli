@@ -56,7 +56,7 @@ import { extractAttachment, pickThumb } from '../utils/attachment'
 import { mediaPaths, thumbPaths } from '../utils/media-cache'
 import { RateLimitError } from '../utils/telegram-rate-limits'
 import { MEDIA_FLOOD_SLEEP_MS } from '../utils/telegram-transfer'
-import { createAccountCacheDb } from './helpers/cache-db'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
 import { documentMessage, pdfDocumentMessage } from './helpers/media-messages'
 import { takePartIn } from './helpers/participation'
 import { fakeBytes, photoMessage } from './helpers/photo-message'
@@ -115,21 +115,16 @@ beforeEach(() => {
     fetched_at: NOW,
     raw_json: '{}',
   })
-  createChatsCache(db).upsert({
-    chat_id: String(TEAM_CHAT_ID),
-    type: 'supergroup',
-    title: 'Example Team',
-    username: null,
-    member_count: 30,
-    access_hash: '7000000000000000005',
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: NOW,
-    // A dialog row: no chat flags
-    raw_json: JSON.stringify({ _: 'dialog', unreadCount: 0 }),
-  })
+  createChatsCache(db).upsert(
+    chatRow(TEAM_CHAT_ID, 'supergroup', {
+      title: 'Example Team',
+      member_count: 30,
+      access_hash: '7000000000000000005',
+      fetched_at: NOW,
+      // A dialog row: no chat flags
+      raw_json: JSON.stringify({ _: 'dialog', unreadCount: 0 }),
+    }),
+  )
 })
 
 afterEach(() => {

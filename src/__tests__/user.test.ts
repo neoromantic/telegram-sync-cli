@@ -26,10 +26,7 @@ import {
   mockDbModule,
   testAccount,
 } from './helpers/db-mock'
-
-function expectLongEqual(actual: tl.Long, expected: string | number | bigint) {
-  expect(actual.toString()).toBe(toLong(expected).toString())
-}
+import { expectLongEqual } from './helpers/input-peer'
 
 function makeRawUser(overrides: Partial<tl.RawUser> = {}): tl.RawUser {
   return {

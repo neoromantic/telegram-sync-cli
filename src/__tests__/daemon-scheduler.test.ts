@@ -25,7 +25,7 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
-import { createAccountCacheDb } from './helpers/cache-db'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
 import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import { fakeDialogClient } from './helpers/fake-dialogs'
 import { createFakeHistory, range } from './helpers/fake-history'
@@ -1085,20 +1085,12 @@ describe('processJobs with two accounts', () => {
     const db = createAccountCacheDb()
     dbs.push(db)
     if (options.withChat) {
-      createChatsCache(db).upsert({
-        chat_id: String(ALICE),
-        type: 'private',
-        title: 'Alice Able',
-        username: null,
-        member_count: null,
-        access_hash: `${accountId}${accountId}${accountId}`,
-        is_creator: 0,
-        is_admin: 0,
-        last_message_id: null,
-        last_message_at: null,
-        fetched_at: Date.now(),
-        raw_json: '{}',
-      })
+      createChatsCache(db).upsert(
+        chatRow(ALICE, 'private', {
+          title: 'Alice Able',
+          access_hash: `${accountId}${accountId}${accountId}`,
+        }),
+      )
       createChatSyncStateService(db).upsert({
         chat_id: ALICE,
         chat_type: 'private',
