@@ -3,7 +3,14 @@
  * with fake clients and injected clocks
  */
 import type { Database } from 'bun:sqlite'
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type mock,
+} from 'bun:test'
 import {
   CATCH_UP_MIN_INTERVAL_MS,
   CATCH_UP_SETTLE_MS,
@@ -12,58 +19,21 @@ import {
   noteConnectionState,
   runDueCatchUps,
 } from '../daemon/daemon-catch-up'
-import {
-  createDaemonRuntime,
-  type DaemonContext,
-} from '../daemon/daemon-context'
 import { createSyncScheduler } from '../daemon/scheduler'
 import type { AccountConnectionState } from '../daemon/types'
 import { createChatSyncStateService } from '../db/chat-sync-state'
-import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache } from '../db/messages-cache'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { SyncJobType, SyncPriority } from '../db/sync-schema'
 import {
   addAccountRuntime,
   createAccountCacheDb,
+  testDaemonContext,
 } from './helpers/daemon-runtime'
 import { fakeDialogClient } from './helpers/fake-dialogs'
 
 const T0 = Date.UTC(2026, 0, 1)
 const HOUR = 3_600_000
-
-function createContext(): DaemonContext {
-  const { accountsDb } = createTestDatabase()
-  return {
-    dataDir: '/tmp/tgcli',
-    pidPath: '/tmp/tgcli/daemon.pid',
-    verbosity: 'normal',
-    reconnectConfig: {
-      initialDelayMs: 1000,
-      maxDelayMs: 4000,
-      maxAttempts: 3,
-      backoffMultiplier: 2,
-    },
-    shutdownTimeoutMs: 1_000_000,
-    logger: {
-      info: mock(() => {}),
-      debug: mock(() => {}),
-      warn: mock(() => {}),
-      error: mock(() => {}),
-    },
-    pidFile: {
-      acquire: () => {},
-      release: () => {},
-      read: () => null,
-      isRunning: () => false,
-      sendSignal: () => false,
-      getPath: () => '/tmp/tgcli/daemon.pid',
-    },
-    state: { running: true, accounts: new Map(), shutdownRequested: false },
-    accountsDb,
-    runtime: createDaemonRuntime(),
-  }
-}
 
 describe('noteConnectionState', () => {
   it('asks for a catch-up after more than 5 s offline, once the connection settles', () => {
@@ -138,7 +108,7 @@ describe('catch-up after a reconnect or a wake', () => {
 
   /** A connected account whose client lists 1002 with a newer message */
   function connectedAccount() {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const rt = addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSyncScheduler({
         db: cacheDb,

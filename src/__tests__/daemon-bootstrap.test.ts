@@ -7,13 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { TelegramClient } from '@mtcute/bun'
 import { fetchJoinedCommunities } from '../commands/chats/helpers'
 import { daemonNetworkMiddlewares } from '../daemon/daemon-accounts'
-import {
-  createDaemonRuntime,
-  type DaemonContext,
-  requestShutdown,
-} from '../daemon/daemon-context'
+import { type DaemonContext, requestShutdown } from '../daemon/daemon-context'
 import { createSyncScheduler } from '../daemon/scheduler'
-import type { AccountsDbInterface } from '../db'
 import {
   type ChatSyncStateService,
   createChatSyncStateService,
@@ -28,6 +23,7 @@ import { toLong } from '../utils/long'
 import {
   addAccountRuntime,
   createAccountCacheDb,
+  testDaemonContext,
 } from './helpers/daemon-runtime'
 import {
   type FakeDialogInput,
@@ -37,38 +33,6 @@ import {
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 let testCacheDb: Database
-
-function createContext(): DaemonContext {
-  return {
-    dataDir: '/tmp/tgcli',
-    pidPath: '/tmp/tgcli/daemon.pid',
-    verbosity: 'normal',
-    reconnectConfig: {
-      initialDelayMs: 1000,
-      maxDelayMs: 4000,
-      maxAttempts: 3,
-      backoffMultiplier: 2,
-    },
-    shutdownTimeoutMs: 1_000_000,
-    logger: {
-      info: mock(() => {}),
-      debug: mock(() => {}),
-      warn: mock(() => {}),
-      error: mock(() => {}),
-    },
-    pidFile: {
-      acquire: () => {},
-      release: () => {},
-      read: () => null,
-      isRunning: () => false,
-      sendSignal: () => false,
-      getPath: () => '/tmp/tgcli/daemon.pid',
-    },
-    state: { running: true, accounts: new Map(), shutdownRequested: false },
-    accountsDb: {} as AccountsDbInterface,
-    runtime: createDaemonRuntime(),
-  }
-}
 
 function connect(
   ctx: DaemonContext,
@@ -93,7 +57,7 @@ describe('bootstrapDialogs', () => {
     initCacheSchema(testCacheDb)
     initSyncSchema(testCacheDb)
     chatSyncState = createChatSyncStateService(testCacheDb)
-    ctx = createContext()
+    ctx = testDaemonContext()
   })
 
   afterEach(() => {

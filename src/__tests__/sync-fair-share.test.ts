@@ -7,12 +7,9 @@
  * for 500 chats.
  */
 import type { Database } from 'bun:sqlite'
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import type { TelegramClient } from '@mtcute/bun'
-import {
-  createDaemonRuntime,
-  type DaemonContext,
-} from '../daemon/daemon-context'
+import type { DaemonContext } from '../daemon/daemon-context'
 import { processJobs } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import { createSyncPacer } from '../daemon/sync-pacing'
@@ -23,7 +20,6 @@ import {
 } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
-import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
@@ -36,7 +32,7 @@ import {
   SyncPriority,
 } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
-import { addAccountRuntime } from './helpers/daemon-runtime'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import {
   createMultiChatHistory,
   type GetHistoryRequest,
@@ -128,35 +124,7 @@ describe('job budget with 500 chats', () => {
       messagesCache,
     })
 
-    ctx = {
-      dataDir: '/tmp/tgcli',
-      pidPath: '/tmp/tgcli/daemon.pid',
-      verbosity: 'normal',
-      reconnectConfig: {
-        initialDelayMs: 1000,
-        maxDelayMs: 4000,
-        maxAttempts: 3,
-        backoffMultiplier: 2,
-      },
-      shutdownTimeoutMs: 1_000_000,
-      logger: {
-        info: mock(() => {}),
-        debug: mock(() => {}),
-        warn: mock(() => {}),
-        error: mock(() => {}),
-      },
-      pidFile: {
-        acquire: () => {},
-        release: () => {},
-        read: () => null,
-        isRunning: () => false,
-        sendSignal: () => false,
-        getPath: () => '/tmp/tgcli/daemon.pid',
-      },
-      state: { running: true, accounts: new Map(), shutdownRequested: false },
-      accountsDb: createTestDatabase().accountsDb,
-      runtime: createDaemonRuntime(),
-    }
+    ctx = testDaemonContext()
     addAccountRuntime(ctx, 1, db, { scheduler })
     useClient(history.client)
     ctx.state.accounts.set(1, {
@@ -489,35 +457,7 @@ describe('job budget with two accounts', () => {
   }
 
   it("doesn't let one account's catch-up backlog starve another's history", async () => {
-    const ctx: DaemonContext = {
-      dataDir: '/tmp/tgcli',
-      pidPath: '/tmp/tgcli/daemon.pid',
-      verbosity: 'normal',
-      reconnectConfig: {
-        initialDelayMs: 1000,
-        maxDelayMs: 4000,
-        maxAttempts: 3,
-        backoffMultiplier: 2,
-      },
-      shutdownTimeoutMs: 1_000_000,
-      logger: {
-        info: mock(() => {}),
-        debug: mock(() => {}),
-        warn: mock(() => {}),
-        error: mock(() => {}),
-      },
-      pidFile: {
-        acquire: () => {},
-        release: () => {},
-        read: () => null,
-        isRunning: () => false,
-        sendSignal: () => false,
-        getPath: () => '/tmp/tgcli/daemon.pid',
-      },
-      state: { running: true, accounts: new Map(), shutdownRequested: false },
-      accountsDb: createTestDatabase().accountsDb,
-      runtime: createDaemonRuntime(),
-    }
+    const ctx: DaemonContext = testDaemonContext()
     const ran: Array<{ accountId: number; type: string }> = []
     const first = seedAccount(ctx, 1, { gap: GAP_CHATS.slice(0, 50) }, ran)
     const second = seedAccount(

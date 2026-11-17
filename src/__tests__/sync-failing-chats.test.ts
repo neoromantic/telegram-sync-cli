@@ -8,13 +8,17 @@
  * like the daemon.
  */
 import type { Database } from 'bun:sqlite'
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type mock,
+} from 'bun:test'
 import { type TelegramClient, tl } from '@mtcute/bun'
 import { dialogToCacheInput } from '../commands/chats/helpers'
-import {
-  createDaemonRuntime,
-  type DaemonContext,
-} from '../daemon/daemon-context'
+import type { DaemonContext } from '../daemon/daemon-context'
 import { processJobs } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import { createRealSyncWorker } from '../daemon/sync-worker'
@@ -25,7 +29,6 @@ import {
 } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
-import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createTestCacheDatabase } from '../db/schema'
@@ -35,7 +38,7 @@ import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
-import { addAccountRuntime } from './helpers/daemon-runtime'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import { fakeDialog } from './helpers/fake-dialogs'
 import {
   createMultiChatHistory,
@@ -115,35 +118,7 @@ describe('chats whose sync pages keep failing', () => {
       messagesCache,
     })
 
-    ctx = {
-      dataDir: '/tmp/tgcli',
-      pidPath: '/tmp/tgcli/daemon.pid',
-      verbosity: 'normal',
-      reconnectConfig: {
-        initialDelayMs: 1000,
-        maxDelayMs: 4000,
-        maxAttempts: 3,
-        backoffMultiplier: 2,
-      },
-      shutdownTimeoutMs: 1_000_000,
-      logger: {
-        info: mock(() => {}),
-        debug: mock(() => {}),
-        warn: mock(() => {}),
-        error: mock(() => {}),
-      },
-      pidFile: {
-        acquire: () => {},
-        release: () => {},
-        read: () => null,
-        isRunning: () => false,
-        sendSignal: () => false,
-        getPath: () => '/tmp/tgcli/daemon.pid',
-      },
-      state: { running: true, accounts: new Map(), shutdownRequested: false },
-      accountsDb: createTestDatabase().accountsDb,
-      runtime: createDaemonRuntime(),
-    }
+    ctx = testDaemonContext()
     addAccountRuntime(ctx, 1, db, {
       scheduler,
       worker: createRealSyncWorker({
@@ -409,35 +384,7 @@ describe('a chat that fails in one account', () => {
   }
 
   it("doesn't stop the other account from queueing the same chat", async () => {
-    const ctx: DaemonContext = {
-      dataDir: '/tmp/tgcli',
-      pidPath: '/tmp/tgcli/daemon.pid',
-      verbosity: 'normal',
-      reconnectConfig: {
-        initialDelayMs: 1000,
-        maxDelayMs: 4000,
-        maxAttempts: 3,
-        backoffMultiplier: 2,
-      },
-      shutdownTimeoutMs: 1_000_000,
-      logger: {
-        info: mock(() => {}),
-        debug: mock(() => {}),
-        warn: mock(() => {}),
-        error: mock(() => {}),
-      },
-      pidFile: {
-        acquire: () => {},
-        release: () => {},
-        read: () => null,
-        isRunning: () => false,
-        sendSignal: () => false,
-        getPath: () => '/tmp/tgcli/daemon.pid',
-      },
-      state: { running: true, accounts: new Map(), shutdownRequested: false },
-      accountsDb: createTestDatabase().accountsDb,
-      runtime: createDaemonRuntime(),
-    }
+    const ctx: DaemonContext = testDaemonContext()
     const first = seedAccount(ctx, 1)
     const second = seedAccount(ctx, 2, () => new Error('connection reset'))
     const accounts = [first, second]

@@ -7,45 +7,8 @@ import { join } from 'node:path'
 import { createContext, createDaemon } from '../daemon/daemon'
 import { createLogger } from '../daemon/daemon-logger'
 import { DaemonExitCode } from '../daemon/types'
-import type { AccountsDbInterface } from '../db'
 import { getDefaultRetentionConfig } from '../db/types'
-import type { Account } from '../types'
-
-function createAccountsDb(
-  accounts: Array<{ id: number; phone: string }>,
-): AccountsDbInterface {
-  const normalized: Account[] = accounts.map((account) => ({
-    id: account.id,
-    phone: account.phone,
-    user_id: null,
-    name: null,
-    username: null,
-    label: null,
-    session_data: '',
-    is_active: 0,
-    created_at: '',
-    updated_at: '',
-  }))
-
-  return {
-    getAll: () => normalized,
-    getById: (id: number) => normalized.find((acc) => acc.id === id) ?? null,
-    getByPhone: (phone: string) =>
-      normalized.find((acc) => acc.phone === phone) ?? null,
-    getByUserId: () => null,
-    getByUsername: () => null,
-    getAllByLabel: () => [],
-    getActive: () => null,
-    create: () => {
-      throw new Error('not used')
-    },
-    update: () => null,
-    updateSession: () => {},
-    setActive: () => {},
-    delete: () => false,
-    count: () => accounts.length,
-  }
-}
+import { createFakeAccountsDb, testAccount } from './helpers/db-mock'
 
 const tempDir = join(process.cwd(), '.tmp', 'daemon-tests')
 const pidPath = join(tempDir, `daemon-${process.pid}.pid`)
@@ -83,7 +46,7 @@ describe('daemon start', () => {
 
     const daemon = createDaemon(
       { pidPath, shutdownTimeoutMs: 1_000_000 },
-      createAccountsDb([{ id: 1, phone: '+1' }]),
+      createFakeAccountsDb([testAccount({ id: 1, phone: '+1', is_active: 0 })]),
     )
 
     const exitCode = await daemon.start()
@@ -97,7 +60,7 @@ describe('daemon start', () => {
     withCredentials('12345', 'test-api-hash')
     const daemon = createDaemon(
       { pidPath, shutdownTimeoutMs: 1_000_000 },
-      createAccountsDb([]),
+      createFakeAccountsDb([]),
     )
 
     const exitCode = await daemon.start()
@@ -109,7 +72,7 @@ describe('daemon start', () => {
     withCredentials(undefined, undefined)
     const daemon = createDaemon(
       { pidPath, shutdownTimeoutMs: 1_000_000 },
-      createAccountsDb([{ id: 1, phone: '+1' }]),
+      createFakeAccountsDb([testAccount({ id: 1, phone: '+1', is_active: 0 })]),
     )
 
     const exitCode = await daemon.start()
@@ -120,7 +83,7 @@ describe('daemon start', () => {
 
 describe('daemon status', () => {
   it('returns baseline status when not running', () => {
-    const daemon = createDaemon({}, createAccountsDb([]))
+    const daemon = createDaemon({}, createFakeAccountsDb([]))
 
     const status = daemon.getStatus()
 
@@ -130,7 +93,7 @@ describe('daemon status', () => {
   })
 
   it('stop requests shutdown', () => {
-    const daemon = createDaemon({}, createAccountsDb([]))
+    const daemon = createDaemon({}, createFakeAccountsDb([]))
 
     daemon.stop()
 
@@ -140,7 +103,7 @@ describe('daemon status', () => {
 })
 
 describe('daemon context', () => {
-  const accountsDb = createAccountsDb([])
+  const accountsDb = createFakeAccountsDb([])
   const logger = createLogger('quiet')
 
   it('keeps the retention it is given', () => {

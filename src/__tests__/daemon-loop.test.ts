@@ -4,7 +4,7 @@
 import { describe, expect, it, mock } from 'bun:test'
 import type { TelegramClient } from '@mtcute/bun'
 import type { DaemonContext } from '../daemon/daemon-context'
-import { createDaemonRuntime, requestShutdown } from '../daemon/daemon-context'
+import { requestShutdown } from '../daemon/daemon-context'
 import { mainLoop, waitForNextTick } from '../daemon/daemon-loop'
 import { startDueJobs, waitForJobsInFlight } from '../daemon/daemon-scheduler'
 import type { SyncScheduler } from '../daemon/scheduler'
@@ -19,6 +19,7 @@ import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
 import {
   addAccountRuntime,
   createAccountCacheDb,
+  testDaemonContext,
 } from './helpers/daemon-runtime'
 import { fakeDialogClient } from './helpers/fake-dialogs'
 
@@ -73,60 +74,11 @@ function createMockScheduler(
   return { ...base, ...overrides }
 }
 
-function createLogger() {
-  return {
-    info: mock(() => {}),
-    debug: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-  }
-}
-
 function createContext(): DaemonContext {
-  return {
-    dataDir: '/tmp/tgcli',
-    pidPath: '/tmp/tgcli/daemon.pid',
+  return testDaemonContext({
     verbosity: 'quiet',
-    reconnectConfig: {
-      initialDelayMs: 1000,
-      maxDelayMs: 4000,
-      maxAttempts: 2,
-      backoffMultiplier: 2,
-    },
-    shutdownTimeoutMs: 1_000_000,
-    logger: createLogger(),
-    pidFile: {
-      acquire: () => {},
-      release: () => {},
-      read: () => null,
-      isRunning: () => false,
-      sendSignal: () => false,
-      getPath: () => '/tmp/tgcli/daemon.pid',
-    },
-    state: {
-      running: false,
-      accounts: new Map(),
-      shutdownRequested: false,
-    },
-    accountsDb: {
-      getAll: () => [],
-      getById: () => null,
-      getByPhone: () => null,
-      getByUserId: () => null,
-      getByUsername: () => null,
-      getAllByLabel: () => [],
-      getActive: () => null,
-      create: () => {
-        throw new Error('not used')
-      },
-      update: () => null,
-      updateSession: () => {},
-      setActive: () => {},
-      delete: () => false,
-      count: () => 0,
-    },
-    runtime: createDaemonRuntime(),
-  }
+    state: { running: false, accounts: new Map(), shutdownRequested: false },
+  })
 }
 
 async function runWithImmediateTimeouts(
