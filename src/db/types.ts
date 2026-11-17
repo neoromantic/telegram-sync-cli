@@ -105,15 +105,6 @@ export type DurationUnit = 's' | 'm' | 'h' | 'd' | 'w'
 export type DurationString = `${number}${DurationUnit}`
 
 /**
- * Cache staleness config with human-readable durations
- */
-export interface CacheStalenessConfigReadable {
-  peers: DurationString
-  dialogs: DurationString
-  fullInfo: DurationString
-}
-
-/**
  * Parse a human-readable duration string to milliseconds
  */
 export function parseDuration(duration: DurationString): number {
