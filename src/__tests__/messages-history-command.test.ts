@@ -198,7 +198,7 @@ function expectAliceCached(
 ) {
   expect(rows.length).toBeGreaterThan(0)
   for (const row of rows) {
-    expect(messageRowToItem(row, null).sender).toMatchObject({
+    expect(messageRowToItem(row, null, null).sender).toMatchObject({
       id: ALICE_ID,
       username: 'alice',
       firstName: 'Alice',

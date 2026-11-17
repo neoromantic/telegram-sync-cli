@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `tg messages list`, `get` and `search` say what a service message did. A call, a pin or a
+  group change used to print only `messageType: "service"` with no text, so an agent reading a
+  chat could not tell a call had happened. Every item now has `action`, read from `raw_json` (so it
+  works for messages cached by older versions too), `null` for other messages: a call gives
+  `video`, `duration` and why it ended (`missed`, `busy`, `hangup`, `disconnect`), a pin the
+  pinned message, a group change the new title or the users added or removed. Any other action
+  gives its type name.
 - `tg status` no longer counts a sender whose every cached message is deleted as missing:
   nothing is left to ask Telegram for, and search doesn't show those messages by default. On a
   1.16M-message cache, 1,125 of the 1,376 senders still missing after the first fetch were such

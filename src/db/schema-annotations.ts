@@ -447,7 +447,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         },
         message_type: {
           description:
-            'Type of message content, as live updates and history sync both write it. Rows history sync wrote in earlier versions say document for every file (voice, video, sticker…) until the background migration messages_raw_json_v2 reaches them',
+            'Type of message content, as live updates and history sync both write it. Rows history sync wrote in earlier versions say document for every file (voice, video, sticker…) until the background migration messages_raw_json_v2 reaches them. service: a call, pin or group change; raw_json.action says which, and tg messages list/get/search print it as action',
           enumValues: [
             'text',
             'photo',
