@@ -4,7 +4,7 @@
  */
 import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
-import { ConfigError, getResolvedCacheConfig } from '../config'
+import { getResolvedCacheConfig } from '../config'
 import { applyContactsSnapshot } from '../db/contacts-sync'
 import { isCacheStale } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
@@ -21,7 +21,7 @@ import {
   cachedUserToContact,
 } from '../utils/telegram-mappers'
 import {
-  isRateLimitError,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
 
@@ -151,16 +151,7 @@ export const listContactsCommand = defineCommand({
 
       success(response)
     } catch (err) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Failed to fetch contacts: ${message}`)
     }
@@ -258,16 +249,7 @@ export const searchContactsCommand = defineCommand({
         stale: false,
       })
     } catch (err) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Search failed: ${message}`)
     }
@@ -400,16 +382,7 @@ export const getContactCommand = defineCommand({
         stale: false,
       })
     } catch (err) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Failed to get user: ${message}`)
     }

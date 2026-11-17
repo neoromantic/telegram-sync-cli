@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
-import { ConfigError, getResolvedCacheConfig } from '../../config'
+import { getResolvedCacheConfig } from '../../config'
 import { createChatsCache } from '../../db/chats-cache'
 import { isCacheStale } from '../../db/types'
 import { getClientForAccount } from '../../services/telegram'
@@ -14,7 +14,7 @@ import {
 } from '../../utils/identifiers'
 import { error, success, verbose } from '../../utils/output'
 import {
-  isRateLimitError,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import { resolveUsername } from '../../utils/telegram-resolve'
@@ -191,16 +191,7 @@ export const getChatCommand = defineCommand({
           candidates: err.candidates,
         })
       }
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Failed to get chat: ${message}`)
     }

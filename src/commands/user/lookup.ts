@@ -1,6 +1,6 @@
 import type { TelegramClient, tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
-import { ConfigError, getResolvedCacheConfig } from '../../config'
+import { getResolvedCacheConfig } from '../../config'
 import { isCacheStale } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
@@ -11,7 +11,7 @@ import { toLong } from '../../utils/long'
 import { error, success, verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import {
-  isRateLimitError,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import {
@@ -169,16 +169,7 @@ export const userCommand = defineCommand({
         stale: false,
       })
     } catch (err: unknown) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      reportConfigOrRateLimitError(err)
       handleUserLookupError(err)
     }
   },

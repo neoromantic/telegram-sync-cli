@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
-import { ConfigError, getResolvedCacheConfig } from '../../config'
+import { getResolvedCacheConfig } from '../../config'
 import {
   type ChatSyncView,
   chatSyncView,
@@ -19,7 +19,7 @@ import { buildCachePaginatedResponse } from '../../utils/cache-pagination'
 import { error, success, verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import {
-  isRateLimitError,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import {
@@ -200,16 +200,7 @@ export const listChatsCommand = defineCommand({
 
       success(response)
     } catch (err) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Failed to fetch chats: ${message}`)
     }

@@ -7,7 +7,6 @@
 import type { TelegramClient, tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
-import { ConfigError } from '../config'
 import { getClientForAccount } from '../services/telegram'
 import { ErrorCodes } from '../types'
 import { openAccountCache } from '../utils/account-cache'
@@ -15,7 +14,7 @@ import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
 import { mergeArgs, spacedFlagValues } from '../utils/args'
 import { error, raw, success } from '../utils/output'
 import {
-  isRateLimitError,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
 
@@ -131,16 +130,7 @@ export const apiCommand = defineCommand({
       }
     } catch (err) {
       await closeClient(client)
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
 
       // Try to extract Telegram error code

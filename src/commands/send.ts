@@ -3,7 +3,6 @@ import { basename } from 'node:path'
 import type { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
-import { ConfigError } from '../config'
 import { accountsDb } from '../db'
 import { createChatsCache } from '../db/chats-cache'
 import { createUsersCache } from '../db/users-cache'
@@ -16,7 +15,7 @@ import { toLong } from '../utils/long'
 import { error, success, verbose } from '../utils/output'
 import { createProgress } from '../utils/progress'
 import {
-  isRateLimitError,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
 import {
@@ -326,16 +325,7 @@ export const sendCommand = defineCommand({
           candidates: err.candidates,
         })
       }
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       handleSendError(recipient, message)
     }

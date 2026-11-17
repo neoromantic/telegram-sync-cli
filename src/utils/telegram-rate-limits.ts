@@ -1,10 +1,13 @@
 import type { Database } from 'bun:sqlite'
 import { type TelegramClient, tl } from '@mtcute/bun'
+import { ConfigError } from '../config'
 import { getAccountCacheDb } from '../db'
 import {
   createRateLimitsService,
   type RateLimitsService,
 } from '../db/rate-limits'
+import { ErrorCodes } from '../types'
+import { error } from './output'
 
 export class RateLimitError extends Error {
   readonly method: string
@@ -20,6 +23,20 @@ export class RateLimitError extends Error {
 
 export function isRateLimitError(err: unknown): err is RateLimitError {
   return err instanceof RateLimitError
+}
+
+/** Report a config error or a rate limit and exit; any other error returns */
+export function reportConfigOrRateLimitError(err: unknown): void {
+  if (err instanceof ConfigError) {
+    error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+  }
+  if (isRateLimitError(err)) {
+    error(
+      ErrorCodes.RATE_LIMITED,
+      `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
+      { method: err.method, wait_seconds: err.waitSeconds },
+    )
+  }
 }
 
 const services = new Map<number, { db: Database; service: RateLimitsService }>()
