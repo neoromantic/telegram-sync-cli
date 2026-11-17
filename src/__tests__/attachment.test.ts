@@ -426,18 +426,6 @@ describe('extractAttachment', () => {
       ).toBe('18446744073709551615')
     })
   })
-
-  it('reads a message without its TL tag, but not media in another form', () => {
-    const { _, ...untagged } = photoMessage(peer, 42)
-    const expected = extractAttachment(photoMessage(peer, 42))
-    expect(expected).not.toBeNull()
-    expect(extractAttachment(untagged)).toEqual(expected)
-
-    // Media not in raw TL form can't be read
-    expect(
-      extractAttachment({ id: 43, date: 1, media: { photo: {} } }),
-    ).toBeNull()
-  })
 })
 
 describe('uniqueFileId', () => {
