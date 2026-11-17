@@ -30,11 +30,7 @@ import {
 } from '@mtcute/bun'
 
 import { ConfigError } from '../config'
-import {
-  type AccountsDbInterface,
-  accountsDb as defaultAccountsDb,
-  getDataDir,
-} from '../db'
+import { getDataDir } from '../db'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
 
 // Store active clients by account ID
@@ -199,95 +195,6 @@ export function createDefaultClientFactory(
 }
 
 /**
- * Telegram client manager interface
- */
-export interface TelegramClientManager {
-  createClient(accountId: number): TelegramClient
-  getClient(accountId: number): TelegramClient
-  getActiveClient(): TelegramClient
-  getClientForAccount(accountId?: number): TelegramClient
-  removeClient(accountId: number): void
-  removeAllClients(): void
-  hasClient(accountId: number): boolean
-}
-
-/**
- * Create a telegram client manager
- */
-export function createClientManager(
-  factory: ClientFactory,
-  accountsDb: AccountsDbInterface = defaultAccountsDb,
-): TelegramClientManager {
-  const clientMap = new Map<number, TelegramClient>()
-
-  return {
-    /**
-     * Create a new Telegram client for an account
-     */
-    createClient(accountId: number): TelegramClient {
-      const client = factory.create(accountId)
-      clientMap.set(accountId, client)
-      return client
-    },
-
-    /**
-     * Get or create a client for an account
-     */
-    getClient(accountId: number): TelegramClient {
-      const existing = clientMap.get(accountId)
-      if (existing) return existing
-      return this.createClient(accountId)
-    },
-
-    /**
-     * Get client for the active account
-     */
-    getActiveClient(): TelegramClient {
-      const account = accountsDb.getActive()
-      if (!account) {
-        throw new Error('No active account. Use "tg auth login" to add one.')
-      }
-      return this.getClient(account.id)
-    },
-
-    /**
-     * Get client for a specific account (by ID or use active)
-     */
-    getClientForAccount(accountId?: number): TelegramClient {
-      if (accountId !== undefined) {
-        const account = accountsDb.getById(accountId)
-        if (!account) {
-          throw new Error(`Account with ID ${accountId} not found`)
-        }
-        return this.getClient(accountId)
-      }
-      return this.getActiveClient()
-    },
-
-    /**
-     * Remove a specific client from cache
-     */
-    removeClient(accountId: number): void {
-      clientMap.delete(accountId)
-    },
-
-    /**
-     * Remove all clients from cache
-     */
-    removeAllClients(): void {
-      clientMap.clear()
-    },
-
-    /**
-     * Check if a client exists
-     */
-    hasClient(accountId: number): boolean {
-      return clientMap.has(accountId)
-    },
-  }
-}
-
-/**
  * Check if a client is connected and authorized
  */
 export async function isAuthorized(client: TelegramClient): Promise<boolean> {
@@ -309,7 +216,7 @@ function getDefaultFactory(): ClientFactory {
 }
 
 /**
- * Create a new Telegram client for an account (uses global manager)
+ * Create a new Telegram client for an account (uses global clients map)
  */
 export function createClient(accountId: number): TelegramClient {
   const client = getDefaultFactory().create(accountId)
@@ -327,40 +234,8 @@ export function getClient(accountId: number): TelegramClient {
 }
 
 /**
- * Get client for the active account
+ * Get or create the client for an account the command already resolved
  */
-export function getActiveClient(): TelegramClient {
-  const account = defaultAccountsDb.getActive()
-  if (!account) {
-    throw new Error('No active account. Use "tg auth login" to add one.')
-  }
-  return getClient(account.id)
-}
-
-/**
- * Get client for a specific account (by ID or use active)
- */
-export function getClientForAccount(accountId?: number): TelegramClient {
-  if (accountId !== undefined) {
-    const account = defaultAccountsDb.getById(accountId)
-    if (!account) {
-      throw new Error(`Account with ID ${accountId} not found`)
-    }
-    return getClient(accountId)
-  }
-  return getActiveClient()
-}
-
-/**
- * Remove a specific client from cache
- */
-export function removeClient(accountId: number): void {
-  clients.delete(accountId)
-}
-
-/**
- * Remove all clients from cache
- */
-export function removeAllClients(): void {
-  clients.clear()
+export function getClientForAccount(accountId: number): TelegramClient {
+  return getClient(accountId)
 }

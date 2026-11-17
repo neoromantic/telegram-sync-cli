@@ -2,22 +2,18 @@
  * Telegram service tests
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterEach, describe, expect, it, mock } from 'bun:test'
 import {
   HttpProxyTcpTransport,
   SocksProxyTcpTransport,
   type TelegramClient,
 } from '@mtcute/bun'
 import { ConfigError } from '../config'
-import { type AccountsDbInterface, createTestDatabase } from '../db'
 import {
-  type ClientFactory,
-  createClientManager,
   createDefaultClientFactory,
   getDefaultConfig,
   getSessionPath,
   isAuthorized,
-  type TelegramClientManager,
   type TelegramConfig,
   validateConfig,
 } from '../services/telegram'
@@ -163,166 +159,6 @@ describe('Telegram Service', () => {
 
       expect(factory).toBeDefined()
       expect(typeof factory.create).toBe('function')
-    })
-  })
-
-  describe('createClientManager', () => {
-    let mockFactory: ClientFactory
-    let accountsDb: AccountsDbInterface
-    let manager: TelegramClientManager
-    let createdClients: Map<number, object>
-
-    beforeEach(() => {
-      createdClients = new Map()
-
-      // Create mock factory
-      mockFactory = {
-        create: mock((accountId: number) => {
-          const client = {
-            id: accountId,
-            start: mock(() =>
-              Promise.resolve({
-                firstName: 'Test',
-                lastName: 'User',
-                username: 'testuser',
-                id: 123,
-              }),
-            ),
-            getMe: mock(() =>
-              Promise.resolve({
-                firstName: 'Test',
-                username: 'testuser',
-                id: 123,
-              }),
-            ),
-            signInQr: mock(() =>
-              Promise.resolve({ firstName: 'Test', id: 123 }),
-            ),
-            call: mock(() => Promise.resolve({})),
-          }
-          createdClients.set(accountId, client)
-          return client as unknown as TelegramClient
-        }),
-      }
-
-      const testDb = createTestDatabase()
-      accountsDb = testDb.accountsDb
-
-      manager = createClientManager(mockFactory, accountsDb)
-    })
-
-    describe('createClient', () => {
-      it('should create a new client', () => {
-        const client = manager.createClient(1)
-
-        expect(client).toBeDefined()
-        expect(mockFactory.create).toHaveBeenCalledTimes(1)
-      })
-
-      it('should store client in cache', () => {
-        manager.createClient(1)
-
-        expect(manager.hasClient(1)).toBe(true)
-      })
-    })
-
-    describe('getClient', () => {
-      it('should return cached client', () => {
-        const client1 = manager.createClient(1)
-        const client2 = manager.getClient(1)
-
-        expect(client1).toBe(client2)
-        expect(mockFactory.create).toHaveBeenCalledTimes(1)
-      })
-
-      it('should create new client if not cached', () => {
-        const client = manager.getClient(1)
-
-        expect(client).toBeDefined()
-        expect(mockFactory.create).toHaveBeenCalledTimes(1)
-      })
-    })
-
-    describe('getActiveClient', () => {
-      it('should throw if no active account', () => {
-        expect(() => manager.getActiveClient()).toThrow('No active account')
-      })
-
-      it('should return client for active account', () => {
-        const account = accountsDb.create({
-          phone: '+1234567890',
-          is_active: true,
-        })
-        const client = manager.getActiveClient()
-
-        expect(client).toBeDefined()
-        expect(createdClients.has(account.id)).toBe(true)
-      })
-    })
-
-    describe('getClientForAccount', () => {
-      it('should return client for specific account ID', () => {
-        const account = accountsDb.create({ phone: '+1234567890' })
-        const client = manager.getClientForAccount(account.id)
-
-        expect(client).toBeDefined()
-      })
-
-      it('should throw if account ID not found', () => {
-        expect(() => manager.getClientForAccount(999)).toThrow(
-          'Account with ID 999 not found',
-        )
-      })
-
-      it('should return active client if no ID specified', () => {
-        accountsDb.create({ phone: '+1234567890', is_active: true })
-        const client = manager.getClientForAccount()
-
-        expect(client).toBeDefined()
-      })
-
-      it('should throw if no ID and no active account', () => {
-        expect(() => manager.getClientForAccount()).toThrow('No active account')
-      })
-    })
-
-    describe('removeClient', () => {
-      it('should remove client from cache', () => {
-        manager.createClient(1)
-        expect(manager.hasClient(1)).toBe(true)
-
-        manager.removeClient(1)
-        expect(manager.hasClient(1)).toBe(false)
-      })
-
-      it('should not throw for non-existent client', () => {
-        expect(() => manager.removeClient(999)).not.toThrow()
-      })
-    })
-
-    describe('removeAllClients', () => {
-      it('should remove all clients from cache', () => {
-        manager.createClient(1)
-        manager.createClient(2)
-        manager.createClient(3)
-
-        manager.removeAllClients()
-
-        expect(manager.hasClient(1)).toBe(false)
-        expect(manager.hasClient(2)).toBe(false)
-        expect(manager.hasClient(3)).toBe(false)
-      })
-    })
-
-    describe('hasClient', () => {
-      it('should return true for cached client', () => {
-        manager.createClient(1)
-        expect(manager.hasClient(1)).toBe(true)
-      })
-
-      it('should return false for non-cached client', () => {
-        expect(manager.hasClient(999)).toBe(false)
-      })
     })
   })
 
