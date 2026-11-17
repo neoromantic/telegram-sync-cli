@@ -85,8 +85,7 @@ Each item of `tg chats list` has `syncEnabled` (whether the daemon syncs the cha
 policy), `large_group`, `unknown_size`, `channel`, `community` (off by the policy),
 `on_by_hand` / `off_by_hand` (set with `tg chats sync`), or, for a group the account doesn't
 take part in, `group_participation_required` (no own message in the last 90 days) or
-`group_participation_unknown` (not checked yet). Such a group takes no new messages at all,
-whatever its mode. `syncReason` is `null` for a chat without sync state that takes messages: an
+`group_participation_unknown` (not checked yet). `syncReason` is `null` for a chat without sync state that takes messages: an
 archived chat that hasn't synced yet, or one no daemon start has seen. `lastOwnMessageAt` is the
 newest own message known in a group, in milliseconds since the epoch, `null` elsewhere.
 
@@ -97,11 +96,7 @@ cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
 ### Chat sync
 
 The daemon syncs DMs and groups of up to 100 members by default, a group only while you take
-part in it: you sent an ordinary message there in the last 90 days. Reading a group doesn't
-count, and the rule holds in every mode, `on` included: a group you don't take part in adds no
-new messages to the cache, live ones and `tg messages list --fresh` pages included, until your
-next message there; what is cached stays (see
-[sync-strategy.md](sync-strategy.md#group-participation)). A bot or a deleted account
+part in it ([group participation](sync-strategy.md#group-participation)). A bot or a deleted account
 gets its newest 100 messages and new ones, but no older history unless you turn it on with
 `tg chats sync`; messages already cached stay. Archived ones start when a
 message arrives in them live, or with `tg chats sync`. A community has no messages of its own,
@@ -220,7 +215,7 @@ are read from Telegram until a page covers them, so while the daemon runs, the n
 active chat asks Telegram. The newest page comes from the cache when a range holds it, so
 without a running daemon it can miss recent messages. See
 [caching.md](caching.md#chat-history). `--fresh` always reads the window from Telegram. In a
-group you don't take part in (no own message in the last 90 days), the page comes from Telegram
+group you don't take part in, the page comes from Telegram
 as usual but its new messages aren't cached.
 
 `tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each

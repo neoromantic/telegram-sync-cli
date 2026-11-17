@@ -127,16 +127,11 @@ first. Messages already cached stay, and edits, deletes and repairs of them stil
 - **What counts**: an outgoing message from the account's own user: text, a file, a voice
   message, a forward. A service message, a reaction or a read doesn't, nor does a message sent
   as a channel or as an anonymous admin (nothing says who wrote it). An edit doesn't move the
-  date. The 90 days are `90 × 24 × 60 × 60` seconds from the message's date (UTC); at exactly
-  90 days the group is off.
-- **Where the date comes from**: every own message the cache writes (live, `tg send`, a sync
-  page, the dialog list's newest message), and one search per group after each dialog pass (on
-  start, after a reconnect and after a wake): a `check_group_participation` job asks
-  `messages.search` for the account's own messages of the last 90 days and keeps the date of
-  the newest ordinary one. It runs in the catch-up lane at P4, after the chats' own catch-up, at
-  the account's pace and with the usual retries; archived groups and groups that don't sync get
-  it too, so a group comes back after an own message from another device. Nothing of the
-  search is cached. There is no polling between passes.
+  date. At exactly 90 days the group is off.
+- **Where the date comes from**: every own message the cache writes, and one
+  `check_group_participation` search per group after each dialog pass (see
+  [Job types](#job-types)); archived groups and groups that don't sync get it too, so a group
+  comes back after an own message from another device.
 - **States**: `active` (an own message of the last 90 days is known), `inactive` (the check
   answered and found none) and `unknown` (no fresh own message and no answer yet, for example
   right after an upgrade or after a failed search). Only `active` takes new messages. An error
@@ -146,25 +141,20 @@ first. Messages already cached stay, and edits, deletes and repairs of them stil
   It ends at the next own message, whose date is when the group takes messages again. Pauses
   are kept (`group_capture_gaps`), and a message dated inside one is never cached, so catch-up
   and history after a return skip the pause; history from before the rule and between pauses
-  still comes in at the group's usual depth. One search finds only the newest own message, so
-  after a long absence the pause ends at the message it found, even if there were earlier own
-  messages Telegram no longer returns.
+  still comes in at the group's usual depth.
 - **Cursors**: a group's cursors stay where they are while it is off. When it comes back, its
   newest message is marked unknown, so the next refresh queues a catch-up from the old forward
   cursor. A page moves the cursor past the messages of a pause it reads, but a page with any
   message kept out records no `history_ranges` range: the cache doesn't hold it whole. A job
-  whose group went off while its page was in flight ends without moving a cursor and without a
-  retry; the cached messages on the page are still updated.
+  that finds its group off after its fetch or its write ends without moving a cursor and without
+  a retry.
 - **Queue**: the scheduler queues no catch-up, first page or history for a group that isn't
   active, and each refresh drops such jobs that are pending, retries included. A queued job
   that starts after the group went off ends without a request.
 
-`tg chats list` and `tg chats sync` show such a group with `syncEnabled: false` and
-`syncReason: group_participation_required` (checked, no own message in 90 days) or
-`group_participation_unknown` (not checked yet), and every group with `lastOwnMessageAt`, the
-newest own message known. `tg status` leaves paused groups out of the chats with sync on and of
-the history progress, and doesn't take Telegram's message count as the goal of a group with a
-pause.
+`tg chats list` and `tg chats sync` show such a group as off ([cli-commands.md](cli-commands.md#chats));
+`tg status` leaves paused groups out of the chats with sync on and of the history progress, and
+doesn't take Telegram's message count as the goal of a group with a pause.
 
 ## Data Model
 
@@ -429,9 +419,8 @@ participation checks at P4 after every catch-up), then
 by age, then by ID. After a first page with history left, the chat's history job is queued
 right away. A catch-up or history page that is full queues the next page of the same chat.
 
-The queue methods create no job for a chat that is disabled, has no state row or is a group
-the account doesn't take part in, so a chat whose sync was turned off stops after the job that
-is running. On start the scheduler also
+The queue methods create no job for a chat that is disabled or has no state row, so a chat
+whose sync was turned off stops after the job that is running. On start the scheduler also
 drops pending jobs of such chats and moves every other pending job to its chat's tier.
 
 ## Batch Size

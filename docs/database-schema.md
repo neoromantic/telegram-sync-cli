@@ -528,9 +528,8 @@ CREATE TABLE group_participation (
 );
 ```
 
-The newest own ordinary message known in each group (basic group or supergroup), for the rule
-that a group adds messages only while the account took part in it in the last 90 days
-([sync-strategy.md](sync-strategy.md#group-participation)). Both columns are Unix seconds.
+Newest own ordinary message per group (basic group or supergroup), for
+[group participation](sync-strategy.md#group-participation). Both columns are Unix seconds.
 
 - `last_own_date`: the date of the newest own message: outgoing, from the account's user, not a
   service message. It comes from every own message the cache writes and from the
@@ -550,11 +549,11 @@ CREATE TABLE group_capture_gaps (
 );
 ```
 
-The periods `[start_date, end_date)` a group was known to be off, in Unix seconds: from the day
-its newest own message turned 90 days old (or its first check, if that found none) to the next
-own message. A row is written when that message ends the pause; while a group is off, the pause
-is open and only `group_participation` says so. A message dated inside a pause is never added
-to `messages_cache`, so catch-up and history after a return skip it. Rows are never deleted.
+Closed pauses `[start_date, end_date)` of a group, in Unix seconds (see
+[group participation](sync-strategy.md#group-participation)). A row is written when an own
+message ends the pause; while a group is off, the pause is open and only `group_participation`
+says so. A message dated inside a pause is never added to `messages_cache`. Rows are never
+deleted.
 
 ### Table: daemon_status
 
@@ -697,8 +696,7 @@ time; opens that find them only read.
 lacks them, in one `BEGIN IMMEDIATE` transaction that waits up to 60 seconds for the lock.
 `group_participation` starts with the date of the newest own ordinary message each group has in
 `messages_cache` (one pass over the table's columns, not its text), with `initialized_at` left
-`NULL`: a group whose newest own message is under 90 days old takes messages at once, the others
-wait for their first check. Opens that find the tables only read.
+`NULL`. Opens that find the tables only read.
 
 The search update trigger `messages_cache_au` of 0.5.0 and older re-indexed a message on every
 update, and `idx_messages_cache_fetched` (`messages_cache(fetched_at)`) served no query. The

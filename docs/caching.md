@@ -13,9 +13,6 @@ The caching system prioritizes **responsiveness** over absolute freshness. Users
 3. **Configurable staleness thresholds** — Different TTLs for different data types
 4. **Lazy initialization** — Cache database initialized on first use for faster startup
 5. **Messages are eternal** — Message records are not expired, only marked deleted
-6. **Groups need participation** — a group adds new messages only while the account sent an
-   ordinary message there in the last 90 days; what is cached stays
-   ([sync-strategy.md](sync-strategy.md#group-participation))
 
 ## Staleness Rules
 
@@ -118,9 +115,8 @@ that ran out of older messages covers down to message 1. Messages from live upda
    in `users_cache`) with `raw_json` and `fetched_at`, record the range, and return the page with
    `source: "api"`, in the same shape as a cached page
 
-In a group the account doesn't take part in (no own ordinary message in the last 90 days, see
-[sync-strategy.md](sync-strategy.md#group-participation)), step 3 still returns Telegram's page,
-but stores only the messages already cached; a page with any message left out records no range.
+In a group the account [doesn't take part in](sync-strategy.md#group-participation), step 3
+still returns Telegram's page, but stores only the messages already cached; a page with any message left out records no range.
 
 So a page never skips a gap, and a short page past the newest cached message asks Telegram.
 Messages that arrived live after a chat's last catch-up have no range yet, so while the daemon

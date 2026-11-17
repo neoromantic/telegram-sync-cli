@@ -60,9 +60,7 @@ function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
  * newest message, which the dialog list carries anyway: its cache stays
  * current to the last pass at no extra request.
  *
- * A group's own newest message counts as participation, and every group,
- * archived ones too, gets a participation check queued after the pass: a
- * group takes new messages only while the account takes part in it
+ * Every group, archived ones too, gets a participation check after the pass
  * (src/db/group-participation.ts).
  *
  * Telegram lists joined communities apart from the dialogs, so the pass
@@ -127,10 +125,7 @@ export async function syncAccountDialogs(
     return newest ? parseRawMessage(newest, chatId) : null
   }
 
-  /**
-   * Keep the dialog's newest message: the chat gets no catch-up. A group
-   * the account doesn't take part in keeps none (src/db/group-participation.ts).
-   */
+  /** Keep the dialog's newest message: the chat gets no catch-up. */
   const keepNewestMessage = (dialog: Dialog, chatId: number) => {
     const input = newestMessage(dialog, chatId)
     if (!input) return
@@ -153,8 +148,6 @@ export async function syncAccountDialogs(
     const chatId = Number(chatInput.chat_id)
     visited.add(chatId)
 
-    // Every group, archived ones too, gets a participation check after the
-    // pass; its own newest message counts at once
     if (chatInput.type === 'group' || chatInput.type === 'supergroup') {
       groups.push(chatId)
       const newest = newestMessage(dialog, chatId)
@@ -293,9 +286,7 @@ export async function syncAccountDialogs(
 
 /**
  * One participation check per group the pass listed, unless one is queued
- * (src/db/group-participation.ts). They run in the catch-up lane after the
- * chats' own catch-up, at the account's pace; a group that syncs nothing
- * needs them too, so a missed own message turns it back on.
+ * (src/db/group-participation.ts).
  */
 function queueParticipationChecks(cacheDb: Database, groups: number[]): void {
   const jobs = createSyncJobsService(cacheDb)

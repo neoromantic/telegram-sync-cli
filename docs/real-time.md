@@ -19,9 +19,8 @@ Handlers live in:
 
 1. **Event received** from mtcute
 2. **Normalize** message metadata (chat type, media type, forward attribution)
-3. **Persist** into `messages_cache`, unless the chat is a group the account doesn't take
-   part in (no own ordinary message in the last 90 days, see
-   [sync-strategy.md](sync-strategy.md#group-participation)). An own message counts before it
+3. **Persist** into `messages_cache`, unless the chat is a group the account
+   [doesn't take part in](sync-strategy.md#group-participation). An own message counts before it
    is written, so it turns such a group back on and is cached itself; a service message
    doesn't count.
 4. **Update counters** in `chat_sync_state` (`synced_messages`, `last_forward_sync`) by the
