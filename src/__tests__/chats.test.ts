@@ -318,11 +318,7 @@ describe('listChatsCommand', () => {
     })
 
     it('should return empty for type with no matches', () => {
-      // Clear cache
-      for (const chat of chatsCache.list()) {
-        chatsCache.delete(chat.chat_id)
-      }
-
+      chatsCache = createChatsCache(createTestCacheDatabase().db)
       chatsCache.upsert(createTestChat({ chat_id: '1', type: 'private' }))
 
       const groups = chatsCache.list({ type: 'group' })

@@ -12,6 +12,8 @@
  */
 import { Database } from 'bun:sqlite'
 
+import type { ChatType } from './types'
+
 /**
  * The most a WAL keeps on disk after a checkpoint, 64 MB. Without a limit a
  * WAL that grew (during a VACUUM, or behind a long reader) stays that size.
@@ -227,7 +229,7 @@ export class UserCacheRow {
 /** Chat cache row class */
 export class ChatCacheRow {
   chat_id!: string
-  type!: string
+  type!: ChatType
   title!: string | null
   username!: string | null
   member_count!: number | null

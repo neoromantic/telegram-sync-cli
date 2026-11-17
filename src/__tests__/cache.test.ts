@@ -506,80 +506,6 @@ describe('UsersCache', () => {
     })
   })
 
-  describe('getStale', () => {
-    it('should return only stale users', () => {
-      const TTL = 60000 // 1 minute
-
-      // Fresh user (now)
-      usersCache.upsert(
-        createTestUser({ user_id: '1', fetched_at: Date.now() }),
-      )
-
-      // Stale user (2 minutes ago)
-      usersCache.upsert(
-        createTestUser({ user_id: '2', fetched_at: Date.now() - 120000 }),
-      )
-
-      // Very stale user (1 hour ago)
-      usersCache.upsert(
-        createTestUser({ user_id: '3', fetched_at: Date.now() - 3600000 }),
-      )
-
-      const stale = usersCache.getStale(TTL)
-
-      expect(stale.length).toBe(2)
-      expect(stale.map((u) => u.user_id).sort()).toEqual(['2', '3'])
-    })
-
-    it('should return empty array when no stale users', () => {
-      usersCache.upsert(createTestUser({ fetched_at: Date.now() }))
-
-      const stale = usersCache.getStale(60000)
-
-      expect(stale).toEqual([])
-    })
-
-    it('should return all users when TTL is 0', () => {
-      usersCache.upsert(
-        createTestUser({ user_id: '1', fetched_at: Date.now() - 1 }),
-      )
-      usersCache.upsert(
-        createTestUser({ user_id: '2', fetched_at: Date.now() - 1 }),
-      )
-
-      const stale = usersCache.getStale(0)
-
-      expect(stale.length).toBe(2)
-    })
-  })
-
-  describe('delete', () => {
-    it('should delete existing user and return true', () => {
-      usersCache.upsert(createTestUser())
-
-      const result = usersCache.delete('123456')
-
-      expect(result).toBe(true)
-      expect(usersCache.getById('123456')).toBeNull()
-    })
-
-    it('should return false for non-existent user', () => {
-      const result = usersCache.delete('nonexistent')
-
-      expect(result).toBe(false)
-    })
-
-    it('should only delete specified user', () => {
-      usersCache.upsert(createTestUser({ user_id: '1' }))
-      usersCache.upsert(createTestUser({ user_id: '2' }))
-
-      usersCache.delete('1')
-
-      expect(usersCache.getById('1')).toBeNull()
-      expect(usersCache.getById('2')).not.toBeNull()
-    })
-  })
-
   describe('count', () => {
     it('should return 0 for empty cache', () => {
       expect(usersCache.count()).toBe(0)
@@ -593,64 +519,11 @@ describe('UsersCache', () => {
       expect(usersCache.count()).toBe(3)
     })
 
-    it('should update after delete', () => {
-      usersCache.upsert(createTestUser({ user_id: '1' }))
-      usersCache.upsert(createTestUser({ user_id: '2' }))
-
-      expect(usersCache.count()).toBe(2)
-
-      usersCache.delete('1')
-
-      expect(usersCache.count()).toBe(1)
-    })
-
     it('should not double count on upsert', () => {
       usersCache.upsert(createTestUser({ user_id: '1' }))
       usersCache.upsert(createTestUser({ user_id: '1', first_name: 'Updated' }))
 
       expect(usersCache.count()).toBe(1)
-    })
-  })
-
-  describe('prune', () => {
-    it('should remove old entries', () => {
-      // Old user (2 hours ago)
-      usersCache.upsert(
-        createTestUser({ user_id: '1', fetched_at: Date.now() - 7200000 }),
-      )
-
-      // Fresh user
-      usersCache.upsert(
-        createTestUser({ user_id: '2', fetched_at: Date.now() }),
-      )
-
-      const pruned = usersCache.prune(3600000) // 1 hour max age
-
-      expect(pruned).toBe(1)
-      expect(usersCache.getById('1')).toBeNull()
-      expect(usersCache.getById('2')).not.toBeNull()
-    })
-
-    it('should return 0 when nothing to prune', () => {
-      usersCache.upsert(createTestUser({ fetched_at: Date.now() }))
-
-      const pruned = usersCache.prune(3600000)
-
-      expect(pruned).toBe(0)
-    })
-
-    it('should prune all entries when maxAge is 0', () => {
-      usersCache.upsert(
-        createTestUser({ user_id: '1', fetched_at: Date.now() - 1 }),
-      )
-      usersCache.upsert(
-        createTestUser({ user_id: '2', fetched_at: Date.now() - 1 }),
-      )
-
-      const pruned = usersCache.prune(0)
-
-      expect(pruned).toBe(2)
-      expect(usersCache.count()).toBe(0)
     })
   })
 
@@ -1005,35 +878,6 @@ describe('ChatsCache', () => {
     })
   })
 
-  describe('getStale', () => {
-    it('should return only stale chats', () => {
-      const TTL = 60000 // 1 minute
-
-      // Fresh chat
-      chatsCache.upsert(
-        createTestChat({ chat_id: '1', fetched_at: Date.now() }),
-      )
-
-      // Stale chat
-      chatsCache.upsert(
-        createTestChat({ chat_id: '2', fetched_at: Date.now() - 120000 }),
-      )
-
-      const stale = chatsCache.getStale(TTL)
-
-      expect(stale.length).toBe(1)
-      expect(stale[0]?.chat_id).toBe('2')
-    })
-
-    it('should return empty array when no stale chats', () => {
-      chatsCache.upsert(createTestChat({ fetched_at: Date.now() }))
-
-      const stale = chatsCache.getStale(60000)
-
-      expect(stale).toEqual([])
-    })
-  })
-
   describe('count', () => {
     it('should return 0 for empty cache', () => {
       expect(chatsCache.count()).toBe(0)
@@ -1054,61 +898,6 @@ describe('ChatsCache', () => {
       expect(chatsCache.count('group')).toBe(2)
       expect(chatsCache.count('channel')).toBe(1)
       expect(chatsCache.count('private')).toBe(0)
-    })
-  })
-
-  describe('delete', () => {
-    it('should delete existing chat and return true', () => {
-      chatsCache.upsert(createTestChat())
-
-      const result = chatsCache.delete('123456')
-
-      expect(result).toBe(true)
-      expect(chatsCache.getById('123456')).toBeNull()
-    })
-
-    it('should return false for non-existent chat', () => {
-      const result = chatsCache.delete('nonexistent')
-
-      expect(result).toBe(false)
-    })
-
-    it('should only delete specified chat', () => {
-      chatsCache.upsert(createTestChat({ chat_id: '1' }))
-      chatsCache.upsert(createTestChat({ chat_id: '2' }))
-
-      chatsCache.delete('1')
-
-      expect(chatsCache.getById('1')).toBeNull()
-      expect(chatsCache.getById('2')).not.toBeNull()
-    })
-  })
-
-  describe('prune', () => {
-    it('should remove old entries', () => {
-      // Old chat
-      chatsCache.upsert(
-        createTestChat({ chat_id: '1', fetched_at: Date.now() - 7200000 }),
-      )
-
-      // Fresh chat
-      chatsCache.upsert(
-        createTestChat({ chat_id: '2', fetched_at: Date.now() }),
-      )
-
-      const pruned = chatsCache.prune(3600000) // 1 hour max age
-
-      expect(pruned).toBe(1)
-      expect(chatsCache.getById('1')).toBeNull()
-      expect(chatsCache.getById('2')).not.toBeNull()
-    })
-
-    it('should return 0 when nothing to prune', () => {
-      chatsCache.upsert(createTestChat({ fetched_at: Date.now() }))
-
-      const pruned = chatsCache.prune(3600000)
-
-      expect(pruned).toBe(0)
     })
   })
 

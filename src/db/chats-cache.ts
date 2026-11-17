@@ -6,45 +6,17 @@ import type { Database } from 'bun:sqlite'
 
 import { legacyChatIdCandidates } from '../utils/telegram-peer-ids'
 import { ChatCacheRow } from './schema'
-import type { CacheConfig, ChatType } from './types'
+import type { ChatType } from './types'
 
 /**
  * Cached chat data structure (matches database row)
  */
-export interface CachedChat {
-  chat_id: string
-  type: ChatType
-  title: string | null
-  username: string | null
-  member_count: number | null
-  access_hash: string | null
-  is_creator: number
-  is_admin: number
-  last_message_id: number | null
-  last_message_at: number | null
-  fetched_at: number
-  raw_json: string
-  created_at: number
-  updated_at: number
-}
+export type CachedChat = ChatCacheRow
 
 /**
  * Input for creating/updating a cached chat
  */
-export interface CachedChatInput {
-  chat_id: string
-  type: ChatType
-  title: string | null
-  username: string | null
-  member_count: number | null
-  access_hash: string | null
-  is_creator: number
-  is_admin: number
-  last_message_id: number | null
-  last_message_at: number | null
-  fetched_at: number
-  raw_json: string
-}
+export type CachedChatInput = Omit<CachedChat, 'created_at' | 'updated_at'>
 
 /**
  * Options for listing chats
@@ -63,16 +35,10 @@ export class ChatsCache {
   private getByIdStmt
   private getByUsernameStmt
   private upsertStmt
-  private deleteByIdStmt
   private countAllStmt
   private countByTypeStmt
-  private getStaleStmt
-  private pruneStmt
 
-  constructor(
-    private db: Database,
-    _config?: CacheConfig,
-  ) {
+  constructor(private db: Database) {
     // Create prepared statements
     this.getByIdStmt = db
       .query('SELECT * FROM chats_cache WHERE chat_id = $chat_id')
@@ -109,22 +75,10 @@ export class ChatsCache {
         updated_at = $now
     `)
 
-    this.deleteByIdStmt = db.query(
-      'DELETE FROM chats_cache WHERE chat_id = $chat_id',
-    )
-
     this.countAllStmt = db.query('SELECT COUNT(*) as count FROM chats_cache')
 
     this.countByTypeStmt = db.query(
       'SELECT COUNT(*) as count FROM chats_cache WHERE type = $type',
-    )
-
-    this.getStaleStmt = db
-      .query('SELECT * FROM chats_cache WHERE fetched_at < $threshold')
-      .as(ChatCacheRow)
-
-    this.pruneStmt = db.query(
-      'DELETE FROM chats_cache WHERE fetched_at < $threshold',
     )
   }
 
@@ -132,8 +86,7 @@ export class ChatsCache {
    * Get chat by ID
    */
   getById(chatId: string): CachedChat | null {
-    const row = this.getByIdStmt.get({ $chat_id: chatId })
-    return row ? this.rowToChat(row) : null
+    return this.getByIdStmt.get({ $chat_id: chatId })
   }
 
   /**
@@ -155,8 +108,7 @@ export class ChatsCache {
     const cleanUsername = username.startsWith('@')
       ? username.slice(1)
       : username
-    const row = this.getByUsernameStmt.get({ $username: cleanUsername })
-    return row ? this.rowToChat(row) : null
+    return this.getByUsernameStmt.get({ $username: cleanUsername })
   }
 
   /**
@@ -207,31 +159,15 @@ export class ChatsCache {
         ? 'ORDER BY title COLLATE NOCASE ASC'
         : 'ORDER BY last_message_at DESC NULLS LAST'
 
-    // Build query based on whether type filter is specified
-    if (type) {
-      const query = `
+    return this.db
+      .query(`
         SELECT * FROM chats_cache
-        WHERE type = $type
+        WHERE ($type IS NULL OR type = $type)
         ${orderClause}
         LIMIT $limit OFFSET $offset
-      `
-      const rows = this.db
-        .query(query)
-        .as(ChatCacheRow)
-        .all({ $type: type, $limit: limit, $offset: offset })
-      return rows.map((row) => this.rowToChat(row))
-    }
-
-    const query = `
-      SELECT * FROM chats_cache
-      ${orderClause}
-      LIMIT $limit OFFSET $offset
-    `
-    const rows = this.db
-      .query(query)
+      `)
       .as(ChatCacheRow)
-      .all({ $limit: limit, $offset: offset })
-    return rows.map((row) => this.rowToChat(row))
+      .all({ $type: type ?? null, $limit: limit, $offset: offset })
   }
 
   /**
@@ -254,30 +190,11 @@ export class ChatsCache {
       LIMIT $limit
     `
 
-    const rows = this.db.query(sql).as(ChatCacheRow).all({
+    return this.db.query(sql).as(ChatCacheRow).all({
       $pattern: searchPattern,
       $exact: query,
       $limit: limit,
     })
-
-    return rows.map((row) => this.rowToChat(row))
-  }
-
-  /**
-   * Get stale chats (older than TTL)
-   */
-  getStale(ttlMs: number): CachedChat[] {
-    const threshold = Date.now() - ttlMs
-    const rows = this.getStaleStmt.all({ $threshold: threshold })
-    return rows.map((row) => this.rowToChat(row))
-  }
-
-  /**
-   * Delete chat from cache
-   */
-  delete(chatId: string): boolean {
-    const result = this.deleteByIdStmt.run({ $chat_id: chatId })
-    return result.changes > 0
   }
 
   /**
@@ -293,45 +210,11 @@ export class ChatsCache {
     const result = this.countAllStmt.get() as { count: number } | null
     return result?.count ?? 0
   }
-
-  /**
-   * Prune old entries
-   */
-  prune(maxAgeMs: number): number {
-    const threshold = Date.now() - maxAgeMs
-    const result = this.pruneStmt.run({ $threshold: threshold })
-    return result.changes
-  }
-
-  /**
-   * Convert a database row to CachedChat
-   */
-  private rowToChat(row: ChatCacheRow): CachedChat {
-    return {
-      chat_id: row.chat_id,
-      type: row.type as ChatType,
-      title: row.title,
-      username: row.username,
-      member_count: row.member_count,
-      access_hash: row.access_hash,
-      is_creator: row.is_creator,
-      is_admin: row.is_admin,
-      last_message_id: row.last_message_id,
-      last_message_at: row.last_message_at,
-      fetched_at: row.fetched_at,
-      raw_json: row.raw_json,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    }
-  }
 }
 
 /**
  * Factory function to create a ChatsCache instance
  */
-export function createChatsCache(
-  db: Database,
-  config?: CacheConfig,
-): ChatsCache {
-  return new ChatsCache(db, config)
+export function createChatsCache(db: Database): ChatsCache {
+  return new ChatsCache(db)
 }
