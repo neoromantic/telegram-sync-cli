@@ -68,7 +68,7 @@ export interface DeleteWithoutChatResult {
 /** What a write of messages did */
 export interface CacheWriteResult {
   /** The messages written: new rows and updates of cached ones */
-  accepted: Array<{ chat_id: number; message_id: number }>
+  written: number
   /** New rows */
   inserted: number
   /** New messages the group participation rule kept out */
@@ -301,7 +301,7 @@ export function createMessagesCache(db: Database): MessagesCache {
         participation.observeOwnMessage(message.chat_id, message.date, now)
       }
 
-      const result: CacheWriteResult = { accepted: [], inserted: 0, skipped: 0 }
+      const result: CacheWriteResult = { written: 0, inserted: 0, skipped: 0 }
       for (const message of messages) {
         const key = {
           $chat_id: message.chat_id,
@@ -317,10 +317,7 @@ export function createMessagesCache(db: Database): MessagesCache {
         }
         writeMessage(message)
         if (!cached) result.inserted++
-        result.accepted.push({
-          chat_id: message.chat_id,
-          message_id: message.message_id,
-        })
+        result.written++
       }
       return result
     },

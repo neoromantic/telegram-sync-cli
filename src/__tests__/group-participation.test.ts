@@ -329,10 +329,7 @@ describe('MessagesCache under the participation rule', () => {
 
     expect(result.inserted).toBe(2)
     expect(result.skipped).toBe(3)
-    expect(result.accepted).toEqual([
-      { chat_id: DM, message_id: 4 },
-      { chat_id: CHANNEL, message_id: 5 },
-    ])
+    expect(result.written).toBe(2)
     expect(cache.get(BASIC, 1)).toBeNull()
     expect(count(db, 'SELECT COUNT(*) AS n FROM message_attachments')).toBe(0)
     expect(
@@ -376,7 +373,7 @@ describe('MessagesCache under the participation rule', () => {
     cache.updateText(BASIC, 1, 'edited own note', NOW + W)
 
     expect(result).toEqual({
-      accepted: [{ chat_id: BASIC, message_id: 2 }],
+      written: 1,
       inserted: 0,
       skipped: 1,
     })

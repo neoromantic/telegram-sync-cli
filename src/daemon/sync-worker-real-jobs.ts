@@ -5,6 +5,7 @@ import {
   PARTICIPATION_WINDOW_SECONDS,
 } from '../db/group-participation'
 import {
+  CHAT_INDEPENDENT_JOB_TYPES,
   type SyncJobRow,
   SyncJobStatus,
   SyncJobType,
@@ -35,10 +36,9 @@ import type {
 import { processJobWithHandlers } from './sync-worker-utils'
 
 /**
- * A group stopped taking new messages while its page was in flight
- * (src/db/group-participation.ts). Its cached messages on the page were
- * updated; the job ends without moving a cursor and without a retry, so
- * the page is read again once the group takes messages.
+ * The group stopped taking new messages during the fetch or the write
+ * (src/db/group-participation.ts): the job ends without moving a cursor and
+ * without a retry, so the page is read again once the group takes messages.
  */
 const PAUSED: RealJobResult = { success: true, messagesFetched: 0 }
 
@@ -480,12 +480,12 @@ export async function processRefetchMessagesReal(
       .map((message) => parseRawMessage(message, chatId))
       .filter((input) => input !== null)
     // Only rows cached already: a refetch repairs them and adds none
-    const { accepted } = ctx.messagesCache.upsertBatch(inputs)
+    const { written } = ctx.messagesCache.upsertBatch(inputs)
 
     const last = Math.max(...ids)
     ctx.jobsService.updateProgress(job.id, {
       cursor_start: last,
-      messages_fetched: accepted.length,
+      messages_fetched: written,
     })
     const more = ctx.messagesCache.listEmptyRawJsonIds(chatId, last, 1)
     const queued = ctx.jobsService
@@ -503,7 +503,7 @@ export async function processRefetchMessagesReal(
         cursor_start: last,
       })
     }
-    return { success: true, messagesFetched: accepted.length }
+    return { success: true, messagesFetched: written }
   } catch (err) {
     return resolveJobError(ctx, err)
   }
@@ -659,14 +659,6 @@ const JOB_HANDLERS: Partial<
   [SyncJobType.CheckGroupParticipation]: processCheckGroupParticipationReal,
 }
 
-/** The jobs that add a chat's messages: a group runs them only while captured */
-const CAPTURE_JOB_HANDLERS = new Set<string>([
-  SyncJobType.ForwardCatchup,
-  SyncJobType.BackwardHistory,
-  SyncJobType.InitialLoad,
-  SyncJobType.FullSync,
-])
-
 export async function processJobReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
@@ -674,7 +666,7 @@ export async function processJobReal(
   // A group the account stopped taking part in after the job was queued:
   // the job ends without a request
   const handlers =
-    CAPTURE_JOB_HANDLERS.has(job.job_type) &&
+    !CHAT_INDEPENDENT_JOB_TYPES.includes(job.job_type) &&
     !ctx.messagesCache.participation.captures(job.chat_id)
       ? { [job.job_type]: async () => PAUSED }
       : JOB_HANDLERS
