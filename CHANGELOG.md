@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-18
+
+Commands for agents: wait for a reply, read and mark unread messages, and keep an agent
+read-only or to a few chats.
+
 ### Added
 
 - `tg db vacuum` checks the free disk before a full VACUUM (daemon stopped): it needs 2.2 times
@@ -39,8 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `login-qr` and `logout`. `allowedChats` (or `TELEGRAM_SYNC_CLI_ALLOWED_CHATS`, which replaces
   it for one process) limits commands to those chats: one that names another chat fails with
   `CHAT_NOT_ALLOWED` (exit 1), `tg chats list`, `tg chats search`, `tg messages search`, `wait`,
-  `watch` and `unread` show only allowed chats, and `tg sql` and `tg api` are off. `tg status` shows both under `access`.
-  They guard against mistakes and are not a security boundary.
+  `watch` and `unread` show only allowed chats, and `tg sql` and `tg api` are off. `tg status`
+  shows both under `access`. They guard against mistakes and are not a security boundary.
 
 ### Changed
 
@@ -61,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.2] - 2026-11-17
 
+### Fixed
 
 - `tg sql "SELECT 1 AS one" -f json` runs the query: the value of `-f`/`--format` after a positional
   query was added to the SQL (`SELECT 1 AS one json`, a syntax error), and after `--query` it was
@@ -955,7 +961,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.2...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.2...v0.13.0
 [0.12.2]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.11.1...v0.12.0
