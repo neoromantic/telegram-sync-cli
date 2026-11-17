@@ -242,17 +242,6 @@ export class ChatCacheRow {
   updated_at!: number
 }
 
-/** Sync state row class */
-export class SyncStateRow {
-  entity_type!: string
-  forward_cursor!: string | null
-  backward_cursor!: string | null
-  is_complete!: number
-  last_sync_at!: number | null
-  created_at!: number
-  updated_at!: number
-}
-
 /** Rate limit row class */
 export class RateLimitRow {
   method!: string
