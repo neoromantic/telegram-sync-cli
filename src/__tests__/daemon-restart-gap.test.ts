@@ -14,7 +14,7 @@ import { processJobs } from '../daemon/daemon-scheduler'
 import { createUpdateHandlers, type UpdateHandlers } from '../daemon/handlers'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import { createSyncPacer } from '../daemon/sync-pacing'
-import { createRealSyncWorker } from '../daemon/sync-worker'
+import { createRealSyncWorker } from '../daemon/sync-worker-real'
 import {
   type ChatSyncStateService,
   createChatSyncStateService,

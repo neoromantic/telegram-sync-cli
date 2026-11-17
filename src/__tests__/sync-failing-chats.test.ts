@@ -21,7 +21,7 @@ import { dialogToCacheInput } from '../commands/chats/helpers'
 import type { DaemonContext } from '../daemon/daemon-context'
 import { processJobs } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
-import { createRealSyncWorker } from '../daemon/sync-worker'
+import { createRealSyncWorker } from '../daemon/sync-worker-real'
 import { pruneCache } from '../db/cache-maintenance'
 import {
   type ChatSyncStateService,

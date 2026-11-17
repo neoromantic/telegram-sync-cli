@@ -13,7 +13,7 @@ import type { DaemonContext } from '../daemon/daemon-context'
 import { processJobs } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import { createSyncPacer } from '../daemon/sync-pacing'
-import { createRealSyncWorker } from '../daemon/sync-worker'
+import { createRealSyncWorker } from '../daemon/sync-worker-real'
 import {
   type ChatSyncStateService,
   createChatSyncStateService,

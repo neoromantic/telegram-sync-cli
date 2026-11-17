@@ -17,7 +17,7 @@ import {
   waitForJobsInFlight,
 } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
-import type { RealSyncWorker } from '../daemon/sync-worker'
+import type { RealSyncWorker } from '../daemon/sync-worker-real'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
