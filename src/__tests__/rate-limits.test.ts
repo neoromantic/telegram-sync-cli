@@ -14,8 +14,8 @@ import {
   createRateLimitsService,
   type RateLimitsService,
 } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { trackApiCall } from '../utils/telegram-rate-limits'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 describe('RateLimitsService', () => {
   let db: Database
@@ -23,8 +23,7 @@ describe('RateLimitsService', () => {
   let originalDateNow: typeof Date.now
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     service = createRateLimitsService(db)
 
     // Store original Date.now for restoration

@@ -26,11 +26,10 @@ type MockClient = {
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { resolvePeer } from '../commands/send/peer-resolver'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
-import { createTestCacheDatabase } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeAccountsDb,
   mockDbModule,
@@ -180,8 +179,7 @@ describe('Peer Resolution - By Username', () => {
   let chatsCache: ChatsCache
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
   })
@@ -512,8 +510,7 @@ describe('Peer Resolution - By Phone Number', () => {
   let chatsCache: ChatsCache
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
   })
@@ -724,8 +721,7 @@ describe('Peer Resolution - By Numeric ID', () => {
   let chatsCache: ChatsCache
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
   })
@@ -960,8 +956,7 @@ describe('Message Sending', () => {
   let chatsCache: ChatsCache
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
   })
@@ -1215,8 +1210,7 @@ describe('Error Handling', () => {
   let chatsCache: ChatsCache
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
   })
@@ -1504,8 +1498,7 @@ describe('Resolution Priority', () => {
   let chatsCache: ChatsCache
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
   })
@@ -1621,10 +1614,8 @@ describe('Resolution Priority', () => {
 
 describe('send command', () => {
   beforeEach(() => {
-    commandCacheDb = createTestCacheDatabase().db
-    initSyncSchema(commandCacheDb)
-    secondCacheDb = createTestCacheDatabase().db
-    initSyncSchema(secondCacheDb)
+    commandCacheDb = createAccountCacheDb()
+    secondCacheDb = createAccountCacheDb()
     commandCall.mockReset()
     commandCall.mockImplementation(async () => {
       throw new Error('Unexpected API call')

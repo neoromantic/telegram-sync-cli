@@ -27,12 +27,11 @@ import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { communityDialog, fakeDialog } from './helpers/fake-dialogs'
 
 type MockCall = <T extends tl.RpcMethod>(
@@ -86,9 +85,7 @@ describe('sync-worker real helpers/context', () => {
   let db: Database
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
   })
 
   afterEach(() => {

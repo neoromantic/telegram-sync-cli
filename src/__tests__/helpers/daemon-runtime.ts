@@ -2,7 +2,7 @@
  * Per-account daemon runtimes for unit tests: each account gets its own
  * in-memory cache, as accounts/<id>/cache.db is in production.
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { type Mock, mock } from 'bun:test'
 import {
   type AccountRuntime,
@@ -11,8 +11,7 @@ import {
 } from '../../daemon/daemon-context'
 import { createSyncPacer } from '../../daemon/sync-pacing'
 import { createDaemonStatusService } from '../../db/daemon-status'
-import { initCacheSchema } from '../../db/schema'
-import { initSyncSchema } from '../../db/sync-schema'
+import { createAccountCacheDb } from './cache-db'
 import { createFakeAccountsDb } from './db-mock'
 
 type LogFn = Mock<(message: string) => void>
@@ -53,14 +52,6 @@ export function testDaemonContext(
     runtime: createDaemonRuntime(),
     ...overrides,
   }
-}
-
-/** An in-memory database with the cache schema */
-export function createAccountCacheDb(): Database {
-  const db = new Database(':memory:')
-  initCacheSchema(db)
-  initSyncSchema(db)
-  return db
 }
 
 /** Give the context a runtime for the account, on its own cache */

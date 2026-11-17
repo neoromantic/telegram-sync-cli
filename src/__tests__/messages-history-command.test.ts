@@ -1,7 +1,7 @@
 /**
  * Tests for the core of `tg messages list` (src/commands/messages/history.ts)
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import {
   afterEach,
   beforeEach,
@@ -46,8 +46,7 @@ import { createHistoryRanges, type HistoryRange } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { createRateLimitsService } from '../db/rate-limits'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import { SyncPriority } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { extractAttachment } from '../utils/attachment'
@@ -56,6 +55,7 @@ import {
   RateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeHistory,
   type GetHistoryRequest,
@@ -87,9 +87,7 @@ const TEAM_CHAT: HistoryChat = {
 type CallClient = Pick<TelegramClient, 'call'>
 
 function createCacheDb(): Database {
-  const db = new Database(':memory:')
-  initCacheSchema(db)
-  initSyncSchema(db)
+  const db = createAccountCacheDb()
   takePartIn(db, TEAM_CHAT_ID, BOOK_CLUB_ID)
   return db
 }

@@ -23,16 +23,12 @@ import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache, type MessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import { SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
-import {
-  addAccountRuntime,
-  createAccountCacheDb,
-  testDaemonContext,
-} from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import { createFakeHistory, range } from './helpers/fake-history'
 
 const CHAT_ID = 4242
@@ -51,8 +47,7 @@ describe('daemon restart with messages missed while stopped', () => {
   let history: ReturnType<typeof createFakeHistory>
 
   beforeEach(() => {
-    db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     messagesCache = createMessagesCache(db)
     chatSyncState = createChatSyncStateService(db)
     const jobsService = createSyncJobsService(db)

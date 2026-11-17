@@ -1,7 +1,7 @@
 /**
  * Tests for messages cache service
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import {
   afterEach,
   beforeEach,
@@ -16,9 +16,8 @@ import {
   type MessagesCache,
 } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { takePartIn } from './helpers/participation'
 
 describe('MessagesCache', () => {
@@ -26,9 +25,7 @@ describe('MessagesCache', () => {
   let cache: MessagesCache
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     takePartIn(db, -5151, -1001234567890, -1009876543210)
     cache = createMessagesCache(db)
   })
@@ -732,9 +729,7 @@ describe('MessagesCache writes and the search index', () => {
 
   beforeEach(() => {
     setSystemTime(new Date('2026-01-01T00:00:00Z'))
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     cache = createMessagesCache(db)
     renameSender('Archer')
     cache.upsert(message)

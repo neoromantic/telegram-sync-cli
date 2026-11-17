@@ -12,8 +12,8 @@ import {
   spyOn,
 } from 'bun:test'
 
-import { createTestCacheDatabase } from '../db/schema'
 import { createUsersCache } from '../db/users-cache'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { mockDbModule } from './helpers/db-mock'
 
 // Note: We no longer mock the output module to avoid interfering with other tests.
@@ -39,7 +39,7 @@ describe('contacts list --fresh', () => {
   let logSpy: ReturnType<typeof spyOn>
 
   beforeEach(() => {
-    testCacheDb = createTestCacheDatabase().db
+    testCacheDb = createAccountCacheDb()
     logSpy = spyOn(console, 'log').mockImplementation(() => {})
   })
 

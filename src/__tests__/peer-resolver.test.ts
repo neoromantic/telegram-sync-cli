@@ -13,12 +13,12 @@ import { ConfigError } from '../config'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
 import { createMessagesCache, type MessagesCache } from '../db/messages-cache'
-import { createTestCacheDatabase } from '../db/schema'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import { SyncPriority } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { RateLimitError } from '../utils/telegram-rate-limits'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { legacyChatRow } from './helpers/legacy-cache'
 
@@ -66,8 +66,7 @@ describe('resolvePeer with numeric IDs', () => {
   let messagesCache: MessagesCache
 
   beforeEach(() => {
-    db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
     messagesCache = createMessagesCache(db)

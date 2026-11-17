@@ -22,16 +22,11 @@ import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
-import {
-  initSyncSchema,
-  type SyncJobRow,
-  SyncJobType,
-  SyncPriority,
-} from '../db/sync-schema'
+import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import {
   createMultiChatHistory,
@@ -81,8 +76,7 @@ describe('job budget with 500 chats', () => {
   }
 
   beforeEach(() => {
-    db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     chatSyncState = createChatSyncStateService(db)
     jobsService = createSyncJobsService(db)
     const messagesCache = createMessagesCache(db)
@@ -380,8 +374,7 @@ describe('job budget with two accounts', () => {
     chats: { gap?: number[]; history?: number[]; fresh?: number[] },
     ran: Array<{ accountId: number; type: string }>,
   ) {
-    const db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    const db = createAccountCacheDb()
     dbs.push(db)
     const chatSyncState = createChatSyncStateService(db)
     const jobsService = createSyncJobsService(db)

@@ -10,7 +10,7 @@
  * - api_activity: API call audit log
  * - cache_meta: which account the file belongs to
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 
 import type { ChatType } from './types'
 
@@ -195,15 +195,6 @@ export function initCacheSchema(db: Database): void {
       updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
     )
   `)
-}
-
-/**
- * Create an in-memory database with cache schema for testing
- */
-export function createTestCacheDatabase(): { db: Database } {
-  const db = new Database(':memory:')
-  initCacheSchema(db)
-  return { db }
 }
 
 // Row class types for typed queries

@@ -28,11 +28,9 @@ import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups, SENDER_RETRY_MS } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
 import {
-  initSyncSchema,
   type SyncJobRow,
   SyncJobStatus,
   SyncJobType,
@@ -40,6 +38,7 @@ import {
 } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { takePartIn } from './helpers/participation'
 
 /** A supergroup whose access hash is cached */
@@ -144,8 +143,7 @@ function scheduler() {
 
 beforeEach(() => {
   setSystemTime(new Date(START))
-  db = createTestCacheDatabase().db
-  initSyncSchema(db)
+  db = createAccountCacheDb()
   takePartIn(db, GROUP, BASIC, NO_HASH)
   requests = []
   ctx = {

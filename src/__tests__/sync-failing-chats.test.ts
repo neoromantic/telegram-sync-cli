@@ -31,13 +31,13 @@ import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { SyncJobType, SyncPriority } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import { fakeDialog } from './helpers/fake-dialogs'
 import {
@@ -76,8 +76,7 @@ describe('chats whose sync pages keep failing', () => {
     failures.clear()
     calls = new Map()
 
-    db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     chatSyncState = createChatSyncStateService(db)
     jobsService = createSyncJobsService(db)
     const messagesCache = createMessagesCache(db)
@@ -329,8 +328,7 @@ describe('a chat that fails in one account', () => {
     accountId: number,
     failure?: () => unknown,
   ) {
-    const db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    const db = createAccountCacheDb()
     dbs.push(db)
     const chatSyncState = createChatSyncStateService(db)
     const jobsService = createSyncJobsService(db)

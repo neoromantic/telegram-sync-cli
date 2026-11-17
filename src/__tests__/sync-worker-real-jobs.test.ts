@@ -23,12 +23,12 @@ import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { SyncJobType, SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { createFakeHistory, range, rawMessage } from './helpers/fake-history'
 import { waitLikeFloodWait } from './helpers/flood-wait'
 import { takePartIn } from './helpers/participation'
@@ -38,9 +38,7 @@ describe('sync-worker real jobs', () => {
   let ctx: RealSyncWorkerContext
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     takePartIn(db, -4242, -1000000000123)
 
     ctx = {

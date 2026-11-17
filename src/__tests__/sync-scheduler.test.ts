@@ -1,22 +1,17 @@
 /**
  * Tests for sync scheduler
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { applySyncMode } from '../commands/chats/sync'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
 import { pruneCache } from '../db/cache-maintenance'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createMessagesCache } from '../db/messages-cache'
-import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
-import {
-  initSyncSchema,
-  SyncJobStatus,
-  SyncJobType,
-  SyncPriority,
-} from '../db/sync-schema'
+import { SyncJobStatus, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { takePartIn } from './helpers/participation'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -40,9 +35,7 @@ describe('SyncScheduler', () => {
   }
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     takePartIn(db, -4001, -4002, -1001234567890)
     jobsService = createSyncJobsService(db)
     chatSyncState = createChatSyncStateService(db)

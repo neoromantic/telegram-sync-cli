@@ -1,16 +1,15 @@
 /**
  * Tests for chat history reads over messages_cache (src/db/messages-history.ts)
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it } from 'bun:test'
 
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesHistory } from '../db/messages-history'
 import { createMessagesSearch } from '../db/messages-search'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { takePartIn } from './helpers/participation'
 
 const CHAT_ID = -1001234567890
@@ -23,9 +22,7 @@ describe('MessagesHistory', () => {
   let history: ReturnType<typeof createMessagesHistory>
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     takePartIn(db, CHAT_ID)
     history = createMessagesHistory(db)
 

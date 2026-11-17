@@ -13,6 +13,7 @@ import {
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema, isContentlessSearch } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { takePartIn } from './helpers/participation'
 
 describe('MessagesSearch', () => {
@@ -22,9 +23,7 @@ describe('MessagesSearch', () => {
   let chatsCache: ReturnType<typeof createChatsCache>
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     takePartIn(db, -200, -1001234567890)
     messagesCache = createMessagesCache(db)
     usersCache = createUsersCache(db)

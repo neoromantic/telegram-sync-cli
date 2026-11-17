@@ -27,11 +27,11 @@ import {
   type ChatsCache,
   createChatsCache,
 } from '../db/chats-cache'
-import { createTestCacheDatabase } from '../db/schema'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import { SyncPriority } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { getDefaultCacheConfig, isCacheStale } from '../db/types'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   communityDialog,
   fakeDialog,
@@ -193,8 +193,7 @@ describe('listChatsCommand', () => {
   let chatsCache: ChatsCache
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     chatsCache = createChatsCache(db)
   })
 
@@ -318,7 +317,7 @@ describe('listChatsCommand', () => {
     })
 
     it('should return empty for type with no matches', () => {
-      chatsCache = createChatsCache(createTestCacheDatabase().db)
+      chatsCache = createChatsCache(createAccountCacheDb())
       chatsCache.upsert(createTestChat({ chat_id: '1', type: 'private' }))
 
       const groups = chatsCache.list({ type: 'group' })
@@ -683,8 +682,7 @@ describe('Chat cache rows', () => {
       '-1005555555556',
     ])
 
-    const { db } = createTestCacheDatabase()
-    initSyncSchema(db)
+    const db = createAccountCacheDb()
     const chatsCache = createChatsCache(db)
     chatsCache.upsertMany(rows)
     createChatSyncStateService(db).upsert({

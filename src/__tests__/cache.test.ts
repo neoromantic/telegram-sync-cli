@@ -12,10 +12,10 @@ import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it } from 'bun:test'
 
 import { ChatsCache, createChatsCache } from '../db/chats-cache'
-import { createTestCacheDatabase } from '../db/schema'
 import type { ChatType, DurationString } from '../db/types'
 import { isCacheStale, parseDuration } from '../db/types'
 import { createUsersCache, UsersCache } from '../db/users-cache'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 // =============================================================================
 // Duration Parsing Tests
@@ -197,8 +197,7 @@ describe('UsersCache', () => {
   })
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     usersCache = createUsersCache(db)
   })
 
@@ -583,8 +582,7 @@ describe('ChatsCache', () => {
   })
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
+    db = createAccountCacheDb()
     chatsCache = createChatsCache(db)
   })
 
@@ -951,7 +949,7 @@ describe('ChatsCache', () => {
 describe('Factory Functions', () => {
   describe('createUsersCache', () => {
     it('should create UsersCache instance', () => {
-      const { db } = createTestCacheDatabase()
+      const db = createAccountCacheDb()
       const cache = createUsersCache(db)
 
       expect(cache).toBeInstanceOf(UsersCache)
@@ -960,7 +958,7 @@ describe('Factory Functions', () => {
 
   describe('createChatsCache', () => {
     it('should create ChatsCache instance', () => {
-      const { db } = createTestCacheDatabase()
+      const db = createAccountCacheDb()
       const cache = createChatsCache(db)
 
       expect(cache).toBeInstanceOf(ChatsCache)

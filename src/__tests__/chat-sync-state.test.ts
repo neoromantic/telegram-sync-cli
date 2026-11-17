@@ -1,24 +1,22 @@
 /**
  * Tests for chat sync state service
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it } from 'bun:test'
 import {
   type ChatSyncStateInput,
   type ChatSyncStateService,
   createChatSyncStateService,
 } from '../db/chat-sync-state'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import { SyncPriority } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 describe('ChatSyncStateService', () => {
   let db: Database
   let service: ChatSyncStateService
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     service = createChatSyncStateService(db)
   })
 

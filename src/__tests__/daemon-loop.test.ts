@@ -16,11 +16,8 @@ import type { DaemonStatusService, DaemonTick } from '../db/daemon-status'
 import { createMessagesCache } from '../db/messages-cache'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
-import {
-  addAccountRuntime,
-  createAccountCacheDb,
-  testDaemonContext,
-} from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import { fakeDialogClient } from './helpers/fake-dialogs'
 
 function createMockStatusService(

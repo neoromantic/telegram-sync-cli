@@ -1,7 +1,7 @@
 /**
  * Tests for update handlers
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import type { tl } from '@mtcute/bun'
 import { dialogToCacheInput } from '../commands/chats/helpers'
@@ -15,15 +15,10 @@ import type { DaemonLogger } from '../daemon/types'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
-import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
-import {
-  initSyncSchema,
-  type SyncChatType,
-  SyncJobType,
-  SyncPriority,
-} from '../db/sync-schema'
+import { type SyncChatType, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
@@ -34,9 +29,7 @@ describe('UpdateHandlers', () => {
   let chatSyncState: ReturnType<typeof createChatSyncStateService>
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     messagesCache = createMessagesCache(db)
     chatSyncState = createChatSyncStateService(db)
     handlers = createUpdateHandlers({ db, messagesCache, chatSyncState })
@@ -759,9 +752,7 @@ describe('UpdateHandlers error handling', () => {
   let errorLogs: string[]
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     messagesCache = createMessagesCache(db)
     chatSyncState = createChatSyncStateService(db)
     errorLogs = []

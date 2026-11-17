@@ -25,11 +25,8 @@ import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createMessagesCache } from '../db/messages-cache'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { SyncJobType, SyncPriority } from '../db/sync-schema'
-import {
-  addAccountRuntime,
-  createAccountCacheDb,
-  testDaemonContext,
-} from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import { fakeDialogClient } from './helpers/fake-dialogs'
 
 const T0 = Date.UTC(2026, 0, 1)

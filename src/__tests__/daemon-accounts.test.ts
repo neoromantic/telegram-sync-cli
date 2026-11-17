@@ -26,7 +26,7 @@ import { isDaemonStopError } from '../daemon/daemon-utils'
 import { createSyncPacer } from '../daemon/sync-pacing'
 import type { AccountConnectionState } from '../daemon/types'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { testDaemonContext } from './helpers/daemon-runtime'
 
 class MockEmitter<T> {
@@ -398,7 +398,7 @@ describe('daemonNetworkMiddlewares', () => {
     /** A context whose account 1 has a cache */
     function withCache() {
       const ctx = testDaemonContext()
-      const { db } = createTestCacheDatabase()
+      const db = createAccountCacheDb()
       ctx.runtime.accounts.set(1, { accountId: 1, db } as AccountRuntime)
       return { ctx, db }
     }

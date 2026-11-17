@@ -1,7 +1,7 @@
 /**
  * Tests for daemon status service
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it } from 'bun:test'
 import {
   createDaemonStatusService,
@@ -9,17 +9,14 @@ import {
   type DaemonStatusService,
   summarizeDaemonStatus,
 } from '../db/daemon-status'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 describe('DaemonStatusService', () => {
   let db: Database
   let service: DaemonStatusService
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     service = createDaemonStatusService(db)
   })
 

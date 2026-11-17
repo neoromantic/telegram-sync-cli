@@ -1,26 +1,19 @@
 /**
  * Tests for sync jobs service
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { createChatSyncStateService } from '../db/chat-sync-state'
-import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
-import {
-  initSyncSchema,
-  SyncJobStatus,
-  SyncJobType,
-  SyncPriority,
-} from '../db/sync-schema'
+import { SyncJobStatus, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 describe('SyncJobsService', () => {
   let db: Database
   let service: SyncJobsService
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     service = createSyncJobsService(db)
   })
 

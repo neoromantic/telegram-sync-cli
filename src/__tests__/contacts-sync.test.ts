@@ -12,9 +12,9 @@ import {
   markContactsNotModified,
   unmarkAllContacts,
 } from '../db/contacts-sync'
-import { createTestCacheDatabase } from '../db/schema'
 import { createUsersCache } from '../db/users-cache'
 import { telegramHash } from '../utils/telegram-hash'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 const NOW = 1_800_000_000_000
 
@@ -113,7 +113,7 @@ describe('telegramHash', () => {
 describe('contactsHash', () => {
   let db: Database
   beforeEach(() => {
-    db = createTestCacheDatabase().db
+    db = createAccountCacheDb()
   })
 
   it('is 0 without a recorded list', () => {
@@ -142,7 +142,7 @@ describe('contactsHash', () => {
 describe('applyContactsSnapshot', () => {
   let db: Database
   beforeEach(() => {
-    db = createTestCacheDatabase().db
+    db = createAccountCacheDb()
   })
 
   it('marks the listed users and unmarks the cached contacts it leaves out', () => {
@@ -217,7 +217,7 @@ describe('applyContactsSnapshot', () => {
 
 describe('markContactsNotModified', () => {
   it('moves only the check time', () => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     applyContactsSnapshot(db, contactsResult([1001], 1), NOW)
     const user = row(db, 1001)
 
@@ -232,7 +232,7 @@ describe('markContactsNotModified', () => {
   })
 
   it('writes nothing without a recorded list', () => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     markContactsNotModified(db, NOW)
     expect(getContactsSyncedAt(db)).toBeNull()
   })
@@ -240,7 +240,7 @@ describe('markContactsNotModified', () => {
 
 describe('unmarkAllContacts', () => {
   it('unmarks every contact', () => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     seedUser(db, 1001, true)
     seedUser(db, 1002, true)
     seedUser(db, 1003, false)

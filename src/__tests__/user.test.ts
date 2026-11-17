@@ -12,7 +12,6 @@ import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import type { tl } from '@mtcute/bun'
 
-import { createTestCacheDatabase } from '../db/schema'
 import { getDefaultCacheConfig, isCacheStale } from '../db/types'
 import {
   type CachedUser,
@@ -21,6 +20,7 @@ import {
   type UsersCache,
 } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeAccountsDb,
   mockDbModule,
@@ -237,7 +237,7 @@ describe('meCommand', () => {
     // Reset mocks
 
     // Create fresh test database
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
 
@@ -577,7 +577,7 @@ describe('userCommand - by username', () => {
   const cacheConfig = getDefaultCacheConfig()
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
     mockClient = createMockClient()
@@ -808,7 +808,7 @@ describe('userCommand - by ID', () => {
   let usersCache: UsersCache
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
     mockClient = createMockClient()
@@ -958,7 +958,7 @@ describe('userCommand - by phone', () => {
   let usersCache: UsersCache
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
     mockClient = createMockClient()
@@ -1151,7 +1151,7 @@ describe('Edge cases', () => {
   let usersCache: UsersCache
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
     mockClient = createMockClient()
@@ -1391,7 +1391,7 @@ describe('Response structure', () => {
   const cacheConfig = getDefaultCacheConfig()
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
   })
@@ -1611,8 +1611,8 @@ describe('userCommand with two accounts', () => {
   })
 
   beforeEach(() => {
-    testCacheDb = createTestCacheDatabase().db
-    secondCacheDb = createTestCacheDatabase().db
+    testCacheDb = createAccountCacheDb()
+    secondCacheDb = createAccountCacheDb()
     getClientForAccount.mockClear()
     mockClient = createMockClient()
   })

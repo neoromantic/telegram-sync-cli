@@ -1,19 +1,17 @@
 /**
  * chat_content_protection: the last online answer per chat. Made-up IDs.
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import { createChatProtectionStore } from '../db/chat-protection'
-import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 let db: Database
 
 beforeEach(() => {
-  db = new Database(':memory:')
-  initCacheSchema(db)
-  initSyncSchema(db)
+  db = createAccountCacheDb()
 })
 
 afterEach(() => {

@@ -2,7 +2,7 @@
  * Tests for the daemon's dialog pass: what it writes to chats_cache and
  * chat_sync_state.
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { TelegramClient } from '@mtcute/bun'
 import { fetchJoinedCommunities } from '../commands/chats/helpers'
@@ -16,15 +16,11 @@ import {
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
-import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { SyncJobType, SyncPriority } from '../db/sync-schema'
 import { toLong } from '../utils/long'
-import {
-  addAccountRuntime,
-  createAccountCacheDb,
-  testDaemonContext,
-} from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import {
   type FakeDialogInput,
   fakeDialogClient,
@@ -53,9 +49,7 @@ describe('bootstrapDialogs', () => {
   let ctx: DaemonContext
 
   beforeEach(() => {
-    testCacheDb = new Database(':memory:')
-    initCacheSchema(testCacheDb)
-    initSyncSchema(testCacheDb)
+    testCacheDb = createAccountCacheDb()
     chatSyncState = createChatSyncStateService(testCacheDb)
     ctx = testDaemonContext()
   })
