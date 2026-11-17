@@ -306,19 +306,21 @@ describe('E2E: two accounts, each with its own cache', () => {
     env.cleanup()
   })
 
+  // A snapshot and a message read start tg 12 times in a row: up to 4.5 s on a
+  // busy self-hosted runner, too close to the default 5 s
   for (const selector of ['2', '@beta_test', 'work']) {
     it(`reads only account 2 with --account ${selector}`, async () => {
       const flag = ['--account', selector]
 
       expect(await snapshot(env, flag)).toEqual(BETA_VIEW)
       expect(await messageText(env, BOOK_CLUB_ID, flag)).toBe('lunch at one')
-    })
+    }, 30_000)
   }
 
   it('reads only the active account without --account', async () => {
     expect(await snapshot(env, [])).toEqual(ALPHA_VIEW)
     expect(await messageText(env, ALICE_ID, [])).toBe('lunch at noon')
-  })
+  }, 30_000)
 
   it("doesn't find a chat of the other account", async () => {
     const result = await failure(env, [

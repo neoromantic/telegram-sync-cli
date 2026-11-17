@@ -1010,6 +1010,162 @@ describe('E2E: Message attachments', () => {
   })
 })
 
+/** A private chat with only calls in it, and a supergroup with a pin */
+const CALLER_ID = 7_000_000_101
+const HARBOR_RAW_ID = 1_555_000_002
+const HARBOR_ID = -1_001_555_000_002
+
+describe('E2E: Service message actions', () => {
+  const callPeer = { _: 'peerUser' as const, userId: CALLER_ID }
+  const harborPeer = { _: 'peerChannel' as const, channelId: HARBOR_RAW_ID }
+  const call = (id: number, action: Record<string, unknown>) => ({
+    _: 'messageService',
+    id,
+    peerId: callPeer,
+    fromId: callPeer,
+    date: 1_760_000_000 + id,
+    action: {
+      _: 'messageActionPhoneCall',
+      callId: String(9000 + id),
+      ...action,
+    },
+  })
+  const calls = [
+    call(1, { reason: { _: 'phoneCallDiscardReasonHangup' }, duration: 1834 }),
+    call(2, {
+      video: true,
+      reason: { _: 'phoneCallDiscardReasonDisconnect' },
+      duration: 95,
+    }),
+    call(3, { reason: { _: 'phoneCallDiscardReasonMissed' } }),
+  ]
+  const harbor = [
+    {
+      _: 'message',
+      id: 1,
+      peerId: harborPeer,
+      date: 1_760_000_101,
+      message: 'boats leave at nine',
+    },
+    {
+      _: 'messageService',
+      id: 2,
+      peerId: harborPeer,
+      date: 1_760_000_102,
+      replyTo: { _: 'messageReplyHeader', replyToMsgId: 1 },
+      action: { _: 'messageActionPinMessage' },
+    },
+    {
+      _: 'messageService',
+      id: 3,
+      peerId: harborPeer,
+      date: 1_760_000_103,
+      action: { _: 'messageActionChatEditTitle', title: 'Harbor Crew' },
+    },
+    {
+      _: 'messageService',
+      id: 4,
+      peerId: harborPeer,
+      date: 1_760_000_104,
+      action: { _: 'messageActionScreenshotTaken' },
+    },
+  ]
+  let env: TestEnvironment
+
+  beforeAll(() => {
+    env = createTestEnvironment('messages-actions')
+    env.initDatabase()
+    env.seedAccounts([
+      { phone: '+15550000000', user_id: SELF_ID, is_active: true },
+    ])
+    const db = env.openCacheDb(1)
+    createChatsCache(db).upsertMany([
+      dialogToCacheInput(
+        fakeDialog({
+          kind: 'supergroup',
+          id: HARBOR_RAW_ID,
+          title: 'Harbor Crew',
+          username: 'harborcrew',
+        }),
+      ),
+    ])
+    takePartIn(db, HARBOR_ID)
+    const messages = createMessagesCache(db)
+    messages.upsertBatch(calls.map((raw) => parseRawMessage(raw, CALLER_ID)!))
+    messages.upsertBatch(harbor.map((raw) => parseRawMessage(raw, HARBOR_ID)!))
+    createHistoryRanges(db).add(CALLER_ID, { low: 1, high: 3 })
+    createHistoryRanges(db).add(HARBOR_ID, { low: 1, high: 4 })
+  })
+
+  afterAll(() => {
+    env.cleanup()
+  })
+
+  const options = () => ({
+    env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+  })
+
+  it('says each call was a call, with video, duration and why it ended', async () => {
+    const result = await runCliSuccess(
+      ['messages', 'list', '--chat', String(CALLER_ID)],
+      options(),
+    )
+    const { items, source } = (result.json as { data: ListData }).data
+
+    expect(source).toBe('cache')
+    expect(items.map((item) => [item.messageId, item.messageType])).toEqual([
+      [3, 'service'],
+      [2, 'service'],
+      [1, 'service'],
+    ])
+    expect(items.map((item) => item.action)).toEqual([
+      { type: 'phone_call', video: false, duration: null, reason: 'missed' },
+      { type: 'phone_call', video: true, duration: 95, reason: 'disconnect' },
+      { type: 'phone_call', video: false, duration: 1834, reason: 'hangup' },
+    ])
+  })
+
+  it('gives pins and group changes their action, and other messages null', async () => {
+    const result = await runCliSuccess(
+      [
+        'messages',
+        'get',
+        '--chat',
+        '@harborcrew',
+        '--id',
+        '2',
+        '--context',
+        '2',
+      ],
+      options(),
+    )
+    const data = (result.json as { data: GetData }).data
+
+    expect(data.message.action).toEqual({ type: 'pin_message', messageId: 1 })
+    expect(data.newer.map((item) => item.action)).toEqual([
+      { type: 'screenshot_taken' },
+      { type: 'chat_edit_title', title: 'Harbor Crew' },
+    ])
+    expect(data.older.map((item) => [item.messageId, item.action])).toEqual([
+      [1, null],
+    ])
+  })
+
+  it('gives search hits the action key too', async () => {
+    const result = await runCliSuccess(
+      ['messages', 'search', '--query', 'boats', '--chat', '@harborcrew'],
+      options(),
+    )
+    const { results } = (
+      result.json as { data: { results: MessageSearchItem[] } }
+    ).data
+
+    expect(results.map((item) => [item.messageId, item.action])).toEqual([
+      [1, null],
+    ])
+  })
+})
+
 function seedHistory(db: Database): void {
   const now = Date.now()
   const usersCache = createUsersCache(db)

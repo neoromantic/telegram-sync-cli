@@ -11,6 +11,10 @@ import { ErrorCodes, type MessageSearchItem } from '../../types'
 import { type AttachmentInfo, extractAttachment } from '../../utils/attachment'
 import { error } from '../../utils/output'
 import {
+  extractServiceAction,
+  type MessageAction,
+} from '../../utils/service-action'
+import {
   isRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
@@ -24,6 +28,7 @@ import {
 export function messageRowToItem(
   row: MessageSearchRow,
   attachment: AttachmentInfo | null,
+  action: MessageAction | null,
 ): MessageSearchItem {
   return {
     chatId: row.chat_id,
@@ -34,6 +39,7 @@ export function messageRowToItem(
     hasMedia: row.has_media === 1,
     mediaPath: row.media_path,
     attachment,
+    action,
     isOutgoing: row.is_outgoing === 1,
     isEdited: row.is_edited === 1,
     isPinned: row.is_pinned === 1,
@@ -58,9 +64,10 @@ export function messageRowToItem(
 }
 
 /**
- * A function that makes the item for a row, with the attachment read from
- * its raw_json (null for has_media = 0). Every cached message has raw_json,
- * so this works for rows cached before message_attachments existed too.
+ * A function that makes the item for a row, with the attachment and the
+ * service action read from its raw_json (only media and service rows are
+ * read). Every cached message has raw_json, so this works for rows cached
+ * before message_attachments existed too.
  */
 export function messageItemReader(
   db: Database,
@@ -69,11 +76,17 @@ export function messageItemReader(
     'SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?',
   )
   return (row) => {
+    const isService = row.message_type === 'service'
     const raw =
-      row.has_media !== 1
-        ? null
-        : (row.raw_json ?? rawJson.get(row.chat_id, row.message_id)?.raw_json)
-    return messageRowToItem(row, raw ? extractAttachment(raw) : null)
+      row.has_media === 1 || isService
+        ? (row.raw_json ?? rawJson.get(row.chat_id, row.message_id)?.raw_json)
+        : null
+    if (!raw) return messageRowToItem(row, null, null)
+    return messageRowToItem(
+      row,
+      row.has_media === 1 ? extractAttachment(raw) : null,
+      isService ? extractServiceAction(raw) : null,
+    )
   }
 }
 
@@ -83,7 +96,7 @@ export function messageItemReader(
  */
 export type MessageRow = MessageSearchRow & { raw_json?: string }
 
-/** Items for rows, each with its attachment (see messageItemReader) */
+/** Items for rows, each with its attachment and action (see messageItemReader) */
 export function messageRowsToItems(
   db: Database,
   rows: MessageRow[],

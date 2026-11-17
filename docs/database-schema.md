@@ -244,7 +244,9 @@ media; a [background migration](#background-migrations) gives each message whose
 is a TL message the value above, `text` included for unsupported media, an expired photo or a
 link preview still pending. Rows whose `raw_json` is `{}` or no message keep theirs. `has_media`
 is 1 for the media a Telegram client shows, so 0 for those three; rows from earlier history
-syncs may still say 1 for them. The file itself is in `message_attachments`.
+syncs may still say 1 for them. The file itself is in `message_attachments`. A `service`
+message is a call, a pin or a group change; `raw_json.action` says which, and `tg messages`
+prints it as `action` ([cli-commands.md](cli-commands.md#messages)).
 
 ### Table: message_attachments
 

@@ -245,6 +245,29 @@ Every item has `attachment`, the message's file (`kind`, `source`, `fileName`, `
 none. It is read from the message's `raw_json`, so messages cached by older versions have it
 too ([media.md](media.md#attachments)).
 
+Every item also has `action`: what a service message did, or `null` for any other message.
+Service messages (`messageType: "service"`) have no text, so `action` is the only thing that
+says what happened. It is read from `raw_json` too, and `type` is always set:
+
+```json
+{ "type": "phone_call", "video": false, "duration": 1834, "reason": "hangup" }
+```
+
+| `type` | Other fields |
+| --- | --- |
+| `phone_call` | `video`; `duration` in seconds, `null` for a call nobody answered; `reason` it ended: `missed`, `busy` (declined), `hangup`, `disconnect`, or `null` |
+| `group_call` | `duration`: `null` when the video chat started, seconds when it ended |
+| `pin_message` | `messageId`, the pinned message (`null` if Telegram didn't say) |
+| `chat_create` | `title`, `userIds` |
+| `channel_create`, `chat_edit_title`, `topic_create` | `title`, the new title |
+| `chat_add_user` | `userIds` added (a user who joined adds themself) |
+| `chat_delete_user` | `userId` removed (the sender, when they left) |
+| `chat_joined_by_link` | `inviterId`, who made the link |
+
+Any other action has only `type`, its Telegram name in snake case without `messageAction`
+(`chat_edit_photo`, `screenshot_taken`, `history_clear`…), so nothing is dropped. Search doesn't
+index actions: `tg messages search` finds a service message only by its text, which is empty.
+
 `tg messages search` reads only the cache. A plain query matches messages that contain every
 word, in any order; a query with FTS5 syntax (`"phrase"`, `OR`, `NOT`, `sender:alice`,
 `chat:team`, `word*`) goes to FTS5 as written, and `--phrase` matches the whole query as one
