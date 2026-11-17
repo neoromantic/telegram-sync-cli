@@ -9,10 +9,13 @@ import { applyContactsSnapshot } from '../db/contacts-sync'
 import { isCacheStale } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { getClientForAccount } from '../services/telegram'
-import { type Contact, ErrorCodes, type PaginatedResult } from '../types'
+import { type Contact, ErrorCodes } from '../types'
 import { openAccountCache } from '../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
-import { buildCachePaginatedResponse } from '../utils/cache-pagination'
+import {
+  buildCachePaginatedResponse,
+  paginate,
+} from '../utils/cache-pagination'
 import { isUsernameIdentifier } from '../utils/identifiers'
 import { toLong } from '../utils/long'
 import { error, success, verbose } from '../utils/output'
@@ -82,7 +85,7 @@ export const listContactsCommand = defineCommand({
             },
           )
 
-          success(response as PaginatedResult<Contact>)
+          success(response)
           return
         }
       }
@@ -125,23 +128,11 @@ export const listContactsCommand = defineCommand({
       // Map to our Contact type
       const allContacts: Contact[] = apiUsers.map(apiUserToContact)
 
-      // Apply pagination
-      const paginatedContacts = allContacts.slice(offset, offset + limit)
-
-      const response: PaginatedResult<Contact> & {
-        source: string
-        stale: boolean
-      } = {
-        items: paginatedContacts,
-        total: allContacts.length,
-        offset,
-        limit,
-        hasMore: offset + limit < allContacts.length,
+      success({
+        ...paginate(allContacts, offset, limit),
         source: 'api',
         stale: false,
-      }
-
-      success(response)
+      })
     } catch (err) {
       reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'

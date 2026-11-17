@@ -12,10 +12,13 @@ import { createGroupParticipation } from '../../db/group-participation'
 import type { ChatType } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
-import { ErrorCodes, type PaginatedResult } from '../../types'
+import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
-import { buildCachePaginatedResponse } from '../../utils/cache-pagination'
+import {
+  buildCachePaginatedResponse,
+  paginate,
+} from '../../utils/cache-pagination'
 import { error, success, verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import {
@@ -182,23 +185,13 @@ export const listChatsCommand = defineCommand({
         (a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0),
       )
 
-      const paginatedChats = filteredChats.slice(offset, offset + limit)
-      const items = paginatedChats.map(toItem)
-
-      const response: PaginatedResult<ChatListItem> & {
-        source: string
-        stale: boolean
-      } = {
-        items,
-        total: filteredChats.length,
-        offset,
-        limit,
-        hasMore: offset + limit < filteredChats.length,
+      const page = paginate(filteredChats, offset, limit)
+      success({
+        ...page,
+        items: page.items.map(toItem),
         source: 'api',
         stale: false,
-      }
-
-      success(response)
+      })
     } catch (err) {
       reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
