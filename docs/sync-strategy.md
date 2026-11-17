@@ -131,7 +131,7 @@ first. Messages already cached stay, and edits, deletes and repairs of them stil
 - **Where the date comes from**: every own message the cache writes, and one
   `check_group_participation` search per group after each dialog pass (see
   [Job types](#job-types)); archived groups and groups that don't sync get it too, so a group
-  comes back after an own message from another device.
+  comes back after an own message from another device. Nothing of the search is cached.
 - **States**: `active` (an own message of the last 90 days is known), `inactive` (the check
   answered and found none) and `unknown` (no fresh own message and no answer yet, for example
   right after an upgrade or after a failed search). Only `active` takes new messages. An error
@@ -141,7 +141,9 @@ first. Messages already cached stay, and edits, deletes and repairs of them stil
   It ends at the next own message, whose date is when the group takes messages again. Pauses
   are kept (`group_capture_gaps`), and a message dated inside one is never cached, so catch-up
   and history after a return skip the pause; history from before the rule and between pauses
-  still comes in at the group's usual depth.
+  still comes in at the group's usual depth. One search finds only the newest own message, so
+  after a long absence the pause ends at the message it found, even if there were earlier own
+  messages Telegram no longer returns.
 - **Cursors**: a group's cursors stay where they are while it is off. When it comes back, its
   newest message is marked unknown, so the next refresh queues a catch-up from the old forward
   cursor. A page moves the cursor past the messages of a pause it reads, but a page with any
