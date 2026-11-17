@@ -88,6 +88,22 @@ describe('sync-worker real jobs', () => {
     expect(result.waitSeconds).toBeGreaterThan(0)
   })
 
+  it('returns rate limited without a request when API calls are blocked (initial load)', async () => {
+    const job = ctx.jobsService.create({
+      chat_id: 1,
+      job_type: SyncJobType.InitialLoad,
+      priority: SyncPriority.High,
+    })
+
+    ctx.rateLimits.setFloodWait(ctx.config.apiMethod, 10)
+
+    const result = await processInitialLoadReal(ctx, job)
+
+    expect(result).toMatchObject({ success: false, rateLimited: true })
+    expect(result.waitSeconds).toBeGreaterThan(0)
+    expect(ctx.client.call).not.toHaveBeenCalled()
+  })
+
   it('returns error when input peer is missing (forward catchup)', async () => {
     // A channel can't be reached without the access hash chats_cache holds
     const job = ctx.jobsService.create({

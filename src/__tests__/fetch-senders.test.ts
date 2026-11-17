@@ -307,6 +307,29 @@ describe('senders missing from the cache (#143)', () => {
     expect(ctx.senderLookups.nextBatch(GROUP, 100)).toHaveLength(1)
   })
 
+  it('drops the lookups of a channel that left the cache, without a request', async () => {
+    ctx.senderLookups.scan(Date.now())
+    db.run('DELETE FROM chats_cache WHERE chat_id = ?', [String(GROUP)])
+    answer([])
+    const result = await processJobReal(ctx, fetchJob(GROUP))
+
+    expect(result).toMatchObject({ success: false, permanent: true })
+    expect(requests).toHaveLength(0)
+    expect(ctx.senderLookups.nextBatch(GROUP, 100)).toEqual([])
+    expect(ctx.senderLookups.countNotFound()).toBe(1)
+  })
+
+  it('keeps the senders waiting while the API is rate limited', async () => {
+    ctx.senderLookups.scan(Date.now())
+    ctx.rateLimits.setFloodWait(ctx.config.apiMethod, 60)
+    answer([])
+    const result = await processJobReal(ctx, fetchJob(GROUP))
+
+    expect(result).toMatchObject({ success: false, rateLimited: true })
+    expect(requests).toHaveLength(0)
+    expect(ctx.senderLookups.nextBatch(GROUP, 100)).toHaveLength(1)
+  })
+
   it('asks for at most 100 senders of a chat per request', async () => {
     for (let i = 0; i < 150; i++) seed(GROUP, 1000 + i, 8000 + i)
     ctx.senderLookups.scan(Date.now())
