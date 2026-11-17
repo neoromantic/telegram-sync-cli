@@ -153,3 +153,27 @@ export function flagValues(rawArgs: string[], name: string): string[] {
   }
   return values
 }
+
+/**
+ * A subcommand's positionals without the value of the main command's
+ * `-f`/`--format`. After the subcommand (`tg sql "SELECT 1" -f json`) citty
+ * reads the flag as `true` there and leaves its value among the positionals.
+ */
+export function withoutFormatValue(
+  rawArgs: string[],
+  positionals: string[],
+): string[] {
+  const kept: string[] = []
+  let from = 0
+  for (const positional of positionals) {
+    const at = rawArgs.indexOf(positional, from)
+    if (at < 0) {
+      kept.push(positional)
+      continue
+    }
+    const flag = rawArgs[at - 1]
+    if (flag !== '-f' && flag !== '--format') kept.push(positional)
+    from = at + 1
+  }
+  return kept
+}

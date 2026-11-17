@@ -6,6 +6,7 @@ import { getTableNames } from '../../db/schema-annotations'
 import { ErrorCodes } from '../../types'
 import { openAccountCache, reportCacheError } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
+import { withoutFormatValue } from '../../utils/args'
 import { stringify as stringifyCsv } from '../../utils/csv'
 import { error, success } from '../../utils/output'
 import {
@@ -16,7 +17,6 @@ import {
 import { printSchemaCommand } from './print-schema'
 
 type QueryArgs = {
-  command?: string
   query?: string
   output?: string
   limit?: string
@@ -24,8 +24,7 @@ type QueryArgs = {
   _?: string[]
 }
 
-function parseQueryArgs(args: QueryArgs) {
-  const positionalArgs = args._ ?? []
+function parseQueryArgs(args: QueryArgs, positionalArgs: string[]) {
   const query = (args.query ?? positionalArgs.join(' ')) || undefined
   const output = args.output ?? 'json'
   const limitStr = args.limit ?? '1000'
@@ -145,9 +144,8 @@ export const sqlQueryCommand = defineCommand({
   },
   async run({ args, rawArgs }) {
     const sqlArgs = args as QueryArgs
-    const positionalArgs = sqlArgs._ ?? []
-    const command =
-      typeof sqlArgs.command === 'string' ? sqlArgs.command : positionalArgs[0]
+    const positionalArgs = withoutFormatValue(rawArgs ?? [], sqlArgs._ ?? [])
+    const command = positionalArgs[0]
 
     if (command === 'print-schema') {
       if (sqlArgs.query) {
@@ -174,7 +172,10 @@ export const sqlQueryCommand = defineCommand({
       )
     }
 
-    const { query, output, limit, limitStr } = parseQueryArgs(sqlArgs)
+    const { query, output, limit, limitStr } = parseQueryArgs(
+      sqlArgs,
+      positionalArgs,
+    )
     validateQueryArgs(query, output, limit, limitStr)
 
     // Each account has its own cache; ATTACH stays blocked, so a query never

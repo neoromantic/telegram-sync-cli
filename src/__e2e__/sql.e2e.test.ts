@@ -40,6 +40,13 @@ describe('E2E: SQL Command', () => {
     ['--query', ['sql', '--query', 'SELECT 1 AS one']],
     ['--query=', ['sql', '--query=SELECT 1 AS one']],
     ['a positional query', ['sql', 'SELECT 1 AS one']],
+    ['a positional query before -f', ['sql', 'SELECT 1 AS one', '-f', 'json']],
+    [
+      'a positional query before --format',
+      ['sql', 'SELECT 1 AS one', '--format', 'json'],
+    ],
+    ['a positional query after -f', ['-f', 'json', 'sql', 'SELECT 1 AS one']],
+    ['--query before -f', ['sql', '--query', 'SELECT 1 AS one', '-f', 'json']],
   ])('runs a query passed as %s', async (_label, args) => {
     const result = await runCliSuccess(args, env.getCliOptions())
 
@@ -102,6 +109,10 @@ describe('E2E: SQL Command', () => {
     it.each([
       ['--output=sql', ['sql', 'print-schema', '--output=sql']],
       ['-o sql before the subcommand', ['sql', '-o', 'sql', 'print-schema']],
+      [
+        '-f json before the subcommand',
+        ['sql', '-f', 'json', 'print-schema', '--output=sql'],
+      ],
     ])('prints annotated DDL with %s', async (_label, args) => {
       const result = await runCliSuccess(args, env.getCliOptions())
 

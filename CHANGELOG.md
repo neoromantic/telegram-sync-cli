@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `tg sql "SELECT 1" -f json` runs the query: the value of `-f`/`--format` after a positional
+  query was added to the SQL (`SELECT 1 json`, a syntax error), and after `--query` it was
+  refused as an extra argument. `tg sql -f json print-schema` prints the schema.
 - `tg status` no longer counts a sender whose every cached message is deleted as missing:
   nothing is left to ask Telegram for, and search doesn't show those messages by default. On a
   1.16M-message cache, 1,125 of the 1,376 senders still missing after the first fetch were such
