@@ -942,6 +942,24 @@ describe('ChatsCache', () => {
       expect(results[0]?.username).toBe('technews')
     })
 
+    it('should rank an exact title match above newer partial matches', () => {
+      chatsCache.upsert(
+        createTestChat({
+          chat_id: '5',
+          title: 'Work Team Archive',
+          username: null,
+          last_message_at: Date.now(),
+        }),
+      )
+
+      const results = chatsCache.search('work team')
+
+      expect(results.map((c) => c.title)).toEqual([
+        'Work Team',
+        'Work Team Archive',
+      ])
+    })
+
     it('should return empty array for no matches', () => {
       const results = chatsCache.search('nonexistent')
 
