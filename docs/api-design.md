@@ -63,10 +63,37 @@ names goes in `--json`, such as `q` in `contacts.search` and `messages.search` o
 tg api account.checkUsername --username myuser
 
 # Nested args via dot notation
-tg api messages.sendMessage --peer.username myuser --message Hello
+tg api messages.sendMessage --peer @myuser --message Hello --replyTo._ inputReplyToMessage --replyTo.replyToMsgId 42
 
 # JSON merge
-tg api messages.sendMessage --peer.username myuser --json '{"message":"Hello"}'
+tg api messages.sendMessage --peer @myuser --json '{"message":"Hello"}'
+```
+
+### Argument Types
+
+`tg api` reads the method's arguments from mtcute's TL schema (`@mtcute/core/tl/api-schema.json`)
+and fixes up what a CLI can't write as a TL object:
+
+- A chat given as a string or number where the method takes an `InputPeer`, `InputUser` or
+  `InputChannel` (`peer`, `offsetPeer`, `channel`, `userId`, `id` of `users.getFullUser`, also
+  in a vector such as `id` of `users.getUsers`) resolves as `tg send --to` does (`me`,
+  `@username`, `+phone`, a marked ID; [Peer Resolution](#peer-resolution)), cache first, and
+  becomes the input type the method takes. A chat of the wrong kind, such as a group where the
+  method takes a user, is `INVALID_ARGS`.
+- A `long` given as a number or a decimal string becomes the Long mtcute sends. Write a long
+  above 2^53 as a string (`--json '{"hash":"9007199254740993"}'`): JSON numbers lose precision.
+- A required `int` or `long` you leave out is 0 (`offsetId`, `offsetDate`, `addOffset`, `maxId`,
+  `minId`, `hash`, also `limit`), a required `randomId` is a random Long and a required
+  `offsetPeer` is `inputPeerEmpty`. Optional arguments stay out.
+
+A full TL object (`{"_":"inputPeerSelf"}`) goes as given, and so does every argument of a method
+the schema doesn't know.
+
+```bash
+tg api messages.getHistory --peer me --limit 1
+tg api messages.getDialogs --limit 10
+tg api users.getFullUser --id @username
+tg api channels.getFullChannel --channel -1001234567890
 ```
 
 ## Convenience Commands
@@ -360,7 +387,9 @@ export const apiCommand = defineCommand({
         accountId: account.id,
       })
       const params = mergeArgs(args, args.json)
-      const result = await client.call({ _: args.method, ...params })
+      // Typed by the TL schema: chats resolved, longs as Long, zeros filled
+      const request = await buildApiRequest(args.method, params, resolveChat)
+      const result = await client.call(request)
       await closeClient(client)
 
       if (args.raw) {

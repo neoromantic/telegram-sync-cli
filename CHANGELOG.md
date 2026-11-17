@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   know its user ID yet, `me` is `INVALID_ARGS` (exit 3) with a hint to run `tg me` once. A
   `--chat` or `--sender` value that is neither an ID, a username nor `me` (a typo such as
   `12abc`) is `INVALID_ARGS` naming the flag, instead of an empty success.
+- `tg api` types its arguments by the method's TL schema, so the documented examples work:
+  `tg api messages.getHistory --peer me --limit 1` and
+  `tg api messages.sendMessage --json '{"peer":"@user","message":"Hi"}'` failed with
+  `Unknown object undefined`. A chat given as a string or number where the method takes an
+  InputPeer, InputUser or InputChannel (`peer`, `id` of `users.getFullUser`, `channel`…)
+  resolves like `tg send --to` (`me`, `@username`, `+phone`, a marked ID; cache first); a long
+  given as a number or decimal string becomes a Long (before, `--hash 123` went out as 0); a
+  required int or long left out is 0 (`offsetId`, `maxId`, `hash`…), a required `randomId` is
+  random and a required `offsetPeer` is `inputPeerEmpty`. A chat of the wrong kind (a group as
+  a user) is `INVALID_ARGS`. Full TL objects go as before.
 
 ## [0.13.0] - 2026-11-18
 

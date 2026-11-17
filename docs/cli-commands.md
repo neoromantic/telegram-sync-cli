@@ -441,7 +441,13 @@ cache folder `tg media download` saves the file in ([media.md](media.md#send-a-f
 tg api account.checkUsername --username myuser
 tg api messages.getHistory --peer @username --limit 10
 tg api messages.sendMessage --json '{"peer":"@user","message":"Hi"}'
+tg api users.getFullUser --id me
 ```
+
+Where the method takes a chat (InputPeer, InputUser or InputChannel), pass it as `tg send --to`
+takes it: `me`, `@username`, `+phone` or a marked ID. Required numbers you leave out are 0
+(`offsetId`, `maxId`, `hash`…), and a required `randomId` is random. Details:
+[API design](api-design.md#argument-types).
 
 Read-only mode lets only `get…`, `search…`, `resolve…` and `check…` methods through, and an
 allowlist turns `tg api` off ([below](#read-only-mode-and-allowed-chats)).
