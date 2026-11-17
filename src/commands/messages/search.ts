@@ -9,10 +9,7 @@ import {
 import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
-import {
-  isUsernameIdentifier,
-  normalizeUsername,
-} from '../../utils/identifiers'
+import { normalizeUsername } from '../../utils/identifiers'
 import { error, success } from '../../utils/output'
 import { buildSnippet, snippetTerms } from '../../utils/search-snippet'
 import { parseTimeBound } from '../../utils/time-bounds'
@@ -38,16 +35,39 @@ function parseBound(
   return seconds
 }
 
+/**
+ * A --chat or --sender value: an ID as tg prints it, a username (with or
+ * without @), or me, the account's own user ID (Saved Messages as a chat).
+ * Anything else is INVALID_ARGS, never a filter that matches nothing.
+ */
 function parseIdentifier(
   input: string | undefined,
+  name: 'chat' | 'sender',
+  selfId: number | null,
 ): { id?: number; username?: string } | undefined {
   if (!input) return undefined
+  const value = input.trim()
 
-  if (isUsernameIdentifier(input)) {
-    return { username: normalizeUsername(input) }
+  if (value.toLowerCase() === 'me') {
+    if (selfId === null) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        `--${name} me: the account's own user ID is not known yet`,
+        { [name]: input },
+        'Run tg me once (it saves the ID), or pass your user ID',
+      )
+    }
+    return { id: selfId }
   }
+  if (/^-?\d+$/.test(value)) return { id: Number(value) }
+  if (/^@?[a-z]\w*$/i.test(value)) return { username: normalizeUsername(value) }
 
-  return { id: Number.parseInt(input, 10) }
+  error(
+    ErrorCodes.INVALID_ARGS,
+    `Invalid --${name}: ${input}`,
+    { [name]: input },
+    'Use an ID as tg prints it, an @username or me',
+  )
 }
 
 export const searchMessagesCommand = defineCommand({
@@ -80,11 +100,11 @@ export const searchMessagesCommand = defineCommand({
     },
     chat: {
       type: 'string',
-      description: 'Filter by chat id or @username',
+      description: 'Filter by chat ID, @username or me (Saved Messages)',
     },
     sender: {
       type: 'string',
-      description: 'Filter by sender id or @username',
+      description: 'Filter by sender ID, @username or me (your own messages)',
     },
     includeDeleted: {
       type: 'boolean',
@@ -159,9 +179,9 @@ export const searchMessagesCommand = defineCommand({
       )
     }
 
-    const chatFilter = parseIdentifier(args.chat)
-    const senderFilter = parseIdentifier(args.sender)
     const { account, db: cacheDb } = openAccountCache(args.account)
+    const chatFilter = parseIdentifier(args.chat, 'chat', account.user_id)
+    const senderFilter = parseIdentifier(args.sender, 'sender', account.user_id)
     const allowed = await allowedChatIds(account.id)
 
     try {
