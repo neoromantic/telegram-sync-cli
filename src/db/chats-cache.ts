@@ -167,7 +167,7 @@ export class ChatsCache {
         LIMIT $limit OFFSET $offset
       `)
       .as(ChatCacheRow)
-      .all({ $type: type ?? null, $limit: limit, $offset: offset })
+      .all({ $type: type || null, $limit: limit, $offset: offset })
   }
 
   /**

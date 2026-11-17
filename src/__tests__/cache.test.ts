@@ -713,6 +713,10 @@ describe('ChatsCache', () => {
       expect(groups[0]?.title).toBe('Team Chat')
     })
 
+    it('treats an empty type as no filter', () => {
+      expect(chatsCache.list({ type: '' as ChatType }).length).toBe(4)
+    })
+
     it('should order by last_message_at by default (newest first)', () => {
       const chats = chatsCache.list()
 
