@@ -17,6 +17,8 @@ export interface HistoryListOptions {
   /** Only messages with a larger ID (exclusive) */
   after?: number
   includeDeleted?: boolean
+  /** Only messages the account received */
+  incomingOnly?: boolean
 }
 
 export interface MessagesHistory {
@@ -28,16 +30,24 @@ export interface MessagesHistory {
   list(chatId: number, options: HistoryListOptions): MessageSearchRow[]
   /** The given messages of a chat, newest first, deleted ones included */
   getMany(chatId: number, messageIds: number[]): MessageSearchRow[]
+  /** How many incoming messages above `after` are cached, deleted ones not */
+  countIncomingAfter(chatId: number, after: number): number
 }
 
 export function createMessagesHistory(db: Database): MessagesHistory {
   return {
-    list(chatId, { limit, before, after, includeDeleted = false }) {
+    list(
+      chatId,
+      { limit, before, after, includeDeleted = false, incomingOnly = false },
+    ) {
       const conditions = ['m.chat_id = ?']
       const params: number[] = [chatId]
 
       if (!includeDeleted) {
         conditions.push('m.is_deleted = 0')
+      }
+      if (incomingOnly) {
+        conditions.push('m.is_outgoing = 0')
       }
       if (before !== undefined) {
         conditions.push('m.message_id < ?')
@@ -78,6 +88,17 @@ export function createMessagesHistory(db: Database): MessagesHistory {
           ORDER BY m.message_id DESC
         `)
         .all(chatId, ...messageIds) as MessageSearchRow[]
+    },
+
+    countIncomingAfter(chatId, after) {
+      const row = db
+        .query(`
+          SELECT COUNT(*) AS n FROM messages_cache
+          WHERE chat_id = ? AND message_id > ?
+            AND is_outgoing = 0 AND is_deleted = 0
+        `)
+        .get(chatId, after) as { n: number }
+      return row.n
     },
   }
 }

@@ -12,7 +12,7 @@
 | `accounts` | list, switch, remove, info |
 | `contacts` | list, search, get (cached; supports `--fresh`) |
 | `chats` | list, search (cache-only), get (@username only), sync (cache-only) |
-| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only), wait and watch (new messages the daemon stores) |
+| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only), wait and watch (new messages the daemon stores), unread (cache, `--fresh`), read (marks a chat read on Telegram) |
 | `send` | send a message or one file (`--to`, `--message`, `--file`) |
 | `media` | download (cache-first), clean |
 | `api` | raw Telegram API calls |
@@ -71,6 +71,7 @@ tg contacts get --id @username
 
 ```bash
 tg chats list --type private --limit 50
+tg chats list --unread            # only chats with unread messages
 tg chats search --query "team"   # cache-only
 tg chats get --id @username       # or the ID of a cached chat (cache-only, no credentials)
 tg chats sync @examplenews        # sync this chat in the background
@@ -85,6 +86,12 @@ Each item of `tg chats list` has `syncEnabled` (whether the daemon syncs the cha
 policy), `large_group`, `unknown_size`, `channel`, `community` (off by the policy), or
 `on_by_hand` / `off_by_hand` (set with `tg chats sync`). It is `null` for a chat without sync
 state: an archived chat that hasn't synced yet, or one no daemon start has seen.
+
+Each item also has `unreadCount`, the chat's unread incoming messages as Telegram counts them,
+or `null` before a dialog list has the chat (a daemon start or `tg chats list --fresh`).
+`--unread` lists only chats with unread messages, in the same order; it answers from the cache
+once a dialog list has given the chats their counts, and otherwise reads the dialog list from
+Telegram, as `--fresh` does. How fresh the count is: [real-time.md](real-time.md#unread-counts).
 
 `tg chats get --id` reads an ID like `tg chats sync` does. A bare 0.2.0 ID that names both a
 cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
@@ -184,6 +191,11 @@ tg messages search --query "deploy" --since 7d --sort relevance --count --snippe
 tg messages wait --chat @username --after 1200     # the next reply after message 1200
 tg messages wait --timeout 300 --settle 3          # any chat; then 3 quiet seconds
 tg messages watch --chat @teamchat                 # one JSON line per new message
+tg messages unread                                 # unread messages of every chat
+tg messages unread --chat @username --limit 50     # of one chat
+tg messages unread --fresh                         # counts and missing messages from Telegram
+tg messages read --chat @username                  # mark the whole chat read
+tg messages read --chat @username --max-id 1200    # only up to message 1200
 ```
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
@@ -303,6 +315,52 @@ When `--timeout` passes with no new message, the result is still a success (exit
 Both need the daemon running for the account (`tg daemon start`), since nothing else stores new
 messages. Without it they fail at once with `DAEMON_NOT_RUNNING` (exit 1),
 `details: { account_id }` and a suggestion to start it.
+
+#### Unread messages
+
+`tg messages unread` prints the unread messages of every chat with unread messages, in
+`tg chats list --unread` order, or of one chat with `--chat`. A chat's unread messages are the
+incoming ones above its read boundary (`readInboxMaxId`); outgoing and deleted messages are
+left out. For each chat it returns its oldest unread messages the cache holds, at most
+`--limit` (1-100, default 20) and newest first like a `list` page, so they read on from where
+the chat was last read:
+
+```json
+{ "chats": [
+    { "chat": { "id": -1001234567890, "title": "Team Chat", "username": "teamchat",
+                "type": "supergroup" },
+      "unreadCount": 5, "readInboxMaxId": 1180, "missing": 3, "returned": 2,
+      "nextAfter": 1185, "items": [ … ], "source": "cache" } ],
+  "unreadCount": 5, "missing": 3, "returned": 2, "limit": 20, "source": "cache", "stale": false }
+```
+
+- `unreadCount` is Telegram's count, from the cache ([real-time.md](real-time.md#unread-counts)
+  says how fresh it is); `returned` is the number of `items`; `missing` is how many unread
+  messages the cache doesn't hold. The top level sums them over the chats.
+- `missing > 0` is usual for chats whose history the daemon doesn't sync (large groups and
+  channels; see [sync-strategy.md](sync-strategy.md)): only the messages that came live are
+  cached. `--fresh` reads the unread counts from Telegram (the chat's dialog with `--chat`,
+  else the 200 newest dialogs, as `tg chats list --fresh` does) and, for each chat that lacks
+  some of its unread messages, fetches the first `--limit` messages above its read boundary and
+  caches them (`source: "api"`). Without `--fresh` the command reads only the cache, except
+  that it reads the counts from Telegram when the cache has none yet: a `--chat` that no dialog
+  list has given a count, or a cache no dialog list has filled.
+- Items are exactly the objects `tg messages list` prints. To read on past `--limit`, pass
+  `nextAfter` to `tg messages list --after`; to mark what you read, pass it to
+  `tg messages read --max-id`.
+
+`tg messages read --chat <peer>` marks the chat's incoming messages read on Telegram, all of them
+or, with `--max-id`, those up to that ID. It calls `messages.readHistory` for a private chat, a
+basic group or Saved Messages and `channels.readHistory` for a supergroup or channel, then reads
+the chat's dialog (`messages.getPeerDialogs`) and writes its new unread state to the cache:
+
+```json
+{ "chatId": -1001234567890, "maxId": null, "method": "channels.readHistory",
+  "unreadCount": 0, "readInboxMaxId": 1185 }
+```
+
+`maxId` is the `--max-id` passed, `null` for everything. Like `tg send`, it is a Telegram
+mutation, so it needs credentials and a connection; the daemon never marks anything read.
 
 ### Media
 

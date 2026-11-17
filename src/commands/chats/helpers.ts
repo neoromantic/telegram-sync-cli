@@ -18,6 +18,8 @@ export interface ChatItem {
   lastMessageAt: number | null
   isCreator: boolean
   isAdmin: boolean
+  /** Unread incoming messages; null until a dialog list has the chat */
+  unreadCount: number | null
 }
 
 export const CHAT_TYPE_VALUES = [
@@ -44,6 +46,7 @@ export function chatRowToItem(chat: ChatRow): ChatItem {
     lastMessageAt: chat.last_message_at,
     isCreator: chat.is_creator === 1,
     isAdmin: chat.is_admin === 1,
+    unreadCount: chat.unread_count ?? null,
   }
 }
 
@@ -116,6 +119,8 @@ export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
     last_message_at: lastMessageAt ? lastMessageAt.getTime() : null,
     fetched_at: Date.now(),
     raw_json: toRawJson(dialog.raw),
+    unread_count: dialog.raw.unreadCount,
+    read_inbox_max_id: dialog.raw.readInboxMaxId,
   }
 }
 

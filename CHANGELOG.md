@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   once, `--settle N` keeps collecting until N quiet seconds, and after `--timeout` (default
   60 s) the result is `{ "messages": [], "timedOut": true }` with exit 0. Without a running
   daemon they fail at once with `DAEMON_NOT_RUNNING` (#24).
+- Unread messages (#25). `tg chats list --unread` lists only chats with unread messages, and
+  every chat item has `unreadCount`. `tg messages unread [--chat <peer>] [--limit N]` prints each
+  chat's oldest unread messages from the cache with its unread count and `missing`, how many of
+  them the cache lacks; `--fresh` reads the counts and those messages from Telegram.
+  `tg messages read --chat <peer> [--max-id <id>]` marks a chat read on Telegram
+  (`messages.readHistory`, or `channels.readHistory` for supergroups and channels) and caches
+  its new count. `chats_cache` gets `unread_count` and `read_inbox_max_id`, which dialog lists
+  set; the daemon raises the count for each new incoming message and takes reads on any device
+  from Telegram's read updates, so the counts stay current between dialog passes. A cache from
+  an older version has no counts until the daemon's next start or `tg chats list --fresh`.
 
 ### Changed
 
@@ -29,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `qrcode-terminal`, which has had no release since 2018. The code is black on white with the
   standard four-module quiet zone, so it scans in dark and light terminal themes, and it goes to
   stderr with its status lines, so they no longer mix with the JSON result on stdout (#10).
+- The daemon raises a chat's `last_message_id` and `last_message_at` with each live message, so
+  `tg chats list` keeps the order of recent activity between dialog passes.
 
 ### Fixed
 

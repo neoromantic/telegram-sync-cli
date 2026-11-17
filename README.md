@@ -65,6 +65,9 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
 - Chat history with cursor paging (`tg messages list`) and a message in context
   (`tg messages get`), cache-first
+- Unread messages: chats with unread messages (`tg chats list --unread`), their unread messages
+  (`tg messages unread`) and marking them read (`tg messages read`); the daemon keeps the
+  counts current
 - Full-text search (FTS5) over cached messages
 - Files: send one with `tg send --file`; download a message's file into a per-account media
   cache with `tg media download` (cached files need no network, partial downloads resume);
@@ -92,6 +95,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Background sync | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; catch-up and history for large groups and channels on request (`tg chats sync`) | partial: waits for events, stores nothing |
 | Any MTProto method | ✅ `tg api <method>` | ❌ fixed tool set |
 | Read chat history | ✅ `tg messages list` (paging) and `tg messages get` (context), cache-first, `--fresh` | ✅ |
+| Unread messages, mark as read | ✅ `tg chats list --unread`, `tg messages unread`, `tg messages read` | ✅ |
 | Send text | ✅ replies, silent | ✅ replies, Markdown/HTML |
 | Edit, delete, forward, pin | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)) | ✅ |
 | Send and download media | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`); sending albums and voice messages later | ✅ files, albums, voice, transcription |
@@ -117,6 +121,8 @@ tg messages list --chat @username --limit 20
 tg messages get --chat @username --id 42 --context 3
 tg messages search --query "hello world" --since 7d   # both words, any order
 tg messages wait --chat @username --after 42 --timeout 60   # block until the next reply
+tg messages unread                   # unread messages of every chat
+tg messages read --chat @username    # mark the chat read
 tg send --to @username --message "Hi there"
 tg send --to me --file ./report.pdf --caption "Q3"
 tg media download --chat me --id 42 --out ./   # into the media cache, then copied here
@@ -162,6 +168,10 @@ Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-
   `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}}}`.
 - Exit codes: `0` ok, `1` general error, `2` auth required, `3` invalid arguments,
   `4` network error, `5` Telegram error or rate limit, `6` account not found.
+- "Summarize my unread messages": `tg messages unread` prints each chat with unread messages,
+  its unread count and its oldest unread messages (`--limit` per chat). `missing` says how many
+  the cache lacks, as in large groups and channels the daemon doesn't sync; `--fresh` fetches
+  them. Then `tg messages read --chat <id> --max-id <nextAfter>` marks what was summarized read.
 - `tg sql --query "…"` runs read-only SQL over the selected account's cache (`--account`, else
   the active account); `tg sql print-schema` prints the annotated schema.
 - `tg skill manifest` prints a skill manifest, `tg skill validate` checks the environment and

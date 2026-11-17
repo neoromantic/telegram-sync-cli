@@ -19,6 +19,7 @@ import {
   type SyncChatType,
 } from '../db/sync-schema'
 import { toRawJson } from '../utils/raw-json'
+import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import { formatError } from './daemon-utils'
 import type { DaemonLogger } from './types'
 
@@ -86,6 +87,48 @@ export interface DeleteMessagesWithoutChatData {
 }
 
 /**
+ * The account read a chat's incoming messages up to `maxId`, here or on
+ * another device (updateReadHistoryInbox, updateReadChannelInbox)
+ */
+export interface ReadInboxData {
+  chatId: number
+  maxId: number
+  stillUnreadCount: number
+}
+
+/**
+ * The read state a raw update carries, or null for any other update. A read
+ * within one forum topic says nothing about the whole chat, so it is null.
+ */
+export function readInboxFromUpdate(
+  update: tl.TypeUpdate,
+): ReadInboxData | null {
+  if (update._ === 'updateReadHistoryInbox') {
+    if (update.topMsgId) return null
+    const chatId = toPeerIdFromRawPeer(update.peer)
+    if (chatId === null) return null
+    return {
+      chatId,
+      maxId: update.maxId,
+      stillUnreadCount: update.stillUnreadCount,
+    }
+  }
+  if (update._ === 'updateReadChannelInbox') {
+    const chatId = toPeerIdFromRawPeer({
+      _: 'peerChannel',
+      channelId: update.channelId,
+    })
+    if (chatId === null) return null
+    return {
+      chatId,
+      maxId: update.maxId,
+      stillUnreadCount: update.stillUnreadCount,
+    }
+  }
+  return null
+}
+
+/**
  * Update handlers interface
  */
 export interface UpdateHandlers {
@@ -108,6 +151,8 @@ export interface UpdateHandlers {
     _ctx: UpdateContext,
     messages: NewMessageData[],
   ): Promise<void>
+  /** Handle a read of a chat's incoming messages */
+  handleReadInbox(_ctx: UpdateContext, data: ReadInboxData): Promise<void>
 }
 
 /**
@@ -211,17 +256,27 @@ function ensureSyncState(
  * to this run (a new DM, say) has no row there. Without one the sync jobs
  * can't build an InputPeer with its access hash, and its first page would
  * fail until the next dialog pass.
+ *
+ * Every dialog pass lists every chat, so such a chat is most likely new:
+ * its unread state starts right below this message, which then counts as
+ * unread if it is incoming. The next dialog pass sets the real state.
  */
 function ensureChatCached(
   chatsCache: ChatsCache | undefined,
-  chatId: number,
-  rawChat: NewMessageData['rawChat'],
+  data: NewMessageData,
 ): void {
+  const { chatId, rawChat } = data
   if (!chatsCache || !rawChat) return
   if (chatsCache.getById(String(chatId))) return
 
   const input = rawPeerToCacheInput(rawChat)
-  if (input) chatsCache.upsert(input)
+  if (input) {
+    chatsCache.upsert({
+      ...input,
+      unread_count: 0,
+      read_inbox_max_id: data.messageId - 1,
+    })
+  }
 }
 
 async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
@@ -232,10 +287,15 @@ async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
     data.memberCount,
     data.rawChat,
   )
-  ensureChatCached(deps.chatsCache, data.chatId, data.rawChat)
+  ensureChatCached(deps.chatsCache, data)
 
   const input = liveMessageInput(deps, data)
   deps.messagesCache.upsert(input)
+  deps.chatsCache?.noteLiveMessage(String(data.chatId), {
+    id: data.messageId,
+    date: data.date * 1000,
+    incoming: !data.isOutgoing,
+  })
 
   // The forward cursor means "every message up to here is cached", so live
   // updates leave it to the sync jobs: messages that arrived while the
@@ -392,5 +452,17 @@ export function createUpdateHandlers(
     handleBatchMessages: async (_ctx, messages) => {
       await handleBatchMessagesImpl(deps, messages)
     },
+    handleReadInbox: createSafeHandler(
+      deps,
+      'handle read inbox',
+      async (data) => {
+        deps.chatsCache?.setReadInbox(
+          String(data.chatId),
+          data.maxId,
+          data.stillUnreadCount,
+        )
+      },
+      (data) => `chatId=${data.chatId}, maxId=${data.maxId}`,
+    ),
   }
 }

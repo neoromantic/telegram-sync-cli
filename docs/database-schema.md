@@ -159,7 +159,9 @@ CREATE TABLE chats_cache (
   fetched_at INTEGER NOT NULL,
   raw_json TEXT NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
-  updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+  unread_count INTEGER,          -- unread incoming messages; NULL until a dialog list has the chat
+  read_inbox_max_id INTEGER      -- every incoming message up to this ID is read
 );
 
 CREATE INDEX idx_chats_cache_username ON chats_cache(username) WHERE username IS NOT NULL;
@@ -176,6 +178,19 @@ dialogs, so the daemon's dialog pass (on start and after a reconnect) and
 `communities.getJoinedCommunities`, access hash included. A community has no messages of its
 own: the dialog pass gives it no `chat_sync_state` row (only `tg chats sync --off` or `--auto`
 writes one, with sync off), and its `last_message_id` and `last_message_at` stay NULL.
+
+`unread_count` and `read_inbox_max_id` (added in 0.13) are the chat's unread state: the
+unread messages are the incoming ones above `read_inbox_max_id`. Dialog lists set both; other
+writes of the row (a lookup, a live message's chat) keep them. The daemon raises the count for
+each new incoming message and takes reads from any device from Telegram's read updates, so the
+count is as fresh as the daemon's updates, and without a daemon as old as the last dialog list
+([real-time.md](real-time.md#unread-counts)). Caches from older versions get both columns as
+NULL; the next dialog pass fills them.
+
+```sql
+SELECT chat_id, title, unread_count FROM chats_cache
+WHERE unread_count > 0 ORDER BY last_message_at DESC;
+```
 
 ### Table: sync_state
 

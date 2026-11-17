@@ -374,12 +374,23 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           defaultValue: 0,
         },
         last_message_id: {
-          description: 'ID of the most recent message in this chat',
+          description:
+            "ID of the most recent message in this chat: the dialog's newest message, raised by each live message the daemon gets",
           nullable: true,
         },
         last_message_at: {
           description: 'Timestamp of the most recent message',
           semanticType: 'timestamp',
+          nullable: true,
+        },
+        unread_count: {
+          description:
+            'Unread incoming messages, as Telegram counts them: set by every dialog list (daemon start and reconnect, tg chats list --fresh), raised by each new incoming message the daemon gets, set by a read on any device and by tg messages read. NULL until a dialog list has the chat',
+          nullable: true,
+        },
+        read_inbox_max_id: {
+          description:
+            'Read boundary: every incoming message up to this ID is read, the unread ones are above it. Set with unread_count; NULL until a dialog list has the chat',
           nullable: true,
         },
         fetched_at: {
