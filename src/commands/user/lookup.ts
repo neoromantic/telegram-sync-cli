@@ -18,14 +18,11 @@ import {
   apiUserToUserInfo,
   cachedUserToUserInfo,
   findCachedUser,
+  isRawUser,
   parseUserIdentifier,
 } from './helpers'
 
 type TelegramClientLike = Pick<TelegramClient, 'call'>
-
-function isRawUser(user: tl.TypeUser): user is tl.RawUser {
-  return user._ === 'user'
-}
 
 async function resolveUserByUsername(
   client: TelegramClientLike,

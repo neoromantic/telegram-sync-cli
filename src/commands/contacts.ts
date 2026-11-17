@@ -13,6 +13,7 @@ import { type Contact, ErrorCodes, type PaginatedResult } from '../types'
 import { openAccountCache } from '../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
 import { buildCachePaginatedResponse } from '../utils/cache-pagination'
+import { isUsernameIdentifier } from '../utils/identifiers'
 import { toLong } from '../utils/long'
 import { error, success, verbose } from '../utils/output'
 import {
@@ -24,16 +25,7 @@ import {
   reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
-
-function isRawUser(user: tl.TypeUser): user is tl.RawUser {
-  return user._ === 'user'
-}
-
-type RawUserWithAbout = tl.RawUser & { about?: string }
-
-function hasAbout(user: tl.RawUser): user is RawUserWithAbout {
-  return 'about' in user
-}
+import { cachedUserToUserInfo, isRawUser } from './user/helpers'
 
 /**
  * List contacts
@@ -289,9 +281,7 @@ export const getContactCommand = defineCommand({
       const usersCache = createUsersCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
-      // Determine if ID or username
-      const isUsername =
-        identifier.startsWith('@') || Number.isNaN(Number(identifier))
+      const isUsername = isUsernameIdentifier(identifier)
 
       // Check cache first (unless --fresh)
       if (!fresh) {
@@ -305,18 +295,7 @@ export const getContactCommand = defineCommand({
             cacheConfig.staleness.peers,
           )
 
-          success({
-            id: Number(cached.user_id),
-            firstName: cached.first_name ?? '',
-            lastName: cached.last_name ?? null,
-            username: cached.username ?? null,
-            phone: cached.phone ?? null,
-            isBot: cached.is_bot === 1,
-            isPremium: cached.is_premium === 1,
-            isContact: cached.is_contact === 1,
-            source: 'cache',
-            stale,
-          })
+          success({ ...cachedUserToUserInfo(cached), source: 'cache', stale })
           return
         }
       }
@@ -372,8 +351,7 @@ export const getContactCommand = defineCommand({
         lastName: user.lastName ?? null,
         username: user.username ?? null,
         phone: user.phone ?? null,
-        bio:
-          hasAbout(user) && typeof user.about === 'string' ? user.about : null,
+        bio: null,
         isBot: user.bot ?? false,
         isVerified: user.verified ?? false,
         isPremium: user.premium ?? false,
