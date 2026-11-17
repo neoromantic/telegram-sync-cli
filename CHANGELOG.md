@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-11-17
+
 ### Fixed
 
-- `tg sql "SELECT 1" -f json` runs the query: the value of `-f`/`--format` after a positional
-  query was added to the SQL (`SELECT 1 json`, a syntax error), and after `--query` it was
+- `tg sql "SELECT 1 AS one" -f json` runs the query: the value of `-f`/`--format` after a positional
+  query was added to the SQL (`SELECT 1 AS one json`, a syntax error), and after `--query` it was
   refused as an extra argument. `tg sql -f json print-schema` prints the schema.
 - `tg messages list`, `get` and `search` say what a service message did. A call, a pin or a
   group change used to print only `messageType: "service"` with no text, so an agent reading a
@@ -902,7 +904,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.11.0...v0.11.1
