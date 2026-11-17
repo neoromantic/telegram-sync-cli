@@ -6,7 +6,6 @@ The list is in priority order.
 
 ## Reliability
 
-- [Search for a common word takes seconds on a big cache](https://github.com/neoromantic/telegram-sync-cli/issues/118)
 - [`tg db check` and `tg db backup`](https://github.com/neoromantic/telegram-sync-cli/issues/91)
 - [`tg db vacuum`: check free disk before a full VACUUM](https://github.com/neoromantic/telegram-sync-cli/issues/119)
 - [A soft cache size budget per account](https://github.com/neoromantic/telegram-sync-cli/issues/98)
@@ -34,6 +33,5 @@ The list is in priority order.
 ## Polish
 
 - [`tg status --sizes`: cache size per chat](https://github.com/neoromantic/telegram-sync-cli/issues/90)
-- [Search: re-index older messages after a person or chat is renamed](https://github.com/neoromantic/telegram-sync-cli/issues/93)
 - [Pretty output for every command](https://github.com/neoromantic/telegram-sync-cli/issues/2)
 - [Replace qrcode-terminal](https://github.com/neoromantic/telegram-sync-cli/issues/10)
