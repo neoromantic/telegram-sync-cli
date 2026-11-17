@@ -176,8 +176,10 @@ src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integratio
 New commands use `defineCommand` from citty and report through `success()`/`error()` in
 `src/utils/output.ts`.
 Import mtcute values and types (`tl`, `TelegramClient`, `networkMiddlewares`) from
-`@mtcute/bun`, the only mtcute package in `package.json`; `@mtcute/core` and `@mtcute/tl` are
-not direct dependencies (and `@mtcute/tl` no longer exists since mtcute 0.29).
+`@mtcute/bun` (helpers such as `toInputUser` from `@mtcute/bun/utils.js`). `@mtcute/core` is a
+direct dependency, at the same version, only for its TL schema export
+`@mtcute/core/tl/api-schema.json`, which `tg api` reads to type its arguments; `@mtcute/tl` no
+longer exists since mtcute 0.29.
 
 ### Testing
 
