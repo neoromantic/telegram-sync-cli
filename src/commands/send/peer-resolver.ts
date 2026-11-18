@@ -24,6 +24,7 @@ import {
   toMarkedPeerId,
 } from '../../utils/telegram-peer-ids'
 import { resolveUsername } from '../../utils/telegram-resolve'
+import { rawPeerToCacheInput } from '../chats/helpers'
 
 export type ResolvedPeer = { inputPeer: tl.TypeInputPeer; name: string }
 
@@ -214,6 +215,19 @@ async function resolveByUsername(
 
   const resolvedChat = resolved.chats?.[0]
   if (resolvedChat) {
+    // Keep the chat's type, so a broadcast channel isn't taken for a group
+    // the account doesn't take part in (src/db/group-participation.ts).
+    // The answer has no dialog metadata, so keep what the cache knows.
+    const cacheInput = rawPeerToCacheInput(resolvedChat)
+    if (cacheInput) {
+      const known = chatsCache.getById(cacheInput.chat_id)
+      chatsCache.upsert({
+        ...cacheInput,
+        member_count: cacheInput.member_count ?? known?.member_count ?? null,
+        last_message_id: known?.last_message_id ?? null,
+        last_message_at: known?.last_message_at ?? null,
+      })
+    }
     if (resolvedChat._ === 'channel' || resolvedChat._ === 'channelForbidden') {
       return buildChannelPeerFromApi(resolvedChat, `@${username}`)
     }

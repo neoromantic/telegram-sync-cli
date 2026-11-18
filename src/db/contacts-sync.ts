@@ -9,6 +9,7 @@
  */
 import type { Database } from 'bun:sqlite'
 import type { tl } from '@mtcute/bun'
+import { isRawUser } from '../commands/user/helpers'
 import { toLong } from '../utils/long'
 import { telegramHash } from '../utils/telegram-hash'
 import { apiUserToCacheInput } from '../utils/telegram-mappers'
@@ -16,10 +17,6 @@ import { createUsersCache } from './users-cache'
 
 /** sync_state.entity_type of the contact list */
 export const CONTACTS_ENTITY = 'contacts'
-
-function isRawUser(user: tl.TypeUser): user is tl.RawUser {
-  return user._ === 'user'
-}
 
 interface ContactsStateRow {
   forward_cursor: string | null

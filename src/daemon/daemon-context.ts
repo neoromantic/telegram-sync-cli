@@ -10,7 +10,7 @@ import { DaemonStopError } from './daemon-utils'
 import type { PidFile } from './pid-file'
 import type { SyncScheduler } from './scheduler'
 import type { SyncPacer, SyncPacingConfig } from './sync-pacing'
-import type { RealSyncWorker } from './sync-worker'
+import type { RealSyncWorker } from './sync-worker-real'
 import type {
   DaemonLogger,
   DaemonState,

@@ -1,7 +1,7 @@
 /**
  * Tests for messages cache service
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import {
   afterEach,
   beforeEach,
@@ -16,10 +16,10 @@ import {
   type MessagesCache,
 } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toRawJson } from '../utils/raw-json'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { takePartIn } from './helpers/participation'
 import {
   REPORT_BLOCKS,
   REPORT_TEXT,
@@ -31,9 +31,8 @@ describe('MessagesCache', () => {
   let cache: MessagesCache
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
+    takePartIn(db, -5151, -1001234567890, -1009876543210)
     cache = createMessagesCache(db)
   })
 
@@ -161,46 +160,6 @@ describe('MessagesCache', () => {
       const result = cache.get(100, 42)
       expect(result).not.toBeNull()
       expect(result?.text).toBe('Test message')
-    })
-  })
-
-  describe('listByChatId', () => {
-    beforeEach(() => {
-      // Insert test messages
-      const baseTime = Date.now()
-      for (let i = 1; i <= 5; i++) {
-        cache.upsert({
-          chat_id: 100,
-          message_id: i,
-          text: `Message ${i}`,
-          message_type: 'text',
-          date: baseTime + i * 1000, // Each message 1 second apart
-          raw_json: '{}',
-        })
-      }
-    })
-
-    it('returns messages in reverse chronological order', () => {
-      const messages = cache.listByChatId(100, { limit: 10 })
-      expect(messages).toHaveLength(5)
-      expect(messages[0]!.message_id).toBe(5) // Most recent first
-      expect(messages[4]!.message_id).toBe(1)
-    })
-
-    it('respects limit parameter', () => {
-      const messages = cache.listByChatId(100, { limit: 3 })
-      expect(messages).toHaveLength(3)
-    })
-
-    it('supports offset parameter', () => {
-      const messages = cache.listByChatId(100, { limit: 2, offset: 2 })
-      expect(messages).toHaveLength(2)
-      expect(messages[0]!.message_id).toBe(3)
-    })
-
-    it('returns empty array for chat with no messages', () => {
-      const messages = cache.listByChatId(999, { limit: 10 })
-      expect(messages).toEqual([])
     })
   })
 
@@ -776,9 +735,7 @@ describe('MessagesCache writes and the search index', () => {
 
   beforeEach(() => {
     setSystemTime(new Date('2026-01-01T00:00:00Z'))
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     cache = createMessagesCache(db)
     renameSender('Archer')
     cache.upsert(message)

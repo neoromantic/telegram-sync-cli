@@ -18,12 +18,7 @@ const HEALTH_CHECK_COOLDOWN_MS = 60_000
 const SCHEDULER_REFRESH_INTERVAL_TICKS = 30
 
 function jobCounts(rt: AccountRuntime): { pending: number; running: number } {
-  if (rt.scheduler) {
-    const status = rt.scheduler.getStatus()
-    return { pending: status.pendingJobs, running: status.runningJobs }
-  }
-  // An account that didn't connect keeps its queue; db.query caches the
-  // statement
+  // db.query caches the statement
   const row = rt.db
     .query(
       `SELECT COALESCE(SUM(status = $pending), 0) AS pending,

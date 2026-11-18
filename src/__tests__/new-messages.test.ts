@@ -8,6 +8,7 @@ import { createMessagesCache } from '../db/messages-cache'
 import { createNewMessagesFeed } from '../db/new-messages'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
+import { takePartIn } from './helpers/participation'
 
 const CHAT = -1001234567890
 const OTHER = 42
@@ -40,6 +41,7 @@ describe('createNewMessagesFeed', () => {
     ids: number[],
     extra: { is_deleted?: boolean } = {},
   ): void {
+    takePartIn(writer, CHAT)
     createMessagesCache(writer).upsertBatch(
       ids.map((id) => ({
         chat_id: chatId,

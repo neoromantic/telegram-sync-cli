@@ -6,7 +6,10 @@
 import type { Database } from 'bun:sqlite'
 import type { TelegramClient, tl } from '@mtcute/bun'
 
-import { parseRawMessage } from '../../daemon/sync-worker-real-helpers'
+import {
+  fetchMessagesByIdRaw,
+  parseRawMessage,
+} from '../../daemon/sync-worker-real-helpers'
 import { createMessagesCache } from '../../db/messages-cache'
 import { createUsersCache } from '../../db/users-cache'
 import { ErrorCodes } from '../../types'
@@ -43,44 +46,18 @@ export async function fetchMessagesById(
   ids: number[],
   signal?: AbortSignal,
 ): Promise<Map<number, FetchedMessage>> {
-  const id = ids.map((id) => ({ _: 'inputMessageID' as const, id }))
-  const peer = chat.inputPeer
-  const response =
-    peer._ === 'inputPeerChannel'
-      ? await client.call(
-          {
-            _: 'channels.getMessages',
-            channel: {
-              _: 'inputChannel',
-              channelId: peer.channelId,
-              accessHash: peer.accessHash,
-            },
-            id,
-          },
-          { abortSignal: signal },
-        )
-      : await client.call(
-          { _: 'messages.getMessages', id },
-          { abortSignal: signal },
-        )
-
+  const page = await fetchMessagesByIdRaw(client, chat.inputPeer, ids, signal)
+  const wanted = new Set(ids)
   const found = new Map<number, FetchedMessage>()
-  if (response._ !== 'messages.messagesNotModified') {
-    const wanted = new Set(ids)
-    for (const message of response.messages) {
-      if (
-        message._ === 'messageEmpty' ||
-        !wanted.has(message.id) ||
-        toPeerIdFromRawPeer(message.peerId) !== chat.chatId
-      ) {
-        continue
-      }
-      found.set(message.id, {
-        message,
-        chats: response.chats,
-        users: response.users,
-      })
+  for (const message of page.messages as tl.TypeMessage[]) {
+    if (
+      message._ === 'messageEmpty' ||
+      !wanted.has(message.id) ||
+      toPeerIdFromRawPeer(message.peerId) !== chat.chatId
+    ) {
+      continue
     }
+    found.set(message.id, { message, chats: page.chats, users: page.users })
   }
   return found
 }
@@ -113,12 +90,17 @@ export function cacheFetchedMessage(
   if (!input) return
   const usersCache = createUsersCache(cacheDb)
   const messagesCache = createMessagesCache(cacheDb)
-  cacheDb.transaction(() => {
-    for (const user of users) {
-      if (user._ === 'user' && !user.min) {
-        usersCache.upsert(apiUserToCacheInput(user))
+  // A group the account doesn't take part in keeps a message it lacks out
+  // of the cache (src/db/group-participation.ts). The write reads before it
+  // writes, so the transaction takes the write lock first.
+  cacheDb
+    .transaction(() => {
+      for (const user of users) {
+        if (user._ === 'user' && !user.min) {
+          usersCache.upsert(apiUserToCacheInput(user))
+        }
       }
-    }
-    messagesCache.upsert(input)
-  })()
+      messagesCache.upsert(input)
+    })
+    .immediate()
 }

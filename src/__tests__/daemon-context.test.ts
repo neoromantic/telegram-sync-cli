@@ -10,7 +10,7 @@ import {
 } from '../daemon/daemon-context'
 import { isDaemonStopError } from '../daemon/daemon-utils'
 import { createSyncPacer } from '../daemon/sync-pacing'
-import { createAccountCacheDb } from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 describe('daemon-context', () => {
   it('creates runtime with sane defaults', () => {

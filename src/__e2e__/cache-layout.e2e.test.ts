@@ -17,6 +17,7 @@ import { join } from 'node:path'
 
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
+import { holdOpen, rowCounts } from '../__tests__/helpers/shared-cache'
 import { UPGRADE_DOCS_URL } from '../db/cache-layout'
 import { readCacheMeta } from '../db/cache-meta'
 import { createMessagesCache } from '../db/messages-cache'
@@ -25,63 +26,6 @@ import { NO_CREDENTIALS, runCli, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
 const SQL_COUNT = 'SELECT COUNT(*) AS n FROM messages_cache'
-
-/** Rows of the tables a shared cache is kept for */
-function rowCounts(path: string) {
-  const db = new Database(path, { readonly: true })
-  try {
-    const count = (table: string) =>
-      (db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
-    return {
-      messages_cache: count('messages_cache'),
-      chats_cache: count('chats_cache'),
-      users_cache: count('users_cache'),
-    }
-  } finally {
-    db.close()
-  }
-}
-
-/** An older tg that keeps the shared cache open, idle, until released */
-function holdOpen(path: string) {
-  const holder = Bun.spawn(
-    [
-      'bun',
-      '--no-env-file',
-      '-e',
-      `
-        import { Database } from 'bun:sqlite'
-        const db = new Database(process.env.HOLD_PATH)
-        db.query('SELECT COUNT(*) FROM chats_cache').get()
-        console.log('open')
-        for await (const _ of console) break
-        db.close()
-      `,
-    ],
-    {
-      env: { ...process.env, HOLD_PATH: path },
-      stdin: 'pipe',
-      stdout: 'pipe',
-    },
-  )
-  return {
-    pid: holder.pid,
-    async ready() {
-      const decoder = new TextDecoder()
-      let text = ''
-      for await (const chunk of holder.stdout) {
-        text += decoder.decode(chunk, { stream: true })
-        if (text.includes('open')) return
-      }
-      throw new Error('holder exited before it opened the file')
-    },
-    async release() {
-      holder.stdin.write('done\n')
-      holder.stdin.end()
-      await holder.exited
-    },
-  }
-}
 
 const NOTICE = 'each account now has its own cache'
 

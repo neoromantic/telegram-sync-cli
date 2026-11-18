@@ -7,7 +7,9 @@ import { createChatsCache } from '../../db/chats-cache'
 import { createMessagesCache } from '../../db/messages-cache'
 import { initCacheSchema } from '../../db/schema'
 import { initSyncSchema } from '../../db/sync-schema'
+import { chatRow } from './cache-db'
 import { seedLegacyCache } from './legacy-cache'
+import { takePartIn } from './participation'
 
 /** A shared cache as 0.2.0 left it (see legacy-cache.ts) */
 export function legacySharedCache(db: Database): void {
@@ -33,20 +35,10 @@ export function cacheWithRowsInWal(
   initCacheSchema(db)
   initSyncSchema(db)
   db.run('PRAGMA wal_autocheckpoint = 0')
-  createChatsCache(db).upsert({
-    chat_id: '-4242',
-    type: 'group',
-    title: 'Book Club',
-    username: null,
-    member_count: 5,
-    access_hash: null,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: Date.now(),
-    raw_json: '{}',
-  })
+  createChatsCache(db).upsert(
+    chatRow(-4242, 'group', { title: 'Book Club', member_count: 5 }),
+  )
+  takePartIn(db, -4242)
   createMessagesCache(db).upsertBatch(
     Array.from({ length: args.messages }, (_, i) => ({
       chat_id: -4242,

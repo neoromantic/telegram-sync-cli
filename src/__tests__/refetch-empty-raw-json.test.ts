@@ -23,19 +23,15 @@ import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { BACKGROUND_MIGRATIONS } from '../db/raw-json-migrations'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
-import {
-  initSyncSchema,
-  SyncJobStatus,
-  SyncJobType,
-  SyncPriority,
-} from '../db/sync-schema'
+import { SyncJobStatus, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toRawJson } from '../utils/raw-json'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { range } from './helpers/fake-history'
+import { takePartIn } from './helpers/participation'
 import { photoMessage } from './helpers/photo-message'
 
 const DM = 5001
@@ -84,8 +80,8 @@ function rawJsonOf(chatId: number, messageId: number) {
 }
 
 beforeEach(() => {
-  db = createTestCacheDatabase().db
-  initSyncSchema(db)
+  db = createAccountCacheDb()
+  takePartIn(db, CHANNEL)
   requests = []
   ctx = {
     client: {} as TelegramClient,

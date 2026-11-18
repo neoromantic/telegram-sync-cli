@@ -550,6 +550,31 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
           'sync jobs to cache messages',
         )
 
+        // Every group gets a participation check, a messages.search for the
+        // account's own messages; one that answered marks its group checked
+        const sqlCount = async (query: string) => {
+          const result = await runCli(['sql', '--query', query], cli())
+          const payload = result.json as Envelope<{
+            rows: Array<{ n: number }>
+          }>
+          return payload?.data?.rows?.[0]?.n ?? 0
+        }
+        const groups = await sqlCount(
+          "SELECT COUNT(*) AS n FROM chats_cache WHERE type IN ('group', 'supergroup')",
+        )
+        if (groups > 0) {
+          await waitFor(
+            async () => {
+              const checked = await sqlCount(
+                'SELECT COUNT(*) AS n FROM group_participation WHERE initialized_at IS NOT NULL',
+              )
+              return checked > 0 ? checked : null
+            },
+            120_000,
+            'a group participation check to answer',
+          )
+        }
+
         // First pages run next to catch-up instead of waiting behind it (#6)
         await waitFor(
           async () => {

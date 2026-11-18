@@ -39,7 +39,9 @@ function extractReplyToId(message: Record<string, unknown>): number | null {
 type RawPeerField = Parameters<typeof toPeerIdFromRawPeer>[0]
 
 /** Marked ID of the original sender of a forwarded message */
-function extractForwardFromId(message: Record<string, unknown>): number | null {
+export function extractForwardFromId(
+  message: Record<string, unknown>,
+): number | null {
   const fwdFrom = message.fwdFrom as { fromId?: RawPeerField } | undefined
   return toPeerIdFromRawPeer(fwdFrom?.fromId)
 }
@@ -166,7 +168,11 @@ export async function fetchMessagesByIdRaw(
   inputPeer: tl.TypeInputPeer,
   ids: number[],
   signal?: AbortSignal,
-): Promise<{ messages: unknown[]; users: tl.TypeUser[] }> {
+): Promise<{
+  messages: unknown[]
+  chats: tl.TypeChat[]
+  users: tl.TypeUser[]
+}> {
   signal?.throwIfAborted()
   const id: tl.TypeInputMessage[] = ids.map((messageId) => ({
     _: 'inputMessageID',
@@ -191,6 +197,7 @@ export async function fetchMessagesByIdRaw(
     : await client.call(request)
   return {
     messages: 'messages' in result ? result.messages : [],
+    chats: 'chats' in result ? result.chats : [],
     users: 'users' in result ? result.users : [],
   }
 }
@@ -232,25 +239,8 @@ export function historyTotal(
 export function createMessageInputs(
   messages: unknown[],
   chatId: number,
-  fallbackMinId: number,
-  fallbackMaxId: number,
-): { inputs: MessageInput[]; minId: number; maxId: number } {
-  const inputs: MessageInput[] = []
-  let minId = fallbackMinId
-  let maxId = fallbackMaxId
-
-  for (const msg of messages) {
-    const parsed = parseRawMessage(msg, chatId)
-    if (parsed) {
-      inputs.push(parsed)
-      if (parsed.message_id < minId) {
-        minId = parsed.message_id
-      }
-      if (parsed.message_id > maxId) {
-        maxId = parsed.message_id
-      }
-    }
-  }
-
-  return { inputs, minId, maxId }
+): MessageInput[] {
+  return messages
+    .map((message) => parseRawMessage(message, chatId))
+    .filter((input) => input !== null)
 }
