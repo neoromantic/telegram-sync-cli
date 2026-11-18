@@ -9,7 +9,10 @@ import { createMessagesCache } from '../../db/messages-cache'
 import { ErrorCodes } from '../../types'
 import { extractAttachment } from '../../utils/attachment'
 import { info } from '../../utils/output'
-import { isRateLimitError } from '../../utils/telegram-rate-limits'
+import {
+  describeRateLimit,
+  isRateLimitError,
+} from '../../utils/telegram-rate-limits'
 import { type HistoryChat, resolveHistoryChat } from '../messages/history'
 import {
   type DownloadDeps,
@@ -47,6 +50,7 @@ export interface FileFailure {
   message: string
   details: Record<string, unknown>
   suggestion?: string
+  retryable: boolean
 }
 
 /** What the command does with each file as it finishes */
@@ -89,14 +93,21 @@ function failureOf(
       message: err.message,
       details: { ...ids, ...err.details },
       suggestion: err.suggestion,
+      retryable: err.retryable,
     }
   }
   const wait = rateLimitWait(err)
   if (wait) {
+    const { message, details, suggestion } = describeRateLimit(
+      wait.method,
+      wait.seconds,
+    )
     return {
       code: ErrorCodes.RATE_LIMITED,
-      message: `Rate limited for ${wait.method}. Wait ${wait.seconds}s before retrying.`,
-      details: { ...ids, method: wait.method, wait_seconds: wait.seconds },
+      message,
+      details: { ...ids, ...details },
+      suggestion,
+      retryable: true,
     }
   }
   const message = err instanceof Error ? err.message : 'Unknown error'
@@ -104,6 +115,7 @@ function failureOf(
     code: ErrorCodes.TELEGRAM_ERROR,
     message: `Failed to download media: ${message}`,
     details: ids,
+    retryable: false,
   }
 }
 

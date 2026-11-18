@@ -100,8 +100,9 @@ instead of failing it:
   pass or a sync job at once.
 
 Longer waits fail the request and are recorded as described above. CLI commands report them
-as `RATE_LIMITED` with `details: { method, wait_seconds }`, both on the failed request and on
-later calls while the method is blocked.
+as `RATE_LIMITED` with `details: { method, wait_seconds }`, `retryable: true` and the suggestion
+to wait that long and run the same command again, both on the failed request and on later
+calls while the method is blocked.
 
 File transfers (`tg media download`, `tg send --file`) go through the same wrapper, so every
 `upload.getFile`, `upload.saveFilePart` and `upload.saveBigFilePart` call is recorded for the

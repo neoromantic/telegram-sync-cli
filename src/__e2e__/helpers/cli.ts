@@ -4,6 +4,9 @@
  * Provides utilities to run the CLI binary and capture output/exit codes.
  */
 
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 export interface CliOptions {
   /** Environment variables to pass to the CLI */
   env?: Record<string, string | undefined>
@@ -166,4 +169,56 @@ export async function runCliFailure(
   }
 
   return result
+}
+
+/**
+ * Run a command line as a POSIX shell reads it, with `tg` on PATH running
+ * this checkout's CLI: the way an agent runs a `next` command it copied
+ */
+export async function runShellCommand(
+  command: string,
+  options: Omit<CliOptions, 'entry'> = {},
+): Promise<CliResult> {
+  const shimDir = join(process.cwd(), '.tmp', `tg-shim-${process.pid}`)
+  const shim = join(shimDir, 'tg')
+  if (!existsSync(shim)) {
+    mkdirSync(shimDir, { recursive: true })
+    writeFileSync(
+      shim,
+      `#!/bin/sh\nexec bun --no-env-file run '${CLI_PATH}' "$@"\n`,
+      { mode: 0o755 },
+    )
+  }
+  const { env = {}, timeout = 10000 } = options
+  const startTime = performance.now()
+  const proc = Bun.spawn(['sh', '-c', command], {
+    env: {
+      ...process.env,
+      BUN_ENV: undefined,
+      NODE_ENV: undefined,
+      ...env,
+      PATH: `${shimDir}:${process.env.PATH ?? ''}`,
+    },
+    cwd: options.cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  const timer = setTimeout(() => proc.kill(), timeout)
+  const exitCode = await proc.exited
+  clearTimeout(timer)
+  const stdout = (await new Response(proc.stdout).text()).trim()
+  const stderr = (await new Response(proc.stderr).text()).trim()
+  let json: unknown
+  try {
+    json = JSON.parse(stdout || stderr)
+  } catch {
+    // Not JSON
+  }
+  return {
+    stdout,
+    stderr,
+    exitCode,
+    json,
+    duration: performance.now() - startTime,
+  }
 }

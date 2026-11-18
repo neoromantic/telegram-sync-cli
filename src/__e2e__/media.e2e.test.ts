@@ -509,6 +509,7 @@ describe('E2E: media download of several messages', () => {
           code: string
           message: string
           details: { messageId: number } & Record<string, unknown>
+          retryable: boolean
         }
       }
 
@@ -650,6 +651,7 @@ describe('E2E: media download of several messages', () => {
           method: 'upload.getFile',
           error: 'FILE_ID_INVALID',
         },
+        retryable: false,
       },
     })
     expect(result.stderr).toContain('Downloaded 2 of 3 files, 1 failed')

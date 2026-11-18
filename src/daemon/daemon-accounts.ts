@@ -14,6 +14,7 @@ import {
   type RawMessageFwdHeader,
 } from '../utils/message-parser'
 import { messageTypeOfMediaType } from '../utils/message-type'
+import { richMessageText } from '../utils/rich-message'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
 import { apiActivityMiddleware } from './daemon-api-activity'
 import { createConnectionWatch, noteConnectionState } from './daemon-catch-up'
@@ -208,7 +209,7 @@ export function setupEventHandlers(
         .handleEditMessage(ctxLocal, {
           chatId: msg.chat.id,
           messageId: msg.id,
-          newText: msg.text,
+          newText: msg.text || richMessageText(msg.raw) || msg.text,
           editDate: msg.editDate?.getTime()
             ? msg.editDate.getTime() / 1000
             : Date.now() / 1000,

@@ -119,11 +119,20 @@ describe('E2E: Accounts Commands', () => {
 
       const response = result.json as {
         success: boolean
-        error: { code: string; message: string }
+        error: {
+          code: string
+          message: string
+          suggestion: string
+          retryable: boolean
+        }
       }
       expect(response.success).toBe(false)
       expect(response.error.code).toBe('ACCOUNT_NOT_FOUND')
       expect(response.error.message).toContain('9999')
+      expect(response.error.suggestion).toBe(
+        'Run tg accounts list to see the account IDs, then pass one to --id',
+      )
+      expect(response.error.retryable).toBe(false)
     })
 
     it('should verify account is now active after switch', async () => {
@@ -268,6 +277,32 @@ describe('E2E: Accounts Commands', () => {
       )
 
       expect(result.exitCode).toBe(6)
+      expect(
+        (result.json as { error: { suggestion?: string } }).error.suggestion,
+      ).toBe(
+        'Run tg accounts list to see the account IDs, then pass one to --id',
+      )
+    })
+
+    it('suggests nothing when there is no account at all', async () => {
+      env.cleanup()
+      env = createTestEnvironment('accounts-none')
+      env.initDatabase()
+
+      const result = await runCliFailure(
+        ['accounts', 'info'],
+        6,
+        env.getCliOptions(),
+      )
+
+      expect(result.json).toEqual({
+        success: false,
+        error: {
+          code: 'ACCOUNT_NOT_FOUND',
+          message: 'No account found',
+          retryable: false,
+        },
+      })
     })
   })
 })

@@ -62,8 +62,9 @@ describe('E2E: background migrations', () => {
       [1, 'chats_raw_json_v2', 'pending'],
       [1, 'messages_refetch_empty_raw_json', 'pending'],
       [1, 'message_search_names', 'pending'],
+      [1, 'messages_rich_text', 'pending'],
     ])
-    expect(before.data.accounts.accounts[0]!.migrations).toHaveLength(5)
+    expect(before.data.accounts.accounts[0]!.migrations).toHaveLength(6)
 
     const pretty = stripAnsi(
       (await runCliSuccess(['status', '--format', 'pretty'], options())).stdout,
@@ -75,7 +76,9 @@ describe('E2E: background migrations', () => {
     const migrated = (
       await runCliSuccess(['db', 'migrate', '--account', '1'], options())
     ).json as MigrateOutput
-    expect(migrated.data.rows).toBe(MESSAGES + 3 + 2 + MESSAGES + MESSAGES)
+    expect(migrated.data.rows).toBe(
+      MESSAGES + 3 + 2 + MESSAGES + MESSAGES + MESSAGES,
+    )
     expect(
       migrated.data.migrations.map((m) => [m.name, m.state, m.done, m.total]),
     ).toEqual([
@@ -84,6 +87,7 @@ describe('E2E: background migrations', () => {
       ['chats_raw_json_v2', 'done', 2, 2],
       ['messages_refetch_empty_raw_json', 'done', MESSAGES, MESSAGES],
       ['message_search_names', 'done', MESSAGES, MESSAGES],
+      ['messages_rich_text', 'done', MESSAGES, MESSAGES],
     ])
 
     const after = (await runCliSuccess(['status'], options()))

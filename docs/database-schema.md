@@ -263,6 +263,15 @@ syncs may still say 1 for them. The file itself is in `message_attachments`. A `
 message is a call, a pin or a group change; `raw_json.action` says which, and `tg messages`
 prints it as `action` ([cli-commands.md](cli-commands.md#messages)).
 
+`text` is the message's text or a file's caption. A rich message (`raw_json.richMessage`, a
+list of page blocks such as headings, tables and lists, and an empty `raw_json.message`) is
+`message_type` `text`, and its `text` is the blocks rendered in Telegram's rich Markdown
+(`src/utils/rich-message.ts`; the rules are in
+[cli-commands.md](cli-commands.md#messages)), written by every writer, so the search index
+holds every word of it. Rows that 0.13.1 and older cached have `NULL` text until the background
+migration `messages_rich_text` reaches them; `tg messages` renders those from `raw_json`
+meanwhile. A live edit stores the new rendered text, as it stores any edited text.
+
 ### Table: message_attachments
 
 The file of a cached message, one row per message that has one, written in the same transaction
@@ -301,7 +310,7 @@ this version knows.
 
 ```sql
 CREATE TABLE cache_migrations (
-  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, …, message_search_names
+  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, …, messages_rich_text
   state       TEXT NOT NULL DEFAULT 'pending',  -- pending, running, done
   cursor      INTEGER NOT NULL DEFAULT 0,       -- rowid of the last row done
   end_rowid   INTEGER,           -- the table's largest rowid when it started
@@ -750,6 +759,7 @@ The migrations so far (see [raw_json](#raw_json)):
 | `chats_raw_json_v2` | `chats_cache` | `raw_json` into the current form |
 | `messages_refetch_empty_raw_json` | `messages_cache` | nothing: it queues a `refetch_messages` sync job for each chat with a message whose `raw_json` is `{}`, which the daemon fetches again by ID (see [sync-strategy.md](sync-strategy.md#job-types)) |
 | `message_search_names` | `messages_cache` | the message's `message_search` row, with the sender and chat names cached now; for caches written before `search_reindex_queue` (#93, [search.md](search.md#names-after-a-rename)) |
+| `messages_rich_text` | `messages_cache` | `text` of each rich message cached by 0.13.1 and older without it: its blocks in rich Markdown, which the update trigger indexes. It reads `raw_json` only for `text` rows with no text |
 
 `messages_raw_json_v2` parses each message's `raw_json` once for all three. It writes neither
 `text`, `from_id` nor `media_path`, so the search index is untouched, and it leaves
