@@ -81,14 +81,31 @@ tg chats sync @examplenews        # sync this chat in the background
 community, a collection of linked chats). `--type community` lists the communities the
 account joined once a daemon start or `tg chats list --fresh` has cached them.
 
-Each item of `tg chats list` has `syncEnabled` (whether the daemon syncs the chat) and
-`syncReason`, why: `dm`, `bot`, `deleted_account`, `small_group`, `medium_group` (the default
-policy), `large_group`, `unknown_size`, `channel`, `community` (off by the policy), or
-`on_by_hand` / `off_by_hand` (set with `tg chats sync`). It is `null` for a chat without sync
-state: an archived chat that hasn't synced yet, or one no daemon start has seen.
+The `data` of `tg chats list`:
 
-Each item also has `unreadCount`, the chat's unread incoming messages as Telegram counts them,
-or `null` before a dialog list has the chat (a daemon start or `tg chats list --fresh`).
+<!-- output: chats list -->
+| Field | Type | Description |
+|---|---|---|
+| `items` | array | The page of chats, newest message first |
+| `items[].id` | integer | Marked peer ID: the user ID, `-N` for a basic group, `-100…` for a supergroup, channel or community |
+| `items[].type` | `private`, `group`, `supergroup`, `channel` or `community` | Chat type |
+| `items[].title` | string | Chat title or the user's name; empty when Telegram gave none |
+| `items[].username` | string or `null` | Public username, without `@` |
+| `items[].memberCount` | integer or `null` | Members of a group or channel; `null` when unknown |
+| `items[].lastMessageAt` | integer or `null` | Time of the newest message, Unix milliseconds |
+| `items[].isCreator` | boolean | The account created the chat |
+| `items[].isAdmin` | boolean | The account is an admin of the chat |
+| `items[].unreadCount` | integer or `null` | Unread incoming messages as Telegram counts them; `null` before a dialog list has the chat (a daemon start or `--fresh`) |
+| `items[].syncEnabled` | boolean | Whether the daemon syncs the chat's messages |
+| `items[].syncReason` | `dm`, `bot`, `deleted_account`, `small_group`, `medium_group`, `large_group`, `unknown_size`, `channel`, `community`, `on_by_hand`, `off_by_hand` or `null` | Why: the policy's reason (`medium_group` is the default; `large_group`, `unknown_size`, `channel` and `community` are off), or `on_by_hand` / `off_by_hand` from `tg chats sync`; `null` for a chat without sync state: an archived chat that hasn't synced yet, or one no daemon start has seen |
+| `total` | integer | Chats that match the filters |
+| `offset` | integer | `--offset` |
+| `limit` | integer | `--limit` |
+| `hasMore` | boolean | More chats follow this page |
+| `source` | `cache` or `api` | `cache`, or `api` with `--fresh` or when the cache has no matching chat |
+| `stale` | boolean | A matching cached chat is older than `cache.staleness.dialogs`; always `false` from the API |
+<!-- /output -->
+
 `--unread` lists only chats with unread messages, in the same order; it answers from the cache
 once a dialog list has given the chats their counts, and otherwise reads the dialog list from
 Telegram, as `--fresh` does. How fresh the count is: [real-time.md](real-time.md#unread-counts).
