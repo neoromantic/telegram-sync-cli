@@ -8,6 +8,7 @@
 import type { Database } from 'bun:sqlite'
 import { join } from 'node:path'
 import { defineCommand } from 'citty'
+import { ConfigError, loadAccessSettings } from '../config'
 import { createPidFile } from '../daemon'
 import {
   accountsDb,
@@ -41,13 +42,14 @@ import { createRateLimitsService } from '../db/rate-limits'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { historyDoneSql, type SyncMode } from '../db/sync-schema'
+import { ErrorCodes } from '../types'
 import { cacheUnavailableSuggestion } from '../utils/account-cache'
 import {
   ACCOUNT_SELECTOR_DESCRIPTION,
   resolveAccountSelector,
 } from '../utils/account-selector'
 import { type MediaUsage, readMediaUsage } from '../utils/media-cache'
-import { getOutputFormat, success } from '../utils/output'
+import { error, getOutputFormat, success } from '../utils/output'
 import { VERSION } from '../version'
 import { printPrettyStatus } from './status/pretty'
 
@@ -119,10 +121,19 @@ export const statusCommand = defineCommand({
     const accountId = resolveAccountSelector(args.account)
 
     // Collect all status data
-    const statusData = await collectStatus(pidFile, {
-      accountId,
-      sizes: args.sizes,
-    })
+    let statusData: Awaited<ReturnType<typeof collectStatus>>
+    try {
+      statusData = await collectStatus(pidFile, {
+        accountId,
+        sizes: args.sizes,
+      })
+    } catch (err) {
+      // A bad TELEGRAM_SYNC_CLI_ALLOWED_CHATS
+      if (err instanceof ConfigError) {
+        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+      }
+      throw err
+    }
 
     // Determine output format
     const format = getOutputFormat()
@@ -720,6 +731,7 @@ export async function collectStatus(
 
   // Moves a shared cache first, so the accounts' files below are current
   const storage = collectStorageStatus(dataDir)
+  const access = await loadAccessSettings({ dataDir })
 
   const allAccounts = accountsDb.getAll()
   const activeAccount = accountsDb.getActive()
@@ -899,6 +911,11 @@ export async function collectStatus(
       media_bytes: options.sizes
         ? sum((s) => (s.media ? s.media.bytes + s.media.partial_bytes : 0))
         : null,
+    },
+    /** Read-only mode and the chat allowlist (null: every chat), as the commands apply them */
+    access: {
+      read_only: access.readOnly,
+      allowed_chats: access.allowedChats,
     },
     cli_version: VERSION,
     timestamp: new Date().toISOString(),

@@ -27,30 +27,7 @@ import {
 } from '../utils/account-selector'
 import { keepActiveAccountInConfig } from '../utils/active-account'
 import { error, info, success } from '../utils/output'
-
-/**
- * QR code generator interface for dependency injection
- */
-export interface QrCodeGenerator {
-  generate(
-    url: string,
-    options: { small: boolean },
-    callback: (qr: string) => void,
-  ): void
-}
-
-/**
- * Default QR code generator using qrcode-terminal
- */
-let defaultQrGenerator: QrCodeGenerator | null = null
-
-async function getQrGenerator(): Promise<QrCodeGenerator> {
-  if (!defaultQrGenerator) {
-    const qrcode = await import('qrcode-terminal')
-    defaultQrGenerator = qrcode
-  }
-  return defaultQrGenerator
-}
+import { renderQr } from '../utils/qr'
 
 /**
  * Prompt user for input
@@ -115,7 +92,8 @@ export interface AuthDependencies {
   isAuthorized: (client: TelegramClient) => Promise<boolean>
   prompt: (message: string) => Promise<string>
   promptPassword: (message: string) => Promise<string>
-  qrGenerator?: QrCodeGenerator
+  /** Render a login URL as a QR code for the terminal */
+  renderQr: (url: string) => string
   /**
    * Write a logged-in account to activeAccount in config.json when the key
    * is set and names another account; fail the command when it can't
@@ -134,6 +112,7 @@ export function getDefaultDependencies(): AuthDependencies {
     isAuthorized,
     prompt,
     promptPassword,
+    renderQr,
     keepActiveAccountInConfig: (accountId) =>
       keepActiveAccountInConfig(accountId, {
         context: `Logged in as account ${accountId}`,
@@ -271,7 +250,7 @@ export async function loginWithQr(
   account?: QrLoginAccount
   error?: string
 }> {
-  const { accountsDb, createClient, qrGenerator } = deps
+  const { accountsDb, createClient } = deps
 
   // Create a new account record for QR login
   const label = accountName?.trim()
@@ -287,23 +266,19 @@ export async function loginWithQr(
   let loggedIn: QrLoginAccount
 
   try {
-    const qr = qrGenerator || (await getQrGenerator())
-
+    // The QR code and its status lines go to stderr, apart from the JSON on stdout
     const user = await client.signInQr({
       onUrlUpdated: (url: string, expires: Date) => {
-        // Generate QR code in terminal
-        qr.generate(url, { small: true }, (qrText: string) => {
-          console.log(qrText)
-        })
-        console.log(`\nExpires: ${expires.toLocaleTimeString()}`)
-        console.log('Waiting for scan...\n')
+        console.error(deps.renderQr(url))
+        console.error(`\nExpires: ${expires.toLocaleTimeString()}`)
+        console.error('Waiting for scan...\n')
       },
       onQrScanned: () => {
-        console.log('✓ QR code scanned! Completing authentication...')
+        console.error('✓ QR code scanned! Completing authentication...')
       },
       password: async () => deps.promptPassword('\nEnter 2FA password: '),
       invalidPasswordCallback: () => {
-        console.log('Invalid password, please try again.')
+        console.error('Invalid password, please try again.')
       },
     })
 
@@ -542,9 +517,9 @@ export const loginQrCommand = defineCommand({
   async run({ args }) {
     settleCacheLayoutBeforeAccountChange()
     ensureCredentials()
-    console.log('\n=== QR Code Login ===\n')
-    console.log('Scan this QR code with your Telegram mobile app:')
-    console.log('(Settings → Devices → Link Desktop Device)\n')
+    console.error('\n=== QR Code Login ===\n')
+    console.error('Scan this QR code with your Telegram mobile app:')
+    console.error('(Settings → Devices → Link Desktop Device)\n')
 
     const result = await loginWithQr(args.name, getDefaultDependencies())
 

@@ -68,6 +68,7 @@ bun run build:all                # cross-compile every target
 bun run test:integration         # real Telegram API, opt-in (see Testing)
 bun run lint:fix                 # Biome autofix (also the pre-commit hook)
 bun run bench:storage            # storage benchmark on made-up data, opt-in (docs/storage.md)
+bun run docs:outputs             # regenerate output tables in docs/cli-commands.md
 ```
 
 - `bin/tg.js` is a 3-line ESM shim (`#!/usr/bin/env bun`) that runs `src/index.ts`. The npm
@@ -117,8 +118,10 @@ Steps: [docs/releasing.md](docs/releasing.md).
   hands its events to a detached copy of tg that sends them (`src/telemetry/background.ts`,
   `send.ts`); only the daemon and debug mode send in-process and wait up to 500 ms.
 - Output is JSON by default with a stable error schema
-  (`{ success: false, error: { code, message, details?, suggestion? } }`) and documented exit
-  codes. Don't change codes or shapes without updating the docs.
+  (`{ success: false, error: { code, message, details?, suggestion?, retryable } }`) and
+  documented exit codes. Don't change codes or shapes without updating the docs. `tg chats list`
+  declares its `data` in `src/commands/chats/list-output.ts` (zod, a devDependency, so the CLI
+  imports only its types): change it with the command, then run `bun run docs:outputs`.
 
 ```
 CLI mode (tg <cmd>)            Daemon mode (tg daemon start)
@@ -181,8 +184,10 @@ src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integratio
 New commands use `defineCommand` from citty and report through `success()`/`error()` in
 `src/utils/output.ts`.
 Import mtcute values and types (`tl`, `TelegramClient`, `networkMiddlewares`) from
-`@mtcute/bun`, the only mtcute package in `package.json`; `@mtcute/core` and `@mtcute/tl` are
-not direct dependencies (and `@mtcute/tl` no longer exists since mtcute 0.29).
+`@mtcute/bun` (helpers such as `toInputUser` from `@mtcute/bun/utils.js`). `@mtcute/core` is a
+direct dependency, at the same version, only for its TL schema export
+`@mtcute/core/tl/api-schema.json`, which `tg api` reads to type its arguments; `@mtcute/tl` no
+longer exists since mtcute 0.29.
 
 ### Testing
 

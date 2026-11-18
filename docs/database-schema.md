@@ -159,7 +159,9 @@ CREATE TABLE chats_cache (
   fetched_at INTEGER NOT NULL,
   raw_json TEXT NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
-  updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+  unread_count INTEGER,          -- unread incoming messages; NULL until a dialog list has the chat
+  read_inbox_max_id INTEGER      -- every incoming message up to this ID is read
 );
 
 CREATE INDEX idx_chats_cache_username ON chats_cache(username) WHERE username IS NOT NULL;
@@ -176,6 +178,19 @@ dialogs, so the daemon's dialog pass (on start and after a reconnect) and
 `communities.getJoinedCommunities`, access hash included. A community has no messages of its
 own: the dialog pass gives it no `chat_sync_state` row (only `tg chats sync --off` or `--auto`
 writes one, with sync off), and its `last_message_id` and `last_message_at` stay NULL.
+
+`unread_count` and `read_inbox_max_id` (added in 0.13) are the chat's unread state: the
+unread messages are the incoming ones above `read_inbox_max_id`. Dialog lists set both; other
+writes of the row (a lookup, a live message's chat) keep them. The daemon raises the count for
+each new incoming message and takes reads from any device from Telegram's read updates, so the
+count is as fresh as the daemon's updates, and without a daemon as old as the last dialog list
+([real-time.md](real-time.md#unread-counts)). Caches from older versions get both columns as
+NULL; the next dialog pass fills them.
+
+```sql
+SELECT chat_id, title, unread_count FROM chats_cache
+WHERE unread_count > 0 ORDER BY last_message_at DESC;
+```
 
 ### Table: sync_state
 
@@ -248,6 +263,15 @@ syncs may still say 1 for them. The file itself is in `message_attachments`. A `
 message is a call, a pin or a group change; `raw_json.action` says which, and `tg messages`
 prints it as `action` ([cli-commands.md](cli-commands.md#messages)).
 
+`text` is the message's text or a file's caption. A rich message (`raw_json.richMessage`, a
+list of page blocks such as headings, tables and lists, and an empty `raw_json.message`) is
+`message_type` `text`, and its `text` is the blocks rendered in Telegram's rich Markdown
+(`src/utils/rich-message.ts`; the rules are in
+[cli-commands.md](cli-commands.md#messages)), written by every writer, so the search index
+holds every word of it. Rows that 0.13.1 and older cached have `NULL` text until the background
+migration `messages_rich_text` reaches them; `tg messages` renders those from `raw_json`
+meanwhile. A live edit stores the new rendered text, as it stores any edited text.
+
 ### Table: message_attachments
 
 The file of a cached message, one row per message that has one, written in the same transaction
@@ -286,7 +310,7 @@ this version knows.
 
 ```sql
 CREATE TABLE cache_migrations (
-  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, …, message_search_names
+  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, …, messages_rich_text
   state       TEXT NOT NULL DEFAULT 'pending',  -- pending, running, done
   cursor      INTEGER NOT NULL DEFAULT 0,       -- rowid of the last row done
   end_rowid   INTEGER,           -- the table's largest rowid when it started
@@ -753,8 +777,9 @@ most 500 or until 50 ms have passed, and moves the cursor in the same transactio
   which rolls back, and the next run goes on from the cursor;
 - the daemon and `tg db migrate` can run at once: each batch reads the cursor under the write
   lock, so they take turns and never do a row twice;
-- another process's write waits for one batch at most, well inside the daemon's 5-second
-  `busy_timeout`.
+- another process's write gets in well inside its 5-second `busy_timeout`: next to the daemon,
+  `tg db migrate` pauses after each batch, so a daemon write waits for one batch at most; with
+  the daemon stopped it pauses after each second of work, so a write waits about a second.
 
 A migration covers the rows up to the table's largest `rowid` when it starts; rows written later
 are already in the new form. Each rewrite is idempotent: a row done twice ends the same. A full
@@ -777,6 +802,7 @@ The migrations so far (see [raw_json](#raw_json)):
 | `chats_raw_json_v2` | `chats_cache` | `raw_json` into the current form |
 | `messages_refetch_empty_raw_json` | `messages_cache` | nothing: it queues a `refetch_messages` sync job for each chat with a message whose `raw_json` is `{}`, which the daemon fetches again by ID (see [sync-strategy.md](sync-strategy.md#job-types)) |
 | `message_search_names` | `messages_cache` | the message's `message_search` row, with the sender and chat names cached now; for caches written before `search_reindex_queue` (#93, [search.md](search.md#names-after-a-rename)) |
+| `messages_rich_text` | `messages_cache` | `text` of each rich message cached by 0.13.1 and older without it: its blocks in rich Markdown, which the update trigger indexes. It reads `raw_json` only for `text` rows with no text |
 
 `messages_raw_json_v2` parses each message's `raw_json` once for all three. It writes neither
 `text`, `from_id` nor `media_path`, so the search index is untouched, and it leaves

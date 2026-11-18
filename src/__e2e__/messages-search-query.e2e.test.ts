@@ -86,8 +86,25 @@ describe('E2E: messages search query rules', () => {
   beforeAll(() => {
     env = createTestEnvironment('messages-search-query')
     env.initDatabase()
-    env.seedAccounts([{ phone: '+15550000000', is_active: true }])
+    // Account 2 knows its own user ID (Alice); account 1 doesn't
+    env.seedAccounts([
+      { phone: '+15550000000', is_active: true },
+      { phone: '+15550000001', user_id: ALICE_ID },
+    ])
     seed(env.openCacheDb(1))
+    const own = env.openCacheDb(2)
+    seed(own)
+    createMessagesCache(own).upsertBatch([
+      {
+        chat_id: ALICE_ID,
+        message_id: 12,
+        from_id: ALICE_ID,
+        text: 'hello note to self',
+        message_type: 'text',
+        date: Math.floor(Date.now() / 1000),
+        raw_json: '{}',
+      },
+    ])
   })
 
   afterAll(() => {
@@ -205,6 +222,30 @@ describe('E2E: messages search query rules', () => {
     expect(await invalidArgs('hello', '--since', '1d', '--until', '7d')).toBe(
       'INVALID_ARGS',
     )
+  })
+
+  it('reads me in --chat and --sender as the own user ID', async () => {
+    // Saved Messages is the chat under the own user ID
+    expect(await ids('hello', '--account', '2', '--chat', 'me')).toEqual([12])
+    expect(await ids('hello', '--account', '2', '--chat', 'ME')).toEqual([12])
+    expect(await ids('hello', '--account', '2', '--sender', 'me')).toEqual([
+      3, 5, 12,
+    ])
+  })
+
+  it('rejects me without a known own user ID, and a value that is no peer', async () => {
+    expect(await invalidArgs('hello', '--chat', 'me')).toBe('INVALID_ARGS')
+    expect(await invalidArgs('hello', '--chat', '12abc')).toBe('INVALID_ARGS')
+    expect(await invalidArgs('hello', '--sender', '1.5')).toBe('INVALID_ARGS')
+    const result = await runCli(
+      ['messages', 'search', '--query', 'hello', '--sender', 'a b'],
+      env.getCliOptions(),
+    )
+    expect(result.json).toMatchObject({
+      error: { message: 'Invalid --sender: a b', details: { sender: 'a b' } },
+    })
+    // A username without @ still works
+    expect(await ids('hello', '--chat', 'teamchat')).toEqual([3])
   })
 
   it('orders by date by default and by bm25 with --sort relevance', async () => {

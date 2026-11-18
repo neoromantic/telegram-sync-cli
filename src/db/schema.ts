@@ -120,7 +120,9 @@ export function initCacheSchema(db: Database): void {
       fetched_at INTEGER NOT NULL,
       raw_json TEXT NOT NULL,
       created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
-      updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+      updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+      unread_count INTEGER,
+      read_inbox_max_id INTEGER
     )
   `)
 
@@ -233,6 +235,8 @@ export class ChatCacheRow {
   raw_json!: string
   created_at!: number
   updated_at!: number
+  unread_count!: number | null
+  read_inbox_max_id!: number | null
 }
 
 /** Rate limit row class */

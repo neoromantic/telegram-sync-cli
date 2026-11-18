@@ -1,5 +1,7 @@
 import { SYNC_RETRY_CONFIG } from '../../daemon/sync-retry'
+import { getAccountCachePath } from '../../db'
 import { UPGRADE_DOCS_URL } from '../../db/cache-layout'
+import { checkVacuumDisk } from '../../db/cache-maintenance'
 import { SyncJobStatus, type SyncMode } from '../../db/sync-schema'
 import { formatBytes, formatRelativeTime } from '../../utils/formatting'
 import { formatDuration } from '../../utils/time'
@@ -491,11 +493,17 @@ function printCacheSizeSection(status: StatusSnapshot): void {
     if (size.file_bytes > 0 && size.free_bytes > size.file_bytes * freeShare) {
       const vacuum = `tg db vacuum --account ${acc.id}`
       // A cache without auto_vacuum needs a full vacuum, with the daemon stopped
-      vacuumHints.push(
-        daemonRunning && size.auto_vacuum === 'none'
-          ? `tg daemon stop && ${vacuum} && tg daemon start`
-          : vacuum,
+      const stopFirst = daemonRunning && size.auto_vacuum === 'none'
+      let hint = c.value(
+        stopFirst ? `tg daemon stop && ${vacuum} && tg daemon start` : vacuum,
       )
+      if (stopFirst || !daemonRunning) {
+        const disk = checkVacuumDisk(getAccountCachePath(acc.id))
+        if (!disk.enough) {
+          hint += `  ${c.warning(`needs ${formatBytes(disk.needed_bytes)} of free disk, ${formatBytes(disk.free_bytes)} free`)}`
+        }
+      }
+      vacuumHints.push(hint)
     }
   }
   if (vacuumHints.length > 0) {
@@ -505,7 +513,7 @@ function printCacheSizeSection(status: StatusSnapshot): void {
         '  The cache has free pages (over 10%, or left by a background migration); to give them back to the disk:',
       ),
     )
-    for (const command of vacuumHints) console.log(`    ${c.value(command)}`)
+    for (const hint of vacuumHints) console.log(`    ${hint}`)
   }
 }
 
@@ -617,11 +625,24 @@ function printScope(status: StatusSnapshot): void {
   )
 }
 
+/** One line for read-only mode and the chat allowlist, when either is on */
+function printAccess(status: StatusSnapshot): void {
+  const { read_only, allowed_chats } = status.access
+  const parts = [
+    ...(read_only ? ['read-only'] : []),
+    ...(allowed_chats === null
+      ? []
+      : [`only chats ${allowed_chats.join(', ') || '(none)'}`]),
+  ]
+  if (parts.length > 0) console.log(c.warning(`  ${parts.join('; ')}`))
+}
+
 export function printPrettyStatus(status: StatusSnapshot): void {
   console.log()
   console.log(c.bold('  Telegram Sync CLI Status'))
   console.log(c.dim(`  ${status.timestamp}`))
   printScope(status)
+  printAccess(status)
 
   printDaemonSection(status)
   printSyncJobsSection(status)

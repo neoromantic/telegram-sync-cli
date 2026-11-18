@@ -1,9 +1,8 @@
 import type { Database } from 'bun:sqlite'
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
-import { defineCommand } from 'citty'
+import { type ArgsDef, defineCommand } from 'citty'
 import { getResolvedCacheConfig } from '../../config'
 import {
-  type ChatSyncView,
   chatSyncView,
   createChatSyncStateService,
 } from '../../db/chat-sync-state'
@@ -25,15 +24,17 @@ import {
   reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
+import { allowedChatIds } from '../access'
+import { nextCommand } from '../next'
 import {
   CHAT_TYPE_VALUES,
-  type ChatItem,
   chatRowToItem,
   dialogToCacheInput,
   fetchJoinedCommunities,
   filterChatsByType,
   isValidChatType,
 } from './helpers'
+import type { ChatsListOutput } from './list-output'
 
 type DialogCollectorClient = Pick<TelegramClient, 'iterDialogs'>
 
@@ -89,42 +90,48 @@ export async function fetchChatsFromApi(
   return chatInputs
 }
 
-export interface ChatListItem extends ChatItem, ChatSyncView {}
+export const listChatsArgs = {
+  limit: {
+    type: 'string',
+    description: 'Maximum number of chats to return (default: 50)',
+    default: '50',
+  },
+  offset: {
+    type: 'string',
+    description: 'Offset for pagination (default: 0)',
+    default: '0',
+  },
+  type: {
+    type: 'string',
+    description: `Filter by chat type: ${CHAT_TYPE_VALUES.join(', ')} (default: all)`,
+  },
+  unread: {
+    type: 'boolean',
+    description: 'Only chats with unread messages',
+    default: false,
+  },
+  account: {
+    type: 'string',
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+  fresh: {
+    type: 'boolean',
+    description: 'Bypass cache and fetch from API',
+    default: false,
+  },
+} satisfies ArgsDef
 
 export const listChatsCommand = defineCommand({
   meta: {
     name: 'list',
     description: 'List chats and dialogs with pagination',
   },
-  args: {
-    limit: {
-      type: 'string',
-      description: 'Maximum number of chats to return (default: 50)',
-      default: '50',
-    },
-    offset: {
-      type: 'string',
-      description: 'Offset for pagination (default: 0)',
-      default: '0',
-    },
-    type: {
-      type: 'string',
-      description: `Filter by chat type: ${CHAT_TYPE_VALUES.join(', ')} (default: all)`,
-    },
-    account: {
-      type: 'string',
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-    fresh: {
-      type: 'boolean',
-      description: 'Bypass cache and fetch from API',
-      default: false,
-    },
-  },
+  args: listChatsArgs,
   async run({ args }) {
     const limit = Number.parseInt(args.limit ?? '50', 10)
     const offset = Number.parseInt(args.offset ?? '0', 10)
     const fresh = args.fresh ?? false
+    const unread = args.unread ?? false
     const rawType = args.type
     const typeFilter = rawType as ChatType | undefined
 
@@ -136,6 +143,9 @@ export const listChatsCommand = defineCommand({
     }
 
     const { account, db: cacheDb } = openAccountCache(args.account)
+    const allowed = await allowedChatIds(account.id)
+    const isAllowed = (chat: { chat_id: string }) =>
+      allowed === null || allowed.has(Number(chat.chat_id))
 
     try {
       const chatsCache = createChatsCache(cacheDb)
@@ -143,7 +153,7 @@ export const listChatsCommand = defineCommand({
       const participation = createGroupParticipation(cacheDb)
       const toItem = (
         chat: Parameters<typeof chatRowToItem>[0],
-      ): ChatListItem => {
+      ): ChatsListOutput['items'][number] => {
         const item = chatRowToItem(chat)
         return {
           ...item,
@@ -153,21 +163,31 @@ export const listChatsCommand = defineCommand({
       const cacheConfig = await getResolvedCacheConfig()
 
       if (!fresh) {
-        const cachedChats = chatsCache.list({
-          limit: 1000,
-          type: typeFilter,
-          orderBy: 'last_message_at',
-        })
-
-        if (cachedChats.length > 0) {
-          const response = buildCachePaginatedResponse(cachedChats, toItem, {
-            offset,
-            limit,
-            ttlMs: cacheConfig.staleness.dialogs,
-            source: 'cache',
+        // With allowedChats, every cached chat is a candidate (-1: no limit)
+        const cachedChats = chatsCache
+          .list({
+            limit: allowed === null ? 1000 : -1,
+            type: typeFilter,
+            orderBy: 'last_message_at',
+            unread,
           })
+          .filter(isAllowed)
 
-          success(response)
+        // With --unread, a cache that knows unread counts answers even when
+        // no chat has unread messages
+        if (cachedChats.length > 0 || (unread && chatsCache.hasUnreadState())) {
+          const response: ChatsListOutput = buildCachePaginatedResponse(
+            cachedChats,
+            toItem,
+            {
+              offset,
+              limit,
+              ttlMs: cacheConfig.staleness.dialogs,
+              source: 'cache',
+            },
+          )
+
+          success(response, nextChatsPage(args, response))
           return
         }
       }
@@ -180,18 +200,22 @@ export const listChatsCommand = defineCommand({
 
       const chatInputs = await fetchChatsFromApi(client, cacheDb)
 
-      const filteredChats = filterChatsByType(chatInputs, typeFilter)
+      const filteredChats = filterChatsByType(chatInputs, typeFilter).filter(
+        (chat) => (!unread || (chat.unread_count ?? 0) > 0) && isAllowed(chat),
+      )
       filteredChats.sort(
         (a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0),
       )
 
       const page = paginate(filteredChats, offset, limit)
-      success({
+      const response: ChatsListOutput = {
         ...page,
         items: page.items.map(toItem),
         source: 'api',
         stale: false,
-      })
+      }
+
+      success(response, nextChatsPage(args, response))
     } catch (err) {
       reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
@@ -199,3 +223,18 @@ export const listChatsCommand = defineCommand({
     }
   },
 })
+
+function nextChatsPage(
+  args: Record<string, unknown>,
+  { hasMore, offset, limit }: ChatsListOutput,
+) {
+  if (!hasMore) return []
+  return [
+    nextCommand(
+      'chats list',
+      listChatsArgs,
+      { ...args, limit, offset: offset + limit },
+      'The next page of chats.',
+    ),
+  ]
+}

@@ -9,6 +9,7 @@ import { getClientForAccount } from '../../services/telegram'
 import { ErrorCodes, type MessageSearchItem } from '../../types'
 import { type AttachmentInfo, extractAttachment } from '../../utils/attachment'
 import { error } from '../../utils/output'
+import { richMessageText } from '../../utils/rich-message'
 import {
   extractServiceAction,
   type MessageAction,
@@ -65,8 +66,9 @@ export function messageRowToItem(
 /**
  * A function that makes the item for a row, with the attachment and the
  * service action read from its raw_json (only media and service rows are
- * read). Every cached message has raw_json, so this works for rows cached
- * before message_attachments existed too.
+ * read), and the text of a rich message cached before its text was (a text
+ * row without text). Every cached message has raw_json, so this works for
+ * rows cached before message_attachments existed too.
  */
 export function messageItemReader(
   db: Database,
@@ -76,13 +78,15 @@ export function messageItemReader(
   )
   return (row) => {
     const isService = row.message_type === 'service'
+    const mayBeRich = !row.text && row.message_type === 'text'
     const raw =
-      row.has_media === 1 || isService
+      row.has_media === 1 || isService || mayBeRich
         ? (row.raw_json ?? rawJson.get(row.chat_id, row.message_id)?.raw_json)
         : null
     if (!raw) return messageRowToItem(row, null, null)
+    const text = mayBeRich ? richMessageText(raw) : null
     return messageRowToItem(
-      row,
+      text ? { ...row, text } : row,
       row.has_media === 1 ? extractAttachment(raw) : null,
       isService ? extractServiceAction(raw) : null,
     )

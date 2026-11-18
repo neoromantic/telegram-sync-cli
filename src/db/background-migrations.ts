@@ -373,18 +373,35 @@ export const OTHER_PROCESS_PAUSE_MS = 150
 export const SHARED_BATCH_LIMITS: BatchLimits = { maxRows: 2_500, maxMs: 50 }
 
 /**
+ * Without the daemon, `tg db migrate` pauses OTHER_PROCESS_PAUSE_MS after
+ * each this many ms of work, so another tg command's write gets the lock
+ * within about a second, well inside its 5 s busy_timeout
+ */
+export const ALONE_WORK_MS = 1_000
+
+/**
  * How a foreground run (`tg db migrate`) paces its batches. With the daemon
  * running: SHARED_BATCH_LIMITS and an OTHER_PROCESS_PAUSE_MS pause after
  * each batch, so a daemon write waits for one batch at most. Alone: the
- * default batches back to back.
+ * default batches back to back, with that pause once ALONE_WORK_MS have
+ * passed since the last one.
  */
 export function foregroundPacing(
   daemonRunning: boolean,
 ): Pick<RunOptions, 'limits' | 'yieldBetweenBatches'> {
-  if (!daemonRunning) return {}
+  if (daemonRunning) {
+    return {
+      limits: SHARED_BATCH_LIMITS,
+      yieldBetweenBatches: () => Bun.sleep(OTHER_PROCESS_PAUSE_MS),
+    }
+  }
+  let workStarted = performance.now()
   return {
-    limits: SHARED_BATCH_LIMITS,
-    yieldBetweenBatches: () => Bun.sleep(OTHER_PROCESS_PAUSE_MS),
+    yieldBetweenBatches: async () => {
+      if (performance.now() - workStarted < ALONE_WORK_MS) return
+      await Bun.sleep(OTHER_PROCESS_PAUSE_MS)
+      workStarted = performance.now()
+    },
   }
 }
 

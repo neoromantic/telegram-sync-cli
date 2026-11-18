@@ -3,13 +3,13 @@
  * Uses UsersCache for stale-while-revalidate pattern
  */
 import type { tl } from '@mtcute/bun'
-import { defineCommand } from 'citty'
+import { type ArgsDef, defineCommand } from 'citty'
 import { getResolvedCacheConfig } from '../config'
 import { applyContactsSnapshot } from '../db/contacts-sync'
 import { isCacheStale } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
 import { getClientForAccount } from '../services/telegram'
-import { type Contact, ErrorCodes } from '../types'
+import { type Contact, ErrorCodes, type PaginatedResult } from '../types'
 import { openAccountCache } from '../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
 import {
@@ -28,37 +28,40 @@ import {
   reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
+import { nextCommand } from './next'
 import { cachedUserToUserInfo, isRawUser } from './user/helpers'
 
 /**
  * List contacts
  */
+export const listContactsArgs = {
+  limit: {
+    type: 'string',
+    description: 'Maximum number of contacts to return (default: 50)',
+    default: '50',
+  },
+  offset: {
+    type: 'string',
+    description: 'Offset for pagination (default: 0)',
+    default: '0',
+  },
+  account: {
+    type: 'string',
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+  fresh: {
+    type: 'boolean',
+    description: 'Bypass cache and fetch from API',
+    default: false,
+  },
+} satisfies ArgsDef
+
 export const listContactsCommand = defineCommand({
   meta: {
     name: 'list',
     description: 'List contacts with pagination',
   },
-  args: {
-    limit: {
-      type: 'string',
-      description: 'Maximum number of contacts to return (default: 50)',
-      default: '50',
-    },
-    offset: {
-      type: 'string',
-      description: 'Offset for pagination (default: 0)',
-      default: '0',
-    },
-    account: {
-      type: 'string',
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-    fresh: {
-      type: 'boolean',
-      description: 'Bypass cache and fetch from API',
-      default: false,
-    },
-  },
+  args: listContactsArgs,
   async run({ args }) {
     const limit = Number.parseInt(args.limit ?? '50', 10)
     const offset = Number.parseInt(args.offset ?? '0', 10)
@@ -85,7 +88,7 @@ export const listContactsCommand = defineCommand({
             },
           )
 
-          success(response)
+          success(response, nextContactsPage(args, response))
           return
         }
       }
@@ -128,11 +131,13 @@ export const listContactsCommand = defineCommand({
       // Map to our Contact type
       const allContacts: Contact[] = apiUsers.map(apiUserToContact)
 
-      success({
+      const response = {
         ...paginate(allContacts, offset, limit),
         source: 'api',
         stale: false,
-      })
+      }
+
+      success(response, nextContactsPage(args, response))
     } catch (err) {
       reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
@@ -140,6 +145,21 @@ export const listContactsCommand = defineCommand({
     }
   },
 })
+
+function nextContactsPage(
+  args: Record<string, unknown>,
+  { hasMore, offset, limit }: PaginatedResult<unknown>,
+) {
+  if (!hasMore) return []
+  return [
+    nextCommand(
+      'contacts list',
+      listContactsArgs,
+      { ...args, limit, offset: offset + limit },
+      'The next page of contacts.',
+    ),
+  ]
+}
 
 /**
  * Search contacts

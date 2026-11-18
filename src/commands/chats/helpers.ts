@@ -7,18 +7,7 @@ import {
   toPeerIdFromRawChat,
   toPeerIdFromRawPeer,
 } from '../../utils/telegram-peer-ids'
-
-export interface ChatItem {
-  /** Marked peer ID, as messages_cache and `tg messages search` use it */
-  id: number
-  type: ChatType
-  title: string
-  username: string | null
-  memberCount: number | null
-  lastMessageAt: number | null
-  isCreator: boolean
-  isAdmin: boolean
-}
+import type { ChatItem } from './list-output'
 
 export const CHAT_TYPE_VALUES = [
   'private',
@@ -44,6 +33,7 @@ export function chatRowToItem(chat: ChatRow): ChatItem {
     lastMessageAt: chat.last_message_at,
     isCreator: chat.is_creator === 1,
     isAdmin: chat.is_admin === 1,
+    unreadCount: chat.unread_count ?? null,
   }
 }
 
@@ -116,6 +106,8 @@ export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
     last_message_at: lastMessageAt ? lastMessageAt.getTime() : null,
     fetched_at: Date.now(),
     raw_json: toRawJson(dialog.raw),
+    unread_count: dialog.raw.unreadCount,
+    read_inbox_max_id: dialog.raw.readInboxMaxId,
   }
 }
 

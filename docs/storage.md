@@ -226,6 +226,13 @@ Edit history: [#96](https://github.com/neoromantic/telegram-sync-cli/issues/96).
   31.0 min by itself, and the rate is about the same at 100,000 and 1M. Before #89 every
   migration ran in one transaction on open; a full pass that holds the write lock is like the
   search index rebuild below.
+- **Pauses with the daemon stopped.** Since #122 `tg db migrate` alone pauses 150 ms after each
+  second of work, so another `tg` command's write gets in within about a second; by
+  construction that adds up to 15%. On the 1M cache in the old form, with every migration of
+  this version pending (3,003,001 rows, the re-index of names and the index merges included),
+  two runs before the change took 63.5 s and 59.7 s, and two after it 68.9 s and 69.7 s, run
+  back to back (before, after, after, before) on a machine loaded with other work: 8 to 17%,
+  13% on average.
 - **Names in the index.** The one-off re-index of names (`message_search_names`, #93) does a
   message at a time, a delete and an insert in the index, in the same batches as the other
   migrations, with a batch of index merges after each: 46,915 messages/s at 100,000 (2.1 s),
@@ -246,7 +253,11 @@ Edit history: [#96](https://github.com/neoromantic/telegram-sync-cli/issues/96).
   100,000, 43 ms at 1M and 437 ms at 10M.
 - **VACUUM.** `tg db vacuum` with the daemon stopped took 0.7 s at 100,000, 4.8 s at 1M and
   1.1 min at 10M. At its peak it needed free disk of about twice the file's size, for the new
-  copy plus the WAL (1.9× at 100,000 and 1.8× at 1M and 10M). After the benchmark's two
+  copy plus the WAL (1.9× at 100,000 and 1.8× at 1M and 10M). An earlier run peaked at 3.37 GB
+  for a 1.56 GB cache (2.16×) and 30.62 GB for 15.55 GB (1.97×), so before a full VACUUM
+  `tg db vacuum` asks for free disk of 2.2 times the file, above every measured peak, plus
+  64 MB for a small cache and for what other programs write meanwhile, and stops at once when
+  the disk has less (#119). After the benchmark's two
   re-indexes of names it gave back 9% at 100,000 and 8% at 1M and 10M; after `tg db migrate` on
   the 1M cache written by 0.5.0 it gave back 31% (2.22 GB to 1.52 GB).
 

@@ -74,7 +74,7 @@ function attributesOf(doc: RawObject): RawObject[] {
 }
 
 /** A TL Long in any form raw_json holds, as a decimal string */
-function longToDecimal(value: unknown): string | null {
+export function longToDecimal(value: unknown): string | null {
   if (typeof value === 'bigint') return value.toString()
   if (typeof value === 'number') {
     return Number.isSafeInteger(value) ? String(value) : null

@@ -19,11 +19,12 @@ export function paginate<T>(
 export function buildCachePaginatedResponse<
   TInput extends { fetched_at: number | null },
   TOutput,
+  TSource extends string,
 >(
   items: TInput[],
   mapItem: (item: TInput) => TOutput,
-  options: { offset: number; limit: number; ttlMs: number; source: string },
-): PaginatedResult<TOutput> & { source: string; stale: boolean } {
+  options: { offset: number; limit: number; ttlMs: number; source: TSource },
+): PaginatedResult<TOutput> & { source: TSource; stale: boolean } {
   const { offset, limit, ttlMs, source } = options
   const anyStale = items.some((item) => isCacheStale(item.fetched_at, ttlMs))
 

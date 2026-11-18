@@ -10,7 +10,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { join } from 'node:path'
 import type { TelegramClient, tl } from '@mtcute/bun'
 
+import { createUsersCache } from '../db/users-cache'
 import { ErrorCodes } from '../types'
+import { toLong } from '../utils/long'
 import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
 import { runCliFailure, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
@@ -145,7 +147,7 @@ describe('E2E: tg api builds the request from its arguments', () => {
         correspondents: true,
         offset: 0,
         limit: 5,
-        hash: 0,
+        hash: toLong(0),
       },
       response,
     )
@@ -189,7 +191,7 @@ describe('E2E: tg api builds the request from its arguments', () => {
           limit: 10,
           maxId: 0,
           minId: 0,
-          hash: 0,
+          hash: toLong(0),
         },
         response,
       )
@@ -211,6 +213,98 @@ describe('E2E: tg api builds the request from its arguments', () => {
       })
     },
   )
+
+  it.each([
+    ['--peer me --limit 1', ['--peer', 'me', '--limit', '1']],
+    ['--json', ['--json', '{"peer":{"_":"inputPeerSelf"},"limit":1}']],
+  ])(
+    'messages.getHistory %s resolves the chat and fills the offsets',
+    async (_form, args) => {
+      const response = {
+        _: 'messages.messages',
+        messages: [],
+        chats: [],
+        users: [],
+      }
+      await recordFixture(
+        {
+          _: 'messages.getHistory',
+          peer: { _: 'inputPeerSelf' },
+          offsetId: 0,
+          offsetDate: 0,
+          addOffset: 0,
+          limit: 1,
+          maxId: 0,
+          minId: 0,
+          hash: toLong(0),
+        },
+        response,
+      )
+
+      const result = await runCliSuccess(
+        ['api', 'messages.getHistory', ...args],
+        replayOptions(),
+      )
+
+      expect(result.json).toEqual({
+        success: true,
+        data: { method: 'messages.getHistory', result: response },
+      })
+    },
+  )
+
+  it('messages.getHistory --peer @username takes the access hash from the cache', async () => {
+    createUsersCache(env.openCacheDb(1)).upsert({
+      user_id: '1001',
+      username: 'alice',
+      first_name: 'Alice',
+      access_hash: '777',
+      fetched_at: Date.now(),
+      raw_json: '{}',
+    })
+    const response = {
+      _: 'messages.messages',
+      messages: [],
+      chats: [],
+      users: [],
+    }
+    await recordFixture(
+      {
+        _: 'messages.getHistory',
+        peer: { _: 'inputPeerUser', userId: 1001, accessHash: toLong('777') },
+        offsetId: 0,
+        offsetDate: 0,
+        addOffset: 0,
+        limit: 10,
+        maxId: 0,
+        minId: 0,
+        hash: toLong(0),
+      },
+      response,
+    )
+
+    const result = await runCliSuccess(
+      ['api', 'messages.getHistory', '--peer', '@alice', '--limit', '10'],
+      replayOptions(),
+    )
+
+    expect(result.json).toEqual({
+      success: true,
+      data: { method: 'messages.getHistory', result: response },
+    })
+  })
+
+  it('refuses a basic group where the method takes a user, before any call', async () => {
+    const result = await runCliFailure(
+      ['api', 'users.getFullUser', '--id', '-4242'],
+      3,
+      replayOptions(),
+    )
+
+    expect((result.json as { error: { code: string } }).error.code).toBe(
+      ErrorCodes.INVALID_ARGS,
+    )
+  })
 
   // citty reads `-1.5` as the short options 1, . and 5; none may reach the request
   it.each([

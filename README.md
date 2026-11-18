@@ -68,16 +68,22 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
 - Chat history with cursor paging (`tg messages list`) and a message in context
   (`tg messages get`), cache-first
+- Unread messages: chats with unread messages (`tg chats list --unread`), their unread messages
+  (`tg messages unread`) and marking them read (`tg messages read`); the daemon keeps the
+  counts current
 - Full-text search (FTS5) over cached messages
 - Files: send one with `tg send --file`; download a message's file into a per-account media
   cache with `tg media download` (cached files need no network, partial downloads resume);
   every message item shows its attachment (kind, name, MIME type, size)
 - Service messages say what happened: calls (video, duration, why they ended), pins and group
   changes in each item's `action`
+- Rich messages (headings, tables, lists, task lists, code, formulas) read as rich Markdown in
+  `text`, and search finds them by any word
 - Contacts, chats and users (`tg contacts`, `tg chats`, `tg me`, `tg user`)
 - Read-only SQL over the cache (`tg sql`) with an annotated schema
 - Rate-limit tracking, config and status tooling (`tg config`, `tg status`)
-- JSON output and a stable error schema for scripts and agents
+- JSON output and a stable error schema for scripts and agents; paged reads add `next`, the
+  command for the next page with the same account and filters
 
 ## How it compares
 
@@ -95,15 +101,16 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Background sync | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; catch-up and history for large groups and channels on request (`tg chats sync`) | partial: waits for events, stores nothing |
 | Any MTProto method | ✅ `tg api <method>` | ❌ fixed tool set |
 | Read chat history | ✅ `tg messages list` (paging) and `tg messages get` (context), cache-first, `--fresh` | ✅ |
+| Unread messages, mark as read | ✅ `tg chats list --unread`, `tg messages unread`, `tg messages read` | ✅ |
 | Send text | ✅ replies, silent | ✅ replies, Markdown/HTML |
 | Edit, delete, forward, pin | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)) | ✅ |
 | Send and download media | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`); sending albums and voice messages later | ✅ files, albums, voice, transcription |
-| Wait for new messages | ❌ ([#24](https://github.com/neoromantic/telegram-sync-cli/issues/24)) | ✅ |
+| Wait for new messages | ✅ `tg messages wait` (JSON, timeout, settle) and `tg messages watch` (NDJSON), from the daemon's cache | ✅ |
 | Groups, channels, admin rights | partial: via `tg api` | ✅ |
 | Contacts | list, search, get; the rest via `tg api` | ✅ add, import, block, export |
 | Reactions, polls, drafts, scheduled, folders | partial: via `tg api` | ✅ |
 | Multi-account | ✅ `--account`; one cache per account, the daemon syncs each account with its own client | ✅ |
-| Guardrails for agents | partial: daemon and SQL are read-only ([#26](https://github.com/neoromantic/telegram-sync-cli/issues/26)) | ✅ read-only mode, chat allowlist |
+| Guardrails for agents | ✅ read-only mode, chat allowlist (`readOnly`, `allowedChats`) | ✅ read-only mode, chat allowlist |
 | Install | Homebrew binary, or bun/npm with Bun | git clone + uv, pip from git, Docker |
 | Runtime, license | TypeScript on Bun ([mtcute](https://mtcute.dev)), MIT | Python ([Telethon](https://docs.telethon.dev)), Apache-2.0 |
 
@@ -119,6 +126,9 @@ tg chats sync @examplenews          # also sync a large group or channel
 tg messages list --chat @username --limit 20
 tg messages get --chat @username --id 42 --context 3
 tg messages search --query "hello world" --since 7d   # both words, any order
+tg messages wait --chat @username --after 42 --timeout 60   # block until the next reply
+tg messages unread                   # unread messages of every chat
+tg messages read --chat @username    # mark the chat read
 tg send --to @username --message "Hi there"
 tg send --to me --file ./report.pdf --caption "Q3"
 tg media download --chat me --id 42 --out ./   # into the media cache, then copied here
@@ -142,6 +152,8 @@ with several accounts: see [per-account caches](docs/configuration.md#upgrading-
 | `TELEGRAM_PROXY` | Optional proxy URL for CLI and daemon connections |
 | `TELEGRAM_SYNC_CLI_DATA_DIR` | Override the data directory (default `~/.telegram-sync-cli`) |
 | `TELEGRAM_SYNC_CLI_TELEMETRY` | `0` turns [usage stats](#usage-stats) off |
+| `TELEGRAM_SYNC_CLI_READ_ONLY` | `1` refuses commands that change Telegram ([read-only mode](docs/configuration.md#read-only-mode-and-allowed-chats)) |
+| `TELEGRAM_SYNC_CLI_ALLOWED_CHATS` | Comma-separated chats this process may use, such as `@teamchat,me` |
 | `DO_NOT_TRACK` | `1` turns usage stats off |
 | `MTCUTE_LOG_LEVEL` | mtcute log level |
 | `VERBOSE` | Verbose logging (`1`) |
@@ -161,14 +173,33 @@ Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-
 ## For AI agents
 
 - Output is JSON by default. Errors look like
-  `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}}}`.
+  `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}, "suggestion": "Wait 30s, then run the same command again", "retryable": true}}`.
+  `retryable` says whether running the same command again can work (for `RATE_LIMITED`, after
+  `details.wait_seconds`); `suggestion`, when present, is what to run or change.
+- A paged read that has more (`tg messages list`, `tg messages search`, `tg chats list`,
+  `tg contacts list`) adds `next` beside `data`: `[{"command": "tg messages list --chat=… --before=…", "why": "…"}]`.
+  Run `next[0].command` as written to get the next page with the same account and filters
+  instead of rebuilding it from `nextBefore` or `offset`. An empty `tg chats search` suggests
+  `tg chats list --fresh` the same way.
 - Exit codes: `0` ok, `1` general error, `2` auth required, `3` invalid arguments,
   `4` network error, `5` Telegram error or rate limit, `6` account not found.
+- "Summarize my unread messages": `tg messages unread` prints each chat with unread messages,
+  its unread count and its oldest unread messages (`--limit` per chat). `missing` says how many
+  the cache lacks, as in large groups and channels the daemon doesn't sync; `--fresh` fetches
+  them. Then `tg messages read --chat <id> --max-id <nextAfter>` marks what was summarized read.
 - `tg sql --query "…"` runs read-only SQL over the selected account's cache (`--account`, else
   the active account); `tg sql print-schema` prints the annotated schema.
 - `tg skill manifest` prints a skill manifest, `tg skill validate` checks the environment and
   `tg skill install` writes the manifest to the default location.
 - The daemon never sends or edits anything, so it is safe to leave running.
+- To wait for a reply, `tg messages wait --chat @username --after <last message ID>` returns
+  the new messages as soon as the daemon stores them, or `{"messages": [], "timedOut": true}`
+  after `--timeout` seconds; `tg messages watch` streams them as NDJSON. Both need the daemon.
+- `TELEGRAM_SYNC_CLI_READ_ONLY=1` refuses sends and other changes with `READ_ONLY`, and
+  `TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat,me` limits commands to those chats
+  (`CHAT_NOT_ALLOWED`); `readOnly` and `allowedChats` in `config.json` do the same for every
+  run. A guard against mistakes, not a sandbox: see
+  [read-only mode](docs/configuration.md#read-only-mode-and-allowed-chats).
 - `tg status` reports each account's cache size (`--sizes` adds each table's and the media
   cache's); `tg db vacuum` prunes old bookkeeping rows and gives free space back to the disk,
   and works while the daemon runs on a cache this version created.

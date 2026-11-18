@@ -17,6 +17,7 @@ import {
   runPendingMigrations,
 } from '../db/background-migrations'
 import { createMessagesCache } from '../db/messages-cache'
+import { createMessagesSearch } from '../db/messages-search'
 import { BACKGROUND_MIGRATIONS } from '../db/raw-json-migrations'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
@@ -31,6 +32,11 @@ import {
   oldFormUsers,
   seedOldFormCache,
 } from './helpers/old-form-cache'
+import {
+  REPORT_BLOCKS,
+  REPORT_TEXT,
+  richTlMessage,
+} from './helpers/rich-message'
 
 const MESSAGES = 21
 const SMALL = { maxRows: 4, maxMs: 1_000 }
@@ -113,10 +119,10 @@ describe('background migrations of a 0.5.0 cache', () => {
 
     const rows = MESSAGES + (await migrateAll(db))
 
-    // The messages three times: the re-encode, the refetch check (#130) and
-    // the re-index of names (#93)
+    // The messages four times: the re-encode, the refetch check (#130), the
+    // re-index of names (#93) and the rich text check
     expect(rows).toBe(
-      3 * MESSAGES + oldFormUsers().length + oldFormChats().length,
+      4 * MESSAGES + oldFormUsers().length + oldFormChats().length,
     )
     const after = snapshot(db)
     for (const [i, message] of originals.entries()) {
@@ -283,6 +289,49 @@ describe('message_type of older rows', () => {
         message_type: 'document',
         raw_json: JSON.stringify({ id: 6, date: 1 }),
       },
+    ])
+  })
+})
+
+describe('rich messages cached without their text', () => {
+  it('gives them their text, which search then finds', async () => {
+    const db = new Database(':memory:')
+    seedOldFormCache(db, { messages: 0 })
+    const peer = { _: 'peerUser' as const, userId: OLD_FORM_CHAT_ID }
+    const insert = db.query(`
+      INSERT INTO messages_cache (chat_id, message_id, text, message_type, date, fetched_at, raw_json)
+      VALUES (${OLD_FORM_CHAT_ID}, $id, $text, $type, 1760000000, 0, $raw)
+    `)
+    const rich = toRawJson(richTlMessage(peer, 1, REPORT_BLOCKS))
+    insert.run({ $id: 1, $text: null, $type: 'text', $raw: rich })
+    insert.run({ $id: 2, $text: '', $type: 'text', $raw: rich })
+    insert.run({ $id: 3, $text: 'kept as sent', $type: 'text', $raw: rich })
+    insert.run({
+      $id: 4,
+      $text: null,
+      $type: 'text',
+      $raw: toRawJson({
+        _: 'message',
+        id: 4,
+        peerId: peer,
+        date: 1,
+        message: '',
+      }),
+    })
+    db.run('DELETE FROM cache_migrations')
+    registerBackgroundMigrations(db)
+    const search = createMessagesSearch(db)
+    expect(search.search('zucchini', {})).toEqual([])
+
+    await migrateAll(db)
+
+    const texts = db
+      .query('SELECT text FROM messages_cache ORDER BY message_id')
+      .all()
+      .map((row) => (row as { text: string | null }).text)
+    expect(texts).toEqual([REPORT_TEXT, REPORT_TEXT, 'kept as sent', null])
+    expect(search.search('zucchini', {}).map((row) => row.message_id)).toEqual([
+      1, 2,
     ])
   })
 })
@@ -478,13 +527,13 @@ describe('a new cache', () => {
 const SLOW_BATCH_MS = 100
 
 /**
- * Runs every pending migration of MIGRATE_PATH as `tg db migrate` does with
- * the daemon running, in batches of 10 rows. A messages batch sleeps
- * SLOW_BATCH_MS inside its transaction, so the migration holds the lock for
- * 700 ms or more in all, longer than the writer's busy_timeout. Without the
- * pause between batches the writer is refused with the SQLite Bun bundles on
- * Linux; macOS's system SQLite lets it in between batches anyway. Prints the
- * longest batch, from its start to its commit.
+ * Runs every pending migration of MIGRATE_PATH as `tg db migrate` does, with
+ * the daemon running or not (DAEMON_RUNNING), in batches of 10 rows. A
+ * messages batch sleeps SLOW_BATCH_MS inside its transaction, so the
+ * migration holds the lock longer than the writer's busy_timeout. Without
+ * pauses between batches the writer is refused with the SQLite Bun bundles
+ * on Linux; macOS's system SQLite lets it in between batches anyway. Prints
+ * the longest batch, from its start to its commit, and the whole run.
  */
 const MIGRATE_SCRIPT = `
   import { Database } from 'bun:sqlite'
@@ -503,10 +552,11 @@ const MIGRATE_SCRIPT = `
   }
   const db = new Database(process.env.MIGRATE_PATH)
   db.run('PRAGMA busy_timeout = 5000')
+  const started = performance.now()
   await runPendingMigrations(
     db,
     {
-      ...foregroundPacing(true),
+      ...foregroundPacing(process.env.DAEMON_RUNNING === '1'),
       limits: { maxRows: 10, maxMs: 1_000 },
       onBatch: (migration) => {
         if (migration.name !== messages.name) return
@@ -515,9 +565,78 @@ const MIGRATE_SCRIPT = `
     },
     [slowMessages],
   )
+  const migrationMs = performance.now() - started
   db.close()
-  console.log(JSON.stringify({ longestBatchMs }))
+  console.log(JSON.stringify({ longestBatchMs, migrationMs }))
 `
+
+/**
+ * Seeds an old-form cache of `messages` messages, runs MIGRATE_SCRIPT on it
+ * in a child process and, until it exits, writes a live message in a loop
+ * from this one, which waits `busyTimeoutMs` for the lock.
+ */
+async function writeNextToMigrate(
+  dir: string,
+  options: { daemonRunning: boolean; messages: number; busyTimeoutMs: number },
+) {
+  const path = join(dir, 'cache.db')
+  const seed = new Database(path)
+  seed.run('PRAGMA journal_mode = WAL')
+  seedOldFormCache(seed, { messages: options.messages })
+  seed.close()
+
+  const child = Bun.spawn(['bun', '--no-env-file', '-e', MIGRATE_SCRIPT], {
+    env: {
+      ...process.env,
+      MIGRATE_PATH: path,
+      MIGRATE_MODULE: join(import.meta.dir, '../db/background-migrations.ts'),
+      MIGRATIONS_MODULE: join(import.meta.dir, '../db/raw-json-migrations.ts'),
+      DAEMON_RUNNING: options.daemonRunning ? '1' : '0',
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  let exited = false
+  void child.exited.then(() => {
+    exited = true
+  })
+
+  const writer = new Database(path)
+  writer.run(`PRAGMA busy_timeout = ${options.busyTimeoutMs}`)
+  const messages = createMessagesCache(writer)
+  let writes = 0
+  let refused = 0
+  let duringMigration = 0
+  while (!exited) {
+    try {
+      messages.upsert({
+        chat_id: OLD_FORM_CHAT_ID,
+        message_id: 100_000,
+        text: `Example live message ${writes}`,
+        message_type: 'text',
+        has_media: false,
+        date: 1_760_000_000,
+        raw_json: '{}',
+      })
+      writes += 1
+    } catch {
+      refused += 1
+    }
+    const state = statusByName(writer).messages_raw_json_v2?.state
+    if (state === 'running') duringMigration += 1
+    await Bun.sleep(1)
+  }
+
+  expect(await child.exited).toBe(0)
+  const timing = JSON.parse(await new Response(child.stdout).text()) as {
+    longestBatchMs: number
+    migrationMs: number
+  }
+  // The live message counts too when it came before the start
+  const status = statusByName(writer).messages_raw_json_v2!
+  writer.close()
+  return { ...timing, refused, duringMigration, status }
+}
 
 describe('a writer in another process next to tg db migrate', () => {
   let dir: string
@@ -531,77 +650,43 @@ describe('a writer in another process next to tg db migrate', () => {
   })
 
   it('is never refused: it gets in after the batch it ran into', async () => {
-    const path = join(dir, 'cache.db')
-    const seed = new Database(path)
-    seed.run('PRAGMA journal_mode = WAL')
-    // 7 batches or more: 700 ms of the write lock
-    seedOldFormCache(seed, { messages: 70 })
-    seed.close()
-
-    const child = Bun.spawn(['bun', '--no-env-file', '-e', MIGRATE_SCRIPT], {
-      env: {
-        ...process.env,
-        MIGRATE_PATH: path,
-        MIGRATE_MODULE: join(import.meta.dir, '../db/background-migrations.ts'),
-        MIGRATIONS_MODULE: join(
-          import.meta.dir,
-          '../db/raw-json-migrations.ts',
-        ),
-      },
-      stdout: 'pipe',
-      stderr: 'pipe',
+    // 7 batches or more: 700 ms of the write lock. A daemon's write waits
+    // 5 s; this one gives up after 500 ms
+    const result = await writeNextToMigrate(dir, {
+      daemonRunning: true,
+      messages: 70,
+      busyTimeoutMs: 500,
     })
-    let exited = false
-    void child.exited.then(() => {
-      exited = true
-    })
-
-    // A daemon's write waits 5 s; this one gives up after 500 ms
-    const writer = new Database(path)
-    writer.run('PRAGMA busy_timeout = 500')
-    const messages = createMessagesCache(writer)
-    let writes = 0
-    let refused = 0
-    let duringMigration = 0
-    while (!exited) {
-      try {
-        messages.upsert({
-          chat_id: OLD_FORM_CHAT_ID,
-          message_id: 100_000,
-          text: `Example live message ${writes}`,
-          message_type: 'text',
-          has_media: false,
-          date: 1_760_000_000,
-          raw_json: '{}',
-        })
-        writes += 1
-      } catch {
-        refused += 1
-      }
-      const state = statusByName(writer).messages_raw_json_v2?.state
-      if (state === 'running') duringMigration += 1
-      await Bun.sleep(1)
-    }
-
-    expect(await child.exited).toBe(0)
-    const { longestBatchMs } = JSON.parse(
-      await new Response(child.stdout).text(),
-    ) as { longestBatchMs: number }
-    expect(longestBatchMs).toBeGreaterThanOrEqual(SLOW_BATCH_MS)
+    expect(result.longestBatchMs).toBeGreaterThanOrEqual(SLOW_BATCH_MS)
     // The migration held the lock for 700 ms or more, and no write gave up
     // after 500 ms: each got in during a pause. Its wait is the rest of the
     // batch it ran into and the busy handler's sleep over the batch's end,
     // 50 to 100 ms by then; the margin covers a writer a busy machine keeps
     // off the CPU for a whole pause.
-    expect(refused).toBe(0)
-    expect(duringMigration).toBeGreaterThan(0)
-    // The live message counts too when it came before the start
-    const status = statusByName(writer).messages_raw_json_v2!
-    expect(status.state).toBe('done')
-    expect(status.done).toBe(status.total!)
-    expect(status.done).toBeGreaterThanOrEqual(70)
-    writer.close()
+    expect(result.refused).toBe(0)
+    expect(result.duringMigration).toBeGreaterThan(0)
+    expect(result.status.state).toBe('done')
+    expect(result.status.done).toBe(result.status.total!)
+    expect(result.status.done).toBeGreaterThanOrEqual(70)
     // A child process that starts Bun and runs 7 paced batches: a slow CI
     // runner needs more than the default 5 s
+  }, 20_000)
+
+  it('without the daemon, is never refused: it gets in within a second of work', async () => {
+    // 30 batches or more: 3 s of the write lock, longer than the writer's
+    // 2 s busy_timeout (a tg command's is 5 s)
+    const result = await writeNextToMigrate(dir, {
+      daemonRunning: false,
+      messages: 300,
+      busyTimeoutMs: 2_000,
+    })
+    expect(result.migrationMs).toBeGreaterThan(2_000)
+    // Its wait is the rest of a second of batches and the batch that passes
+    // it, 1.1 s at most; the margin is for a busy machine
+    expect(result.refused).toBe(0)
+    expect(result.duringMigration).toBeGreaterThan(0)
+    expect(result.status.state).toBe('done')
+    expect(result.status.done).toBe(result.status.total!)
+    expect(result.status.done).toBeGreaterThanOrEqual(300)
   }, 20_000)
 })

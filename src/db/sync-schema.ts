@@ -620,6 +620,9 @@ export function initSyncSchema(
   )
   // Added in 0.10: why the policy turns the chat on or off (#131)
   ensureColumn(db, 'chat_sync_state', 'sync_policy', 'TEXT')
+  // Added in 0.13: unread state from the dialog list and live updates (#25)
+  ensureColumn(db, 'chats_cache', 'unread_count', 'INTEGER')
+  ensureColumn(db, 'chats_cache', 'read_inbox_max_id', 'INTEGER')
 
   // Chat sync state indexes
   db.run(`

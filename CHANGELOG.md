@@ -21,10 +21,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lastOwnMessageAt`, and `tg status` leaves it out of the chats with sync on and of the history
   progress. See [docs/sync-strategy.md](docs/sync-strategy.md#group-participation).
 
+## [0.14.0] - 2026-11-18
+
+### Added
+
+- Every error says whether running the same command again can work: `error.retryable` is
+  `true` for `RATE_LIMITED`, `NETWORK_ERROR`, a media download that waited too long for
+  another tg process and a `tg api` call Telegram failed on its side (500 or -503), `false`
+  otherwise (#160). Nothing else in the error schema changes.
+- `RATE_LIMITED` carries the suggestion `Wait <n>s, then run the same command again` (for a
+  media download, "… to resume the download"), with the wait in `details.wait_seconds` as
+  before, from every command: `tg api`, `tg send`, `tg chats`, `tg contacts`, `tg user`,
+  `tg messages` and `tg media download`.
+- `ACCOUNT_NOT_FOUND` suggests `tg accounts list` and the flag to pass the account to
+  (`--account`, or `--id` for `tg accounts switch`, `remove` and `info`). `tg send --to` with a
+  user ID Telegram refuses (`PEER_ID_INVALID`) suggests sending to the user's `@username` or
+  `+phone` once, so tg caches the user.
+- `next` in success answers: a list of `{ command, why }` beside `data`, where `command` is a
+  complete `tg` command line that runs as written in a POSIX shell and `why` says what it does
+  (#160). A paged read that has more suggests its next page with the account and every filter
+  it was given: `tg messages list` (older pages, or newer ones after `--after`),
+  `tg messages search`, `tg chats list`, `tg contacts list`, and `tg messages wait --chat`,
+  which suggests waiting on from the last message it returned. `tg chats search` with no
+  result suggests `tg chats list --fresh`, then the same search, where before the command was
+  only in `message`. An answer with nothing to suggest has no `next`, and every existing field
+  (`message`, `nextBefore`, `nextAfter`, `hasMore`, `offset`) is unchanged. `--format pretty`
+  prints the suggestions on stderr, so stdout stays the data's JSON; `--quiet` prints nothing.
+
+### Changed
+
+- The `data` fields of `tg chats list` are declared once, in
+  `src/commands/chats/list-output.ts`: the command's types come from it, the field table in
+  [docs/cli-commands.md](docs/cli-commands.md) is generated from it (`bun run docs:outputs`), and
+  an e2e test fails when the command prints a field the declaration doesn't have (#160, a trial
+  on one command). The output doesn't change. zod is a devDependency and doesn't ship.
+
 ### Fixed
 
-- `tg sql "SELECT 1" -f json` runs the query: the value of `-f`/`--format` after a positional
-  query was added to the SQL (`SELECT 1 json`, a syntax error), and after `--query` it was
+- `tg messages list`, `get`, `search`, `unread`, `wait` and `watch` show the content of a rich
+  message: one whose content is page blocks (headings, tables, lists, quotations, code,
+  formulas, footnotes, media) instead of a text. It printed as `text: null`, so an agent saw an
+  empty message where a table or a whole report was sent, and search could not find it. Its
+  `text` is now the blocks in Telegram's rich Markdown (`#` headings, pipe tables, `- [x]` task
+  lists, `$$…$$` formulas, `[^1]` footnotes, HTML tags such as `<details>` where Markdown has
+  none), with a placeholder for media, maps and buttons (`[photo: caption]`). `messageType`
+  stays `text`. The text is cached, so search matches any word of it, a table cell's too.
+  Messages cached by older versions print it from `raw_json` at once, and a background
+  migration (`messages_rich_text`) makes them searchable.
+
+## [0.13.1] - 2026-11-18
+
+### Fixed
+
+- `tg messages search --chat me` searches Saved Messages and `--sender me` finds your own
+  messages: `me` (any case) is the account's own user ID, read from the account without a
+  Telegram call. Before, both returned nothing and still succeeded. When the account doesn't
+  know its user ID yet, `me` is `INVALID_ARGS` (exit 3) with a hint to run `tg me` once. A
+  `--chat` or `--sender` value that is neither an ID, a username nor `me` (a typo such as
+  `12abc`) is `INVALID_ARGS` naming the flag, instead of an empty success.
+- `tg api` types its arguments by the method's TL schema, so the documented examples work:
+  `tg api messages.getHistory --peer me --limit 1` and
+  `tg api messages.sendMessage --json '{"peer":"@user","message":"Hi"}'` failed with
+  `Unknown object undefined`. A chat given as a string or number where the method takes an
+  InputPeer, InputUser or InputChannel (`peer`, `id` of `users.getFullUser`, `channel`…)
+  resolves like `tg send --to` (`me`, `@username`, `+phone`, a marked ID; cache first); a long
+  given as a number or decimal string becomes a Long (before, `--hash 123` went out as 0); a
+  required int or long left out is 0 (`offsetId`, `maxId`, `hash`…), a required `randomId` is
+  random and a required `offsetPeer` is `inputPeerEmpty`. A chat of the wrong kind (a group as
+  a user) is `INVALID_ARGS`. Full TL objects go as before.
+
+## [0.13.0] - 2026-11-18
+
+Commands for agents: wait for a reply, read and mark unread messages, and keep an agent
+read-only or to a few chats.
+
+### Added
+
+- `tg db vacuum` checks the free disk before a full VACUUM (daemon stopped): it needs 2.2 times
+  the cache file plus 64 MB, as the storage benchmark measured. When the disk is short it fails
+  at once with `GENERAL_ERROR`, `details.reason: "disk_full"`, the bytes needed and free, and
+  changes nothing, instead of failing after minutes of work. `tg status` shows the same check
+  next to its vacuum hint (#119).
+- `tg messages wait` blocks until the daemon stores a new message, then returns the new messages
+  oldest first, in the same shape as `tg messages list`; `tg messages watch` prints each one as a
+  JSON line as it is stored, until Ctrl-C or SIGTERM. Both read only the cache (no second
+  Telegram session) and return within about a second of the daemon storing a message.
+  `--chat` keeps one chat, `--after <id>` returns that chat's cached messages newer than it at
+  once, `--settle N` keeps collecting until N quiet seconds, and after `--timeout` (default
+  60 s) the result is `{ "messages": [], "timedOut": true }` with exit 0. Without a running
+  daemon they fail at once with `DAEMON_NOT_RUNNING` (#24).
+- Unread messages (#25). `tg chats list --unread` lists only chats with unread messages, and
+  every chat item has `unreadCount`. `tg messages unread [--chat <peer>] [--limit N]` prints each
+  chat's oldest unread messages from the cache with its unread count and `missing`, how many of
+  them the cache lacks; `--fresh` reads the counts and those messages from Telegram.
+  `tg messages read --chat <peer> [--max-id <id>]` marks a chat read on Telegram
+  (`messages.readHistory`, or `channels.readHistory` for supergroups and channels) and caches
+  its new count. `chats_cache` gets `unread_count` and `read_inbox_max_id`, which dialog lists
+  set; the daemon raises the count for each new incoming message and takes reads on any device
+  from Telegram's read updates, so the counts stay current between dialog passes. A cache from
+  an older version has no counts until the daemon's next start or `tg chats list --fresh`.
+- Read-only mode and a chat allowlist for agents (#26). `readOnly` in `config.json` or
+  `TELEGRAM_SYNC_CLI_READ_ONLY=1` refuses, before connecting, every command that changes
+  something on Telegram with the new code `READ_ONLY` (exit 1): `tg send`, `tg messages read`,
+  `tg api` methods not named `get…`, `search…`, `resolve…` or `check…`, and `tg auth login`,
+  `login-qr` and `logout`. `allowedChats` (or `TELEGRAM_SYNC_CLI_ALLOWED_CHATS`, which replaces
+  it for one process) limits commands to those chats: one that names another chat fails with
+  `CHAT_NOT_ALLOWED` (exit 1), `tg chats list`, `tg chats search`, `tg messages search`, `wait`,
+  `watch` and `unread` show only allowed chats, and `tg sql` and `tg api` are off. `tg status`
+  shows both under `access`. They guard against mistakes and are not a security boundary.
+
+### Changed
+
+- `tg auth login-qr` draws its QR code with [uqr](https://github.com/unjs/uqr) instead of
+  `qrcode-terminal`, which has had no release since 2018. The code is black on white with the
+  standard four-module quiet zone, so it scans in dark and light terminal themes, and it goes to
+  stderr with its status lines, so they no longer mix with the JSON result on stdout (#10).
+- The daemon raises a chat's `last_message_id` and `last_message_at` with each live message, so
+  `tg chats list` keeps the order of recent activity between dialog passes.
+
+### Fixed
+
+- `tg db migrate` with the daemon stopped no longer locks other `tg` commands out of the cache: it
+  ran its batches back to back, and on a big cache a command that wrote meanwhile (`tg messages
+  list` caching a page, `tg send` caching the sent message) could give up with `database is
+  locked` after 5 s. It now pauses 150 ms after each second of work, so such a write gets in
+  within about a second; the run takes up to 15% longer (#122).
+
+## [0.12.2] - 2026-11-17
+
+### Fixed
+
+- `tg sql "SELECT 1 AS one" -f json` runs the query: the value of `-f`/`--format` after a positional
+  query was added to the SQL (`SELECT 1 AS one json`, a syntax error), and after `--query` it was
   refused as an extra argument. `tg sql -f json print-schema` prints the schema.
 - `tg messages list`, `get` and `search` say what a service message did. A call, a pin or a
   group change used to print only `messageType: "service"` with no text, so an agent reading a
@@ -916,7 +1044,11 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.1...v0.14.0
+[0.13.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.0...v0.13.1
+[0.13.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.2...v0.13.0
+[0.12.2]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.11.0...v0.11.1

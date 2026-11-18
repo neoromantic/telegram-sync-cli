@@ -516,6 +516,7 @@ describe('E2E: chats sync', () => {
         details: { chat: '@unknownchat', account_id: 1 },
         suggestion:
           'Start the daemon (its dialog pass lists every chat, archived ones too) or run tg chats get --id @username, then retry',
+        retryable: false,
       },
     })
   })

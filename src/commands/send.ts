@@ -70,6 +70,11 @@ function handleSendError(recipient: string, message: string): never {
     error(
       ErrorCodes.TELEGRAM_ERROR,
       `Invalid recipient: ${recipient}. Make sure the user/chat exists and you have access to it.`,
+      undefined,
+      // A user ID the cache has no access hash for
+      /^\d+$/.test(recipient.trim())
+        ? "Send to the user's @username or +phone once: tg caches the user, and its ID works after that"
+        : undefined,
     )
   }
   if (message.includes('USER_IS_BOT')) {

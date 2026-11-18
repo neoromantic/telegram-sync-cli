@@ -345,6 +345,7 @@ tg sql --query="SELECT first_name, last_name, username, phone FROM users_cache W
 | `NO_ACTIVE_ACCOUNT` | Several accounts and none active: pass `--account` (exit 1) |
 | `ACCOUNT_NOT_FOUND` | `--account` matches no account (exit 6) |
 | `CACHE_UNAVAILABLE` | The account's cache can't be opened yet: an older tg still holds the shared cache, or the file belongs to another account (`details.reason`, exit 1) |
+| `CHAT_NOT_ALLOWED` | `allowedChats` is set, and SQL can't be limited to those chats ([allowed chats](configuration.md#read-only-mode-and-allowed-chats), exit 1) |
 
 ---
 

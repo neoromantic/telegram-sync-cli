@@ -228,7 +228,7 @@ describe('search newest first (#118)', () => {
     // Both ways ran
     expect(ways.messages).toBeGreaterThan(30)
     expect(ways.sort).toBeGreaterThan(30)
-  }, 20_000)
+  }, 60_000)
 
   it('goes through the messages for a common word and sorts the matches of a rare one', () => {
     // At the default threshold, a word in 60% of 15,000 messages, not 10%

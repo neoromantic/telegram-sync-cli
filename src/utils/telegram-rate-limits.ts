@@ -26,18 +26,33 @@ export function isRateLimitError(err: unknown): err is RateLimitError {
   return err instanceof RateLimitError
 }
 
+/**
+ * Message, details and suggestion of a RATE_LIMITED error. The wait is
+ * always `details.wait_seconds`, so a caller reads it without parsing text.
+ */
+export function describeRateLimit(method: string, waitSeconds: number) {
+  return {
+    message: `Rate limited for ${method}. Wait ${waitSeconds}s before retrying.`,
+    details: { method, wait_seconds: waitSeconds },
+    suggestion: `Wait ${waitSeconds}s, then run the same command again`,
+  }
+}
+
+/** Report a flood wait as RATE_LIMITED (exit 5), retryable after the wait */
+export function reportRateLimit(err: RateLimitError): never {
+  const { message, details, suggestion } = describeRateLimit(
+    err.method,
+    err.waitSeconds,
+  )
+  error(ErrorCodes.RATE_LIMITED, message, details, suggestion)
+}
+
 /** Report a config error or a rate limit and exit; any other error returns */
 export function reportConfigOrRateLimitError(err: unknown): void {
   if (err instanceof ConfigError) {
     error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
   }
-  if (isRateLimitError(err)) {
-    error(
-      ErrorCodes.RATE_LIMITED,
-      `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-      { method: err.method, wait_seconds: err.waitSeconds },
-    )
-  }
+  if (isRateLimitError(err)) reportRateLimit(err)
 }
 
 const services = new Map<number, { db: Database; service: RateLimitsService }>()

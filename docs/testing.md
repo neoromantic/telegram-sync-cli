@@ -115,6 +115,10 @@ request's peer).
 - `cache-db-lock.test.ts` — several processes opening, migrating and moving caches at once
 - `account-selector.test.ts` — `resolveAccount`: `--account`, the active account, the only one,
   and the errors
+- `api-request.test.ts` — `buildApiRequest`, typed by the TL schema: chats as InputPeer,
+  InputUser, InputChannel and vectors of them, resolved from the cache or Telegram; longs as
+  Long; the zeros, random ID and empty offset peer of required arguments left out; full TL
+  objects and unknown methods as given
 - `args.test.ts` — which `tg api` flags take the next argument as their value: a method
   argument after the method, followed by a value or a negative number; not `--name=value`,
   `--no-name`, `--account`/`-a`, `--json`/`-j` or `-r`, a flag before the method or followed
@@ -199,6 +203,11 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - No interference with production data (`~/.telegram-sync-cli/`)
 - Automatic cleanup after each test
 
+`TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES` replaces the free disk that `tg db vacuum` and
+`tg status` read with `statfs` before a full VACUUM, so `src/__e2e__/db.e2e.test.ts` and
+`status.e2e.test.ts` can test a disk with enough and too little room without filling one. It
+is for tests only.
+
 ### E2E Files
 
 - `help.e2e.test.ts` — `--help`, subcommand help, invalid commands
@@ -250,7 +259,9 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
   sends that request with no extra keys; `--username myuser`, `--username=myuser` and `--json`
   build the same call, as do flags with no value, dotted names and negative numbers (`-10`,
   `-1.5`) in either form, with `--account`/`-a` before or after the method; tg's own options
-  (`-v`, `--verbose`, `-f json`, `--format json`, `-q`, `--quiet`) stay out of the request
+  (`-v`, `--verbose`, `-f json`, `--format json`, `-q`, `--quiet`) stay out of the request;
+  `--peer me` and a cached `--peer @username` resolve, the offsets get 0 and `hash` a Long, and
+  a group where the method takes a user is `INVALID_ARGS`
 
 ### E2E Helpers
 

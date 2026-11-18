@@ -4,6 +4,7 @@
  */
 import type { Database } from 'bun:sqlite'
 import { extractAttachment } from '../utils/attachment'
+import { richMessageText } from '../utils/rich-message'
 import { sharesAccountMessageIds } from '../utils/telegram-peer-ids'
 import {
   createGroupParticipation,
@@ -228,7 +229,11 @@ export function createMessagesCache(db: Database): MessagesCache {
       $from_id: message.from_id ?? null,
       $reply_to_id: message.reply_to_id ?? null,
       $forward_from_id: message.forward_from_id ?? null,
-      $text: message.text ?? null,
+      // A rich message has no text of its own: search indexes its blocks
+      $text:
+        message.text ||
+        richMessageText(message.raw_json) ||
+        (message.text ?? null),
       $message_type: message.message_type,
       $has_media: message.has_media ? 1 : 0,
       $media_path: message.media_path ?? null,
