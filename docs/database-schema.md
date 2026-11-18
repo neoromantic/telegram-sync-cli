@@ -350,11 +350,11 @@ search index doesn't cover it yet.
 CREATE TABLE message_transcripts (
   chat_id        INTEGER NOT NULL,  -- marked peer ID
   message_id     INTEGER NOT NULL,
-  unique_file_id TEXT NOT NULL,     -- as in message_attachments; a copy of the file reuses the row's text
+  unique_file_id TEXT NOT NULL,     -- as in message_attachments; the row counts only while the message holds this file
   text           TEXT NOT NULL,     -- empty for silent audio
   language       TEXT,              -- code the program detected or was given; NULL for silent audio
-  source         TEXT NOT NULL,     -- local: a program on this machine
-  runner         TEXT,              -- whisper-cli, mlx_whisper, whisper-ctranslate2, whisper…; NULL for silent audio
+  source         TEXT NOT NULL,     -- the provider: local, a program on this machine
+  runner         TEXT,              -- the provider's program or service: whisper-cli, mlx_whisper…; NULL for silent audio
   model          TEXT,              -- model name, or the model file's name for whisper.cpp; NULL for silent audio
   transcribed_at INTEGER NOT NULL,  -- ms
   PRIMARY KEY (chat_id, message_id)

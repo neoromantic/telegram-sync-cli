@@ -183,7 +183,7 @@ const MESSAGE_TRANSCRIPTS_ANNOTATION: TableAnnotation = {
     },
     unique_file_id: {
       description:
-        'Telegram unique file ID of the audio, as in message_attachments: a forwarded copy reuses the transcript',
+        'Telegram unique file ID of the audio, as in message_attachments: the row counts only while the message holds this file, and a forwarded copy reuses it',
       nullable: false,
     },
     text: {
@@ -196,14 +196,15 @@ const MESSAGE_TRANSCRIPTS_ANNOTATION: TableAnnotation = {
       nullable: true,
     },
     source: {
-      description: 'local: a program on this machine made it',
+      description:
+        'The provider that made it (media.md#providers); local: a program on this machine',
       nullable: false,
       semanticType: 'enum',
       enumValues: ['local'],
     },
     runner: {
       description:
-        'The program: whisper-cli, mlx_whisper, whisper-ctranslate2, whisper or a configured one; null for silent audio, which no program read',
+        "The provider's program or service: whisper-cli, mlx_whisper, whisper-ctranslate2, whisper or a configured one; null for silent audio, which no provider read",
       nullable: true,
     },
     model: {

@@ -167,8 +167,8 @@ Supported keys:
 - `sync.pacing.calmInterval` (duration, default `3s`): how often a job may start per account
   with no history due
 
-- `transcribe.command` (string, default none): the speech-to-text program
-  `tg media transcribe` runs, a name on `PATH` or a path. A program named `whisper-cli` is run
+- `transcribe.command` (string, default none): the speech-to-text program the local provider of
+  `tg media transcribe` runs ([media.md](media.md#providers)), a name on `PATH` or a path. A program named `whisper-cli` is run
   as whisper.cpp, any other as an openai-whisper-compatible CLI. Without it, tg looks on `PATH`
   for `whisper-cli`, `mlx_whisper`, `whisper-ctranslate2` and `whisper`, in that order
 - `transcribe.model` (string): the model; for whisper.cpp the path of a model file, which it

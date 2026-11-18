@@ -330,7 +330,7 @@ Exit codes:
 - `FILE_EXISTS`: the `--out` target exists and `--overwrite` isn't set; `details: { path }`.
 
 `tg media transcribe` adds `TRANSCRIBER_NOT_FOUND` (exit 1): no speech-to-text program or no
-ffmpeg on `PATH`; `details: { searched, runner, ffmpeg }` (the names looked for, and the path
+ffmpeg on `PATH`; `details: { chatId, messageId, searched, runner, ffmpeg }` (the message, the names looked for, and the path
 found for each or `null`), with install commands for the OS (and for whisper.cpp the model download and
 `tg config set transcribe.model`) as `suggestion`. A message that is
 not a voice note or video note is `MEDIA_UNSUPPORTED` with `details.reason: "not_speech"`

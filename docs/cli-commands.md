@@ -468,8 +468,9 @@ language, source, runner, model, cached }`; with several `--id`, one JSON line p
 order, and exit 1 when any failed. A stored transcript is printed again without running the
 program (`cached: true`) unless `--force`. `tg messages` items show it as `transcript`. No
 program or ffmpeg found is `TRANSCRIBER_NOT_FOUND` (exit 1); this and every other setup error
-carries the commands to fix it in `suggestion`. Setup and where the audio goes:
-[media.md](media.md#transcribe).
+carries the commands to fix it in `suggestion`; in a batch it fails only the messages that need
+the program. Ctrl-C or SIGTERM removes the converted audio and exits 130. Setup, providers and
+where the audio goes: [media.md](media.md#transcribe).
 
 `tg media clean` removes partial downloads untouched for a day; `--older-than <30d|date>`,
 `--chat <peer>` (a file another chat also holds stays, as far as `message_attachments` knows)

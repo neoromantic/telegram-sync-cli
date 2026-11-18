@@ -163,7 +163,9 @@ With several `--id`, one compact JSON line per message, in `--id` order: `{"succ
 failing doesn't stop the others; the run exits 1 when any failed and says how many on stderr.
 
 - `cached: true`: the transcript was stored already, by an earlier run or for the same file in
-  another message (a forward), and no program ran. `--force` transcribes again.
+  another message (a forward), and no program ran. A stored transcript counts only for the file
+  the message holds now: after the attachment changes, the message is transcribed again, and
+  `tg messages` shows no transcript until then. `--force` transcribes again.
 - `language` is what the program detected, or `--language` (else `transcribe.language`).
 - `runner` is the program that ran and `model` the model it used (for whisper.cpp the model
   file's name), so a slow run says what it ran. `source` is `local`.
@@ -172,8 +174,16 @@ failing doesn't stop the others; the run exits 1 when any failed and says how ma
   invented phrases such as "Thank you.". Audio that holds only noise still goes to the program
   and can come back as a short invented phrase.
 - Only voice notes (`voice`) and video notes (`round`) are transcribed; any other message is
-  `MEDIA_UNSUPPORTED` with `details.reason: "not_speech"`. A file `tg media download` would
-  refuse, such as a content-protected one, is refused with the same error.
+  `MEDIA_UNSUPPORTED` with `details.reason: "not_speech"`, before any of its file is
+  downloaded. A file `tg media download` would refuse, such as a content-protected one, is
+  refused with the same error, even when a transcript or the file is stored already. The check
+  runs again before a transcript is saved: a message whose file changed meanwhile is
+  `GENERAL_ERROR` with `details.reason: "attachment_changed"` (retryable), and one that became
+  protected is `CONTENT_PROTECTED`; neither is stored.
+- A transcript is stored only for a message in the cache. A message of a group the cache keeps
+  out ([sync rules](sync-strategy.md)) is printed and not stored.
+- Ctrl-C or SIGTERM stops the download, ffmpeg or the program, removes the converted audio and
+  exits 130. Transcripts finished before it stay stored.
 - Every `tg messages` item has `transcript`: `{ text, language, source, model }` for a voice or
   video note that has one, else `null`. For `tg sql` the table is
   [`message_transcripts`](database-schema.md#table-message_transcripts). Transcripts are not
@@ -219,6 +229,9 @@ Each setup problem is an error whose `suggestion` holds the commands to run:
 | whisper.cpp, model file missing or unreadable | `INVALID_ARGS`, `details: { runner, model }` | the `curl` download to that path |
 | the program ran and wrote no transcript | `GENERAL_ERROR` for that message, `details: { runner, exitCode, stderr }` (the last 20 lines) | none |
 
+A setup problem fails each message that still needs the program, with `chatId` and `messageId`
+in `details`; messages answered from stored transcripts in the same run are printed as usual.
+
 Example, on Linux with ffmpeg but no program:
 
 ```json
@@ -243,6 +256,45 @@ the exception: it writes every result of one run under the first file's name, so
 once per file. On an M4 Pro, nine test clips (295 s of English and Russian speech) took 31 s
 with mlx-whisper, 38 s with whisper.cpp (large-v3-turbo-q5_0) and 281 s with openai-whisper on
 the CPU, each in one process.
+
+### Providers
+
+A source of transcripts is a provider. Every provider implements one protocol
+(`src/commands/media/transcription-provider.ts`), and one pipeline
+(`transcription-pipeline.ts`) runs the same steps for each, in this order:
+
+1. Eligibility: the message's attachment as it is now, from the cache or fetched from
+   Telegram, checked as `tg media download` checks it (content protection), and only voice
+   and video notes.
+2. Reuse: a stored transcript of that message for the same file, else of the same file in
+   another message.
+3. Setup: the provider's readiness; a problem fails the messages still pending.
+4. Limits: audio longer than the provider takes is refused before it is fetched.
+5. Audio, only for a provider that reads audio: the file through `tg media download`'s path,
+   handed over as stored when the provider takes the original, else converted by ffmpeg to
+   16 kHz mono WAV in a temporary directory. Digital silence is found in that conversion and
+   stored as empty text without calling the provider.
+6. The provider, in batches of its size, with up to its number of calls at once.
+7. Each result saved as soon as it exists, after the eligibility check runs again.
+
+The temporary directory is removed on success, failure and interrupt.
+
+Before anything runs, a provider declares:
+
+- `sendsTo`: where the audio (or the message reference) goes; `null` keeps it on this machine
+- `cost`: `free`, or `paid` when a request can cost money
+- `input`: the message itself (no download), or audio in the formats it takes (`original`,
+  `wav16k`)
+- `batchSize`, `concurrency` and `maxDurationSeconds`
+- `engine` and `model`, stored as `runner` and `model`, and its `id`, stored as `source`
+
+A provider answers each request with the text, language and model, or a failure that says
+whether trying again can work: `rejected` (it won't as it is), `retry_later` (a rate limit, a
+result not ready yet) or `outcome_unknown` (the request may have been accepted and billed, so
+it is reported with `details.outcome: "unknown"`, not retryable, and nothing is stored).
+
+Only the local provider exists: the programs above, which take WAV, cost nothing and send
+nothing anywhere. The `transcribe.*` keys configure it.
 
 ### Where the audio goes
 

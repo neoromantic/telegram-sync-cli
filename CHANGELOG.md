@@ -13,15 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   turns voice notes and video notes into text with a speech-to-text program installed on this
   machine: whisper.cpp (`whisper-cli`) or an openai-whisper-compatible CLI (`mlx_whisper`,
   `whisper-ctranslate2`, `whisper`), found on `PATH` or set with `transcribe.command`. tg
-  bundles and downloads no model. Each file comes through `tg media download`'s path (cache
-  first, content protection refused), is converted with ffmpeg to 16 kHz mono WAV, and one run
-  of the program handles all of them. Silent audio is stored as empty without running it.
+  bundles and downloads no model. The program is the local provider behind one provider
+  protocol: a provider declares where the audio goes, whether it can cost money, what input it
+  reads and its limits, and one pipeline gives every provider the same steps. Each message is
+  checked as `tg media download` checks it (content protection) before a stored transcript is
+  reused and again before one is saved; a stored transcript counts only for the file the message
+  holds now. Each file comes through `tg media download`'s path, is converted with ffmpeg to
+  16 kHz mono WAV, and one run of the program handles all of them. Silent audio is stored as
+  empty without running it. Ctrl-C or SIGTERM stops ffmpeg or the program, removes the
+  converted audio and exits 130.
   Transcripts go into the new `message_transcripts` table, and every `tg messages` item has
   `transcript` (`{ text, language, source, model }` or `null`). Config keys
   `transcribe.command`, `transcribe.model` and `transcribe.language`; a missing program or
   ffmpeg is the new error `TRANSCRIBER_NOT_FOUND` (exit 1), and every setup error (no program,
   no ffmpeg, no whisper.cpp model) has the install, download and config commands in
-  `suggestion`
+  `suggestion` and fails only the messages that need the program
   ([#102](https://github.com/neoromantic/telegram-sync-cli/issues/102)).
 - `tg send --markdown` and `--html` send rich messages such as headings and tables on
   supported accounts. The result includes `format`. File captions stay plain text.
