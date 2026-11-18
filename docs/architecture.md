@@ -63,6 +63,9 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 - Uses Citty for command parsing
 - Each command is a separate module
 - Commands delegate to services and cache layers
+- The command tree is in `src/cli.ts`; `src/index.ts` wraps every command with the access
+  guard (`src/commands/access.ts`: read-only mode and `allowedChats`, checked before the
+  command connects) and usage stats
 - Implemented: `auth`, `accounts`, `contacts`, `chats`, `messages`, `send`, `media`, `api`, `me`, `user`, `daemon`, `status`, `sql`
 
 ### 2. Service Layer (`src/services/`)
@@ -89,7 +92,8 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 - Long-running daemon process for real-time updates and background message sync
 - Per-account mtcute connections (max 5), each with its own cache, scheduler and sync worker
 - Sync jobs for forward catchup and backfill
-- Read-only to Telegram (no mutations)
+- Read-only to Telegram (no mutations). Besides new messages, it applies Telegram's read
+  updates to the cached unread counts (`chats_cache.unread_count`, `read_inbox_max_id`)
 
 ## Data Flow
 
@@ -171,7 +175,7 @@ Commands:
   contacts search   Search contacts
   contacts get      Get contact by ID or @username
 
-  chats list        List dialogs (cached, --fresh for API)
+  chats list        List dialogs (cached, --fresh for API, --unread)
   chats search      Search chats by title/username (cache-only)
   chats get         Get chat by @username
   chats sync        Turn background sync on or off for a chat (cache-only)
@@ -179,13 +183,17 @@ Commands:
   messages list     Chat history, newest first (cache-first, --before/--after paging, --fresh)
   messages get      One message with --context messages on each side (cache-first, --fresh)
   messages search   Search cached messages (FTS5, --chat/--sender/--since/--until/--sort)
+  messages wait     Wait for new messages the daemon stores (cache-only, needs the daemon)
+  messages watch    Print each new message as NDJSON until stopped (needs the daemon)
+  messages unread   Unread messages per chat (cache-first, --fresh)
+  messages read     Mark a chat read on Telegram
 
   send              Send a message or one file (--file) to a user/chat
 
   media download    A message's file into the account's media cache (cache-first, resumes)
   media clean       Remove cached files and stale partial downloads
 
-  api               Generic API call
+  api               Generic API call (chat arguments resolve like send --to)
   me                Show current user
   user              Lookup user
   status            Show system status
