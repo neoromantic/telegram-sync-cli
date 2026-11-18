@@ -273,34 +273,67 @@ as usual but its new messages aren't cached.
 - Paging works as without filters: `nextBefore` and `nextAfter` page through the filtered list,
   and a filter that matches nothing is an empty page.
 
-A filtered page reads only the cache: Telegram's history has no such filters, so `--fresh` with a
-filter is `INVALID_ARGS`. The page lists every cached match and adds three keys:
+A filtered page reads only the cache and never asks Telegram for messages: Telegram's history
+has no such filters, so `--fresh` with a filter is `INVALID_ARGS`. Resolving `--chat` and
+checking it against `allowedChats` read the cache too, so a chat the cache knows, by ID or by a
+cached `@username`, needs no credentials and no connection. The page lists every cached match
+and adds four keys:
 
 ```json
 { "chatId": -1001234567890, "items": [ … ], "limit": 20, "before": null, "after": null,
   "nextBefore": 45, "nextAfter": 60, "source": "cache", "stale": false,
-  "complete": false, "missingBefore": 63,
-  "suggestion": "The cache may lack messages of this page: fetch the missing history with tg messages list --chat -1001234567890 --before 63 --limit 100 (repeat with its nextBefore while this stays incomplete), or turn on history sync with tg chats sync -1001234567890. Then run this command again." }
+  "complete": false, "missing": ["history"], "missingBefore": null,
+  "suggestion": "This page may lack matches: the cache lacks messages 61-62: next fetches them, then reads this page again (tg chats sync turns on history sync for a long gap)." }
 ```
 
-`complete` is `true` when one cached range (see above) holds every message the page covers: from
-the window's newest message (the newest cached one, or the one below `--before` or `--until`) to
-its oldest (message 1, the one above `--after`, or the first one sent at `--since`), or to the
-last item of a full page. Cached messages sent before `--since` or after `--until` mark where the
-window ends, as dates rise with message IDs. When `complete` is `false`, items past a gap may be
-missing: `missingBefore` is where the newest gap ends, so the unfiltered
-`tg messages list --before <missingBefore>` fetches the page below it from Telegram and caches
-it; repeat until the filtered page is complete, or let the daemon fetch the history
-(`tg chats sync`). `missingBefore` is `null` when the chat has no cached message (fetch its
-newest page) or when only `--type` is in doubt: while the background migration that types
-messages cached by older versions runs, `--type` pages are incomplete and the suggestion says to
-run `tg db migrate`. As for the newest unfiltered page, the newest cached message stands for the
-chat's newest, and messages that arrived live since the last catch-up are outside any range, so
-while the daemon runs the newest page of an active chat is incomplete until an unfiltered newest
-page caches them.
+What a filtered page promises:
+
+1. **The span.** The page vouches for a span of message IDs: from the chat's newest known
+   message (the newest cached one, or the newest one the dialog list or the daemon's sync state
+   reported, whichever is higher), or the one below `--before`, down to message 1 or the one
+   above `--after`; a full page vouches only down to its last item (up to it, paging forward).
+   A cached message sent at or after `--until` (before `--since`) ends the span there, as dates
+   rise with message IDs, unless a cached message beyond it was sent inside the window: then the
+   dates are out of order and the span doesn't end there.
+2. **`complete: true`** means one recorded history range covers the whole span and, with
+   `--type`, every cached message in it has its type: no message of the chat that matches is
+   missing from the page, as of the chat's newest known message. An empty complete page is a
+   real zero. The rows, the ranges, the newest known message and the type state are read in one
+   SQLite read transaction, so a sync writing meanwhile can't make the page look complete.
+3. **`missing`** says why a page is incomplete, empty when it is complete: `history` when the
+   cache lacks messages of the span (a gap, or messages that arrived live since the last
+   catch-up), `types` with `--type` while some cached messages have no type to filter on yet
+   (the background migration that types messages of older versions is unfinished, or a media
+   message is waiting for a refetch of its raw message).
+4. **`missingBefore`** is where the newest gap ends: the `--before` of the unfiltered page that
+   fills it. It is `null` when the gap reaches the chat's newest message (the newest page fills
+   it) or when only `types` is missing.
+5. **`next` of an incomplete page fills first, then reads the same page again**, since filling
+   can add matches to it: `tg messages list --chat=… --limit=100 [--before=<missingBefore>]
+   --fresh` caches that page from Telegram (it needs credentials and a connection), `tg db
+   migrate` finishes the type migration, and the last command is this page again. Repeat until
+   the page is complete; each round fills up to 100 more messages. Every command keeps
+   `--account`. `next` of a complete page is the next page, as without filters, so `next` never
+   steps over a gap. `nextBefore` and `nextAfter` still page through the cached matches when you
+   choose to read past a gap. A group you don't take part in keeps its new messages out of the
+   cache ([group participation](sync-strategy.md#group-participation)), so its gaps can't be
+   filled: `next` is then the next page and `suggestion` says to read the chat unfiltered.
+6. **Time bounds are pinned.** `next` carries `--since` and `--until` resolved to UTC seconds
+   (`--since=2026-11-11T14:59:53Z`), so a relative bound such as `60s` keeps the window of the
+   first page. Bounds with milliseconds round up to the next second, as message dates are whole
+   seconds: `--until 00:01:40.500Z` keeps a message sent at `00:01:40`.
+
+`suggestion` is one sentence on what the page lacks, `null` when it is complete; the commands
+are in `next`. A deleted newest message that the daemon hasn't settled yet
+([sync strategy](sync-strategy.md#when-catch-up-runs)) can keep the newest page incomplete
+until its next catch-up. Messages whose dates fall out of ID order (imported history) can make a
+date window look complete when the cache holds no message that shows the order.
 
 `tg messages search --type` keeps the same types among the search hits; `filters.type` echoes
-it (`null` without the flag).
+it (`null` without the flag). Search vouches for nothing about history: it finds what the cache
+holds. `typesPending` is `true` when `--type` may miss cached matches that have no type yet (the
+migration is unfinished, or a matching media message waits for its raw message); `next` then
+starts with `tg db migrate`. Without `--type` it is `false`.
 
 `tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each
 side: `{ chatId, message, newer, older, source, stale }`. `newer` and `older` are newest first,
@@ -389,8 +422,10 @@ Telegram call: Saved Messages as a chat, your own messages as a sender); any oth
 relevance` puts the best matches first (bm25); `--count` adds `count`, every match over all
 pages, while `total` stays the size of the page; `--snippet` adds `snippet` to each item, the
 text around the first match with matched words in `**`. When another page has matches, `next`
-has the same search with the following `--offset` ([Next commands](#next-commands)). The rules
-and examples are in [search.md](search.md#query-rules).
+has the same search with the following `--offset` and `--since`/`--until` resolved to UTC
+seconds, so a relative bound keeps its window ([Next commands](#next-commands)). Search has no
+`--fresh`: it reads only the cache. The rules and examples are in
+[search.md](search.md#query-rules).
 
 #### Waiting for new messages
 
@@ -986,14 +1021,15 @@ A success answer may add `next`, the commands that continue the read, beside `da
   `-`, stays one argument. It never carries the global `--format`, `--verbose` or `--quiet`.
 - `why` is one sentence for whoever decides whether to run it.
 - `next` is absent when there is nothing to suggest, and it never suggests a command that
-  read-only mode or `allowedChats` would refuse: only reads, of the chat the command already read.
+  read-only mode or `allowedChats` would refuse: only reads, of the chat the command already read,
+  and `tg db migrate`, which changes only the local cache.
 - `--format pretty` prints each suggestion on stderr as `Next: <why>` and the command on the
   line below, so stdout stays the data's JSON; `--quiet` prints nothing.
 
 | Command | `next` |
 | --- | --- |
-| `tg messages list` | after a full page: `--before <nextBefore>` (older), or with `--after`, `--after <nextAfter>` (newer); none past message 1 |
-| `tg messages search` | when another page has matches: `--offset <offset + limit>` |
+| `tg messages list` | after a full page: `--before <nextBefore>` (older), or with `--after`, `--after <nextAfter>` (newer); none past message 1. With `--type`, `--since` or `--until`, `--since`/`--until` are resolved to UTC seconds, and an incomplete page suggests instead what fills it (`tg messages list --fresh`, `tg db migrate`) and then the same page ([Filtering a chat](#filtering-a-chat)) |
+| `tg messages search` | when another page has matches: `--offset <offset + limit>`, with `--since`/`--until` resolved to UTC seconds; with `typesPending`, first `tg db migrate` |
 | `tg chats list`, `tg contacts list` | when `hasMore`: `--offset <offset + limit>`; `--fresh` is kept, so the page comes from the same list |
 | `tg messages wait --chat` | after new messages: the same wait with `--after` the newest of them |
 | `tg chats search` | with no result: `tg chats list --fresh`, then the same search |

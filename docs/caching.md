@@ -129,9 +129,11 @@ around it. If that call fails, or Telegram no longer returns the message, a cach
 from the cache with the context its ranges hold, as a cached deleted message always does. Only
 `--fresh` reports the failure.
 
-`tg messages list --type/--since/--until` never takes step 3: it reads the cache only and says
-with `complete` whether one range holds the whole filtered page, and if not, which unfiltered
-page fills the newest gap (see [cli-commands.md](cli-commands.md#filtering-a-chat)).
+`tg messages list --type/--since/--until` never takes step 3: it reads the cache only, in one
+read transaction, and says with `complete` whether one range holds the whole filtered page up to
+the chat's newest known message; if not, `missing` says why and `next` has the unfiltered page
+that fills the newest gap, then the filtered page again (see
+[cli-commands.md](cli-commands.md#filtering-a-chat)).
 
 `--fresh` always takes step 3. Fetched pages are searchable right away. The CLI doesn't move the
 daemon's sync cursors and never infers deletions, and backfill doesn't read progress from cached

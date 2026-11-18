@@ -227,8 +227,9 @@ Response includes cache metadata (wrapped by `success`):
 
 A success answer may carry `next` beside `data`: commands that continue the read, each a
 complete `tg` command line and one sentence on why. A paged list with more suggests its next
-page, carrying the account and every filter it was given; an empty chat cache suggests the
-command that fills it:
+page, carrying the account and every filter it was given (relative times resolved to UTC); an
+empty chat cache suggests the command that fills it, and a filtered `tg messages list` page that
+the cache can't vouch for suggests what fills it and then the same page again:
 
 ```json
 {

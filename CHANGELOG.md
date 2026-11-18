@@ -14,13 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   peer and filter. `--type` takes one or more message types, comma-separated or repeated
   (`voice`, `photo`, `video`, `document`…), plus `round` and `animation` for the round video
   messages and GIFs that `video` also covers; `--since` and `--until` take the forms of
-  `tg messages search`. A filtered page reads only the cache, and pages with `--before` and
-  `--after` as before. It adds `complete`: `false` when the cache may lack messages of the page
-  (a gap in the cached history, messages that arrived live, or `--type` while `tg db migrate`
-  has older rows to type), with `missingBefore`, the `--before` of the unfiltered
-  `tg messages list` page that fetches the missing history, and a `suggestion`. Without the new
-  flags the output is unchanged. `tg messages search` takes `--type` too, and echoes it in
-  `filters.type`.
+  `tg messages search`. A filtered page reads only the cache, needs no credentials for a chat
+  the cache knows (a cached `@username` included), and pages with `--before` and `--after` as
+  before. It adds `complete`, `true` only when one cached range covers the page up to the chat's
+  newest known message and, with `--type`, every message in it has its type; `missing`
+  (`history`, `types`) says why it is `false`, `missingBefore` where the newest gap ends, and
+  `suggestion` one sentence. `next` of an incomplete page has what fills it
+  (`tg messages list --fresh`, `tg db migrate`), then the same page again, with `--account`
+  kept; `next` carries `--since` and `--until` resolved to UTC seconds. Without the new flags the
+  output is unchanged. `tg messages search` takes `--type` too, echoes it in `filters.type` and
+  adds `typesPending`.
 - `tg send --markdown` and `--html` send rich messages such as headings and tables on
   supported accounts. The result includes `format`. File captions stay plain text.
 
@@ -40,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `tg messages search --since` and `--until` with milliseconds round up to the next second,
+  since message dates are whole seconds: `--until 00:01:40.500Z` no longer leaves out a message
+  sent at `00:01:40`, and `--since` with milliseconds no longer takes one sent just before it.
+  Its `next` carries the bounds resolved to UTC, so a relative bound (`60s`) keeps its window
+  across pages.
+- `allowedChats` resolves an `@username` the cache knows without asking Telegram, so a chat
+  cached without an access hash no longer needs credentials to be checked.
+- A string flag's value that looks like a repeatable flag is no longer read as that flag: `tg send
+  --caption '--file=x'` sends that caption.
 - The npm package declares `long`, which tg imports directly. Until now it only arrived
   through `@mtcute/core`, so an install that doesn't hoist transitive dependencies could fail
   to start.
