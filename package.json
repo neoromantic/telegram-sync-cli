@@ -25,7 +25,7 @@
     "check:knip": "knip",
     "typecheck": "tsc --noEmit",
     "test": "bun test --isolate src/__tests__",
-    "test:e2e": "bun test src/__e2e__",
+    "test:e2e": "bun test --timeout 30000 src/__e2e__",
     "test:integration": "bun test src/__integration__",
     "test:all": "bun test --isolate",
     "test:coverage": "bun test --isolate --coverage",

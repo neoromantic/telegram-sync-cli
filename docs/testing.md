@@ -196,7 +196,8 @@ expect(logSpy.mock.calls[0]?.[0]).toMatchInlineSnapshot(`
 
 ## E2E Tests
 
-E2E tests execute the CLI binary via `Bun.spawn` to verify actual command behavior.
+E2E tests execute the CLI binary via `Bun.spawn` to verify actual command behavior. A test can run several commands.
+`bun run test:e2e` allows 30 seconds per test. The CLI helper allows 10 seconds per command by default.
 
 ### Test Isolation
 
