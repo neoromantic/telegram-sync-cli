@@ -7,7 +7,7 @@ import {
   isExiting,
   reportCliError,
 } from '../telemetry'
-import type { ErrorCode, Output, OutputFormat } from '../types'
+import type { ErrorCode, NextCommand, Output, OutputFormat } from '../types'
 
 /** Current output format (can be overridden per-command) */
 let currentFormat: OutputFormat = 'json'
@@ -31,10 +31,11 @@ export function getOutputFormat(): OutputFormat {
  * Note: In production mode, this exits the process to close any active connections.
  * In test mode, this just logs and returns.
  */
-export function success<T>(data: T): void {
+export function success<T>(data: T, next: NextCommand[] = []): void {
   // An exit is under way: the run already printed its result
   if (isExiting()) return
-  const result: Output<T> = { success: true, data }
+  const result: Output<T> =
+    next.length > 0 ? { success: true, data, next } : { success: true, data }
 
   switch (currentFormat) {
     case 'json':
@@ -42,6 +43,10 @@ export function success<T>(data: T): void {
       break
     case 'pretty':
       console.log(JSON.stringify(data, null, 2))
+      // stderr keeps stdout the data's JSON alone
+      for (const { command, why } of next) {
+        console.error(`Next: ${why}\n  ${command}`)
+      }
       break
     case 'quiet':
       // No output for quiet mode

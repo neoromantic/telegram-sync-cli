@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `next` in success answers: a list of `{ command, why }` beside `data`, where `command` is a
+  complete `tg` command line that runs as written in a POSIX shell and `why` says what it does
+  (#160). A paged read that has more suggests its next page with the account and every filter
+  it was given: `tg messages list` (older pages, or newer ones after `--after`),
+  `tg messages search`, `tg chats list`, `tg contacts list`, and `tg messages wait --chat`,
+  which suggests waiting on from the last message it returned. `tg chats search` with no
+  result suggests `tg chats list --fresh`, then the same search, where before the command was
+  only in `message`. An answer with nothing to suggest has no `next`, and every existing field
+  (`message`, `nextBefore`, `nextAfter`, `hasMore`, `offset`) is unchanged. `--format pretty`
+  prints the suggestions on stderr, so stdout stays the data's JSON; `--quiet` prints nothing.
+
 ## [0.13.1] - 2026-11-18
 
 ### Fixed

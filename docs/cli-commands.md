@@ -93,6 +93,11 @@ or `null` before a dialog list has the chat (a daemon start or `tg chats list --
 once a dialog list has given the chats their counts, and otherwise reads the dialog list from
 Telegram, as `--fresh` does. How fresh the count is: [real-time.md](real-time.md#unread-counts).
 
+`tg chats list` and `tg contacts list` page with `--offset`; while `hasMore` is true, `next` has
+the command for the following page ([Next commands](#next-commands)). `tg chats search` reads
+only the cache: with no result it keeps its `message` and adds `next` with
+`tg chats list --fresh` and then the same search.
+
 `tg chats get --id` reads an ID like `tg chats sync` does. A bare 0.2.0 ID that names both a
 cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
 `details: { identifier, candidates }`.
@@ -206,7 +211,8 @@ channel is `INVALID_ARGS` (exit 3) with `details: { chat, candidates }` in `list
 To page back, pass `nextBefore` as `--before`; to page forward, pass `nextAfter` as `--after`;
 stop when `items` is empty. Both bounds are exclusive message IDs, `--after 0` starts at the
 first message, and with both set the page is the one right after `--after`. `--limit` is 1-100
-(default 20).
+(default 20). After a full page the answer's `next` has the command for the following page in
+the same direction, with the chat, account and flags kept ([Next commands](#next-commands)).
 
 ```json
 { "chatId": -1001234567890, "items": [ … ], "limit": 20, "before": null, "after": null,
@@ -280,8 +286,9 @@ Telegram call: Saved Messages as a chat, your own messages as a sender); any oth
 `--until` take a date, a date and time or a duration back from now (`24h`, `7d`); `--sort
 relevance` puts the best matches first (bm25); `--count` adds `count`, every match over all
 pages, while `total` stays the size of the page; `--snippet` adds `snippet` to each item, the
-text around the first match with matched words in `**`. The rules and examples are in
-[search.md](search.md#query-rules).
+text around the first match with matched words in `**`. When another page has matches, `next`
+has the same search with the following `--offset` ([Next commands](#next-commands)). The rules
+and examples are in [search.md](search.md#query-rules).
 
 #### Waiting for new messages
 
@@ -301,7 +308,8 @@ the daemon stays read-only. What the daemon stores live: [real-time.md](real-tim
 - `--after <id>` needs `--chat` (message IDs are per chat; `INVALID_ARGS`, exit 3, otherwise).
   The chat's cached messages newer than it come back at once; with none, `wait` waits for one.
   To never miss a reply, pass the ID of the last message you have read or sent: a reply stored
-  before `wait` started is still returned.
+  before `wait` started is still returned. With `--chat`, an answer with messages has `next`:
+  the same wait with `--after` the newest of them ([Next commands](#next-commands)).
 - `--timeout` is in seconds (default 60, `0` checks once).
 - `--settle N`: after the first new message, keep collecting until N seconds pass without
   another (default 0: return at once), never past `--timeout`.
@@ -831,3 +839,42 @@ Errors:
 ```
 
 `details` and `suggestion` are optional.
+
+### Next commands
+
+A success answer may add `next`, the commands that continue the read, beside `data`:
+
+```json
+{
+  "success": true,
+  "data": { "chatId": -1001234567890, "items": [ … ], "nextBefore": 1181, … },
+  "next": [
+    {
+      "command": "tg messages list --chat=-1001234567890 --limit=50 --before=1181 --account=2",
+      "why": "The next page of older messages."
+    }
+  ]
+}
+```
+
+- `command` is a complete command line that runs as written in a POSIX shell. It carries the
+  `--account` and every flag the command was given, except the ones the next page changes and
+  the ones at their default; each value is written as `--name=value` and single-quoted when the
+  shell would change it, so a query with spaces, quotes or `$`, or a value that starts with
+  `-`, stays one argument. It never carries the global `--format`, `--verbose` or `--quiet`.
+- `why` is one sentence for whoever decides whether to run it.
+- `next` is absent when there is nothing to suggest, and it never suggests a command that
+  read-only mode or `allowedChats` would refuse: only reads, of the chat the command already read.
+- `--format pretty` prints each suggestion on stderr as `Next: <why>` and the command on the
+  line below, so stdout stays the data's JSON; `--quiet` prints nothing.
+
+| Command | `next` |
+| --- | --- |
+| `tg messages list` | after a full page: `--before <nextBefore>` (older), or with `--after`, `--after <nextAfter>` (newer); none past message 1 |
+| `tg messages search` | when another page has matches: `--offset <offset + limit>` |
+| `tg chats list`, `tg contacts list` | when `hasMore`: `--offset <offset + limit>`; `--fresh` is kept, so the page comes from the same list |
+| `tg messages wait --chat` | after new messages: the same wait with `--after` the newest of them |
+| `tg chats search` | with no result: `tg chats list --fresh`, then the same search |
+
+The cursors (`nextBefore`, `nextAfter`, `hasMore`, `offset`) and `message` stay as they were;
+`next` only spells out the command they lead to.

@@ -223,6 +223,29 @@ Response includes cache metadata (wrapped by `success`):
 }
 ```
 
+### Next Commands
+
+A success answer may carry `next` beside `data`: commands that continue the read, each a
+complete `tg` command line and one sentence on why. A paged list with more suggests its next
+page, carrying the account and every filter it was given; an empty chat cache suggests the
+command that fills it:
+
+```json
+{
+  "success": true,
+  "data": { "items": [ … ], "offset": 0, "limit": 50, "hasMore": true, … },
+  "next": [
+    { "command": "tg contacts list --offset=50 --account=2", "why": "The next page of contacts." }
+  ]
+}
+```
+
+`next` sits beside `data`, not in it, because it is about the answer rather than part of the
+command's own shape: every `data` field stays as it was, and a script that reads only `data`
+sees no change. It is absent when there is nothing to suggest, and never names a command that
+read-only mode or `allowedChats` would refuse. The commands, quoting rules and where each
+appears: [cli-commands.md](cli-commands.md#next-commands).
+
 ## Output Modes
 
 ```bash
@@ -230,7 +253,7 @@ Response includes cache metadata (wrapped by `success`):
 tg contacts list
 # {"success": true, "data": {...}}
 
-# Pretty output for humans (pretty-printed JSON payload)
+# Pretty output for humans (pretty-printed JSON payload; next commands on stderr)
 tg contacts list --format pretty
 
 # Quiet mode (no output, just exit code)
