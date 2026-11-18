@@ -62,6 +62,12 @@ export interface PipelineDeps {
   now?: () => number
 }
 
+/** What a stored transcript holds besides the message and file it is for */
+type TranscriptFields = Omit<
+  MessageTranscriptRow,
+  'chat_id' | 'message_id' | 'unique_file_id'
+>
+
 /** A message the provider still has to transcribe */
 interface Pending {
   messageId: number
@@ -162,10 +168,8 @@ export async function transcribeMessages(
   /** Saved only while the message is cached, eligible and holds the same file */
   const save = (
     request: Pick<TranscriptionRequest, 'messageId' | 'uniqueFileId'>,
-    fields: Pick<
-      MessageTranscriptRow,
-      'text' | 'language' | 'source' | 'runner' | 'model'
-    >,
+    fields: TranscriptFields,
+    cached = false,
   ): TranscribeOutcome => {
     const { messageId, uniqueFileId } = request
     const row: MessageTranscriptRow = {
@@ -173,7 +177,6 @@ export async function transcribeMessages(
       message_id: messageId,
       unique_file_id: uniqueFileId,
       ...fields,
-      transcribed_at: now(),
     }
     let current: AttachmentInfo | null
     try {
@@ -183,7 +186,7 @@ export async function transcribeMessages(
       return withMessage(err, chatId, messageId)
     }
     // A message the cache keeps out (a group the account left) keeps no transcript either
-    if (!current) return toResult(row, false)
+    if (!current) return toResult(row, cached)
     if (current.uniqueFileId !== uniqueFileId) {
       return new MediaError(
         ErrorCodes.GENERAL_ERROR,
@@ -194,10 +197,14 @@ export async function transcribeMessages(
       )
     }
     store.save(row)
-    return toResult(row, false)
+    return toResult(row, cached)
   }
 
-  const pending = await checkAndReuse(deps, chat, messageIds, outcomes, fail)
+  const pending = await checkAndReuse(deps, chat, messageIds, {
+    outcomes,
+    fail,
+    save,
+  })
   if (pending.length > 0) {
     if (!setup.ready) {
       for (const item of pending) fail(item.messageId, setup.problem)
@@ -278,6 +285,7 @@ export async function transcribeMessages(
                 source: declaration.id,
                 runner: null,
                 model: null,
+                transcribed_at: now(),
               }),
             )
             continue
@@ -341,6 +349,7 @@ export async function transcribeMessages(
                   source: provider.declaration.id,
                   runner: engine,
                   model: result.model,
+                  transcribed_at: now(),
                 })
               : failureError(result, chatId, request.messageId),
           )
@@ -362,9 +371,18 @@ async function checkAndReuse(
   deps: PipelineDeps,
   chat: HistoryChat,
   messageIds: readonly number[],
-  outcomes: Map<number, TranscribeOutcome>,
-  fail: (messageId: number, err: MediaError) => void,
+  report: {
+    outcomes: Map<number, TranscribeOutcome>
+    fail: (messageId: number, err: MediaError) => void
+    /** Store a reused transcript for this message too */
+    save: (
+      request: Pick<TranscriptionRequest, 'messageId' | 'uniqueFileId'>,
+      fields: TranscriptFields,
+      cached: boolean,
+    ) => TranscribeOutcome
+  },
 ): Promise<Pending[]> {
+  const { outcomes, fail, save } = report
   const { download, force } = deps
   const store = createMessageTranscriptsStore(download.cacheDb)
   const pending: Pending[] = []
@@ -389,9 +407,11 @@ async function checkAndReuse(
     }
     const sameFile = force ? null : store.getByFile(attachment.uniqueFileId)
     if (sameFile) {
-      const copy = { ...sameFile, chat_id: chat.chatId, message_id: messageId }
-      store.save(copy)
-      outcomes.set(messageId, toResult(copy, true))
+      const { chat_id, message_id, unique_file_id, ...fields } = sameFile
+      outcomes.set(
+        messageId,
+        save({ messageId, uniqueFileId: unique_file_id }, fields, true),
+      )
       continue
     }
     pending.push({ messageId, attachment })

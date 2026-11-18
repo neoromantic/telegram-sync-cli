@@ -83,8 +83,9 @@ export function messageItemReader(
   const rawJson = db.query<{ raw_json: string }, [number, number]>(
     'SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?',
   )
-  const transcriptOf = db.query<MessageTranscript, [number, number]>(
-    'SELECT text, language, source, model FROM message_transcripts WHERE chat_id = ? AND message_id = ?',
+  // Only the transcript of the file the message holds now
+  const transcriptOf = db.query<MessageTranscript, [number, number, string]>(
+    'SELECT text, language, source, model FROM message_transcripts WHERE chat_id = ? AND message_id = ? AND unique_file_id = ?',
   )
   return (row) => {
     const isService = row.message_type === 'service'
@@ -98,7 +99,7 @@ export function messageItemReader(
     const attachment = row.has_media === 1 ? extractAttachment(raw) : null
     const transcript =
       attachment?.kind === 'voice' || attachment?.kind === 'round'
-        ? transcriptOf.get(row.chat_id, row.message_id)
+        ? transcriptOf.get(row.chat_id, row.message_id, attachment.uniqueFileId)
         : null
     return messageRowToItem(
       text ? { ...row, text } : row,

@@ -647,6 +647,11 @@ describe('E2E: media transcribe', () => {
       await transcribe('--id', '1')
 
       note(1, 'New words.', { fileId: '6000000000000000202' })
+      createHistoryRanges(env.openCacheDb(1)).add(SELF_ID, { low: 1, high: 1 })
+      const get = await tg(['messages', 'get', '--chat', 'me', '--id', '1'])
+      expect(get.json).toMatchObject({
+        data: { message: { messageId: 1, transcript: null } },
+      })
       const result = await transcribe('--id', '1')
 
       expect(result.exitCode).toBe(0)
@@ -657,46 +662,49 @@ describe('E2E: media transcribe', () => {
       expect(runnerCalls()).toHaveLength(2)
     })
 
-    it('removes the converted audio and stops the program on SIGTERM, exit 130', async () => {
-      install('ffmpeg', FAKE_FFMPEG)
-      const pidFile = join(env.dataDir, 'runner.pid')
-      install('whisper', `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 30\n`)
-      symlinkSync(Bun.which('sleep')!, join(toolsDir, 'sleep'))
-      note(1, 'Hello.')
-      const tmp = join(env.dataDir, 'tmp')
-      mkdirSync(tmp)
+    for (const stage of ['ffmpeg', 'whisper'] as const) {
+      it(`removes the temporary audio and stops ${stage} on SIGTERM, exit 130`, async () => {
+        const pidFile = join(env.dataDir, 'child.pid')
+        const hang = `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 30\n`
+        install('ffmpeg', stage === 'ffmpeg' ? hang : FAKE_FFMPEG)
+        install('whisper', stage === 'whisper' ? hang : FAKE_OPENAI_RUNNER)
+        symlinkSync(Bun.which('sleep')!, join(toolsDir, 'sleep'))
+        note(1, 'Hello.')
+        const tmp = join(env.dataDir, 'tmp')
+        mkdirSync(tmp)
 
-      const proc = spawnCli(
-        ['media', 'transcribe', '--chat', 'me', '--id', '1'],
-        {
-          env: {
-            ...env.getCliOptions().env,
-            ...NO_CREDENTIALS,
-            PATH: `${binDir}:${toolsDir}`,
-            XDG_CACHE_HOME: cacheHome,
-            FAKE_LOG: logPath,
-            TMPDIR: tmp,
+        const proc = spawnCli(
+          ['media', 'transcribe', '--chat', 'me', '--id', '1'],
+          {
+            env: {
+              ...env.getCliOptions().env,
+              ...NO_CREDENTIALS,
+              PATH: `${binDir}:${toolsDir}`,
+              XDG_CACHE_HOME: cacheHome,
+              FAKE_LOG: logPath,
+              TMPDIR: tmp,
+            },
           },
-        },
-      )
-      const deadline = Date.now() + 8000
-      while (!existsSync(pidFile) || readFileSync(pidFile, 'utf-8') === '') {
-        if (Date.now() > deadline) throw new Error('the runner never started')
-        await Bun.sleep(25)
-      }
-      const runnerPid = Number(readFileSync(pidFile, 'utf-8').trim())
-      expect(readdirSync(tmp)).not.toEqual([])
+        )
+        const deadline = Date.now() + 8000
+        while (!existsSync(pidFile) || readFileSync(pidFile, 'utf-8') === '') {
+          if (Date.now() > deadline) throw new Error(`${stage} never started`)
+          await Bun.sleep(25)
+        }
+        const childPid = Number(readFileSync(pidFile, 'utf-8').trim())
+        expect(readdirSync(tmp)).not.toEqual([])
 
-      proc.kill('SIGTERM')
-      const exitCode = await proc.exited
+        proc.kill('SIGTERM')
+        const exitCode = await proc.exited
 
-      expect(exitCode).toBe(130)
-      expect(readdirSync(tmp)).toEqual([])
-      expect(() => process.kill(runnerPid, 0)).toThrow()
-      expect(
-        env.openCacheDb(1).query('SELECT 1 FROM message_transcripts').get(),
-      ).toBeNull()
-    }, 15_000)
+        expect(exitCode).toBe(130)
+        expect(readdirSync(tmp)).toEqual([])
+        expect(() => process.kill(childPid, 0)).toThrow()
+        expect(
+          env.openCacheDb(1).query('SELECT 1 FROM message_transcripts').get(),
+        ).toBeNull()
+      }, 15_000)
+    }
 
     it('prints the ready results of a batch when the program is missing for the rest', async () => {
       install('ffmpeg', FAKE_FFMPEG)
