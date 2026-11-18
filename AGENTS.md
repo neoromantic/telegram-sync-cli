@@ -68,6 +68,7 @@ bun run build:all                # cross-compile every target
 bun run test:integration         # real Telegram API, opt-in (see Testing)
 bun run lint:fix                 # Biome autofix (also the pre-commit hook)
 bun run bench:storage            # storage benchmark on made-up data, opt-in (docs/storage.md)
+bun run docs:outputs             # regenerate output tables in docs/cli-commands.md
 ```
 
 - `bin/tg.js` is a 3-line ESM shim (`#!/usr/bin/env bun`) that runs `src/index.ts`. The npm
@@ -118,7 +119,9 @@ Steps: [docs/releasing.md](docs/releasing.md).
   `send.ts`); only the daemon and debug mode send in-process and wait up to 500 ms.
 - Output is JSON by default with a stable error schema
   (`{ success: false, error: { code, message, details?, suggestion?, retryable } }`) and
-  documented exit codes. Don't change codes or shapes without updating the docs.
+  documented exit codes. Don't change codes or shapes without updating the docs. `tg chats list`
+  declares its `data` in `src/commands/chats/list-output.ts` (zod, a devDependency, so the CLI
+  imports only its types): change it with the command, then run `bun run docs:outputs`.
 
 ```
 CLI mode (tg <cmd>)            Daemon mode (tg daemon start)
