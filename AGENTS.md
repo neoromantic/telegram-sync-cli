@@ -192,7 +192,9 @@ src/services/        Telegram client manager (lazy credentials)
 src/db/              schema, caches, sync jobs, per-chat sync state, rate limits
 src/daemon/          daemon entry, loop, scheduler, update handlers, sync workers
 src/utils/           output, args, formatting, mappers, peer resolution
-src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integration__/  live API
+*.test.ts            unit tests, beside the module they test
+*.e2e.test.ts        CLI e2e (mostly src/test/)   *.integration.test.ts  live API (src/test/)
+src/test/            CLI-level e2e and integration tests, shared *.test-utils.ts helpers
 ~/.telegram-sync-cli/  user data: config.json, daemon.pid, data.db (accounts),
                        session_<id>.db (mtcute), accounts/<id>/cache.db (the
                        account's cache, sync state, jobs, rate limits)
@@ -235,7 +237,7 @@ longer exists since mtcute 0.29.
   child process with `seedInChild`: a file the test process wrote stays open after `close()`,
   and tg moves the file only when no other process has it open.
 
-- Integration tests (`src/__integration__/`) are a live smoke suite against the real API and
+- Integration tests (`src/test/telegram.integration.test.ts`) are a live smoke suite against the real API and
   are never part of `test`. They need `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` (or the
   `TELEGRAM_TEST_` variants), `TELEGRAM_TEST_ACCOUNT` and `TELEGRAM_TEST_SESSION_PATH` (or
   `TELEGRAM_TEST_SESSION`), pointing at a session logged in only for tests. Each test copies the

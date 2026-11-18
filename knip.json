@@ -1,5 +1,5 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "include": ["files", "dependencies", "devDependencies", "unlisted", "unresolved", "binaries"],
-  "entry": ["index.ts", "src/__tests__/helpers/session-exit-child.ts"]
+  "entry": ["index.ts", "src/daemon/session-exit-child.test-utils.ts"]
 }
