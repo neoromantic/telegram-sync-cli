@@ -214,19 +214,22 @@ async function processForwardCatchup(
     const messageInputs = messages.map((msg) =>
       telegramMessageToInput(chatId, msg),
     )
-    ctx.messagesCache.upsertBatch(messageInputs)
+    const { inserted } = ctx.messagesCache.upsertBatch(messageInputs)
+    if (!ctx.messagesCache.participation.captures(chatId)) {
+      return { success: true, messagesFetched: 0 }
+    }
 
     const newestMessageId = Math.max(...messages.map((m) => m.id))
     ctx.chatSyncState.updateCursors(chatId, { forward_cursor: newestMessageId })
-    ctx.chatSyncState.incrementSyncedMessages(chatId, messages.length)
+    ctx.chatSyncState.incrementSyncedMessages(chatId, inserted)
     ctx.chatSyncState.updateLastSync(chatId, 'forward')
 
     ctx.jobsService.updateProgress(job.id, {
-      messages_fetched: messages.length,
+      messages_fetched: inserted,
       cursor_end: newestMessageId,
     })
 
-    return { success: true, messagesFetched: messages.length }
+    return { success: true, messagesFetched: inserted }
   } catch (err) {
     if (err instanceof FloodWaitError) {
       handleFloodWait(ctx, err.seconds)
@@ -282,17 +285,20 @@ async function processBackwardHistory(
     const messageInputs = messages.map((msg) =>
       telegramMessageToInput(chatId, msg),
     )
-    ctx.messagesCache.upsertBatch(messageInputs)
+    const { inserted } = ctx.messagesCache.upsertBatch(messageInputs)
+    if (!ctx.messagesCache.participation.captures(chatId)) {
+      return { success: true, messagesFetched: 0 }
+    }
 
     const oldestMessageId = Math.min(...messages.map((m) => m.id))
     ctx.chatSyncState.updateCursors(chatId, {
       backward_cursor: oldestMessageId,
     })
-    ctx.chatSyncState.incrementSyncedMessages(chatId, messages.length)
+    ctx.chatSyncState.incrementSyncedMessages(chatId, inserted)
     ctx.chatSyncState.updateLastSync(chatId, 'backward')
 
     ctx.jobsService.updateProgress(job.id, {
-      messages_fetched: messages.length,
+      messages_fetched: inserted,
       cursor_end: oldestMessageId,
     })
 
@@ -300,7 +306,7 @@ async function processBackwardHistory(
       ctx.chatSyncState.markHistoryComplete(chatId)
     }
 
-    return { success: true, messagesFetched: messages.length }
+    return { success: true, messagesFetched: inserted }
   } catch (err) {
     if (err instanceof FloodWaitError) {
       handleFloodWait(ctx, err.seconds)
@@ -346,7 +352,10 @@ async function processInitialLoad(
     const messageInputs = messages.map((msg) =>
       telegramMessageToInput(chatId, msg),
     )
-    ctx.messagesCache.upsertBatch(messageInputs)
+    const { inserted } = ctx.messagesCache.upsertBatch(messageInputs)
+    if (!ctx.messagesCache.participation.captures(chatId)) {
+      return { success: true, messagesFetched: 0 }
+    }
 
     const newestMessageId = Math.max(...messages.map((m) => m.id))
     const oldestMessageId = Math.min(...messages.map((m) => m.id))
@@ -355,7 +364,7 @@ async function processInitialLoad(
       forward_cursor: newestMessageId,
       backward_cursor: oldestMessageId,
     })
-    ctx.chatSyncState.incrementSyncedMessages(chatId, messages.length)
+    ctx.chatSyncState.incrementSyncedMessages(chatId, inserted)
     ctx.chatSyncState.updateLastSync(chatId, 'forward')
 
     if (messages.length < ctx.config.batchSize || result.noMoreMessages) {
@@ -363,12 +372,12 @@ async function processInitialLoad(
     }
 
     ctx.jobsService.updateProgress(job.id, {
-      messages_fetched: messages.length,
+      messages_fetched: inserted,
       cursor_start: newestMessageId,
       cursor_end: oldestMessageId,
     })
 
-    return { success: true, messagesFetched: messages.length }
+    return { success: true, messagesFetched: inserted }
   } catch (err) {
     if (err instanceof FloodWaitError) {
       handleFloodWait(ctx, err.seconds)

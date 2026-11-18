@@ -3,11 +3,11 @@ import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import { type ArgsDef, defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
 import {
-  type ChatSyncStateService,
+  chatSyncView,
   createChatSyncStateService,
-  syncReason,
 } from '../../db/chat-sync-state'
 import { type CachedChatInput, createChatsCache } from '../../db/chats-cache'
+import { createGroupParticipation } from '../../db/group-participation'
 import type { ChatType } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
@@ -88,20 +88,6 @@ export async function fetchChatsFromApi(
   return chatInputs
 }
 
-/** A chat with its sync state, one primary key lookup per listed chat */
-function withSync(
-  chatSyncState: ChatSyncStateService,
-  chat: Parameters<typeof chatRowToItem>[0],
-): ChatsListOutput['items'][number] {
-  const item = chatRowToItem(chat)
-  const state = chatSyncState.get(item.id)
-  return {
-    ...item,
-    syncEnabled: state?.sync_enabled === 1,
-    syncReason: state ? syncReason(state) : null,
-  }
-}
-
 export const listChatsArgs = {
   limit: {
     type: 'string',
@@ -162,8 +148,16 @@ export const listChatsCommand = defineCommand({
     try {
       const chatsCache = createChatsCache(cacheDb)
       const chatSyncState = createChatSyncStateService(cacheDb)
-      const toItem = (chat: Parameters<typeof chatRowToItem>[0]) =>
-        withSync(chatSyncState, chat)
+      const participation = createGroupParticipation(cacheDb)
+      const toItem = (
+        chat: Parameters<typeof chatRowToItem>[0],
+      ): ChatsListOutput['items'][number] => {
+        const item = chatRowToItem(chat)
+        return {
+          ...item,
+          ...chatSyncView(participation, item.id, chatSyncState.get(item.id)),
+        }
+      }
       const cacheConfig = await getResolvedCacheConfig()
 
       if (!fresh) {

@@ -19,6 +19,7 @@ import {
 } from '../db/sync-schema'
 import { extractAttachment } from '../utils/attachment'
 import { pdfDocumentMessage } from './helpers/media-messages'
+import { takePartIn } from './helpers/participation'
 import { photoMessage } from './helpers/photo-message'
 
 const CHAT = 1001
@@ -195,6 +196,7 @@ describe('message_attachments', () => {
   it('finds the files of a chat and whether another chat holds them', () => {
     const otherChat = -1_002_000_000_001
     const store = createMessageAttachmentsStore(db)
+    takePartIn(db, otherChat)
     cache.upsertBatch([
       input(photoMessage(peer, 12)),
       input(pdfDocumentMessage(peer, 13)),

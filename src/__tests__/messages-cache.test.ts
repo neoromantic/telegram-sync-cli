@@ -20,6 +20,7 @@ import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toRawJson } from '../utils/raw-json'
+import { takePartIn } from './helpers/participation'
 import {
   REPORT_BLOCKS,
   REPORT_TEXT,
@@ -34,6 +35,7 @@ describe('MessagesCache', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
+    takePartIn(db, -5151, -1001234567890, -1009876543210)
     cache = createMessagesCache(db)
   })
 

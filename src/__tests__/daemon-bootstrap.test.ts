@@ -297,6 +297,53 @@ describe('bootstrapDialogs', () => {
     expect(chatSyncState.get(-1_000_000_002_005)).toBeNull()
   })
 
+  it('queues one participation check per group, archived ones too, and counts an own newest message (group participation)', async () => {
+    const now = Math.floor(Date.now() / 1000)
+    const dialogs: FakeDialogInput[] = [
+      {
+        kind: 'group',
+        id: 4301,
+        membersCount: 5,
+        lastMessage: { id: 9, date: now - 60, fromSelf: 7000 },
+      },
+      {
+        kind: 'supergroup',
+        id: 4302,
+        archived: true,
+        lastMessage: { id: 4, text: 'Archived group note', date: now },
+      },
+      { kind: 'channel', id: 4303, lastMessage: { id: 2 } },
+      { kind: 'user', id: 4304 },
+    ]
+    await runPass(dialogs)
+
+    const jobs = createSyncJobsService(testCacheDb)
+    const checks = () =>
+      jobs
+        .getPendingJobs()
+        .filter((job) => job.job_type === SyncJobType.CheckGroupParticipation)
+        .map((job) => [job.chat_id, job.priority])
+    expect(checks()).toEqual([
+      [-4301, SyncPriority.Background],
+      [-1_000_000_004_302, SyncPriority.Background],
+    ])
+    const participation = createMessagesCache(testCacheDb).participation
+    expect(participation.status(-4301)).toBe('active')
+    expect(participation.status(-1_000_000_004_302)).toBe('unknown')
+    // An archived group without participation keeps no newest message
+    expect(
+      createMessagesCache(testCacheDb).get(-1_000_000_004_302, 4),
+    ).toBeNull()
+    expect(chatSyncState.get(-1_000_000_004_302)).toBeNull()
+
+    // A second pass queues none twice
+    const { refreshDialogsAfterReconnect } = await import(
+      '../daemon/daemon-bootstrap'
+    )
+    await refreshDialogsAfterReconnect(ctx, 1, fakeDialogClient(dialogs).client)
+    expect(checks()).toHaveLength(2)
+  })
+
   it('lists archived dialogs too', async () => {
     const fake = await runPass([{ kind: 'user', id: 1001, topMessage: 5 }])
 

@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-
+import { takePartIn } from '../__tests__/helpers/participation'
 import { type CachedChatInput, createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { createUsersCache, type UserCacheInput } from '../db/users-cache'
@@ -60,6 +60,7 @@ describe('E2E: names in the search index', () => {
 
   function seedMessages(): void {
     const db = env.openCacheDb(1)
+    takePartIn(db, -1009000000002)
     createMessagesCache(db).upsertBatch(
       [1, 2, 3].map((id) => ({
         chat_id: CHAT_ID,

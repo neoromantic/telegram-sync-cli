@@ -14,6 +14,7 @@ import {
 import { createMessagesCache } from '../db/messages-cache'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
+import { takePartIn } from './helpers/participation'
 
 const CHAT_ID = -1001234567890
 const OTHER_CHAT_ID = 10
@@ -26,6 +27,7 @@ describe('HistoryRanges', () => {
     db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db)
+    takePartIn(db, -1001234567890)
     ranges = createHistoryRanges(db)
   })
 

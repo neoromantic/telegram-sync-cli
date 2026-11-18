@@ -36,6 +36,7 @@ import { createUsersCache } from '../db/users-cache'
 import { toRawJson } from '../utils/raw-json'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { range } from './helpers/fake-history'
+import { takePartIn } from './helpers/participation'
 import { photoMessage } from './helpers/photo-message'
 
 const DM = 5001
@@ -86,6 +87,7 @@ function rawJsonOf(chatId: number, messageId: number) {
 beforeEach(() => {
   db = createTestCacheDatabase().db
   initSyncSchema(db)
+  takePartIn(db, CHANNEL)
   requests = []
   ctx = {
     client: {} as TelegramClient,

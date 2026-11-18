@@ -29,6 +29,7 @@ import {
   createFakeHistory,
   type GetHistoryRequest,
 } from './helpers/fake-history'
+import { takePartIn } from './helpers/participation'
 
 const ALICE_ID = 10
 const BOOK_CLUB_RAW_ID = 4242
@@ -102,6 +103,7 @@ function cacheMessages(
   ids: number[],
   extra: { outgoing?: number[]; deleted?: number[] } = {},
 ) {
+  takePartIn(db, BOOK_CLUB_ID, TEAM_ID, NEWS_ID)
   const messages = createMessagesCache(db)
   messages.upsertBatch(
     ids.map((id) => ({

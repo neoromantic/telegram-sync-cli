@@ -59,6 +59,7 @@ import { mediaPaths, thumbPaths } from '../utils/media-cache'
 import { RateLimitError } from '../utils/telegram-rate-limits'
 import { MEDIA_FLOOD_SLEEP_MS } from '../utils/telegram-transfer'
 import { documentMessage, pdfDocumentMessage } from './helpers/media-messages'
+import { takePartIn } from './helpers/participation'
 import { fakeBytes, photoMessage } from './helpers/photo-message'
 
 const SELF_ID = 5_550_001
@@ -108,6 +109,7 @@ beforeEach(() => {
   db = new Database(':memory:')
   initCacheSchema(db)
   initSyncSchema(db)
+  takePartIn(db, TEAM_CHAT_ID)
   createUsersCache(db).upsert({
     user_id: String(ALICE_ID),
     first_name: 'Alice',

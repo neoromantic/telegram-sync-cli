@@ -216,6 +216,52 @@ describe('resolvePeer with numeric IDs', () => {
       })
       expect(call).not.toHaveBeenCalled()
     })
+
+    it("keeps a cached channel's dialog metadata when it resolves a new username", async () => {
+      chatsCache.upsert({
+        chat_id: '-1009100000006',
+        type: 'channel',
+        title: 'Made-up News',
+        username: 'made_up_old_alias',
+        member_count: 123,
+        access_hash: '777',
+        is_creator: 0,
+        is_admin: 0,
+        last_message_id: 77,
+        last_message_at: 1_760_000_000_000,
+        fetched_at: Date.now(),
+        raw_json: '{}',
+      })
+      const channel = {
+        _: 'channel',
+        id: 9_100_000_006,
+        broadcast: true,
+        title: 'Made-up News',
+        username: 'made_up_new_alias',
+        accessHash: toLong(777),
+        photo: { _: 'chatPhotoEmpty' },
+        date: 1_760_000_000,
+      }
+      const client = {
+        call: async () => ({
+          _: 'contacts.resolvedPeer',
+          peer: { _: 'peerChannel', channelId: 9_100_000_006 },
+          chats: [channel],
+          users: [],
+        }),
+      } as unknown as TelegramClient
+
+      await resolve('@made_up_new_alias', client)
+
+      expect(chatsCache.getById('-1009100000006')).toMatchObject({
+        type: 'channel',
+        username: 'made_up_new_alias',
+        access_hash: '777',
+        member_count: 123,
+        last_message_id: 77,
+        last_message_at: 1_760_000_000_000,
+      })
+    })
   })
 
   describe('bare chat IDs from 0.2.0', () => {
