@@ -12,7 +12,7 @@
 | `accounts` | list, switch, remove, info |
 | `contacts` | list, search, get (cached; supports `--fresh`) |
 | `chats` | list, search (cache-only), get (@username only), sync (cache-only) |
-| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only), wait and watch (new messages the daemon stores), unread (cache, `--fresh`), read (marks a chat read on Telegram) |
+| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only), wait and watch (new messages the daemon stores), unread (cache, `--fresh`), read (marks a chat read on Telegram), delete (deletes messages on Telegram) |
 | `send` | send a message or one file (`--to`, `--message`, `--file`) |
 | `media` | download (cache-first), clean |
 | `api` | raw Telegram API calls |
@@ -219,6 +219,7 @@ tg messages unread --chat @username --limit 50     # of one chat
 tg messages unread --fresh                         # counts and missing messages from Telegram
 tg messages read --chat @username                  # mark the whole chat read
 tg messages read --chat @username --max-id 1200    # only up to message 1200
+tg messages delete --chat @username --id 1200 --id 1201 --revoke   # delete for everyone
 ```
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
@@ -421,6 +422,50 @@ the chat's dialog (`messages.getPeerDialogs`) and writes its new unread state to
 
 `maxId` is the `--max-id` passed, `null` for everything. Like `tg send`, it is a Telegram
 mutation, so it needs credentials and a connection; the daemon never marks anything read.
+
+`tg messages delete --chat <peer> --id <id>` deletes messages of a chat. A delete cannot be
+undone. Repeat `--id` for several messages, up to 100 per call (more is `INVALID_ARGS`; a
+repeated ID counts once). In a private chat, a basic group or Saved Messages it calls
+`messages.deleteMessages`, which deletes only for this account unless `--revoke` deletes for
+everyone. In a supergroup or channel it calls `channels.deleteMessages`, which always deletes for
+everyone, with or without `--revoke`.
+
+`messages.deleteMessages` names no chat: message IDs of private chats and basic groups are
+shared across the account, so an ID would delete whatever message has it. The command first
+fetches the IDs (`messages.getMessages`) and deletes only if every one is a message of `--chat`.
+Otherwise nothing is deleted, and the error lists the IDs in `details.missingIds` without
+saying which chat holds them:
+
+```json
+{ "success": false,
+  "error": { "code": "TELEGRAM_ERROR", "message": "Chat 10 has no message 40: nothing was deleted",
+             "details": { "chatId": 10, "missingIds": [40] }, "retryable": false } }
+```
+
+After Telegram confirms, the cache marks the messages deleted, so `tg messages list` and
+`tg messages search` leave them out unless `--includeDeleted`:
+
+```json
+{ "chatId": 10, "messageIds": [12, 13], "deletedCount": 2, "forEveryone": true }
+```
+
+`messageIds` are the IDs asked for. `deletedCount` is the number Telegram reports deleted
+(`ptsCount`), which can be lower, for example for a message that was already gone; the command
+still succeeds, asks Telegram which of the messages are gone and marks only those deleted in
+the cache. `forEveryone` is `true` with `--revoke` and always in a supergroup or channel.
+When Telegram refuses, the error is `TELEGRAM_ERROR` (exit 5) with Telegram's error name in
+`details.telegramError`, beside `chatId` and `messageIds`, and the cache stays as it was:
+
+| `details.telegramError` | Meaning |
+|-------------------------|---------|
+| `MESSAGE_DELETE_FORBIDDEN` | one of the messages can't be deleted, most likely a service message |
+| `MESSAGE_ID_INVALID`, `MSG_ID_INVALID` | one of the IDs is invalid in this chat |
+| `CHAT_ADMIN_REQUIRED` | no permission to delete these messages |
+| `CHANNEL_PRIVATE` | you are not a member of the chat |
+
+Any other failure is `Failed to delete the messages: <Telegram's error>`. Editing, forwarding and
+pinning still go through `tg api`
+([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)).
 
 ### Media
 
@@ -860,7 +905,7 @@ TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg chats list   # only @teamchat
 TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg messages list --chat @alice   # CHAT_NOT_ALLOWED
 ```
 
-`readOnly` refuses `tg send`, `tg messages read`, `tg api` methods that aren't `get…`,
+`readOnly` refuses `tg send`, `tg messages read`, `tg messages delete`, `tg api` methods that aren't `get…`,
 `search…`, `resolve…` or `check…`, and `tg auth login`, `login-qr` and `logout` with
 `READ_ONLY`. `allowedChats` makes commands that name a chat refuse others with
 `CHAT_NOT_ALLOWED`, makes `tg chats list`, `tg chats search`, `tg messages search`, `wait`,

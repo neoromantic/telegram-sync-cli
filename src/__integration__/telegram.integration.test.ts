@@ -262,6 +262,54 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
   )
 
   it(
+    'messages delete removes the message on Telegram and hides it in the cache',
+    async () => {
+      const marker = uniqueMarker()
+      const messageId = await sendToSavedMessages(`tg smoke test ${marker}`)
+
+      const result = await runCliSuccess(
+        ['messages', 'delete', '--chat', 'me', '--id', String(messageId)],
+        cli(),
+      )
+      expect(result.json).toMatchObject({
+        success: true,
+        data: { messageIds: [messageId], deletedCount: 1, forEveryone: false },
+      })
+
+      const raw = await runCliSuccess(
+        [
+          'api',
+          'messages.getMessages',
+          '--json',
+          JSON.stringify({ id: [{ _: 'inputMessageID', id: messageId }] }),
+        ],
+        cli(),
+      )
+      const messages = (
+        raw.json as Envelope<{ result: { messages: Array<{ _: string }> } }>
+      ).data.result.messages
+      expect(messages.map((m) => m._)).toEqual(['messageEmpty'])
+
+      const search = async (extra: string[] = []) => {
+        const found = await runCliSuccess(
+          ['messages', 'search', '--query', marker, ...extra],
+          cli(),
+        )
+        return (
+          found.json as Envelope<{
+            results: Array<{ messageId: number; isDeleted: boolean }>
+          }>
+        ).data.results
+      }
+      expect(await search()).toEqual([])
+      expect(await search(['--includeDeleted'])).toMatchObject([
+        { messageId, isDeleted: true },
+      ])
+    },
+    API_TIMEOUT_MS * 3,
+  )
+
+  it(
     'messages list and get read Saved Messages from Telegram, then from the cache',
     async () => {
       type Item = {

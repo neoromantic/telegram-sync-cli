@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg messages delete --chat <peer> --id <id>... [--revoke]` deletes up to 100 messages of a chat
+  (the delete part of #23). In a private chat, basic group or Saved Messages it deletes for this
+  account, or for everyone with `--revoke`; in a supergroup or channel always for everyone. It
+  first checks that every ID is a message of `--chat` and refuses the whole call otherwise, since
+  `messages.deleteMessages` names no chat. It prints `chatId`, `messageIds`, `deletedCount` (as
+  Telegram reports it) and `forEveryone`, and marks the messages deleted in the cache, so list
+  and search hide them. Telegram's refusals are `TELEGRAM_ERROR` with the reason in
+  `details.telegramError`. It is a write: read-only mode refuses it and `allowedChats` applies.
+
 ## [0.14.0] - 2026-11-18
 
 ### Added

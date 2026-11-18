@@ -137,6 +137,7 @@ tg messages wait --chat @username --after 1200 --timeout 60   # the daemon's new
 tg messages watch                                             # NDJSON, until Ctrl-C
 tg messages unread --chat @username   # unread messages (cache, --fresh)
 tg messages read --chat @username     # mark read on Telegram (--max-id)
+tg messages delete --chat @username --id 123 --revoke   # delete for everyone, cannot be undone
 
 # Messaging
 tg send --to @username --message "Hello"
