@@ -83,9 +83,10 @@ bun run docs:outputs             # regenerate output tables in docs/cli-commands
   `neoromantic/tap/tg` installs it. Targets: darwin arm64/x64, linux x64/arm64, windows x64.
 - Git hooks: `lefthook.yml` runs `lint:fix` and `typecheck` on commit, plus devkit's gitleaks
   and privacy scan (needs `gitleaks` on `PATH`).
-- CI: `.github/workflows/ci.yml` calls devkit's `ci-bun` (check, build, test, test:e2e) and
-  `hygiene` workflows and adds a `pack` job that compiles the binary, packs the tarball,
-  installs it globally and runs `tg --help`/`--version` with no Telegram credentials. A weekly
+- CI: `.github/workflows/ci.yml` calls devkit's `ci-bun` (check, build, pack, test, test:e2e)
+  and `hygiene` workflows. `ci-bun`'s pack step installs the npm tarball in a clean project and
+  runs `tg --help` and `tg --version` with no Telegram credentials; the `binary` job compiles
+  `dist/tg` and runs the same two commands with no credentials. A weekly
   run (Monday) uses Bun canary and refreshes dependencies within their ranges. The required
   check is `ci`.
 
