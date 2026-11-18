@@ -23,23 +23,23 @@ import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { SyncJobType, SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { createFakeHistory, range, rawMessage } from './helpers/fake-history'
 import { waitLikeFloodWait } from './helpers/flood-wait'
+import { takePartIn } from './helpers/participation'
 
 describe('sync-worker real jobs', () => {
   let db: Database
   let ctx: RealSyncWorkerContext
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
+    takePartIn(db, -4242, -1000000000123)
 
     ctx = {
       client: {
@@ -86,6 +86,22 @@ describe('sync-worker real jobs', () => {
 
     expect(result.rateLimited).toBe(true)
     expect(result.waitSeconds).toBeGreaterThan(0)
+  })
+
+  it('returns rate limited without a request when API calls are blocked (initial load)', async () => {
+    const job = ctx.jobsService.create({
+      chat_id: 1,
+      job_type: SyncJobType.InitialLoad,
+      priority: SyncPriority.High,
+    })
+
+    ctx.rateLimits.setFloodWait(ctx.config.apiMethod, 10)
+
+    const result = await processInitialLoadReal(ctx, job)
+
+    expect(result).toMatchObject({ success: false, rateLimited: true })
+    expect(result.waitSeconds).toBeGreaterThan(0)
+    expect(ctx.client.call).not.toHaveBeenCalled()
   })
 
   it('returns error when input peer is missing (forward catchup)', async () => {
@@ -1563,7 +1579,12 @@ describe('sync-worker real jobs', () => {
     })
 
     it('makes no call for a chat that already has a forward cursor', async () => {
-      ctx.chatSyncState.updateCursors(chatId, { forward_cursor: 1000 })
+      ctx.chatSyncState.recordFirstPage(chatId, {
+        forward_cursor: 1000,
+        backward_cursor: 1000,
+        history_complete: false,
+        new_messages: 0,
+      })
       const history = createFakeHistory(range(1, 1150))
       ctx.client = history.client
 
@@ -1873,7 +1894,12 @@ describe('sync-worker real jobs', () => {
     })
 
     it("takes a whole history's length as its count", async () => {
-      ctx.chatSyncState.resetSyncState(chatId)
+      db.run(
+        `UPDATE chat_sync_state SET forward_cursor = NULL,
+           backward_cursor = NULL, history_complete = 0, synced_messages = 0
+         WHERE chat_id = ?`,
+        [chatId],
+      )
       ctx.client = {
         call: mock(async () => ({
           _: 'messages.messages',

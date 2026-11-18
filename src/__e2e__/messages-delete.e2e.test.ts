@@ -6,6 +6,7 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import type { DeleteMessagesResult } from '../commands/messages/delete-messages'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
@@ -85,6 +86,7 @@ function seed(db: Database): void {
       fakeDialog({ kind: 'group', id: 4242, title: 'Book Club' }),
     ].map(dialogToCacheInput),
   )
+  takePartIn(db, TEAM_ID, BOOK_CLUB_ID)
   createMessagesCache(db).upsertBatch([
     message(ALICE_PEER, FAKE_UNDELETABLE_MESSAGE, 'Alice joined the chat.'),
     message(ALICE_PEER, 12, 'See you at nine.'),

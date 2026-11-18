@@ -15,6 +15,7 @@ import {
 import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
@@ -73,6 +74,7 @@ function seedUser(
 }
 
 function seedMessage(db: Database, chatId: number, text: string) {
+  takePartIn(db, -4242)
   createMessagesCache(db).upsertBatch([
     {
       chat_id: chatId,

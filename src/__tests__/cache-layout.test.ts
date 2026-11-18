@@ -5,7 +5,6 @@
  * after close() (see seed-in-child.ts), and tg moves a file only when no
  * process has it open.
  */
-import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import {
   chmodSync,
@@ -33,22 +32,7 @@ import {
 } from '../db/cache-layout'
 import { createTestDatabase } from '../db/index'
 import { seedInChild } from './helpers/seed-in-child'
-
-/** Rows of the tables that make a shared cache worth keeping */
-function rowCounts(path: string): Record<string, number> {
-  const db = new Database(path, { readonly: true })
-  try {
-    const counts: Record<string, number> = {}
-    for (const table of ['messages_cache', 'chats_cache', 'users_cache']) {
-      counts[table] = (
-        db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }
-      ).n
-    }
-    return counts
-  } finally {
-    db.close()
-  }
-}
+import { holdOpen, rowCounts } from './helpers/shared-cache'
 
 /**
  * Every file under the data dir, relative to it, except data.db's and the
@@ -85,46 +69,6 @@ function seedFolded(path: string, options: { empty?: boolean } = {}) {
   seedInChild(path, 'foldedCache', options)
   rmSync(`${path}-shm`, { force: true })
   rmSync(`${path}-wal`, { force: true })
-}
-
-/** An older tg: keeps a file open, idle, until it exits */
-function holdOpen(path: string) {
-  const holder = Bun.spawn(
-    [
-      'bun',
-      '--no-env-file',
-      '-e',
-      `
-        import { Database } from 'bun:sqlite'
-        const db = new Database(process.env.HOLD_PATH)
-        db.query('SELECT COUNT(*) FROM chats_cache').get()
-        console.log('open')
-        for await (const _ of console) break
-        db.close()
-      `,
-    ],
-    {
-      env: { ...process.env, HOLD_PATH: path },
-      stdin: 'pipe',
-      stdout: 'pipe',
-    },
-  )
-  return {
-    async ready() {
-      const decoder = new TextDecoder()
-      let text = ''
-      for await (const chunk of holder.stdout) {
-        text += decoder.decode(chunk, { stream: true })
-        if (text.includes('open')) return
-      }
-      throw new Error('holder exited before it opened the file')
-    },
-    async release() {
-      holder.stdin.write('done\n')
-      holder.stdin.end()
-      await holder.exited
-    },
-  }
 }
 
 describe('migrateSharedCache', () => {

@@ -15,6 +15,8 @@ const SYNC_REASONS = [
   'community',
   'on_by_hand',
   'off_by_hand',
+  'group_participation_required',
+  'group_participation_unknown',
 ] as const satisfies readonly SyncReason[]
 
 export const chatItem = z.strictObject({
@@ -52,12 +54,20 @@ export const chatsListOutput = z.strictObject({
       chatItem.extend({
         syncEnabled: z
           .boolean()
-          .describe("Whether the daemon syncs the chat's messages"),
+          .describe(
+            "Whether the daemon syncs the chat's messages: its mode allows it and, in a group, the account takes part in it",
+          ),
         syncReason: z
           .enum(SYNC_REASONS)
           .nullable()
           .describe(
-            "Why: the policy's reason (`medium_group` is the default; `large_group`, `unknown_size`, `channel` and `community` are off), or `on_by_hand` / `off_by_hand` from `tg chats sync`; `null` for a chat without sync state: an archived chat that hasn't synced yet, or one no daemon start has seen",
+            "Why: the policy's reason (`medium_group` is the default; `large_group`, `unknown_size`, `channel` and `community` are off), `on_by_hand` / `off_by_hand` from `tg chats sync`, or `group_participation_required` / `group_participation_unknown` for a group that takes no new messages because the account sent none there in the last 90 days, or isn't checked yet ([sync-strategy.md](sync-strategy.md#group-participation)); `null` for a chat without sync state that takes messages: an archived chat that hasn't synced yet, or one no daemon start has seen",
+          ),
+        lastOwnMessageAt: z
+          .int()
+          .nullable()
+          .describe(
+            "A group's newest own message known, Unix milliseconds; `null` in other chats or when none is known",
           ),
       }),
     )

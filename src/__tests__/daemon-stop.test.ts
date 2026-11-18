@@ -24,7 +24,7 @@ import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createDaemonStatusService } from '../db/daemon-status'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { SyncJobType, SyncPriority } from '../db/sync-schema'
-import { createAccountCacheDb } from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeAccountsDb,
   mockDbModule,

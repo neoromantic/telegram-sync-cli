@@ -13,12 +13,12 @@ import {
   spyOn,
 } from 'bun:test'
 
-import { createTestCacheDatabase } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import type { ErrorCode } from '../types'
 import { ErrorCodes } from '../types'
 import { setOutputFormat } from '../utils/output'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { mockDbModule } from './helpers/db-mock'
 
 let testCacheDb: Database
@@ -45,7 +45,7 @@ describe('SQL Commands', () => {
   let errorSpy: Mock<typeof console.error>
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     logSpy = spyOn(console, 'log').mockImplementation(() => {})
     errorSpy = spyOn(console, 'error').mockImplementation(() => {})

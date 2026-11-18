@@ -7,7 +7,19 @@ import type { RateLimitsService } from '../db/rate-limits'
 import type { SenderLookups } from '../db/sender-lookups'
 import type { SyncJobsService } from '../db/sync-jobs'
 import type { UsersCache } from '../db/users-cache'
-import type { JobResult, SyncWorkerConfig } from './sync-worker-core'
+import type { JobResultLike } from './sync-worker-utils'
+
+export interface SyncWorkerConfig {
+  /** Batch size for fetching messages */
+  batchSize: number
+  /** API method name for rate limiting */
+  apiMethod: string
+}
+
+export const DEFAULT_SYNC_WORKER_CONFIG: SyncWorkerConfig = {
+  batchSize: 100,
+  apiMethod: 'messages.getHistory',
+}
 
 export interface RealSyncWorkerDeps {
   client: TelegramClient
@@ -26,7 +38,7 @@ export interface RealSyncWorkerDeps {
   signal?: AbortSignal
 }
 
-export interface RealJobResult extends JobResult {
+export interface RealJobResult extends JobResultLike {
   hasMore?: boolean
   newCursor?: number
   historyComplete?: boolean

@@ -76,8 +76,6 @@ export interface DaemonStatusService {
   delete(key: string): void
   /** Get all key-value pairs */
   getAll(): Record<string, string>
-  /** Clear all values */
-  clear(): void
 
   // Convenience methods
   /**
@@ -87,12 +85,6 @@ export interface DaemonStatusService {
   setDaemonRunning(pid: number, version: string): void
   /** Mark daemon as stopped */
   setDaemonStopped(): void
-  /** Check if daemon is running */
-  isDaemonRunning(): boolean
-  /** Update last update timestamp */
-  updateLastUpdate(): void
-  /** Set total messages synced */
-  setMessagesSynced(count: number): void
   /** Write a tick's figures and last_update in one transaction */
   writeTick(tick: DaemonTick): void
   /** Record a dialog pass after a reconnect or a wake (#124) */
@@ -231,10 +223,6 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       SELECT key, value FROM daemon_status
     `)
       .as(DaemonStatusRow),
-
-    clear: db.prepare(`
-      DELETE FROM daemon_status
-    `),
   }
 
   const service: DaemonStatusService = {
@@ -266,10 +254,6 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         }
       }
       return result
-    },
-
-    clear(): void {
-      stmts.clear.run()
     },
 
     setDaemonRunning(pid: number, version: string): void {
@@ -305,18 +289,6 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         service.set('daemon_status', 'stopped')
         service.set('connection_status', 'disconnected')
       }).immediate()
-    },
-
-    isDaemonRunning(): boolean {
-      return service.get('daemon_status') === 'running'
-    },
-
-    updateLastUpdate(): void {
-      service.set('last_update', Date.now().toString())
-    },
-
-    setMessagesSynced(count: number): void {
-      service.set('messages_synced', count.toString())
     },
 
     writeTick(tick: DaemonTick): void {

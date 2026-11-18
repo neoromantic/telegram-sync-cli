@@ -5,7 +5,7 @@
 import { stdin as input, stdout as output } from 'node:process'
 import type { Interface as ReadlineInterface } from 'node:readline'
 import * as readline from 'node:readline/promises'
-import type { TelegramClient } from '@mtcute/bun'
+import type { TelegramClient, User } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
 import { ConfigError } from '../config'
@@ -15,11 +15,11 @@ import {
 } from '../db'
 import {
   createClient,
-  getClient,
+  getClientForAccount,
   isAuthorized,
   requireDefaultConfig,
 } from '../services/telegram'
-import { ErrorCodes } from '../types'
+import { type Account, ErrorCodes } from '../types'
 import { settleCacheLayoutBeforeAccountChange } from '../utils/account-cache'
 import {
   ACCOUNT_SELECTOR_DESCRIPTION,
@@ -108,7 +108,7 @@ export function getDefaultDependencies(): AuthDependencies {
   return {
     accountsDb: defaultAccountsDb,
     createClient,
-    getClient,
+    getClient: getClientForAccount,
     isAuthorized,
     prompt,
     promptPassword,
@@ -157,6 +157,30 @@ interface QrLoginAccount {
 }
 
 /**
+ * Save the signed-in user on the login's account. When another account
+ * already has this user_id, keep that one and delete the login's account.
+ * Returns the account kept
+ */
+function saveLoggedInUser(
+  accountsDb: AccountsDbInterface,
+  account: Account,
+  user: User,
+  fields: { phone?: string; label?: string },
+): Account {
+  const existing = accountsDb.getByUserId(user.id)
+  const finalAccount =
+    existing && existing.id !== account.id ? existing : account
+  accountsDb.update(finalAccount.id, {
+    ...fields,
+    user_id: user.id,
+    name: `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`,
+    username: user.username ?? null,
+  })
+  if (finalAccount !== account) accountsDb.delete(account.id)
+  return finalAccount
+}
+
+/**
  * Login with phone number - core logic
  */
 export async function loginWithPhone(
@@ -189,32 +213,10 @@ export async function loginWithPhone(
       password: async () => promptPassword('Enter 2FA password: '),
     })
 
-    // Check if an account with this user_id already exists (to handle duplicates)
-    const existingAccount = accountsDb.getByUserId(user.id)
-    let finalAccount = account
-
-    if (existingAccount && existingAccount.id !== account.id) {
-      // Duplicate found! Merge: keep the existing account, delete the new one
-      // Update existing account with the new phone number and name
-      accountsDb.update(existingAccount.id, {
-        phone,
-        name: `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`,
-        username: user.username ?? null,
-        label: labelValue,
-      })
-
-      // Delete the newly created account
-      accountsDb.delete(account.id)
-      finalAccount = existingAccount
-    } else {
-      // No duplicate, update the current account with user_id and name
-      accountsDb.update(account.id, {
-        user_id: user.id,
-        name: `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`,
-        username: user.username ?? null,
-        label: labelValue,
-      })
-    }
+    const finalAccount = saveLoggedInUser(accountsDb, account, user, {
+      phone,
+      label: labelValue,
+    })
 
     // Close client to allow process to exit
     await client.destroy()
@@ -280,32 +282,12 @@ export async function loginWithQr(
       },
     })
 
-    // Check if an account with this user_id already exists (to handle duplicates)
-    const existingAccount = accountsDb.getByUserId(user.id)
-    let finalAccount = account
-
-    if (existingAccount && existingAccount.id !== account.id) {
-      // Duplicate found! Merge: keep the existing account, delete the new one
-      // Update existing account with user info
-      accountsDb.update(existingAccount.id, {
-        user_id: user.id,
-        name: `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`,
-        username: user.username ?? null,
-        label: label && label.length > 0 ? label : undefined,
-      })
-
-      // Delete the newly created account
-      accountsDb.delete(account.id)
-      finalAccount = existingAccount
-    } else {
-      // No duplicate, update the current account with user_id and name
-      accountsDb.update(account.id, {
-        phone: `user:${user.id}`, // QR logins don't expose phone number
-        user_id: user.id,
-        name: `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`,
-        username: user.username ?? null,
-        label: label && label.length > 0 ? label : undefined,
-      })
+    const finalAccount = saveLoggedInUser(accountsDb, account, user, {
+      label: label && label.length > 0 ? label : undefined,
+    })
+    if (finalAccount.id === account.id) {
+      // QR logins don't expose the phone number
+      accountsDb.update(account.id, { phone: `user:${user.id}` })
     }
 
     // Close client to allow process to exit

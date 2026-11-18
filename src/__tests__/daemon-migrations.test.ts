@@ -3,34 +3,17 @@
  * stop, a wait after a failure. Made-up data only.
  */
 import { Database } from 'bun:sqlite'
-import { describe, expect, it, mock } from 'bun:test'
+import { describe, expect, it } from 'bun:test'
 
-import {
-  createDaemonRuntime,
-  type DaemonContext,
-} from '../daemon/daemon-context'
 import {
   MIGRATION_RETRY_DELAY_MS,
   runMigrationsTick,
 } from '../daemon/daemon-migrations'
 import { readMigrationStatus } from '../db/background-migrations'
-import { addAccountRuntime } from './helpers/daemon-runtime'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import { seedOldFormCache } from './helpers/old-form-cache'
 
 const LIMITS = { maxRows: 4, maxMs: 1_000 }
-
-function createContext(): DaemonContext {
-  return {
-    logger: {
-      info: mock(() => {}),
-      debug: mock(() => {}),
-      warn: mock(() => {}),
-      error: mock(() => {}),
-    },
-    state: { running: true, accounts: new Map(), shutdownRequested: false },
-    runtime: createDaemonRuntime(),
-  } as unknown as DaemonContext
-}
 
 function oldCache(): Database {
   const db = new Database(':memory:')
@@ -44,7 +27,7 @@ function states(db: Database) {
 
 describe('runMigrationsTick', () => {
   it("finishes each account's migrations", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const first = addAccountRuntime(ctx, 1, oldCache())
     const second = addAccountRuntime(ctx, 2, oldCache())
 
@@ -72,7 +55,7 @@ describe('runMigrationsTick', () => {
   })
 
   it('stops when the tick budget is spent and goes on next tick', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const rt = addAccountRuntime(ctx, 1, oldCache())
     let clock = 0
     // Every reading of the clock is 1 ms later; the budget is 10
@@ -95,7 +78,7 @@ describe('runMigrationsTick', () => {
   })
 
   it('runs no batch once the daemon is stopping', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const rt = addAccountRuntime(ctx, 1, oldCache())
     ctx.state.shutdownRequested = true
 
@@ -112,7 +95,7 @@ describe('runMigrationsTick', () => {
   })
 
   it('waits before trying an account whose batch failed again', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const db = oldCache()
     addAccountRuntime(ctx, 1, db)
     db.run('DROP TABLE message_attachments')

@@ -23,16 +23,14 @@ import { processJobReal } from '../daemon/sync-worker-real-jobs'
 import type { RealSyncWorkerContext } from '../daemon/sync-worker-real-types'
 import { runPendingMigrations } from '../db/background-migrations'
 import { createChatSyncStateService } from '../db/chat-sync-state'
-import { type CachedChatInput, createChatsCache } from '../db/chats-cache'
+import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups, SENDER_RETRY_MS } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
 import {
-  initSyncSchema,
   type SyncJobRow,
   SyncJobStatus,
   SyncJobType,
@@ -40,6 +38,8 @@ import {
 } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
+import { takePartIn } from './helpers/participation'
 
 /** A supergroup whose access hash is cached */
 const GROUP = -1_000_000_003_003
@@ -59,23 +59,6 @@ const START = new Date('2026-03-01T00:00:00Z').getTime()
 let db: Database
 let ctx: RealSyncWorkerContext
 let requests: Record<string, unknown>[]
-
-function chatRow(chatId: number, accessHash: string | null): CachedChatInput {
-  return {
-    chat_id: String(chatId),
-    type: 'supergroup',
-    title: `Made-up group ${chatId}`,
-    username: null,
-    member_count: 500,
-    access_hash: accessHash,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: 1,
-    raw_json: '{}',
-  }
-}
 
 function seed(
   chatId: number,
@@ -143,8 +126,8 @@ function scheduler() {
 
 beforeEach(() => {
   setSystemTime(new Date(START))
-  db = createTestCacheDatabase().db
-  initSyncSchema(db)
+  db = createAccountCacheDb()
+  takePartIn(db, GROUP, BASIC, NO_HASH)
   requests = []
   ctx = {
     client: {} as TelegramClient,
@@ -158,8 +141,18 @@ beforeEach(() => {
     senderLookups: createSenderLookups(db),
     config: { apiMethod: 'messages.getHistory', batchSize: 100 },
   }
-  createChatsCache(db).upsert(chatRow(GROUP, '4242'))
-  createChatsCache(db).upsert(chatRow(NO_HASH, null))
+  for (const [chatId, accessHash] of [
+    [GROUP, '4242'],
+    [NO_HASH, null],
+  ] as const) {
+    createChatsCache(db).upsert(
+      chatRow(chatId, 'supergroup', {
+        member_count: 500,
+        access_hash: accessHash,
+        fetched_at: 1,
+      }),
+    )
+  }
   // An older cache: history synced without its senders (#126)
   for (const id of [10, 11, 12]) seed(GROUP, id, ALICIA)
   seed(GROUP, 13, BORIS)
@@ -311,6 +304,29 @@ describe('senders missing from the cache (#143)', () => {
     const result = await processJobReal(ctx, fetchJob(GROUP))
 
     expect(result).toMatchObject({ success: false, permanent: false })
+    expect(ctx.senderLookups.nextBatch(GROUP, 100)).toHaveLength(1)
+  })
+
+  it('drops the lookups of a channel that left the cache, without a request', async () => {
+    ctx.senderLookups.scan(Date.now())
+    db.run('DELETE FROM chats_cache WHERE chat_id = ?', [String(GROUP)])
+    answer([])
+    const result = await processJobReal(ctx, fetchJob(GROUP))
+
+    expect(result).toMatchObject({ success: false, permanent: true })
+    expect(requests).toHaveLength(0)
+    expect(ctx.senderLookups.nextBatch(GROUP, 100)).toEqual([])
+    expect(ctx.senderLookups.countNotFound()).toBe(1)
+  })
+
+  it('keeps the senders waiting while the API is rate limited', async () => {
+    ctx.senderLookups.scan(Date.now())
+    ctx.rateLimits.setFloodWait(ctx.config.apiMethod, 60)
+    answer([])
+    const result = await processJobReal(ctx, fetchJob(GROUP))
+
+    expect(result).toMatchObject({ success: false, rateLimited: true })
+    expect(requests).toHaveLength(0)
     expect(ctx.senderLookups.nextBatch(GROUP, 100)).toHaveLength(1)
   })
 

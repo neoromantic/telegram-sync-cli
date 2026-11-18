@@ -10,12 +10,12 @@ import {
   createRateLimitsService,
   type RateLimitsService,
 } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import {
   getRateLimitsService,
   RateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeAccountsDb,
   mockDbModule,
@@ -45,7 +45,7 @@ describe('wrapClientCallWithRateLimits', () => {
   let rateLimits: RateLimitsService
 
   beforeEach(() => {
-    db = createTestCacheDatabase().db
+    db = createAccountCacheDb()
     rateLimits = createRateLimitsService(db)
   })
 
@@ -117,8 +117,8 @@ describe('wrapClientCallWithRateLimits', () => {
 
 describe('rate limits per account', () => {
   beforeEach(() => {
-    accountCaches.set(1, createTestCacheDatabase().db)
-    accountCaches.set(2, createTestCacheDatabase().db)
+    accountCaches.set(1, createAccountCacheDb())
+    accountCaches.set(2, createAccountCacheDb())
   })
 
   afterEach(() => {

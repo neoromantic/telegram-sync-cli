@@ -21,6 +21,10 @@ export interface ParsedIdentifier {
   raw: string
 }
 
+export function isRawUser(user: tl.TypeUser): user is tl.RawUser {
+  return user._ === 'user'
+}
+
 export function apiUserToUserInfo(user: tl.RawUser): UserInfo {
   return {
     id: user.id,

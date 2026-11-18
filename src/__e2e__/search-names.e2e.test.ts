@@ -6,8 +6,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-
-import { type CachedChatInput, createChatsCache } from '../db/chats-cache'
+import { chatRow } from '../__tests__/helpers/cache-db'
+import { takePartIn } from '../__tests__/helpers/participation'
+import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { createUsersCache, type UserCacheInput } from '../db/users-cache'
 import type { MessageSearchItem } from '../types'
@@ -26,20 +27,11 @@ const user: UserCacheInput = {
   raw_json: '{}',
 }
 
-const chat: CachedChatInput = {
-  chat_id: String(CHAT_ID),
-  type: 'supergroup',
+const chat = chatRow(CHAT_ID, 'supergroup', {
   title: 'Hiking Group',
-  username: null,
   member_count: 40,
-  access_hash: null,
-  is_creator: 0,
-  is_admin: 0,
-  last_message_id: null,
-  last_message_at: null,
   fetched_at: 1,
-  raw_json: '{}',
-}
+})
 
 describe('E2E: names in the search index', () => {
   let env: TestEnvironment
@@ -60,6 +52,7 @@ describe('E2E: names in the search index', () => {
 
   function seedMessages(): void {
     const db = env.openCacheDb(1)
+    takePartIn(db, -1009000000002)
     createMessagesCache(db).upsertBatch(
       [1, 2, 3].map((id) => ({
         chat_id: CHAT_ID,

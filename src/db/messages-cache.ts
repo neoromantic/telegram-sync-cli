@@ -6,6 +6,12 @@ import type { Database } from 'bun:sqlite'
 import { extractAttachment } from '../utils/attachment'
 import { richMessageText } from '../utils/rich-message'
 import { sharesAccountMessageIds } from '../utils/telegram-peer-ids'
+import {
+  createGroupParticipation,
+  type GroupParticipation,
+  isOwnOrdinaryMessage,
+  nowSeconds,
+} from './group-participation'
 import { createMessageAttachmentsStore } from './message-attachments'
 import { MessageCacheRow } from './sync-schema'
 
@@ -31,15 +37,6 @@ export interface MessageInput {
   raw_json: string
 }
 
-/**
- * Options for listing messages
- */
-export interface ListMessagesOptions {
-  limit: number
-  offset?: number
-  includeDeleted?: boolean
-}
-
 /** A message ID that more than one private chat or basic group has live */
 export interface AmbiguousMessageId {
   messageId: number
@@ -60,14 +57,32 @@ export interface DeleteWithoutChatResult {
   ambiguous: AmbiguousMessageId[]
 }
 
+/** What a write of messages did */
+export interface CacheWriteResult {
+  /** The messages written: new rows and updates of cached ones */
+  written: number
+  /** New rows */
+  inserted: number
+  /** New messages the group participation rule kept out */
+  skipped: number
+}
+
 /**
  * Messages cache service interface
  */
 export interface MessagesCache {
-  /** Insert or update a message */
-  upsert(message: MessageInput): void
-  /** Insert or update multiple messages in a transaction */
-  upsertBatch(messages: MessageInput[]): void
+  /** The group participation rule every write follows */
+  participation: GroupParticipation
+  /** Insert or update a message (see upsertBatch) */
+  upsert(message: MessageInput): CacheWriteResult
+  /**
+   * Insert or update messages in one transaction. Own ordinary messages
+   * count as participation first, oldest first. A cached message is always
+   * updated; a new one is written only if its chat may take it
+   * (GroupParticipation.canInsert), else it is skipped before anything of
+   * it (attachment, search index) is written.
+   */
+  upsertBatch(messages: MessageInput[]): CacheWriteResult
   /**
    * IDs of the chat's messages cached with raw_json '{}' (#130), above
    * `afterId`, oldest first
@@ -80,8 +95,6 @@ export interface MessagesCache {
    * basic groups, for delete events without chat context
    */
   findChatIdsByMessageIds(messageIds: number[]): MessageChatLookup
-  /** List messages for a chat in reverse chronological order */
-  listByChatId(chatId: number, options: ListMessagesOptions): MessageCacheRow[]
   /** Mark messages as deleted */
   markDeleted(chatId: number, messageIds: number[]): void
   /**
@@ -101,7 +114,7 @@ export interface MessagesCache {
   /** Get the oldest message ID for a chat */
   getOldestMessageId(chatId: number): number | null
   /** Count messages in a chat */
-  countByChatId(chatId: number, includeDeleted?: boolean): number
+  countByChatId(chatId: number): number
 }
 
 /**
@@ -158,30 +171,17 @@ export function createMessagesCache(db: Database): MessagesCache {
     `)
       .as(MessageCacheRow),
 
+    exists: db.query(`
+      SELECT 1 FROM messages_cache
+      WHERE chat_id = $chat_id AND message_id = $message_id
+    `),
+
     listEmptyRawJsonIds: db.query(`
       SELECT message_id FROM messages_cache
       WHERE chat_id = $chat_id AND message_id > $after AND raw_json = '{}'
       ORDER BY message_id
       LIMIT $limit
     `),
-
-    listByChatId: db
-      .query(`
-      SELECT * FROM messages_cache
-      WHERE chat_id = $chat_id AND is_deleted = 0
-      ORDER BY date DESC
-      LIMIT $limit OFFSET $offset
-    `)
-      .as(MessageCacheRow),
-
-    listByChatIdIncludeDeleted: db
-      .query(`
-      SELECT * FROM messages_cache
-      WHERE chat_id = $chat_id
-      ORDER BY date DESC
-      LIMIT $limit OFFSET $offset
-    `)
-      .as(MessageCacheRow),
 
     markDeleted: db.prepare(`
       UPDATE messages_cache
@@ -213,11 +213,6 @@ export function createMessagesCache(db: Database): MessagesCache {
     countByChatId: db.query(`
       SELECT COUNT(*) as count FROM messages_cache
       WHERE chat_id = $chat_id AND is_deleted = 0
-    `),
-
-    countByChatIdAll: db.query(`
-      SELECT COUNT(*) as count FROM messages_cache
-      WHERE chat_id = $chat_id
     `),
   }
 
@@ -260,17 +255,50 @@ export function createMessagesCache(db: Database): MessagesCache {
     )
   }
 
-  // Inside a caller's transaction these run as savepoints
-  const upsertOne = db.transaction(writeMessage)
-  const upsertMany = db.transaction((messages: MessageInput[]) => {
-    for (const message of messages) {
-      writeMessage(message)
-    }
-  })
+  const participation = createGroupParticipation(db)
+
+  // Inside a caller's transaction this runs as a savepoint. It reads before
+  // it writes, so it takes the write lock first: a deferred transaction
+  // would fail at once if another process wrote after its read.
+  const upsertMany = db.transaction(
+    (messages: MessageInput[]): CacheWriteResult => {
+      const now = nowSeconds()
+      const own = messages
+        .filter(
+          (message) => message.chat_id < 0 && isOwnOrdinaryMessage(message),
+        )
+        .sort((a, b) => a.date - b.date)
+      for (const message of own) {
+        participation.observeOwnMessage(message.chat_id, message.date, now)
+      }
+
+      const result: CacheWriteResult = { written: 0, inserted: 0, skipped: 0 }
+      for (const message of messages) {
+        const key = {
+          $chat_id: message.chat_id,
+          $message_id: message.message_id,
+        }
+        const cached = stmts.exists.get(key) !== null
+        if (
+          !cached &&
+          !participation.canInsert(message.chat_id, message.date, now)
+        ) {
+          result.skipped++
+          continue
+        }
+        writeMessage(message)
+        if (!cached) result.inserted++
+        result.written++
+      }
+      return result
+    },
+  )
 
   return {
-    upsert(message: MessageInput): void {
-      upsertOne(message)
+    participation,
+
+    upsert(message: MessageInput): CacheWriteResult {
+      return upsertMany.immediate([message])
     },
 
     listEmptyRawJsonIds(
@@ -286,8 +314,8 @@ export function createMessagesCache(db: Database): MessagesCache {
       return rows.map((row) => row.message_id)
     },
 
-    upsertBatch(messages: MessageInput[]): void {
-      upsertMany(messages)
+    upsertBatch(messages: MessageInput[]): CacheWriteResult {
+      return upsertMany.immediate(messages)
     },
 
     get(chatId: number, messageId: number): MessageCacheRow | null {
@@ -320,22 +348,6 @@ export function createMessagesCache(db: Database): MessagesCache {
       }
 
       return { chatIds, ambiguous }
-    },
-
-    listByChatId(
-      chatId: number,
-      options: ListMessagesOptions,
-    ): MessageCacheRow[] {
-      const params = {
-        $chat_id: chatId,
-        $limit: options.limit,
-        $offset: options.offset ?? 0,
-      }
-
-      if (options.includeDeleted) {
-        return stmts.listByChatIdIncludeDeleted.all(params)
-      }
-      return stmts.listByChatId.all(params)
     },
 
     markDeleted(chatId: number, messageIds: number[]): void {
@@ -403,9 +415,10 @@ export function createMessagesCache(db: Database): MessagesCache {
       return result?.min_id ?? null
     },
 
-    countByChatId(chatId: number, includeDeleted = false): number {
-      const stmt = includeDeleted ? stmts.countByChatIdAll : stmts.countByChatId
-      const result = stmt.get({ $chat_id: chatId }) as { count: number } | null
+    countByChatId(chatId: number): number {
+      const result = stmts.countByChatId.get({ $chat_id: chatId }) as {
+        count: number
+      } | null
       return result?.count ?? 0
     },
   }

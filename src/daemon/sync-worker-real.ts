@@ -3,50 +3,16 @@
  */
 
 import type { SyncJobRow } from '../db/sync-schema'
+import { canMakeApiCall } from './sync-worker-real-context'
+import { processJobReal } from './sync-worker-real-jobs'
 import {
   DEFAULT_SYNC_WORKER_CONFIG,
+  type RealSyncWorkerContext,
+  type RealSyncWorkerDeps,
   type SyncWorkerConfig,
-} from './sync-worker-core'
-import {
-  canMakeApiCall,
-  getInputPeer,
-  getWaitTime,
-} from './sync-worker-real-context'
-import { parseRawMessage } from './sync-worker-real-helpers'
-import {
-  processBackwardHistoryReal,
-  processForwardCatchupReal,
-  processInitialLoadReal,
-  processJobReal,
-} from './sync-worker-real-jobs'
-import type {
-  RealJobResult,
-  RealSyncWorkerContext,
-  RealSyncWorkerDeps,
-} from './sync-worker-real-types'
-import { runOnceBase } from './sync-worker-utils'
-
-export {
-  buildInputPeer,
-  extractFloodWaitSeconds,
-  fetchMessagesRaw,
-  parseRawMessage,
-} from './sync-worker-real-helpers'
-export type {
-  RealJobResult,
-  RealSyncWorkerDeps,
 } from './sync-worker-real-types'
 
-async function runOnceReal(
-  ctx: RealSyncWorkerContext,
-): Promise<RealJobResult | null> {
-  return runOnceBase<RealJobResult>({
-    canMakeApiCall: () => canMakeApiCall(ctx),
-    getWaitTime: () => getWaitTime(ctx),
-    getNextJob: () => ctx.jobsService.getNextPending(),
-    processJob: (job) => processJobReal(ctx, job),
-  })
-}
+export type { RealJobResult } from './sync-worker-real-types'
 
 /**
  * Create a sync worker that uses the real mtcute TelegramClient
@@ -73,18 +39,8 @@ export function createRealSyncWorker(deps: RealSyncWorkerDeps) {
   return {
     /** The client this worker calls; a reconnect replaces the worker */
     client: ctx.client,
-    processJobReal: (job: SyncJobRow) => processJobReal(ctx, job),
-    processForwardCatchupReal: (job: SyncJobRow) =>
-      processForwardCatchupReal(ctx, job),
-    processBackwardHistoryReal: (job: SyncJobRow) =>
-      processBackwardHistoryReal(ctx, job),
-    processInitialLoadReal: (job: SyncJobRow) =>
-      processInitialLoadReal(ctx, job),
-    runOnceReal: () => runOnceReal(ctx),
     canMakeApiCall: () => canMakeApiCall(ctx),
-    getWaitTime: () => getWaitTime(ctx),
-    buildInputPeer: (chatId: number) => getInputPeer(ctx, chatId),
-    parseRawMessage,
+    processJobReal: (job: SyncJobRow) => processJobReal(ctx, job),
   }
 }
 

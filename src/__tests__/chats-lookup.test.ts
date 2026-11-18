@@ -10,17 +10,16 @@ import { AmbiguousPeerError } from '../commands/send/peer-resolver'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
-import { createTestCacheDatabase } from '../db/schema'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import { SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { type FakeDialogInput, fakeDialog } from './helpers/fake-dialogs'
 
 describe('findCachedChatById', () => {
   let db: Database
 
   beforeEach(() => {
-    db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
   })
 
   function cacheDialog(input: FakeDialogInput) {

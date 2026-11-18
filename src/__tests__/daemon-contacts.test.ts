@@ -21,11 +21,7 @@ import {
   maybeSyncContacts,
   requestContactsCheckNow,
 } from '../daemon/daemon-contacts'
-import {
-  createDaemonRuntime,
-  type DaemonContext,
-  requestShutdown,
-} from '../daemon/daemon-context'
+import { type DaemonContext, requestShutdown } from '../daemon/daemon-context'
 import { DaemonStopError } from '../daemon/daemon-utils'
 import type { AccountConnectionState } from '../daemon/types'
 import {
@@ -36,41 +32,14 @@ import {
 import { createRateLimitsService } from '../db/rate-limits'
 import { getDefaultCacheConfig } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
-import { addAccountRuntime } from './helpers/daemon-runtime'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 
 const NOW = 1_800_000_000_000
 const HOUR = 60 * 60 * 1000
 const WEEK = 7 * 24 * HOUR
 
-function createLogger() {
-  return {
-    info: mock((_m: string) => {}),
-    debug: mock((_m: string) => {}),
-    warn: mock((_m: string) => {}),
-    error: mock((_m: string) => {}),
-  }
-}
-
-function createContext(): DaemonContext & {
-  logger: ReturnType<typeof createLogger>
-} {
-  return {
-    dataDir: '/tmp/tgcli',
-    pidPath: '/tmp/tgcli/daemon.pid',
-    verbosity: 'quiet',
-    reconnectConfig: {
-      initialDelayMs: 1000,
-      maxDelayMs: 4000,
-      maxAttempts: 2,
-      backoffMultiplier: 2,
-    },
-    shutdownTimeoutMs: 1_000_000,
-    logger: createLogger(),
-    pidFile: {} as DaemonContext['pidFile'],
-    state: { running: true, accounts: new Map(), shutdownRequested: false },
-    accountsDb: {} as DaemonContext['accountsDb'],
-    runtime: createDaemonRuntime(),
-  }
+function createContext() {
+  return testDaemonContext({ verbosity: 'quiet' })
 }
 
 interface PendingCall {
@@ -600,11 +569,9 @@ describe('handleContactRawUpdate', () => {
 describe('loadContactsTtl', () => {
   let dirs = 0
   // A fresh data dir under the test data dir, with this config.json
-  async function withConfig(config: string): Promise<
-    DaemonContext & {
-      logger: ReturnType<typeof createLogger>
-    }
-  > {
+  async function withConfig(
+    config: string,
+  ): Promise<ReturnType<typeof createContext>> {
     const ctx = createContext()
     ctx.dataDir = join(
       process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? '.tmp',
