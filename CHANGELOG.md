@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tg skill validate` reports the account a command uses without `--account` (`account`,
   `accounts_total`) and whether the daemon runs (`daemon: { status, pid }`). No account, or
   several and none active, is an issue.
+
+### Removed
+
+- `tg skill manifest` and the `skill.json` that `tg skill install` wrote into the data
+  directory. No agent read that file; `tg skill install --dir <dir>` now writes `SKILL.md`.
+
+## [0.14.0] - 2026-11-18
+
+### Added
+
 - Every error says whether running the same command again can work: `error.retryable` is
   `true` for `RATE_LIMITED`, `NETWORK_ERROR`, a media download that waited too long for
   another tg process and a `tg api` call Telegram failed on its side (500 or -503), `false`
@@ -48,11 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [docs/cli-commands.md](docs/cli-commands.md) is generated from it (`bun run docs:outputs`), and
   an e2e test fails when the command prints a field the declaration doesn't have (#160, a trial
   on one command). The output doesn't change. zod is a devDependency and doesn't ship.
-
-### Removed
-
-- `tg skill manifest` and the `skill.json` that `tg skill install` wrote into the data
-  directory. No agent read that file; `tg skill install --dir <dir>` now writes `SKILL.md`.
 
 ### Fixed
 
@@ -1042,7 +1047,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.2...v0.13.0
 [0.12.2]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.1...v0.12.2
