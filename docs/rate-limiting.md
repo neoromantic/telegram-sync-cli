@@ -107,7 +107,9 @@ File transfers (`tg media download`, `tg send --file`) go through the same wrapp
 `upload.getFile`, `upload.saveFilePart` and `upload.saveBigFilePart` call is recorded for the
 account. They sleep through flood waits of up to 10 seconds, part by part and without a log
 line; a longer wait ends the command with `RATE_LIMITED`. A download keeps its partial file, and
-the next run after the wait resumes it ([media.md](media.md#download)).
+the next run after the wait resumes it ([media.md](media.md#download)). A download of several
+messages instead pauses the whole batch for waits of up to 5 minutes and then resumes the files
+it stopped ([media.md](media.md#several-messages)).
 
 ## Daemon Sync Jobs
 

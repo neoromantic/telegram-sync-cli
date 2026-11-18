@@ -373,6 +373,8 @@ tg media download --chat me --id 42                   # into the media cache, pr
 tg media download --chat @username --id 42 --out ./   # also copy it into this directory
 tg media download --chat me --id 42 --out - > report.pdf
 tg media download --chat me --id 42 --thumb           # the file's small preview
+tg media download --chat me --id 42 --id 43 --out ./media/   # several: one JSON line per file
+tg media download --chat me --id 42 --out './media/{chat}/{date}_{id}_{name}'
 tg media clean --older-than 30d                       # files not used for 30 days
 ```
 
@@ -385,7 +387,16 @@ mimeType, size, kind, chatId, messageId, uniqueFileId, groupedId, cached, resume
   fresh file reference, checks its content protection and downloads the file. A partial
   download is kept and the next run resumes it (`resumedFrom`).
 - `--out` copies the file into a directory or to a file path; `--out -` writes the bytes to
-  stdout with no JSON. An existing target is `FILE_EXISTS` unless `--overwrite` is set.
+  stdout with no JSON. An existing target with other content is `FILE_EXISTS` unless
+  `--overwrite` is set; one that already holds the file is left as it is.
+- `--out` can be a name template with `{chat}`, `{id}`, `{date}` (the message's UTC day),
+  `{name}` and `{kind}`; each filled part is made a safe file name.
+- Repeat `--id` for several messages of the chat. One run fetches the messages together,
+  downloads up to 5 files at a time (2 of 20 MB or more) and pauses the whole batch for a flood
+  wait of up to 5 minutes. It prints one JSON line per file as each finishes, success or error,
+  in the shapes above, then `Downloaded N of M files` on stderr. A failed file doesn't stop the
+  others; the exit code is 1 when any failed. A directory `--out` names each file
+  `{id}_{name}`. `--out -` takes one `--id`.
 - Errors, all exit 1: `NO_MEDIA` (no file, or no preview with `--thumb`), `MESSAGE_NOT_FOUND`
   (Telegram has no such message in the chat), `CONTENT_PROTECTED` (`details.reason`:
   `message`, `chat`, `private_chat` or `self_destructing`), `MEDIA_UNSUPPORTED` (a file served

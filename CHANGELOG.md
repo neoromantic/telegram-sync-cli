@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg media download` takes several `--id` values and downloads the files of those messages of
+  the chat in one run: one fetch of the messages, one content-protection check, up to 5 files at
+  a time (2 of 20 MB or more) and a flood wait that pauses the whole batch instead of failing
+  files. It prints one JSON line per file as each finishes, success or error, and exits 1 when
+  any failed. Cached files need no network and partial files resume, as before. One `--id`
+  prints what it printed before.
+- `--out` takes a name template such as `./media/{chat}/{date}_{id}_{name}` (placeholders
+  `{chat}`, `{id}`, `{date}`, `{name}`, `{kind}`); each filled part is made a safe file name.
+  With several `--id`, a directory `--out` names files `{id}_{name}`, so two photos no longer
+  collide on `photo.jpg`.
+
+### Changed
+
+- `tg media download --out` leaves an existing target that already holds the same file as it
+  is instead of failing with `FILE_EXISTS`, so a download can be repeated.
+
 ## [0.13.1] - 2026-11-18
 
 ### Fixed

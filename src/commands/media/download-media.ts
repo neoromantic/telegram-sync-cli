@@ -272,7 +272,7 @@ function lockTimeout(err: DownloadLockTimeoutError): MediaError {
  * the cache knows it, and the complete file. Null when the message or the
  * file isn't cached; NO_MEDIA or CONTENT_PROTECTED as the cache tells.
  */
-function readFromCache(
+export function readFromCache(
   deps: DownloadDeps,
   chat: HistoryChat,
   request: DownloadRequest,

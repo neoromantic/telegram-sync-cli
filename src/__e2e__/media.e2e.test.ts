@@ -13,7 +13,10 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 
-import { pdfDocumentMessage } from '../__tests__/helpers/media-messages'
+import {
+  documentMessage,
+  pdfDocumentMessage,
+} from '../__tests__/helpers/media-messages'
 import { fakeBytes, photoMessage } from '../__tests__/helpers/photo-message'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createChatProtectionStore } from '../db/chat-protection'
@@ -22,6 +25,15 @@ import { createUsersCache } from '../db/users-cache'
 import { extractAttachment, pickThumb } from '../utils/attachment'
 import { mediaPaths, thumbPaths } from '../utils/media-cache'
 import { NO_CREDENTIALS, runCli, runCliSuccess, spawnCli } from './helpers/cli'
+import {
+  FAKE_MEDIA_CALL,
+  FAKE_MEDIA_CLI,
+  FAKE_MEDIA_ENV,
+  type FakeMediaFile,
+  type FakeMediaScenario,
+  mediaBytes,
+  mediaMessage,
+} from './helpers/fake-media-cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
 const SELF_ID = 5_550_001
@@ -448,5 +460,317 @@ describe('E2E: media download', () => {
         details: { chatId: ALICE_ID, messageId: 2, reason: 'private_chat' },
       },
     })
+  })
+})
+
+describe('E2E: media download of several messages', () => {
+  const ALICE_ID = 5_550_003
+  let env: TestEnvironment
+  let mediaDir: string
+
+  beforeEach(() => {
+    env = createTestEnvironment('media-batch')
+    env.initDatabase()
+    env.seedAccounts([
+      { phone: '+15550000000', user_id: SELF_ID, is_active: true },
+    ])
+    createUsersCache(env.openCacheDb(1)).upsert({
+      user_id: String(ALICE_ID),
+      first_name: 'Alice',
+      last_name: 'Example',
+      access_hash: '1111',
+      fetched_at: Date.now(),
+      raw_json: '{}',
+    })
+    mediaDir = join(env.dataDir, 'accounts', '1', 'media')
+  })
+
+  afterEach(() => {
+    env.cleanup()
+  })
+
+  function run(args: string[], files: FakeMediaFile[] = []) {
+    const scenario: FakeMediaScenario = { userId: ALICE_ID, files }
+    return runCli(['media', 'download', ...args], {
+      env: {
+        ...env.getCliOptions().env,
+        [FAKE_MEDIA_ENV]: JSON.stringify(scenario),
+      },
+      entry: FAKE_MEDIA_CLI,
+      timeout: 20_000,
+    })
+  }
+
+  type Line =
+    | DownloadOutput
+    | {
+        success: false
+        error: {
+          code: string
+          message: string
+          details: { messageId: number } & Record<string, unknown>
+        }
+      }
+
+  /** stdout's lines, by message ID */
+  function lines(stdout: string): Line[] {
+    const id = (line: Line) =>
+      'data' in line ? line.data.messageId : line.error.details.messageId
+    return stdout
+      .split('\n')
+      .map((line) => JSON.parse(line) as Line)
+      .sort((a, b) => id(a) - id(b))
+  }
+
+  function calls(stderr: string) {
+    return stderr
+      .split('\n')
+      .filter((line) => line.startsWith(FAKE_MEDIA_CALL))
+      .map((line) => JSON.parse(line.slice(FAKE_MEDIA_CALL.length)))
+  }
+
+  function cacheFile(chatId: number, raw: unknown, bytes: Uint8Array) {
+    createMessagesCache(env.openCacheDb(1)).upsert(
+      parseRawMessage(raw, chatId)!,
+    )
+    const { file } = mediaPaths(mediaDir, extractAttachment(raw)!)
+    mkdirSync(join(file, '..'), { recursive: true })
+    writeFileSync(file, bytes)
+    return file
+  }
+
+  const VOICE = { id: 11, size: 30_000, fileName: 'example-voice.ogg' }
+  const CLIP = { id: 12, size: 700_000, fileName: 'example-clip.mp4' }
+  const NOTES = { id: 13, size: 5_000, fileName: 'example-notes.txt' }
+
+  it('downloads several messages in one run: one fetch, one line per file', async () => {
+    const files = [VOICE, CLIP, NOTES]
+    const ids = files.flatMap((file) => ['--id', String(file.id)])
+
+    const result = await run(['--chat', String(ALICE_ID), ...ids], files)
+
+    expect(result.exitCode).toBe(0)
+    const output = lines(result.stdout) as DownloadOutput[]
+    expect(output.map((line) => line.data)).toEqual(
+      files.map((file) =>
+        expect.objectContaining({
+          chatId: ALICE_ID,
+          messageId: file.id,
+          fileName: file.fileName,
+          size: file.size,
+          cached: false,
+          resumedFrom: null,
+        }),
+      ),
+    )
+    for (const [index, line] of output.entries()) {
+      expect(line.data.path).toBe(line.data.cachePath)
+      expect(
+        Buffer.compare(readFileSync(line.data.path), mediaBytes(files[index]!)),
+      ).toBe(0)
+    }
+    const made = calls(result.stderr)
+    expect(made.filter((call) => call.method !== 'upload.getFile')).toEqual([
+      { method: 'messages.getMessages', ids: [11, 12, 13] },
+      { method: 'users.getFullUser' },
+    ])
+    expect(result.stderr).toContain('Downloaded 3 of 3 files')
+  })
+
+  it('serves cached files without network and fetches only the rest', async () => {
+    const cached = mediaMessage(ALICE_ID, NOTES)
+    const file = cacheFile(ALICE_ID, cached, mediaBytes(NOTES))
+
+    const result = await run(
+      ['--chat', String(ALICE_ID), '--id', '13', '--id', '11'],
+      [VOICE],
+    )
+
+    expect(result.exitCode).toBe(0)
+    const [voice, notes] = lines(result.stdout) as DownloadOutput[]
+    expect(notes!.data).toMatchObject({ path: file, cached: true })
+    expect(voice!.data).toMatchObject({ messageId: 11, cached: false })
+    expect(calls(result.stderr)[0]).toEqual({
+      method: 'messages.getMessages',
+      ids: [11],
+    })
+  })
+
+  it('resumes a partial download from its last whole part', async () => {
+    const big = { id: 14, size: 1_200_000, fileName: 'example-talk.ogg' }
+    const { part } = mediaPaths(
+      mediaDir,
+      extractAttachment(mediaMessage(ALICE_ID, big))!,
+    )
+    mkdirSync(join(part, '..'), { recursive: true })
+    writeFileSync(part, mediaBytes(big).subarray(0, 600_000))
+
+    const result = await run(
+      ['--chat', String(ALICE_ID), '--id', '14', '--id', '11'],
+      [big, VOICE],
+    )
+
+    expect(result.exitCode).toBe(0)
+    const [, talk] = lines(result.stdout) as DownloadOutput[]
+    expect(talk!.data).toMatchObject({ resumedFrom: 524_288, cached: false })
+    expect(Buffer.compare(readFileSync(talk!.data.path), mediaBytes(big))).toBe(
+      0,
+    )
+    const offsets = calls(result.stderr)
+      .filter((call) => call.method === 'upload.getFile' && call.id === 14)
+      .map((call) => call.offset)
+    expect(offsets).toEqual([524_288, 1_048_576])
+  })
+
+  it('reports a failed file on its own line, finishes the others and exits 1', async () => {
+    const broken = {
+      id: 15,
+      size: 9_000,
+      fileName: 'broken.bin',
+      error: 'FILE_ID_INVALID',
+    }
+
+    const result = await run(
+      ['--chat', String(ALICE_ID), '--id', '11', '--id', '15', '--id', '13'],
+      [VOICE, broken, NOTES],
+    )
+
+    expect(result.exitCode).toBe(1)
+    const [voice, notes, failed] = lines(result.stdout)
+    expect(voice).toMatchObject({ success: true, data: { messageId: 11 } })
+    expect(notes).toMatchObject({ success: true, data: { messageId: 13 } })
+    expect(failed).toEqual({
+      success: false,
+      error: {
+        code: 'TELEGRAM_ERROR',
+        message: 'Telegram refused the download: FILE_ID_INVALID',
+        details: {
+          chatId: ALICE_ID,
+          messageId: 15,
+          method: 'upload.getFile',
+          error: 'FILE_ID_INVALID',
+        },
+      },
+    })
+    expect(result.stderr).toContain('Downloaded 2 of 3 files, 1 failed')
+  })
+
+  it('pauses the whole batch for a flood wait and then completes it', async () => {
+    const flooded = { ...CLIP, floodWaitOnce: 2 }
+    const started = Date.now()
+
+    const result = await run(
+      ['--chat', String(ALICE_ID), '--id', '11', '--id', '12', '--id', '13'],
+      [VOICE, flooded, NOTES],
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(lines(result.stdout).every((line) => line.success)).toBe(true)
+    expect(result.stderr).toContain(
+      '[flood-wait] upload.getFile: pausing the batch for 2s',
+    )
+    expect(Date.now() - started).toBeGreaterThanOrEqual(2_000)
+    // The retry reuses the batch's fetch of the message
+    expect(
+      calls(result.stderr).filter(
+        (call) => call.method === 'messages.getMessages',
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('names files by template: two photos into one directory and a name made safe', async () => {
+    const self = { _: 'peerUser' as const, userId: SELF_ID }
+    const bytes = fakeBytes(60_000, 3)
+    cacheFile(SELF_ID, photoMessage(self, 1), bytes)
+    cacheFile(SELF_ID, photoMessage(self, 2), bytes)
+    const draft = documentMessage(self, 3, {
+      id: '6000000000000000031',
+      mimeType: 'application/pdf',
+      size: 4_000,
+      thumbs: [],
+      attributes: [
+        { _: 'documentAttributeFilename', fileName: 'Q3 report: draft?.pdf' },
+      ],
+    })
+    cacheFile(SELF_ID, draft, fakeBytes(4_000))
+    const outDir = join(env.dataDir, 'exports')
+    const offline = { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } }
+
+    const photos = await runCliSuccess(
+      [
+        'media',
+        'download',
+        '--chat',
+        'me',
+        '--id',
+        '1',
+        '--id',
+        '2',
+        '--out',
+        outDir,
+      ],
+      offline,
+    )
+    expect(
+      lines(photos.stdout).map((line) => (line as DownloadOutput).data.path),
+    ).toEqual([join(outDir, '1_photo.jpg'), join(outDir, '2_photo.jpg')])
+
+    const template = join(outDir, '{chat}', '{date}_{id}_{kind}_{name}')
+    const args = [
+      'media',
+      'download',
+      '--chat',
+      'me',
+      '--id',
+      '3',
+      '--id',
+      '1',
+      '--out',
+      template,
+    ]
+    const named = await runCliSuccess(args, offline)
+    expect(
+      lines(named.stdout).map((line) => (line as DownloadOutput).data.path),
+    ).toEqual([
+      join(outDir, String(SELF_ID), '2025-10-09_1_photo_photo.jpg'),
+      join(
+        outDir,
+        String(SELF_ID),
+        '2025-10-09_3_document_Q3 report_ draft_.pdf',
+      ),
+    ])
+
+    // A rerun finds the same files in place
+    await runCliSuccess(args, offline)
+    expect(readdirSync(join(outDir, String(SELF_ID))).sort()).toEqual([
+      '2025-10-09_1_photo_photo.jpg',
+      '2025-10-09_3_document_Q3 report_ draft_.pdf',
+    ])
+  })
+
+  it('refuses --out - and unknown placeholders', async () => {
+    const offline = { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } }
+    for (const out of ['-', 'exports/{title}']) {
+      const result = await runCli(
+        [
+          'media',
+          'download',
+          '--chat',
+          'me',
+          '--id',
+          '1',
+          '--id',
+          '2',
+          '--out',
+          out,
+        ],
+        offline,
+      )
+      expect(result.exitCode).toBe(3)
+      expect(result.json).toMatchObject({
+        success: false,
+        error: { code: 'INVALID_ARGS', details: { out } },
+      })
+    }
   })
 })
