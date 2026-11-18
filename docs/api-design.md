@@ -163,8 +163,9 @@ tg skill validate
 ### Agent skill
 
 [`skills/telegram-sync-cli/SKILL.md`](../skills/telegram-sync-cli/SKILL.md) tells a coding
-agent how to use `tg`: when to reach for it, the read paths (`tg messages search`, `tg sql`), confirming before `tg send`, the error schema and the exit
-codes. Install it with the skills CLI:
+agent how to use `tg`: when to reach for it, the read paths (`tg messages search`, `tg sql`),
+checking that the cache covers a chat before reporting a total, confirming before `tg send`,
+the error schema and the exit codes. Install it with the skills CLI:
 
 ```bash
 bunx skills add neoromantic/telegram-sync-cli
@@ -172,34 +173,75 @@ bunx skills add neoromantic/telegram-sync-cli
 
 or with `tg skill install --dir <skills dir>`, which writes the same file, embedded in `tg`, to
 `<dir>/telegram-sync-cli/SKILL.md` and prints `{ path, bytes, overwritten }`. `--dir` is
-required: it is the agent's skills directory, such as `~/.claude/skills`. Every command in the
-skill's code blocks runs in `src/__e2e__/skill-examples.e2e.test.ts`, so an example can't go
-stale.
+required and can't be empty: it is the agent's skills directory, such as `~/.claude/skills`.
+Install replaces a `SKILL.md` already there, local edits included. The skills directory may be
+a symbolic link, but `telegram-sync-cli` and `SKILL.md` inside it may not: install refuses
+them (`GENERAL_ERROR`, `details.path`), so a reinstall never writes into another tree. Both
+commands, as described here, need tg newer than 0.14.0; 0.14.0 and older ignore `--dir` and
+write `skill.json` into the data directory.
+
+Every command in the skill's code blocks runs in `src/__e2e__/skill-examples.e2e.test.ts`, so
+an example can't go stale.
 
 `tg skill validate` checks what the skill needs, locally, without a network call or
-credentials: the API credentials in the environment, that the data directory is writable, the
-account a command uses without `--account` (the active one, else the only one) and whether the
-daemon runs.
+credentials, and works with an invalid `config.json` or a broken `data.db`:
+
+- `env`: the API credentials in the environment;
+- `data_dir`: that the data directory is writable;
+- `account`, `accounts_total`: the account record the next command uses without `--account`,
+  picked as every command picks it: `activeAccount` in `config.json`, else the active account,
+  else the only one;
+- `daemon`: whether a live process holds `daemon.pid`.
+
+The last two are local records. Neither says whether the account's session is still authorized
+or whether the daemon is connected; `tg status` shows the connection. Each value is read on
+its own, so one that can't be read leaves the others accurate: `accounts_total` is `null` when
+`data.db` can't be read, and `daemon.status` is `unknown`, with `daemon.error`, when
+`daemon.pid` can't.
 
 ```json
 {
-  "valid": true,
-  "env": {
-    "telegram_api_id": { "present": true, "valid": true },
-    "telegram_api_hash": { "present": true, "valid": true }
-  },
-  "data_dir": { "path": "/home/user/.telegram-sync-cli", "exists": true, "is_directory": true, "writable": true },
-  "account": { "id": 1, "username": "example", "label": null },
-  "accounts_total": 1,
-  "daemon": { "status": "running", "pid": 4242 },
-  "issues": []
+  "success": true,
+  "data": {
+    "valid": true,
+    "env": {
+      "telegram_api_id": {
+        "present": true,
+        "valid": true
+      },
+      "telegram_api_hash": {
+        "present": true,
+        "valid": true
+      }
+    },
+    "data_dir": {
+      "path": "/tmp/tg-example-data",
+      "exists": true,
+      "is_directory": true,
+      "writable": true
+    },
+    "account": {
+      "id": 1,
+      "username": "example_one",
+      "label": null
+    },
+    "accounts_total": 1,
+    "daemon": {
+      "status": "running",
+      "pid": 23595
+    },
+    "issues": []
+  }
 }
 ```
 
 `issues` lists what keeps `tg` from working: missing credentials, a data directory it can't
-write, no account (`tg auth login`), or several accounts and none active. `account` is `null`
-in the last two cases. A stopped daemon isn't an issue, since cache reads work without it, but
-the cache then holds only what earlier commands fetched.
+write, an invalid or unreadable `config.json` (every other command refuses to start until it is
+fixed, so `account` is `null`), no account (`tg auth login`), several accounts and none active,
+or a `data.db` it can't read, such as
+`Could not read the accounts in /tmp/tg-example-data/data.db: file is not a database`. A
+stopped daemon isn't an issue, since cache reads work without it, but the cache then holds only
+what earlier commands fetched.
 
 ### Cache Behavior
 

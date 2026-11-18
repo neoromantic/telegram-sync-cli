@@ -249,11 +249,20 @@ is for tests only.
   as runCli's `entry`), which keeps the process alive even after it is closed, as a connected
   mtcute client might: with and without `--raw` and on a failed call, the command prints its
   output, closes the client and exits the process itself
-- `skill.e2e.test.ts` — `tg skill install --dir` writes the repo's `SKILL.md`; `tg skill
-  validate` reports the active account and whether the daemon runs
+- `skill.e2e.test.ts` — `tg skill install --dir` writes the repo's `SKILL.md`, replaces a file
+  with other contents, follows a skills directory that is a link, refuses a link for the skill
+  directory or the file and rejects an empty `--dir`; `tg skill validate` reports the account
+  the next command uses (right after `tg config set activeAccount`, agreeing with
+  `tg accounts info`), an invalid `config.json` as an issue, the accounts and the daemon of a
+  read-only data directory, an unreadable `daemon.pid` as `unknown`, and a corrupt `data.db` as
+  an issue while install still works
 - `skill-examples.e2e.test.ts` — every command in the code blocks of
-  `skills/telegram-sync-cli/SKILL.md` runs against a seeded cache (`tg api` with the fake
-  client); an example that fails or answers an empty list fails the test
+  `skills/telegram-sync-cli/SKILL.md` runs against a seeded cache with a deleted voice note, a
+  deleted text and a gap of ten messages between two history ranges. The SQL examples must
+  return the exact rows: the live voice notes, the live message IDs and the two ranges. The
+  other cache examples must answer a non-empty list. Two examples reach Telegram in real use:
+  `tg daemon start` runs only up to the credentials check (the test unsets them), and
+  `tg api` runs with the fake client of `helpers/fake-client-cli.ts`
 - `status.e2e.test.ts` — `tg status` counts and lists running, pending, retrying and failed
   sync jobs from a seeded cache, in JSON and pretty output, without credentials; the retry
   commands it prints delete the failed jobs and keep each chat's mode; it shows the daemon's

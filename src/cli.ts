@@ -82,8 +82,9 @@ export const main = defineCommand({
         rawArgs[i - 1] !== '-f' &&
         rawArgs[i - 1] !== '--format',
     )
-    // tg config has to repair an invalid file. tg skill and tg telemetry
-    // read no key, and tg daemon only cache.retention.*, leniently: a
+    // tg config has to repair an invalid file, and tg skill validate
+    // reports one. tg telemetry reads no key, and tg daemon only
+    // cache.retention.*, leniently: a
     // supervised daemon must not stop over a typo there, silently under its
     // own -q (which sets ours)
     if (
