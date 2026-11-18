@@ -8,6 +8,10 @@ import { error } from './output'
 export const ACCOUNT_SELECTOR_DESCRIPTION =
   'Account selector (ID, @username, or label)'
 
+/** The suggestion of an ACCOUNT_NOT_FOUND error for --account */
+export const ACCOUNT_NOT_FOUND_SUGGESTION =
+  'Run tg accounts list to see the accounts, then pass an ID, @username or label to --account'
+
 export function resolveAccountSelector(
   selector: string | undefined,
   accountsDb: AccountsDbInterface = defaultAccountsDb,
@@ -23,7 +27,12 @@ export function resolveAccountSelector(
     const id = Number.parseInt(trimmed, 10)
     const account = accountsDb.getById(id)
     if (!account) {
-      error(ErrorCodes.ACCOUNT_NOT_FOUND, `Account with ID ${id} not found`)
+      error(
+        ErrorCodes.ACCOUNT_NOT_FOUND,
+        `Account with ID ${id} not found`,
+        undefined,
+        ACCOUNT_NOT_FOUND_SUGGESTION,
+      )
     }
     return id
   }
@@ -35,6 +44,8 @@ export function resolveAccountSelector(
       error(
         ErrorCodes.ACCOUNT_NOT_FOUND,
         `Account with username @${normalized} not found`,
+        undefined,
+        ACCOUNT_NOT_FOUND_SUGGESTION,
       )
     }
     return account.id
@@ -63,6 +74,8 @@ export function resolveAccountSelector(
   error(
     ErrorCodes.ACCOUNT_NOT_FOUND,
     `Account not found for selector "${trimmed}"`,
+    undefined,
+    ACCOUNT_NOT_FOUND_SUGGESTION,
   )
 }
 
@@ -82,6 +95,8 @@ export function resolveAccount(
     error(
       ErrorCodes.ACCOUNT_NOT_FOUND,
       `Account with ID ${selectedId} not found`,
+      undefined,
+      ACCOUNT_NOT_FOUND_SUGGESTION,
     )
   }
 

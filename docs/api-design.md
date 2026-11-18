@@ -227,6 +227,29 @@ Response includes cache metadata (wrapped by `success`):
 }
 ```
 
+### Next Commands
+
+A success answer may carry `next` beside `data`: commands that continue the read, each a
+complete `tg` command line and one sentence on why. A paged list with more suggests its next
+page, carrying the account and every filter it was given; an empty chat cache suggests the
+command that fills it:
+
+```json
+{
+  "success": true,
+  "data": { "items": [ … ], "offset": 0, "limit": 50, "hasMore": true, … },
+  "next": [
+    { "command": "tg contacts list --offset=50 --account=2", "why": "The next page of contacts." }
+  ]
+}
+```
+
+`next` sits beside `data`, not in it, because it is about the answer rather than part of the
+command's own shape: every `data` field stays as it was, and a script that reads only `data`
+sees no change. It is absent when there is nothing to suggest, and never names a command that
+read-only mode or `allowedChats` would refuse. The commands, quoting rules and where each
+appears: [cli-commands.md](cli-commands.md#next-commands).
+
 ## Output Modes
 
 ```bash
@@ -234,7 +257,7 @@ Response includes cache metadata (wrapped by `success`):
 tg contacts list
 # {"success": true, "data": {...}}
 
-# Pretty output for humans (pretty-printed JSON payload)
+# Pretty output for humans (pretty-printed JSON payload; next commands on stderr)
 tg contacts list --format pretty
 
 # Quiet mode (no output, just exit code)
@@ -245,17 +268,45 @@ tg send --to @user --message "Hi" --quiet
 
 ## Error Handling
 
-All errors are returned as JSON (unless `--quiet`):
+All errors are returned as JSON on stderr (unless `--quiet`):
 
 ```json
 {
   "success": false,
   "error": {
-    "code": "PEER_ID_INVALID",
-    "message": "Could not find the specified peer",
+    "code": "RATE_LIMITED",
+    "message": "Rate limited for upload.getFile. Wait 42s before retrying.",
     "details": {
-      "peer": "@nonexistent"
-    }
+      "method": "upload.getFile",
+      "wait_seconds": 42
+    },
+    "suggestion": "Wait 42s, then run the same command again to resume the download",
+    "retryable": true
+  }
+}
+```
+
+- `code` and `message` are always there; `details` holds the code's own fields.
+- `suggestion`, when there is one, says what to run or change. A command in it runs as written;
+  "the same command" means the one that failed, unchanged.
+- `retryable` is always there. `true` means the same command, run again unchanged, can
+  succeed: after `details.wait_seconds` for `RATE_LIMITED`, at once for `NETWORK_ERROR` and
+  for a download that waited too long for another tg process, and for a `tg api` call that
+  Telegram failed on its side (`details.telegramErrorCode` 500 or -503). `false` means
+  something has to change first, such as the arguments, the account or the daemon.
+
+`RATE_LIMITED` always carries the wait in `details.wait_seconds` and the method in
+`details.method`, whichever command hit it: the first FLOOD_WAIT from Telegram, and every
+later call to that method while the account's wait runs, even from another tg process.
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "ACCOUNT_NOT_FOUND",
+    "message": "Account with ID 99 not found",
+    "suggestion": "Run tg accounts list to see the accounts, then pass an ID, @username or label to --account",
+    "retryable": false
   }
 }
 ```
@@ -284,8 +335,10 @@ Exit codes:
 
 A download that stalls for 60 seconds or loses its connection is `NETWORK_ERROR` (exit 4) with
 `details.resumable: true`; a flood wait over 10 seconds is `RATE_LIMITED` (exit 5) with
-`details: { method: "upload.getFile", wait_seconds }`. Both keep the partial download for the
-next run. A download stopped with Ctrl-C or SIGTERM exits 130 and prints no JSON.
+`details: { method: "upload.getFile", wait_seconds }`. Both are `retryable` and keep the partial
+download for the next run. A download that waits more than 10 minutes for another tg process
+downloading the same file is `GENERAL_ERROR`, also `retryable`. A download stopped with Ctrl-C
+or SIGTERM exits 130 and prints no JSON.
 
 `DAEMON_NOT_RUNNING` (exit 1) is returned by `tg daemon stop` without a daemon, and by
 `tg messages wait` and `watch` when the daemon doesn't run for the account, with

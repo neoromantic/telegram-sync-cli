@@ -61,6 +61,7 @@ describe('E2E: a bare ID that names a cached group and a cached channel', () => 
           code: 'INVALID_ARGS',
           message,
           details: { [key]: BARE_ID, candidates: CANDIDATES },
+          retryable: false,
         },
       })
     })
