@@ -24,7 +24,7 @@ interface MigrateOutput {
 }
 
 const MESSAGES = 14;
-const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
+const stripAnsi = (text: string) => Bun.stripANSI(text);
 
 describe("E2E: background migrations", () => {
   let env: TestEnvironment;

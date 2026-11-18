@@ -12,7 +12,7 @@ import { SyncJobType, SyncPriority } from "../db/sync-schema";
 import { runCliFailure, runCliSuccess } from "./helpers/cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
 
-const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
+const stripAnsi = (text: string) => Bun.stripANSI(text);
 
 const NO_CREDENTIALS = {
   TELEGRAM_API_ID: undefined,

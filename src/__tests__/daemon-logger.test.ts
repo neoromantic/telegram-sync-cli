@@ -98,10 +98,10 @@ describe("routeClientLogs (#128)", () => {
 
   function logger() {
     return {
-      info: mock((_: string) => {}),
-      debug: mock((_: string) => {}),
-      warn: mock((_: string) => {}),
-      error: mock((_: string) => {}),
+      info: mock<(message: string) => void>(() => {}),
+      debug: mock<(message: string) => void>(() => {}),
+      warn: mock<(message: string) => void>(() => {}),
+      error: mock<(message: string) => void>(() => {}),
     };
   }
 
@@ -172,10 +172,10 @@ describe("routeClientLogs with mtcute's own logger (#128)", () => {
       storage: new MemoryStorage(),
     });
     const log = {
-      info: mock((_: string) => {}),
-      debug: mock((_: string) => {}),
-      warn: mock((_: string) => {}),
-      error: mock((_: string) => {}),
+      info: mock<(message: string) => void>(() => {}),
+      debug: mock<(message: string) => void>(() => {}),
+      warn: mock<(message: string) => void>(() => {}),
+      error: mock<(message: string) => void>(() => {}),
     };
     try {
       routeClientLogs(client, log, "verbose", "[Account 1]");

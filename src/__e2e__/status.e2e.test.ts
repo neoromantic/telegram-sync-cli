@@ -46,7 +46,7 @@ interface StatusResult {
   };
 }
 
-const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
+const stripAnsi = (text: string) => Bun.stripANSI(text);
 
 describe("E2E: status", () => {
   let env: TestEnvironment;

@@ -16,7 +16,7 @@ function readModules(text: string) {
   for (const line of text.split("\n")) {
     expect(line.startsWith("\x1b[30;47m")).toBe(true);
     expect(line.endsWith("\x1b[0m")).toBe(true);
-    const cells = [...line.slice("\x1b[30;47m".length, -"\x1b[0m".length)];
+    const cells = Array.from(line.slice("\x1b[30;47m".length, -"\x1b[0m".length));
     const halves = cells.map((cell) => {
       const half = HALVES[cell];
       if (!half) throw new Error(`Unexpected character ${cell}`);

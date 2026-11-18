@@ -282,7 +282,7 @@ describe("E2E: two accounts, each with its own cache", () => {
 
   it("names the account in the pretty retry command", async () => {
     const result = await runCliSuccess(["status", "--format", "pretty"], cliOptions(env));
-    const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    const output = Bun.stripANSI(result.stdout);
 
     expect(output).toContain(`chat:${ALICE_ID} acct:1`);
     expect(output).toContain(`tg chats sync ${ALICE_ID} --auto --account 1`);
@@ -731,7 +731,7 @@ describe("E2E: status per account", () => {
 
   it("prints a line per account in pretty output", async () => {
     const result = await runCliSuccess(["status", "--format", "pretty"], cliOptions(env));
-    const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    const output = Bun.stripANSI(result.stdout);
 
     expect(output).toMatch(/connected · 0 queued · 1 failed · history 0\/0 · 1 msgs/);
     expect(output).toMatch(/reconnecting · 0 queued · history 0\/0 · 1 msgs/);
@@ -743,7 +743,7 @@ describe("E2E: status per account", () => {
       ["status", "--account", "work", "--format", "pretty"],
       cliOptions(env),
     );
-    const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    const output = Bun.stripANSI(result.stdout);
 
     expect(output).toContain(`Only account #2 ${BETA.phone} [work];`);
     expect(output).toMatch(/Total\s+2/);
@@ -882,7 +882,7 @@ describe("E2E: status totals over two accounts", () => {
 
   it("tags flood waits and sample chats with acct:<id> in pretty output", async () => {
     const result = await runCliSuccess(["status", "--format", "pretty"], cliOptions(env));
-    const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    const output = Bun.stripANSI(result.stdout);
 
     expect(output).toMatch(/messages\.getHistory acct:2 → \d+s remaining/);
     expect(output).not.toContain("messages.getHistory acct:1");

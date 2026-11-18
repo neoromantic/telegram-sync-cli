@@ -77,7 +77,7 @@ export function thumbPaths(mediaDir: string, info: AttachmentInfo, thumb: MediaT
 }
 
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
-const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f/\\:*?"<>|]/g;
+const UNSAFE_CHARS = /[\p{Cc}/\\:*?"<>|]/gu;
 const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 
 function cutToBytes(text: string, maxBytes: number) {

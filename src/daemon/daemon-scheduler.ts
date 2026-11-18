@@ -293,7 +293,7 @@ export async function processJobs(ctx: DaemonContext) {
 
 /** Wait for every account's running sync job to end */
 export async function waitForJobsInFlight(ctx: DaemonContext) {
-  await Promise.allSettled([...ctx.runtime.jobsInFlight.values()]);
+  await Promise.allSettled(ctx.runtime.jobsInFlight.values());
 }
 
 /**

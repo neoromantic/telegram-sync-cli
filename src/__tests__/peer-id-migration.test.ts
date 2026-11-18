@@ -180,7 +180,11 @@ describe("peer ID migration", () => {
     const tables = ["chat_sync_state", "sync_jobs", "history_ranges", "users_cache"];
     const messages = () =>
       dump(db, "messages_cache").map((row) => {
-        const { from_id, forward_from_id, ...rest } = row as Record<string, unknown>;
+        const {
+          from_id: _fromId,
+          forward_from_id: _forwardFromId,
+          ...rest
+        } = row as Record<string, unknown>;
         return rest;
       });
     const before = tables.map((table) => dump(db, table));

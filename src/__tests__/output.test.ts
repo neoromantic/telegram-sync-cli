@@ -120,7 +120,7 @@ describe("Output Utilities", () => {
           endpoint: "/test",
           status: 500,
         });
-      } catch (_e) {}
+      } catch {}
 
       const output = JSON.parse(errorSpy.mock.calls[0]?.[0] as string);
       expect(output.error.details).toEqual({ endpoint: "/test", status: 500 });
