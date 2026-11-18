@@ -45,9 +45,10 @@ bun test src/commands/auth.test.ts
 Unit tests run without network access, on the real code with a fake Telegram client (see
 [Test doubles](#test-doubles)).
 
-`test-setup.ts`, preloaded for every `bun test` run, points `TELEGRAM_SYNC_CLI_DATA_DIR` at
-`.tmp/test-data-<pid>` even if the shell or `.env` sets it, so tests that use the file-backed
-cache database never touch a real data dir. It also sets `TELEGRAM_SYNC_CLI_TELEMETRY=0`, so no
+`test-setup.ts`, preloaded for every test file, points `TELEGRAM_SYNC_CLI_DATA_DIR` at a new
+`tg-test-data-*` dir in the system temp dir (`TMPDIR`) and removes it after the file, even if the
+shell or `.env` sets the variable, so tests that use the file-backed cache database never touch
+a real data dir or another file's. It also sets `TELEGRAM_SYNC_CLI_TELEMETRY=0`, so no
 test and no CLI a test spawns sends usage stats; `src/test/telemetry.e2e.test.ts` sets it to
 `debug`, which prints each event to stderr instead of sending it, or to `1` with
 `TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT` pointing at a local server (a source checkout only), to

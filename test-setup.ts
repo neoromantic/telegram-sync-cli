@@ -1,12 +1,14 @@
-import { mkdirSync } from "node:fs";
+import { afterAll } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.BUN_ENV = "test";
 process.env.NODE_ENV = "test";
 
-const testDataDir = join(process.cwd(), ".tmp", `test-data-${process.pid}`);
+const testDataDir = mkdtempSync(join(tmpdir(), "tg-test-data-"));
 process.env.TELEGRAM_SYNC_CLI_DATA_DIR = testDataDir;
-mkdirSync(testDataDir, { recursive: true });
+afterAll(() => rmSync(testDataDir, { recursive: true, force: true }));
 
 process.env.TELEGRAM_SYNC_CLI_TELEMETRY = "0";
 
