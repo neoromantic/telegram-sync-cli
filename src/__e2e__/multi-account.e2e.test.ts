@@ -373,7 +373,13 @@ describe('E2E: two accounts, each with its own cache', () => {
     const result = await failure(env, ['chats', 'list', '--account', '3'])
 
     expect(result.exitCode).toBe(6)
-    expect(result.error.code).toBe('ACCOUNT_NOT_FOUND')
+    expect(result.error).toEqual({
+      code: 'ACCOUNT_NOT_FOUND',
+      message: 'Account with ID 3 not found',
+      suggestion:
+        'Run tg accounts list to see the accounts, then pass an ID, @username or label to --account',
+      retryable: false,
+    })
   })
 })
 

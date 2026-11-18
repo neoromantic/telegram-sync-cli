@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Every error says whether running the same command again can work: `error.retryable` is
+  `true` for `RATE_LIMITED`, `NETWORK_ERROR`, a media download that waited too long for
+  another tg process and a `tg api` call Telegram failed on its side (500 or -503), `false`
+  otherwise (#160). Nothing else in the error schema changes.
+- `RATE_LIMITED` carries the suggestion `Wait <n>s, then run the same command again` (for a
+  media download, "… to resume the download"), with the wait in `details.wait_seconds` as
+  before, from every command: `tg api`, `tg send`, `tg chats`, `tg contacts`, `tg user`,
+  `tg messages` and `tg media download`.
+- `ACCOUNT_NOT_FOUND` suggests `tg accounts list` and the flag to pass the account to
+  (`--account`, or `--id` for `tg accounts switch`, `remove` and `info`). `tg send --to` with a
+  user ID Telegram refuses (`PEER_ID_INVALID`) suggests sending to the user's `@username` or
+  `+phone` once, so tg caches the user.
 - `next` in success answers: a list of `{ command, why }` beside `data`, where `command` is a
   complete `tg` command line that runs as written in a POSIX shell and `why` says what it does
   (#160). A paged read that has more suggests its next page with the account and every filter

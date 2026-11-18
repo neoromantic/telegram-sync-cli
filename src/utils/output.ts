@@ -7,7 +7,13 @@ import {
   isExiting,
   reportCliError,
 } from '../telemetry'
-import type { ErrorCode, NextCommand, Output, OutputFormat } from '../types'
+import {
+  type ErrorCode,
+  ErrorCodes,
+  type NextCommand,
+  type Output,
+  type OutputFormat,
+} from '../types'
 
 /** Current output format (can be overridden per-command) */
 let currentFormat: OutputFormat = 'json'
@@ -86,6 +92,17 @@ function exitAfterSuccess(): void {
   }
 }
 
+/** Codes whose command can succeed when run again unchanged */
+const RETRYABLE_CODES: ReadonlySet<ErrorCode> = new Set([
+  ErrorCodes.RATE_LIMITED,
+  ErrorCodes.NETWORK_ERROR,
+])
+
+/** Whether an error of this code is retryable unless its caller says otherwise */
+export function isRetryableCode(code: ErrorCode): boolean {
+  return RETRYABLE_CODES.has(code)
+}
+
 /**
  * Output error result
  * Note: In test mode, this throws instead of calling process.exit
@@ -95,12 +112,13 @@ export function error(
   message: string,
   details?: Record<string, unknown>,
   suggestion?: string,
+  retryable = isRetryableCode(code),
 ): never {
   // An exit is under way: the run already reported its outcome
   if (isExiting()) throw new ExitPending()
   const result: Output<never> = {
     success: false,
-    error: { code, message, details, suggestion },
+    error: { code, message, details, suggestion, retryable },
   }
 
   if (currentFormat !== 'quiet') {
@@ -112,9 +130,13 @@ export function error(
     const err = new Error(message) as Error & {
       code: ErrorCode
       details?: Record<string, unknown>
+      suggestion?: string
+      retryable: boolean
     }
     err.code = code
     err.details = details
+    err.suggestion = suggestion
+    err.retryable = retryable
     throw err
   }
 

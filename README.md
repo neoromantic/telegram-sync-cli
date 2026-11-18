@@ -168,7 +168,9 @@ Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-
 ## For AI agents
 
 - Output is JSON by default. Errors look like
-  `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}}}`.
+  `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}, "suggestion": "Wait 30s, then run the same command again", "retryable": true}}`.
+  `retryable` says whether running the same command again can work (for `RATE_LIMITED`, after
+  `details.wait_seconds`); `suggestion`, when present, is what to run or change.
 - A paged read that has more (`tg messages list`, `tg messages search`, `tg chats list`,
   `tg contacts list`) adds `next` beside `data`: `[{"command": "tg messages list --chat=… --before=…", "why": "…"}]`.
   Run `next[0].command` as written to get the next page with the same account and filters

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test'
 import { $ } from 'bun'
 import type { ArgsDef } from 'citty'
 
+import { listChatsArgs } from '../commands/chats/list'
+import { listContactsArgs } from '../commands/contacts'
 import { shellQuote, tgCommand } from '../commands/next'
 
 /** What a POSIX shell passes for `words` */
@@ -94,6 +96,22 @@ describe('tgCommand', () => {
       `--query=--it's $5 "today"`,
       '--account=Work Phone',
     ])
+  })
+
+  it('keeps --fresh, filters and the account on the next page of chats and contacts', () => {
+    const values = {
+      limit: 2,
+      offset: 2,
+      type: 'group',
+      fresh: true,
+      account: 'Work Phone',
+    }
+    expect(tgCommand('chats list', listChatsArgs, values)).toBe(
+      "tg chats list --limit=2 --offset=2 --type=group --account='Work Phone' --fresh",
+    )
+    expect(tgCommand('contacts list', listContactsArgs, values)).toBe(
+      "tg contacts list --limit=2 --offset=2 --account='Work Phone' --fresh",
+    )
   })
 
   it('refuses a command that read-only mode would refuse', () => {

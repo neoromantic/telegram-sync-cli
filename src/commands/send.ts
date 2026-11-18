@@ -17,6 +17,7 @@ import { error, success, verbose } from '../utils/output'
 import { createProgress } from '../utils/progress'
 import {
   isRateLimitError,
+  reportRateLimit,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
 import {
@@ -71,6 +72,11 @@ function handleSendError(recipient: string, message: string): never {
     error(
       ErrorCodes.TELEGRAM_ERROR,
       `Invalid recipient: ${recipient}. Make sure the user/chat exists and you have access to it.`,
+      undefined,
+      // A user ID the cache has no access hash for
+      /^\d+$/.test(recipient.trim())
+        ? "Send to the user's @username or +phone once: tg caches the user, and its ID works after that"
+        : undefined,
     )
   }
   if (message.includes('USER_IS_BOT')) {
@@ -329,13 +335,7 @@ export const sendCommand = defineCommand({
       if (err instanceof ConfigError) {
         error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
       }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      if (isRateLimitError(err)) reportRateLimit(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       handleSendError(recipient, message)
     }
