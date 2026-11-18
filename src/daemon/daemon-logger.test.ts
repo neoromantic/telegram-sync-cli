@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { MemoryStorage, TelegramClient } from "@mtcute/bun";
 import {
   accountLabel,
@@ -7,34 +7,23 @@ import {
   maskPhone,
   routeClientLogs,
 } from "./daemon-logger";
+import { watchedLogger } from "../test/daemon-runtime.test-utils";
 
-const originalConsole = {
-  log: console.log,
-  warn: console.warn,
-  error: console.error,
-};
-
-function stubConsole() {
-  const log = mock(() => {});
-  const warn = mock(() => {});
-  const error = mock(() => {});
-
-  console.log = log as unknown as typeof console.log;
-  console.warn = warn as unknown as typeof console.warn;
-  console.error = error as unknown as typeof console.error;
-
-  return { log, warn, error };
+function watchConsole() {
+  return {
+    log: spyOn(console, "log"),
+    warn: spyOn(console, "warn"),
+    error: spyOn(console, "error"),
+  };
 }
 
 afterEach(() => {
-  console.log = originalConsole.log;
-  console.warn = originalConsole.warn;
-  console.error = originalConsole.error;
+  mock.restore();
 });
 
 describe("createLogger", () => {
   it("suppresses info/debug in quiet mode", () => {
-    const { log, warn, error } = stubConsole();
+    const { log, warn, error } = watchConsole();
 
     const logger = createLogger("quiet");
     logger.info("info");
@@ -48,7 +37,7 @@ describe("createLogger", () => {
   });
 
   it("logs info but not debug in normal mode", () => {
-    const { log } = stubConsole();
+    const { log } = watchConsole();
 
     const logger = createLogger("normal");
     logger.info("info");
@@ -58,7 +47,7 @@ describe("createLogger", () => {
   });
 
   it("logs debug in verbose mode", () => {
-    const { log } = stubConsole();
+    const { log } = watchConsole();
 
     const logger = createLogger("verbose");
     logger.debug("debug");
@@ -96,22 +85,13 @@ describe("routeClientLogs (#128)", () => {
     return { client, mgr, errorHandlers };
   }
 
-  function logger() {
-    return {
-      info: mock<(message: string) => void>(() => {}),
-      debug: mock<(message: string) => void>(() => {}),
-      warn: mock<(message: string) => void>(() => {}),
-      error: mock<(message: string) => void>(() => {}),
-    };
-  }
-
   it("keeps mtcute's warnings for --verbose and its update gap chatter at debug", () => {
     const quiet = fakeClient();
-    routeClientLogs(quiet.client, logger(), "normal", "[Account 1]");
+    routeClientLogs(quiet.client, watchedLogger(), "normal", "[Account 1]");
     expect(quiet.mgr.level).toBe(1);
 
     const { client, mgr } = fakeClient();
-    const log = logger();
+    const log = watchedLogger();
     routeClientLogs(client, log, "verbose", "[Account 1]");
     expect(mgr.level).toBe(2);
 
@@ -138,7 +118,7 @@ describe("routeClientLogs (#128)", () => {
 
   it("logs a client error in one line, and the same error again only at debug for 5 minutes", () => {
     const { client, errorHandlers } = fakeClient();
-    const log = logger();
+    const log = watchedLogger();
     let now = 0;
     routeClientLogs(client, log, "normal", "[Account 1]", () => now);
     const err = new Error("Could not connect to DC 2\nusing any address");
@@ -171,12 +151,7 @@ describe("routeClientLogs with mtcute's own logger (#128)", () => {
       apiHash: "example",
       storage: new MemoryStorage(),
     });
-    const log = {
-      info: mock<(message: string) => void>(() => {}),
-      debug: mock<(message: string) => void>(() => {}),
-      warn: mock<(message: string) => void>(() => {}),
-      error: mock<(message: string) => void>(() => {}),
-    };
+    const log = watchedLogger();
     try {
       routeClientLogs(client, log, "verbose", "[Account 1]");
 

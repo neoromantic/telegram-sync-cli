@@ -63,7 +63,7 @@ describe("migrateSharedCache", () => {
     dataDir = mkdtempSync(join(tmpdir(), "tg-cache-layout-"));
     shared = legacyCachePath(dataDir);
     data = createTestDatabase();
-    notice = mock(() => {});
+    notice = mock();
   });
 
   afterEach(() => {

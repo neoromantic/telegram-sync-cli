@@ -4,15 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { collectStatus, readAccountStatus } from "./status";
-import type { createPidFile } from "../daemon";
+import { createPidFile } from "../daemon";
 import { getAccountCacheDb } from "../db";
 import { createMessagesCache } from "../db/messages-cache";
 import { testAccount, useTestDataDir } from "../test/accounts.test-utils";
 
-const noDaemon = {
-  read: () => null,
-  isRunning: () => false,
-} as unknown as ReturnType<typeof createPidFile>;
+const noDaemon = createPidFile("/nonexistent/daemon.pid");
 
 useTestDataDir([testAccount(), testAccount({ phone: "+15550000002", is_active: false })]);
 
