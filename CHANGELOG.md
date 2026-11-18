@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `tg media download --out` leaves an existing target that already holds the same file as it
   is instead of failing with `FILE_EXISTS`, so a download can be repeated.
+- The `data` fields of `tg chats list` are declared once, in
+  `src/commands/chats/list-output.ts`: the command's types come from it, the field table in
+  [docs/cli-commands.md](docs/cli-commands.md) is generated from it (`bun run docs:outputs`), and
+  an e2e test fails when the command prints a field the declaration doesn't have (#160, a trial
+  on one command). The output doesn't change. zod is a devDependency and doesn't ship.
 
 ### Fixed
 

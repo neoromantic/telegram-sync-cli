@@ -5,6 +5,7 @@ import { verbose } from './output'
 export function buildCachePaginatedResponse<
   TInput extends { fetched_at: number | null },
   TOutput,
+  TSource extends string,
 >(
   items: TInput[],
   mapItem: (item: TInput) => TOutput,
@@ -12,10 +13,10 @@ export function buildCachePaginatedResponse<
     offset: number
     limit: number
     ttlMs: number
-    source: string
+    source: TSource
     staleMessage?: string
   },
-): PaginatedResult<TOutput> & { source: string; stale: boolean } {
+): PaginatedResult<TOutput> & { source: TSource; stale: boolean } {
   const { offset, limit, ttlMs, source, staleMessage } = options
   const anyStale = items.some((item) => isCacheStale(item.fetched_at, ttlMs))
 
