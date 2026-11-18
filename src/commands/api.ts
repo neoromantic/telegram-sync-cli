@@ -24,6 +24,7 @@ import { toLong } from '../utils/long'
 import { error, raw, success } from '../utils/output'
 import {
   isRateLimitError,
+  reportRateLimit,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
 import {
@@ -32,6 +33,9 @@ import {
   InvalidPeerError,
   resolvePeer,
 } from './send/peer-resolver'
+
+/** Telegram's own failures, which can pass on a retry: 500 INTERNAL and the -503 timeout */
+const TRANSIENT_TELEGRAM_CODES: ReadonlySet<unknown> = new Set([500, -503])
 
 /**
  * Generic API command
@@ -168,13 +172,7 @@ export const apiCommand = defineCommand({
       ) {
         error(ErrorCodes.INVALID_ARGS, err.message, { method })
       }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      if (isRateLimitError(err)) reportRateLimit(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
 
       // Try to extract Telegram error code
@@ -188,7 +186,13 @@ export const apiCommand = defineCommand({
         }
       }
 
-      error(code, `API call failed: ${message}`, details)
+      error(
+        code,
+        `API call failed: ${message}`,
+        details,
+        undefined,
+        TRANSIENT_TELEGRAM_CODES.has(details.telegramErrorCode),
+      )
     }
   },
 })

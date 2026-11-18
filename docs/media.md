@@ -101,14 +101,17 @@ How a run gets the file:
   `details: { stalled_seconds: 60, downloaded_bytes, resumable: true }`. Run the command again
   to resume.
 - Flood waits of up to 10 seconds are slept through. A longer one ends the command with
-  `RATE_LIMITED`, `details: { method: "upload.getFile", wait_seconds }`, recorded for the
-  account like any other call ([rate-limiting.md](rate-limiting.md)).
+  `RATE_LIMITED`, `details: { method: "upload.getFile", wait_seconds }`, `retryable: true`,
+  recorded for the account like any other call ([rate-limiting.md](rate-limiting.md)). Other
+  downloads of the same account then fail the same way until the wait ends, so downloads run
+  side by side all report it; run them again after `wait_seconds`, and each resumes its file.
 - Ctrl-C or SIGTERM keeps the partial file, prints how much is kept to stderr and exits 130,
   with no JSON.
 - Progress goes to stderr, only when stderr is a terminal.
 - Two runs that download the same file, such as a file and a forwarded copy, don't write it
   together: the second waits, then serves the finished file from the cache. It waits up to 10
-  minutes, then ends with `GENERAL_ERROR`, `details: { lock, pid, waited_seconds }`. A running
+  minutes, then ends with `GENERAL_ERROR`, `details: { lock, pid, waited_seconds }`,
+  `retryable: true`. A running
   download refreshes its lock; a lock whose process is gone, or that nobody refreshed for a
   minute (a crashed run), is taken over.
 
@@ -229,7 +232,8 @@ Example, on Linux with ffmpeg but no program:
       "runner": null,
       "ffmpeg": "/usr/bin/ffmpeg"
     },
-    "suggestion": "Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.model /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin"
+    "suggestion": "Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.model /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin",
+    "retryable": false
   }
 }
 ```

@@ -17,6 +17,7 @@ import {
   runPendingMigrations,
 } from '../db/background-migrations'
 import { createMessagesCache } from '../db/messages-cache'
+import { createMessagesSearch } from '../db/messages-search'
 import { BACKGROUND_MIGRATIONS } from '../db/raw-json-migrations'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
@@ -30,6 +31,11 @@ import {
   oldFormUsers,
   seedOldFormCache,
 } from './helpers/old-form-cache'
+import {
+  REPORT_BLOCKS,
+  REPORT_TEXT,
+  richTlMessage,
+} from './helpers/rich-message'
 
 const MESSAGES = 21
 const SMALL = { maxRows: 4, maxMs: 1_000 }
@@ -112,10 +118,10 @@ describe('background migrations of a 0.5.0 cache', () => {
 
     const rows = MESSAGES + (await migrateAll(db))
 
-    // The messages three times: the re-encode, the refetch check (#130) and
-    // the re-index of names (#93)
+    // The messages four times: the re-encode, the refetch check (#130), the
+    // re-index of names (#93) and the rich text check
     expect(rows).toBe(
-      3 * MESSAGES + oldFormUsers().length + oldFormChats().length,
+      4 * MESSAGES + oldFormUsers().length + oldFormChats().length,
     )
     const after = snapshot(db)
     for (const [i, message] of originals.entries()) {
@@ -282,6 +288,49 @@ describe('message_type of older rows', () => {
         message_type: 'document',
         raw_json: JSON.stringify({ id: 6, date: 1 }),
       },
+    ])
+  })
+})
+
+describe('rich messages cached without their text', () => {
+  it('gives them their text, which search then finds', async () => {
+    const db = new Database(':memory:')
+    seedOldFormCache(db, { messages: 0 })
+    const peer = { _: 'peerUser' as const, userId: OLD_FORM_CHAT_ID }
+    const insert = db.query(`
+      INSERT INTO messages_cache (chat_id, message_id, text, message_type, date, fetched_at, raw_json)
+      VALUES (${OLD_FORM_CHAT_ID}, $id, $text, $type, 1760000000, 0, $raw)
+    `)
+    const rich = toRawJson(richTlMessage(peer, 1, REPORT_BLOCKS))
+    insert.run({ $id: 1, $text: null, $type: 'text', $raw: rich })
+    insert.run({ $id: 2, $text: '', $type: 'text', $raw: rich })
+    insert.run({ $id: 3, $text: 'kept as sent', $type: 'text', $raw: rich })
+    insert.run({
+      $id: 4,
+      $text: null,
+      $type: 'text',
+      $raw: toRawJson({
+        _: 'message',
+        id: 4,
+        peerId: peer,
+        date: 1,
+        message: '',
+      }),
+    })
+    db.run('DELETE FROM cache_migrations')
+    registerBackgroundMigrations(db)
+    const search = createMessagesSearch(db)
+    expect(search.search('zucchini', {})).toEqual([])
+
+    await migrateAll(db)
+
+    const texts = db
+      .query('SELECT text FROM messages_cache ORDER BY message_id')
+      .all()
+      .map((row) => (row as { text: string | null }).text)
+    expect(texts).toEqual([REPORT_TEXT, REPORT_TEXT, 'kept as sent', null])
+    expect(search.search('zucchini', {}).map((row) => row.message_id)).toEqual([
+      1, 2,
     ])
   })
 })

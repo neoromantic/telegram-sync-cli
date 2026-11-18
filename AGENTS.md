@@ -117,8 +117,8 @@ Steps: [docs/releasing.md](docs/releasing.md).
   hands its events to a detached copy of tg that sends them (`src/telemetry/background.ts`,
   `send.ts`); only the daemon and debug mode send in-process and wait up to 500 ms.
 - Output is JSON by default with a stable error schema
-  (`{ success: false, error: { code, message, details?, suggestion? } }`) and documented exit
-  codes. Don't change codes or shapes without updating the docs.
+  (`{ success: false, error: { code, message, details?, suggestion?, retryable } }`) and
+  documented exit codes. Don't change codes or shapes without updating the docs.
 
 ```
 CLI mode (tg <cmd>)            Daemon mode (tg daemon start)

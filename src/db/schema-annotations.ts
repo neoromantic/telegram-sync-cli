@@ -512,7 +512,8 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         text: {
-          description: 'Message text content (null for media-only messages)',
+          description:
+            'Message text content (null for media-only messages). A rich message (raw_json.richMessage: page blocks such as headings, tables and lists) has no text of its own; this holds its blocks rendered in rich Markdown, so search finds it',
           nullable: true,
         },
         message_type: {

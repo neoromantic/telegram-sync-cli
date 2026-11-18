@@ -5,6 +5,8 @@ import {
   createRateLimitsService,
   type RateLimitsService,
 } from '../db/rate-limits'
+import { ErrorCodes } from '../types'
+import { error } from './output'
 
 export class RateLimitError extends Error {
   readonly method: string
@@ -20,6 +22,27 @@ export class RateLimitError extends Error {
 
 export function isRateLimitError(err: unknown): err is RateLimitError {
   return err instanceof RateLimitError
+}
+
+/**
+ * Message, details and suggestion of a RATE_LIMITED error. The wait is
+ * always `details.wait_seconds`, so a caller reads it without parsing text.
+ */
+export function describeRateLimit(method: string, waitSeconds: number) {
+  return {
+    message: `Rate limited for ${method}. Wait ${waitSeconds}s before retrying.`,
+    details: { method, wait_seconds: waitSeconds },
+    suggestion: `Wait ${waitSeconds}s, then run the same command again`,
+  }
+}
+
+/** Report a flood wait as RATE_LIMITED (exit 5), retryable after the wait */
+export function reportRateLimit(err: RateLimitError): never {
+  const { message, details, suggestion } = describeRateLimit(
+    err.method,
+    err.waitSeconds,
+  )
+  error(ErrorCodes.RATE_LIMITED, message, details, suggestion)
 }
 
 const services = new Map<number, { db: Database; service: RateLimitsService }>()

@@ -325,6 +325,7 @@ describe('E2E: media transcribe', () => {
             kind: 'photo',
             reason: 'not_speech',
           },
+          retryable: false,
         }),
       },
       {
@@ -411,6 +412,7 @@ describe('E2E: media transcribe', () => {
         message: 'whisper.cpp needs a model file: transcribe.model is not set',
         details: { runner: join(binDir, 'whisper-cli'), model: null },
         suggestion: `Run whisper.cpp with a model: download the 574 MB model and point tg at it: curl -L --create-dirs -o ${model} ${MODEL_URL} && tg config set transcribe.model ${model}`,
+        retryable: false,
       },
     })
     expect(runnerCalls()).toEqual([])
@@ -537,6 +539,7 @@ describe('E2E: media transcribe', () => {
           { runner: true, ffmpeg: false },
           defaultModelPath(cacheHome),
         ),
+        retryable: false,
       },
     })
     if (process.platform !== 'win32') {

@@ -332,6 +332,7 @@ function withMessage(
     err.message,
     { chatId, messageId, ...err.details },
     err.suggestion,
+    err.retryable,
   )
 }
 
@@ -351,6 +352,7 @@ function printBatch(results: Array<TranscribeResult | MediaError>): void {
               message: result.message,
               details: result.details,
               suggestion: result.suggestion,
+              retryable: result.retryable,
             },
           }
         : { success: true, data: result }
