@@ -238,7 +238,9 @@ longer exists since mtcute 0.29.
   off).
 - Both suites run their files in parallel worker processes (`--parallel`, one per CPU core). A
   test file owns its state: `mkdtemp` dirs, its own databases, port 0. Run the full scripts
-  before a PR.
+  before a PR. `test-timings.json` holds each file's duration, so the slowest files start
+  first; a missing or stale entry only costs speed. Refresh it after big test changes with
+  `bun run test --update-timings` and `bun run test:e2e --update-timings`.
 - Unit tests mock the mtcute client and use `createTestDatabase()` for in-memory databases.
 - E2E tests spawn the CLI with `bun --no-env-file` and an isolated
   `TELEGRAM_SYNC_CLI_DATA_DIR`:
