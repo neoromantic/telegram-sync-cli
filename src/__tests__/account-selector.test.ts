@@ -68,8 +68,11 @@ describe('resolveAccountSelector', () => {
       resolveAccountSelector('Missing', accountsDb)
       throw new Error('Expected error')
     } catch (err) {
-      const typed = err as Error & { code?: string }
+      const typed = err as Error & { code?: string; suggestion?: string }
       expect(typed.code).toBe(ErrorCodes.ACCOUNT_NOT_FOUND)
+      expect(typed.suggestion).toBe(
+        'Run tg accounts list to see the accounts, then pass an ID, @username or label to --account',
+      )
     }
   })
 })
