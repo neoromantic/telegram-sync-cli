@@ -42,7 +42,8 @@ bun test src/commands/auth.test.ts
 
 ## Unit Tests
 
-Unit tests run without network access using mocked dependencies.
+Unit tests run without network access, on the real code with a fake Telegram client (see
+[Test doubles](#test-doubles)).
 
 `test-setup.ts`, preloaded for every `bun test` run, points `TELEGRAM_SYNC_CLI_DATA_DIR` at
 `.tmp/test-data-<pid>` even if the shell or `.env` sets it, so tests that use the file-backed
@@ -67,14 +68,47 @@ import { createTestDatabase } from "../db";
 const { accountsDb, db } = createTestDatabase();
 ```
 
-**Dependency injection**: Services use interfaces for testability.
+**Dependency injection**: a service takes its Telegram client, or a function that makes one,
+as a parameter, so a test passes a fake client and real everything else.
 
 ```typescript
 const deps: AuthDependencies = {
   accountsDb: createTestDatabase().accountsDb,
-  createClient: mock(() => mockClient),
+  createClient: () => fakeClient,
 };
 ```
+
+### Test doubles
+
+Tests run the real code: SQLite caches (in memory or in the temp data dir), the config and the
+file system, the scheduler, the sync worker, the daemon loop and its pacing, and the loggers,
+watched by spies that still log. Time moves with `setSystemTime()`, and the daemon loop takes
+its tick clock as a parameter.
+
+The one fake is the Telegram client, the MTProto network boundary: MTProto has no offline
+server to run tests against. It is faked in three ways:
+
+- A client object a test builds, whose `call` (and `getMe`, `withParams` and the other client
+  methods the code uses) answers as Telegram would: `src/test/fake-history.test-utils.ts`
+  (`messages.getHistory`), `src/test/fake-dialogs.test-utils.ts` (dialog lists),
+  `src/test/flood-wait.test-utils.ts` (a FLOOD_WAIT that the daemon stop ends), or inline in
+  a test.
+- `mock.module("@mtcute/bun")` and `mock.module("@mtcute/core")`, for code that creates the
+  client itself: `src/test/fake-telegram-client.test-utils.ts`,
+  `src/daemon/daemon-accounts.connect.test.ts` and `src/services/telegram-factory.test.ts`.
+- `mock.module("../services/telegram")`, for commands that get their client from the
+  service: `src/test/fake-client-cli.test-utils.ts` and the contacts, send and user command
+  tests.
+
+Nothing else is faked. To make the cache fail, make SQLite fail: `failWrites` in
+`src/test/cache-db.test-utils.ts`, a dropped table, a column that can't be read. To run jobs,
+give the account the real scheduler and sync worker with `realSyncParts` from
+`src/test/daemon-runtime.test-utils.ts`, and watch them with `spyOn` if a test needs to know
+what was called.
+
+`no-test-doubles` from `@interfere/landmines` 0.1.0 doesn't see `bun:test` doubles yet; an
+upstream proposal teaches it to ([interfere-inc/landmines#14](https://github.com/interfere-inc/landmines/pull/14)).
+Once that lands, the Telegram client fakes above need an explicit override in `.oxlintrc.json`.
 
 **Lint rules for tests**: `bun run lint` runs the landmines testing rules on every test file.
 
