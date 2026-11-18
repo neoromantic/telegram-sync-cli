@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{chat}`, `{id}`, `{date}`, `{name}`, `{kind}`); each filled part is made a safe file name.
   With several `--id`, a directory `--out` names files `{id}_{name}`, so two photos no longer
   collide on `photo.jpg`.
+
+### Changed
+
+- `tg media download --out` leaves an existing target that already holds the same file as it
+  is instead of failing with `FILE_EXISTS`, so a download can be repeated.
+
+## [0.14.0] - 2026-11-18
+
+### Added
+
 - Every error says whether running the same command again can work: `error.retryable` is
   `true` for `RATE_LIMITED`, `NETWORK_ERROR`, a media download that waited too long for
   another tg process and a `tg api` call Telegram failed on its side (500 or -503), `false`
@@ -44,8 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `tg media download --out` leaves an existing target that already holds the same file as it
-  is instead of failing with `FILE_EXISTS`, so a download can be repeated.
 - The `data` fields of `tg chats list` are declared once, in
   `src/commands/chats/list-output.ts`: the command's types come from it, the field table in
   [docs/cli-commands.md](docs/cli-commands.md) is generated from it (`bun run docs:outputs`), and
@@ -1040,7 +1048,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.2...v0.13.0
 [0.12.2]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.1...v0.12.2
