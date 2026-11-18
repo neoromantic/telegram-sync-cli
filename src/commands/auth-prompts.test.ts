@@ -1,34 +1,37 @@
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import { PassThrough } from "node:stream";
 
-const questionMock = mock(async (_message: string) => "  secret  ");
-const closeMock = mock(() => {});
+import { prompt, promptPassword } from "./auth";
 
-mock.module("node:readline/promises", () => ({
-  createInterface: mock(() => ({
-    question: questionMock,
-    close: closeMock,
-  })),
-}));
+function streams() {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const written = () => output.read()?.toString() ?? "";
+  return { input, output, written };
+}
 
 describe("promptPassword", () => {
   it("falls back to prompt when stdin is not a TTY", async () => {
-    const originalIsTTY = process.stdin.isTTY;
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: false,
-      configurable: true,
-    });
+    const io = streams();
 
-    const { promptPassword } = await import("./auth");
+    const answer = promptPassword("Password: ", io);
+    io.input.write("  secret  \n");
 
-    const result = await promptPassword("Password: ");
+    expect(await answer).toBe("secret");
+    expect(io.written()).toBe("Password: ");
+    expect(io.input.listenerCount("data")).toBe(0);
+  });
+});
 
-    expect(result).toBe("secret");
-    expect(questionMock).toHaveBeenCalledWith("Password: ");
-    expect(closeMock).toHaveBeenCalled();
+describe("prompt", () => {
+  it("asks on the output and reads one trimmed line", async () => {
+    const io = streams();
 
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: originalIsTTY,
-      configurable: true,
-    });
+    const answer = prompt("Code: ", io);
+    io.input.write(" 12345 \nleft unread\n");
+
+    expect(await answer).toBe("12345");
+    expect(io.written()).toBe("Code: ");
+    expect(io.input.listenerCount("data")).toBe(0);
   });
 });
