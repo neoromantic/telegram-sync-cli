@@ -310,7 +310,7 @@ this version knows.
 
 ```sql
 CREATE TABLE cache_migrations (
-  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, …, message_search_names
+  name        TEXT PRIMARY KEY,  -- messages_raw_json_v2, …, messages_rich_text
   state       TEXT NOT NULL DEFAULT 'pending',  -- pending, running, done
   cursor      INTEGER NOT NULL DEFAULT 0,       -- rowid of the last row done
   end_rowid   INTEGER,           -- the table's largest rowid when it started
