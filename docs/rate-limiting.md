@@ -110,7 +110,8 @@ account. They sleep through flood waits of up to 10 seconds, part by part and wi
 line; a longer wait ends the command with `RATE_LIMITED`. A download keeps its partial file, and
 the next run after the wait resumes it ([media.md](media.md#download)). A download of several
 messages shares a pause before new requests for waits of up to 5 minutes, including short waits.
-It retries each file or page of message IDs up to five times and resumes partial files ([media.md](media.md#several-messages)).
+It retries a page of message IDs up to five times, and a file up to five times in a row
+without a part downloaded between waits, and resumes partial files ([media.md](media.md#several-messages)).
 
 ## Daemon Sync Jobs
 

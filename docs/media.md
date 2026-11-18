@@ -130,8 +130,11 @@ tg media download --chat @examplegroup --id 1200 --id 1201 --id 1205 --out ./dow
   soft limits for parallel downloads from one data center
   ([client configuration](https://core.telegram.org/api/config)).
 - A flood wait pauses the whole batch, which then retries the files it stopped. A partial file
-  resumes. A wait longer than 5 minutes or a sixth wait for one file or one page of IDs
-  returns `RATE_LIMITED` for the affected IDs. Other pages continue.
+  resumes. A wait longer than 5 minutes returns `RATE_LIMITED` for the affected IDs, and so
+  does a sixth wait in a row for one file with no part downloaded between the waits, or a
+  sixth wait for one page of IDs. A large file that keeps receiving parts between waits, such
+  as one throttled by Telegram's download speed limit, never fails on waits. Other pages
+  continue.
 - stdout gets one JSON line per file as each finishes, in the order they finish: the result of
   a single download (`{"success":true,"data":{…}}`) or its error
   (`{"success":false,"error":{…}}`, with `chatId` and `messageId` in `details`). A failed file
@@ -166,7 +169,9 @@ tg sql "SELECT message_id FROM message_attachments WHERE chat_id = 5550001 AND k
   the first file written to a path keeps it. Different bytes for that path return
   `FILE_EXISTS` even with `--overwrite`.
 - Creating a new export without `--overwrite` uses a hard link to publish the complete copy
-  atomically. The output filesystem must support hard links for this mode.
+  atomically. On a filesystem without hard links (exFAT, FAT, some network shares) it copies
+  the file instead, still never over an existing one, but not atomically: until the copy ends,
+  another program can see a partial file at the target.
 - A template ending in a slash or expanding to an existing directory uses the directory naming
   rule. Paired braces in output paths denote placeholders.
 
