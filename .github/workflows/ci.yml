@@ -1,5 +1,5 @@
 # Based on devkit's templates/ci.bun.yml (https://github.com/neoromantic/devkit), plus the
-# repo-specific `pack` smoke test and a weekly canary. Repo-owned: devkit sync leaves this file alone.
+# compiled binary smoke test and a weekly canary. Repo-owned: devkit sync leaves this file alone.
 name: ci
 
 on:
@@ -19,7 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # check (lint + typecheck), build, test, test:e2e
+  # check (lint, typecheck, Knip), build, pack, test, test:e2e. pack installs the npm tarball in
+  # a clean project and runs `tg --help` and `tg --version` with no Telegram credentials.
   build:
     uses: neoromantic/devkit/.github/workflows/ci-bun.yml@v1
     permissions:
@@ -27,15 +28,16 @@ jobs:
     with:
       e2e: true
       canary: ${{ github.event_name == 'schedule' }}
+      pack: true
+      pack-args: '[["--help"],["--version"]]'
 
   hygiene:
     uses: neoromantic/devkit/.github/workflows/hygiene.yml@v1
     permissions:
       contents: read
 
-  # Compile the binary, pack the npm tarball, install it globally and run tg with no
-  # Telegram credentials, the way a user installs it.
-  pack:
+  # Compile the single-file binary that releases ship and run it with no Telegram credentials.
+  binary:
     if: github.event.pull_request.draft != true
     runs-on: ${{ fromJSON('{"true":"oss-linux","false":"ubuntu-latest"}')[format('{0}', vars.CI_SELF_HOSTED == 'true' && github.ref == 'refs/heads/main')] }}
     timeout-minutes: 10
@@ -56,24 +58,12 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
-      - name: Build binary
+      - name: Build and run the binary
         run: |
           bun run build
-          ./dist/tg --version
-          ./dist/tg --help
-
-      - name: Pack npm tarball
-        run: bun pm pack --destination "$RUNNER_TEMP/pack"
-
-      - name: Install tarball globally and run tg without credentials
-        run: |
-          export BUN_INSTALL="$RUNNER_TEMP/bun-global"
           mkdir -p "$RUNNER_TEMP/home"
-          # bun needs a file: specifier for an absolute tarball path
-          bun i -g "file:$(ls "$RUNNER_TEMP"/pack/*.tgz)"
-          clean_path="$BUN_INSTALL/bin:$(dirname "$(command -v bun)"):/usr/bin:/bin"
-          env -i PATH="$clean_path" HOME="$RUNNER_TEMP/home" tg --version
-          env -i PATH="$clean_path" HOME="$RUNNER_TEMP/home" tg --help
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/home" ./dist/tg --version
+          env -i PATH=/usr/bin:/bin HOME="$RUNNER_TEMP/home" ./dist/tg --help
 
   # Weekly only: refresh dependencies to the newest versions their ranges allow and run the
   # offline suites, so upstream breakage shows up before a Renovate PR or a user does.
@@ -109,7 +99,7 @@ jobs:
 
   # The one required check for the branch ruleset. It is named exactly "ci".
   ci:
-    needs: [build, hygiene, pack, latest-deps]
+    needs: [build, hygiene, binary, latest-deps]
     if: always() && github.event.pull_request.draft != true
     runs-on: ${{ fromJSON('{"true":"oss-linux","false":"ubuntu-latest"}')[format('{0}', vars.CI_SELF_HOSTED == 'true' && github.ref == 'refs/heads/main')] }}
     permissions: {}
