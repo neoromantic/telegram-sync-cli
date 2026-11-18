@@ -36,6 +36,11 @@ export interface ErrorResult {
     details?: Record<string, unknown>
     /** What to do next, for errors that have a fix */
     suggestion?: string
+    /**
+     * Whether the same command, run again unchanged, can succeed: after
+     * `details.wait_seconds` for RATE_LIMITED
+     */
+    retryable: boolean
   }
 }
 

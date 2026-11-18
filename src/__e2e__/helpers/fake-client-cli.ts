@@ -12,8 +12,10 @@
  * channels.readHistory mark the chat read and print FAKE_CLIENT_CALL with
  * the method and max_id to stderr; messages.getPeerDialogs then returns a
  * dialog read up to that max_id, or to FAKE_TOP_MESSAGE for 0 (everything),
- * with the messages above it unread. Any other method fails the way
- * Telegram rejects an unknown one.
+ * with the messages above it unread. FAKE_FLOOD_METHOD fails with a
+ * FLOOD_WAIT of FAKE_FLOOD_SECONDS, and messages.sendMessage with
+ * PEER_ID_INVALID. Any other method fails the way Telegram rejects an
+ * unknown one.
  */
 
 /** This file, to pass as runCli's `entry` */
@@ -25,6 +27,11 @@ export const FAKE_CLIENT_CALL = 'fake client: call'
 
 /** The newest message of every chat the fake client reads */
 export const FAKE_TOP_MESSAGE = 30
+
+/** The method Telegram answers with FLOOD_WAIT_<FAKE_FLOOD_SECONDS> */
+export const FAKE_FLOOD_METHOD = 'help.getNearestDc'
+
+export const FAKE_FLOOD_SECONDS = 42
 
 /** A made-up help.getConfig result */
 export const FAKE_CONFIG = {
@@ -40,6 +47,7 @@ export const FAKE_CONFIG = {
 if (import.meta.main) {
   // mock.module works in a plain `bun run` script too, not only in bun test
   const { mock } = await import('bun:test')
+  const { tl } = await import('@mtcute/bun')
   const telegram = await import('../../services/telegram')
 
   // Never cleared, not even by destroy()
@@ -77,6 +85,20 @@ if (import.meta.main) {
           chats: [],
           users: [],
         }
+      }
+      if (request._ === FAKE_FLOOD_METHOD) {
+        throw tl.RpcError.fromTl({
+          _: 'rpc_error',
+          errorCode: 420,
+          errorMessage: `FLOOD_WAIT_${FAKE_FLOOD_SECONDS}`,
+        })
+      }
+      if (request._ === 'messages.sendMessage') {
+        throw tl.RpcError.fromTl({
+          _: 'rpc_error',
+          errorCode: 400,
+          errorMessage: 'PEER_ID_INVALID',
+        })
       }
       throw Object.assign(new Error('METHOD_INVALID'), { code: 400 })
     },

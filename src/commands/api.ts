@@ -24,6 +24,7 @@ import { toLong } from '../utils/long'
 import { error, raw, success } from '../utils/output'
 import {
   isRateLimitError,
+  reportRateLimit,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
 import {
@@ -168,13 +169,7 @@ export const apiCommand = defineCommand({
       ) {
         error(ErrorCodes.INVALID_ARGS, err.message, { method })
       }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      if (isRateLimitError(err)) reportRateLimit(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
 
       // Try to extract Telegram error code

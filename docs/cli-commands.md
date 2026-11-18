@@ -826,8 +826,10 @@ Errors:
 ```json
 {
   "success": false,
-  "error": { "code": "INVALID_ARGS", "message": "...", "details": {}, "suggestion": "..." }
+  "error": { "code": "INVALID_ARGS", "message": "...", "details": {}, "suggestion": "...", "retryable": false }
 }
 ```
 
-`details` and `suggestion` are optional.
+`details` and `suggestion` are optional. `retryable` is always there: whether the same command,
+run again unchanged, can succeed (`RATE_LIMITED` after `details.wait_seconds`). See
+[api-design.md](api-design.md#error-handling).

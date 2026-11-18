@@ -167,7 +167,9 @@ Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-
 ## For AI agents
 
 - Output is JSON by default. Errors look like
-  `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}}}`.
+  `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}, "suggestion": "Wait 30s, then run the same command again", "retryable": true}}`.
+  `retryable` says whether running the same command again can work (for `RATE_LIMITED`, after
+  `details.wait_seconds`); `suggestion`, when present, is what to run or change.
 - Exit codes: `0` ok, `1` general error, `2` auth required, `3` invalid arguments,
   `4` network error, `5` Telegram error or rate limit, `6` account not found.
 - "Summarize my unread messages": `tg messages unread` prints each chat with unread messages,
