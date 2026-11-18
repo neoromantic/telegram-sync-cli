@@ -3,7 +3,15 @@
  * a name template such as `exports/{chat}/{date}_{id}_{name}`
  */
 import { randomUUID } from 'node:crypto'
-import { linkSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import {
+  constants,
+  copyFileSync,
+  linkSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
 import { ErrorCodes } from '../../types'
@@ -103,6 +111,32 @@ function fileKey(path: string): string | undefined {
   return st && `${st.dev}:${st.ino}`
 }
 
+/** link() errors of a filesystem without hard links (exFAT, FAT, some network shares) */
+const NO_HARD_LINKS = new Set(['EPERM', 'ENOTSUP', 'ENOSYS', 'EXDEV'])
+
+/**
+ * Publish tmp at target unless target exists (EEXIST). A hard link does it
+ * atomically; without hard links an exclusive copy keeps the no-clobber
+ * rule, but a reader can see the target while it is being written.
+ */
+function publishNew(tmp: string, target: string): void {
+  try {
+    linkSync(tmp, target)
+    return
+  } catch (err) {
+    if (!NO_HARD_LINKS.has((err as NodeJS.ErrnoException).code ?? '')) throw err
+  }
+  try {
+    copyFileSync(tmp, target, constants.COPYFILE_EXCL)
+  } catch (err) {
+    // Only EEXIST leaves the target untouched; anything else is our partial copy
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+      rmSync(target, { force: true })
+    }
+    throw err
+  }
+}
+
 /** Publish complete bytes. False means the existing target must be compared or refused. */
 async function publishCopy(
   source: string,
@@ -121,10 +155,10 @@ async function publishCopy(
       const previous = published && fileKey(target)
       if (previous && published?.has(previous)) return false
       renameSync(tmp, target)
-      if (published) published.add(fileKey(target)!)
     } else {
-      linkSync(tmp, target)
+      publishNew(tmp, target)
     }
+    if (published) published.add(fileKey(target)!)
     return true
   } catch (err) {
     if (!overwrite && (err as NodeJS.ErrnoException).code === 'EEXIST') {
@@ -171,11 +205,12 @@ export async function copyOut(
       { path: target },
     )
   }
+  const key = fileKey(target)
   throw new MediaError(
     ErrorCodes.FILE_EXISTS,
     `File already exists: ${target}`,
     { path: target },
-    published
+    key && published?.has(key)
       ? 'use a distinct output path for each file'
       : 'pass --overwrite or another --out',
   )
