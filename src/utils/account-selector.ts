@@ -79,6 +79,16 @@ export function resolveAccountSelector(
   )
 }
 
+/** The account without --account: the active one, else the only one, else null */
+export function findDefaultAccount(
+  accountsDb: AccountsDbInterface = defaultAccountsDb,
+): { account: Account | null; accounts: Account[] } {
+  const accounts = accountsDb.getAll()
+  const account =
+    accountsDb.getActive() ?? (accounts.length === 1 ? accounts[0]! : null)
+  return { account, accounts }
+}
+
 /**
  * The account a command works on: `--account`, else the active account,
  * else the only one. Each account has its own cache, so a command never
@@ -100,11 +110,8 @@ export function resolveAccount(
     )
   }
 
-  const active = accountsDb.getActive()
-  if (active) return active
-
-  const accounts = accountsDb.getAll()
-  if (accounts.length === 1) return accounts[0]!
+  const { account, accounts } = findDefaultAccount(accountsDb)
+  if (account) return account
 
   if (accounts.length === 0) {
     error(

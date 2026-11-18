@@ -15,6 +15,7 @@ import {
   getDefaultRetentionConfig,
   parseDuration,
 } from '../db/types'
+import type { Account } from '../types'
 
 /**
  * `positiveDuration` is a duration above 0, such as a retention; `rate` is
@@ -609,6 +610,14 @@ export async function loadDaemonConfig(
   }
 }
 
+/** The account config.json's activeAccount names, if it exists */
+export function configuredActiveAccount(
+  config: ConfigFile,
+  accounts: AccountsDbInterface = accountsDb,
+): Account | null {
+  return config.activeAccount ? accounts.getById(config.activeAccount) : null
+}
+
 export async function syncActiveAccountFromConfig(
   accounts: AccountsDbInterface = accountsDb,
   options: { dataDir?: string } = {},
@@ -617,8 +626,6 @@ export async function syncActiveAccountFromConfig(
     dataDir: options.dataDir,
     strict: true,
   })
-  if (!config.activeAccount) return
-  const account = accounts.getById(config.activeAccount)
-  if (!account) return
-  accounts.setActive(account.id)
+  const account = configuredActiveAccount(config, accounts)
+  if (account) accounts.setActive(account.id)
 }

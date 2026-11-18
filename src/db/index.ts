@@ -412,16 +412,34 @@ if (!existsSync(DATA_DIR)) {
   mkdirSync(DATA_DIR, { recursive: true })
 }
 
-// Production database instance
-const db = new Database(DB_PATH)
-initSchema(db)
+let production: { db: Database; accounts: AccountsDbInterface } | null = null
 
-// Production accountsDb instance
-export const accountsDb = createAccountsDb(db)
+/**
+ * data.db, opened on first use, so a command that reads no account (tg skill
+ * install, tg skill validate) still runs when the file is broken
+ */
+function openProduction(): { db: Database; accounts: AccountsDbInterface } {
+  if (production) return production
+  const db = new Database(DB_PATH)
+  try {
+    initSchema(db)
+  } catch (err) {
+    db.close()
+    throw err
+  }
+  production = { db, accounts: createAccountsDb(db) }
+  return production
+}
+
+/** The accounts in data.db; the first call opens the file */
+export const accountsDb: AccountsDbInterface = new Proxy(
+  {} as AccountsDbInterface,
+  { get: (_target, key) => Reflect.get(openProduction().accounts, key) },
+)
 
 const cacheLayout = createCacheLayoutGuard(() => ({
   dataDir: DATA_DIR,
-  db,
+  db: openProduction().db,
   accounts: accountsDb,
   notice: info,
 }))
@@ -576,4 +594,3 @@ export {
   SyncJobType,
   SyncPriority,
 } from './sync-schema'
-export { db }
