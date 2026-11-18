@@ -113,7 +113,7 @@ describe("E2E: upgrading from the shared cache", () => {
 
       expect((await sqlCount()).count).toBe(5);
       expect(existsSync(shared)).toBe(false);
-    }, 30_000);
+    });
 
     it("moves the cache to the only account before tg auth login adds another", async () => {
       seedInChild(shared, "legacySharedCache");
@@ -152,7 +152,7 @@ describe("E2E: upgrading from the shared cache", () => {
       } finally {
         await holder.release();
       }
-    }, 30_000);
+    });
 
     it("leaves the held cache alone in commands that need no cache", async () => {
       seedInChild(shared, "legacySharedCache");
@@ -173,7 +173,7 @@ describe("E2E: upgrading from the shared cache", () => {
       } finally {
         await holder.release();
       }
-    }, 30_000);
+    });
 
     it("says in tg daemon status that an older daemon still holds the shared cache", async () => {
       seedInChild(shared, "legacySharedCache");
@@ -203,7 +203,7 @@ describe("E2E: upgrading from the shared cache", () => {
       } finally {
         await holder.release();
       }
-    }, 30_000);
+    });
   });
 
   it("moves the rows still in the WAL to an account with ID 3", async () => {
@@ -254,7 +254,7 @@ describe("E2E: upgrading from the shared cache", () => {
     expect(rowCounts(parked)).toEqual(before);
     env.seedAccounts([{ phone: "+15550000003", is_active: true }]);
     expect((await sqlCount()).count).toBe(0);
-  }, 30_000);
+  });
 
   describe("with two accounts", () => {
     beforeEach(() => {
@@ -344,7 +344,7 @@ describe("E2E: upgrading from the shared cache", () => {
       expect(existsSync(shared)).toBe(false);
       expect(rowCounts(parked)).toEqual(before);
       expect((await sqlCount()).count).toBe(0);
-    }, 30_000);
+    });
 
     it("deletes a shared cache that holds nothing", async () => {
       seedInChild(shared, "emptyCache");
@@ -371,7 +371,7 @@ describe("E2E: upgrading from the shared cache", () => {
       await sqlCount();
       expect(existsSync(shared)).toBe(false);
       expect(existsSync(join(env.dataDir, "shared-cache.db"))).toBe(true);
-    }, 30_000);
+    });
   });
 
   it("gives a logged-out account's cache to the same user's new account", async () => {

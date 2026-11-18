@@ -76,6 +76,21 @@ const deps: AuthDependencies = {
 };
 ```
 
+**Lint rules for tests**: `bun run lint` runs the landmines testing rules on every test file.
+
+- Keep real implementations. Fake only the Telegram client (MTProto, which has no offline
+  server), and give a fake its behaviour when you build it, not by replacing a method later.
+  To make a cache write fail, make SQLite fail it (a trigger that raises) instead of stubbing
+  the cache. Spies on `console` only observe.
+- Move time with `setSystemTime()` from `bun:test` (reset it with `setSystemTime()` in
+  `afterEach` or `finally`), or with `vi.useFakeTimers()` for intervals. Never assign
+  `Date.now` or `setTimeout`.
+- Wait for the operation or a signal it gives: its promise, a callback of a test double, or
+  output from a spawned CLI. No fixed `Bun.sleep()`.
+- No raised per-test timeouts and no retries. `bun run test:e2e` gives every e2e test 30
+  seconds. The few tests that can't do without a fixed wait or a raised timeout are listed with
+  their count in `.oxlintrc.json`.
+
 ### Core Unit Test Files
 
 - `auth.test.ts` — authentication flows (phone, QR, logout); a login makes its account the
@@ -178,7 +193,7 @@ Snapshot tests lock down formatted output to catch regressions.
 - Update snapshots with `bun test -u`
 
 ```typescript
-const logSpy = spyOn(console, "log").mockImplementation(() => {});
+const logSpy = spyOn(console, "log");
 
 setOutputFormat("json");
 success({ message: "Snapshot test", count: 2, items: ["alpha", "beta"] });

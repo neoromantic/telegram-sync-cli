@@ -431,5 +431,5 @@ describe("job budget with two accounts", () => {
         .filter((job) => job.accountId === 1)
         .every((job) => job.type === SyncJobType.ForwardCatchup),
     ).toBe(true);
-  }, 30_000);
+  });
 });

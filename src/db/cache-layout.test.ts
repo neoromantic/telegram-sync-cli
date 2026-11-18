@@ -375,7 +375,7 @@ describe("migrateSharedCache", () => {
 
       expect(migrateSharedCache(deps()).state).toBe("adopted");
       expect(rowCounts(accountCachePath(dataDir, 1))).toEqual(before);
-    }, 20_000);
+    });
 
     it("defers setting it aside", async () => {
       addAccounts(2);
@@ -395,7 +395,7 @@ describe("migrateSharedCache", () => {
       }
 
       expect(migrateSharedCache(deps()).state).toBe("parked");
-    }, 20_000);
+    });
   });
 
   it("leaves data.db unlocked and its busy_timeout as it was", () => {
@@ -533,7 +533,7 @@ describe("createCacheLayoutGuard", () => {
     }
 
     expect(layout.ensure("strict").state).toBe("adopted");
-  }, 20_000);
+  });
 
   it.skipIf(isRoot)(
     "throws CACHE_UNAVAILABLE move_failed in strict mode when the move fails",

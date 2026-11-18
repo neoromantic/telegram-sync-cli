@@ -12,7 +12,6 @@ import {
 import { createTestEnvironment, type TestEnvironment } from "./e2e-setup.test-utils";
 
 const HANG_TIMEOUT_MS = 8_000;
-const TEST_TIMEOUT_MS = 15_000;
 
 describe("E2E: tg api closes the client and exits", () => {
   let env: TestEnvironment;
@@ -36,46 +35,34 @@ describe("E2E: tg api closes the client and exits", () => {
     return runCli(["api", ...args], options);
   }
 
-  it(
-    "--raw prints the bare result, closes the client and exits 0",
-    async () => {
-      const result = await runApi(["help.getConfig", "--raw"]);
+  it("--raw prints the bare result, closes the client and exits 0", async () => {
+    const result = await runApi(["help.getConfig", "--raw"]);
 
-      expect(result.exitCode).toBe(0);
-      expect(JSON.parse(result.stdout)).toEqual(FAKE_CONFIG);
-      expect(result.stderr).toContain(FAKE_CLIENT_DESTROYED);
-    },
-    TEST_TIMEOUT_MS,
-  );
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(FAKE_CONFIG);
+    expect(result.stderr).toContain(FAKE_CLIENT_DESTROYED);
+  });
 
-  it(
-    "without --raw prints the success wrapper, closes the client and exits 0",
-    async () => {
-      const result = await runApi(["help.getConfig"]);
+  it("without --raw prints the success wrapper, closes the client and exits 0", async () => {
+    const result = await runApi(["help.getConfig"]);
 
-      expect(result.exitCode).toBe(0);
-      expect(result.json).toEqual({
-        success: true,
-        data: { method: "help.getConfig", result: FAKE_CONFIG },
-      });
-      expect(result.stderr).toContain(FAKE_CLIENT_DESTROYED);
-    },
-    TEST_TIMEOUT_MS,
-  );
+    expect(result.exitCode).toBe(0);
+    expect(result.json).toEqual({
+      success: true,
+      data: { method: "help.getConfig", result: FAKE_CONFIG },
+    });
+    expect(result.stderr).toContain(FAKE_CLIENT_DESTROYED);
+  });
 
-  it(
-    "a failed call closes the client and exits with TELEGRAM_ERROR",
-    async () => {
-      const result = await runApi(["help.getNothing", "--raw"]);
+  it("a failed call closes the client and exits with TELEGRAM_ERROR", async () => {
+    const result = await runApi(["help.getNothing", "--raw"]);
 
-      expect(result.exitCode).toBe(5);
-      expect(result.stdout).toBe("");
-      expect(result.stderr).toContain(FAKE_CLIENT_DESTROYED);
-      expect(result.stderr).toContain('"code": "TELEGRAM_ERROR"');
-      expect(result.stderr).toContain('"telegramErrorCode": 400');
-    },
-    TEST_TIMEOUT_MS,
-  );
+    expect(result.exitCode).toBe(5);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(FAKE_CLIENT_DESTROYED);
+    expect(result.stderr).toContain('"code": "TELEGRAM_ERROR"');
+    expect(result.stderr).toContain('"telegramErrorCode": 400');
+  });
 });
 
 describe("E2E: errors say whether a retry can work", () => {
@@ -112,41 +99,33 @@ describe("E2E: errors say whether a retry can work", () => {
     retryable: true,
   };
 
-  it(
-    "a FLOOD_WAIT is RATE_LIMITED, retryable after details.wait_seconds, also while it runs",
-    async () => {
-      const first = await run(["api", FAKE_FLOOD_METHOD]);
-      expect(first.exitCode).toBe(5);
-      expect(errorOf(first.stderr)).toEqual(RATE_LIMITED);
+  it("a FLOOD_WAIT is RATE_LIMITED, retryable after details.wait_seconds, also while it runs", async () => {
+    const first = await run(["api", FAKE_FLOOD_METHOD]);
+    expect(first.exitCode).toBe(5);
+    expect(errorOf(first.stderr)).toEqual(RATE_LIMITED);
 
-      const second = await run(["api", FAKE_FLOOD_METHOD]);
-      expect(second.exitCode).toBe(5);
-      expect(errorOf(second.stderr)).toMatchObject({
-        code: "RATE_LIMITED",
-        retryable: true,
-      });
-      const wait = (errorOf(second.stderr).details as { wait_seconds: number }).wait_seconds;
-      expect(wait).toBeGreaterThan(0);
-      expect(wait).toBeLessThanOrEqual(FAKE_FLOOD_SECONDS);
-    },
-    TEST_TIMEOUT_MS,
-  );
+    const second = await run(["api", FAKE_FLOOD_METHOD]);
+    expect(second.exitCode).toBe(5);
+    expect(errorOf(second.stderr)).toMatchObject({
+      code: "RATE_LIMITED",
+      retryable: true,
+    });
+    const wait = (errorOf(second.stderr).details as { wait_seconds: number }).wait_seconds;
+    expect(wait).toBeGreaterThan(0);
+    expect(wait).toBeLessThanOrEqual(FAKE_FLOOD_SECONDS);
+  });
 
-  it(
-    "a refused call is not retryable",
-    async () => {
-      const result = await run(["api", "help.getNothing"]);
+  it("a refused call is not retryable", async () => {
+    const result = await run(["api", "help.getNothing"]);
 
-      expect(result.exitCode).toBe(5);
-      expect(errorOf(result.stderr)).toEqual({
-        code: "TELEGRAM_ERROR",
-        message: "API call failed: METHOD_INVALID",
-        details: { method: "help.getNothing", telegramErrorCode: 400 },
-        retryable: false,
-      });
-    },
-    TEST_TIMEOUT_MS,
-  );
+    expect(result.exitCode).toBe(5);
+    expect(errorOf(result.stderr)).toEqual({
+      code: "TELEGRAM_ERROR",
+      message: "API call failed: METHOD_INVALID",
+      details: { method: "help.getNothing", telegramErrorCode: 400 },
+      retryable: false,
+    });
+  });
 
   it.each(Object.entries(FAKE_INTERNAL_ERRORS))(
     "a failure on Telegram's side (%s) is retryable",
@@ -161,45 +140,36 @@ describe("E2E: errors say whether a retry can work", () => {
         retryable: true,
       });
     },
-    TEST_TIMEOUT_MS,
   );
 
-  it(
-    "a user ID Telegram refuses suggests sending to the @username or +phone once",
-    async () => {
-      const result = await run(["send", "--to", "123456", "--message", "Hi"]);
+  it("a user ID Telegram refuses suggests sending to the @username or +phone once", async () => {
+    const result = await run(["send", "--to", "123456", "--message", "Hi"]);
 
-      expect(result.exitCode).toBe(5);
-      expect(errorOf(result.stderr)).toEqual({
-        code: "TELEGRAM_ERROR",
-        message:
-          "Invalid recipient: 123456. Make sure the user/chat exists and you have access to it.",
-        suggestion:
-          "Send to the user's @username or +phone once: tg caches the user, and its ID works after that",
-        retryable: false,
-      });
-    },
-    TEST_TIMEOUT_MS,
-  );
+    expect(result.exitCode).toBe(5);
+    expect(errorOf(result.stderr)).toEqual({
+      code: "TELEGRAM_ERROR",
+      message:
+        "Invalid recipient: 123456. Make sure the user/chat exists and you have access to it.",
+      suggestion:
+        "Send to the user's @username or +phone once: tg caches the user, and its ID works after that",
+      retryable: false,
+    });
+  });
 
-  it(
-    "a @username Telegram refuses gets no suggestion",
-    async () => {
-      createUsersCache(env.openCacheDb(1)).upsert({
-        user_id: "1001",
-        username: "alice",
-        first_name: "Alice",
-        access_hash: "777",
-        fetched_at: Date.now(),
-        raw_json: "{}",
-      });
-      const result = await run(["send", "--to", "@alice", "--message", "Hi"]);
+  it("a @username Telegram refuses gets no suggestion", async () => {
+    createUsersCache(env.openCacheDb(1)).upsert({
+      user_id: "1001",
+      username: "alice",
+      first_name: "Alice",
+      access_hash: "777",
+      fetched_at: Date.now(),
+      raw_json: "{}",
+    });
+    const result = await run(["send", "--to", "@alice", "--message", "Hi"]);
 
-      expect(result.exitCode).toBe(5);
-      const reported = errorOf(result.stderr);
-      expect(reported.code).toBe("TELEGRAM_ERROR");
-      expect(reported.suggestion).toBeUndefined();
-    },
-    TEST_TIMEOUT_MS,
-  );
+    expect(result.exitCode).toBe(5);
+    const reported = errorOf(result.stderr);
+    expect(reported.code).toBe("TELEGRAM_ERROR");
+    expect(reported.suggestion).toBeUndefined();
+  });
 });

@@ -594,7 +594,7 @@ describe("a writer in another process next to tg db migrate", () => {
     expect(result.status.state).toBe("done");
     expect(result.status.done).toBe(result.status.total!);
     expect(result.status.done).toBeGreaterThanOrEqual(70);
-  }, 20_000);
+  });
 
   it("without the daemon, is never refused: it gets in within a second of work", async () => {
     const result = await writeNextToMigrate(dir, {

@@ -169,7 +169,7 @@ describe("cache database lock", () => {
     db.close();
 
     expect(await holder.exited).toBe(0);
-  }, 20_000);
+  });
 
   it("lets tg chats sync wait for a write lock another process holds", async () => {
     const holder = spawnBun(HOLD_LOCK, {
@@ -198,7 +198,7 @@ describe("cache database lock", () => {
     db.close();
 
     expect(await holder.exited).toBe(0);
-  }, 20_000);
+  });
 
   it("opens a migrated, stamped cache without waiting for the write lock", async () => {
     const owner = { id: 1, user_id: 101 };
@@ -225,7 +225,7 @@ describe("cache database lock", () => {
     db.close();
 
     expect(await holder.exited).toBe(0);
-  }, 20_000);
+  });
 
   it("lets several processes switch a new or folded cache to WAL at once", async () => {
     for (const kind of ["new", "folded"] as const) {
@@ -260,7 +260,7 @@ describe("cache database lock", () => {
         db.close();
       }
     }
-  }, 60_000);
+  });
 
   it("lets several processes rebuild an outdated search index at once", async () => {
     const outdated = new Database(path);
@@ -319,7 +319,7 @@ describe("cache database lock", () => {
         .get(),
     ).toEqual({ count: 3 });
     rebuilt.close();
-  }, 30_000);
+  });
 
   it("lets several processes move a 0.2.0 cache to marked IDs at once", async () => {
     const legacy = new Database(path);
@@ -362,7 +362,7 @@ describe("cache database lock", () => {
     ).toEqual(["-1001234567890", "-1002222222222", "-4242", "10"]);
     assertPeerIdInvariants(migrated);
     migrated.close();
-  }, 30_000);
+  });
 
   it("waits past the 5-second busy timeout to build the message_id index", async () => {
     const cache = new Database(path);
@@ -422,7 +422,7 @@ describe("cache database lock", () => {
       "first open: disk full",
       `second open: ${PEER_ID_USER_VERSION}`,
     ]);
-  }, 20_000);
+  });
 
   it("lets several processes move a shared cache to its only account at once", async () => {
     seedSharedCache(path);
@@ -443,7 +443,7 @@ describe("cache database lock", () => {
     expect(existsSync(`${path}-wal`)).toBe(false);
     expect(existsSync(join(dir, "accounts", "1", "cache.db"))).toBe(true);
     expect(listCacheFiles(dir)).toEqual(["accounts/1/cache.db"]);
-  }, 30_000);
+  });
 
   it("moves a shared cache only after the older process that holds it exits", async () => {
     seedSharedCache(path);
@@ -517,5 +517,5 @@ describe("cache database lock", () => {
         .get(),
     ).toEqual({ name: "idx_messages_cache_message_id" });
     migrated.close();
-  }, 30_000);
+  });
 });

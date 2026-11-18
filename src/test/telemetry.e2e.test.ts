@@ -285,7 +285,7 @@ describe("usage stats in the background", () => {
     expect(sent.find((e) => e.event === "error_occurred")?.properties.error_type).toBe(
       "AUTH_REQUIRED",
     );
-  }, 15000);
+  });
 
   it("arrive with a data directory given as a relative path", async () => {
     const project = join(dataDir, "project");
@@ -296,5 +296,5 @@ describe("usage stats in the background", () => {
     expect(sent).toHaveLength(4);
     const state = JSON.parse(readFileSync(join(project, "data", "telemetry.json"), "utf8"));
     expect(sent.every((e) => e.distinct_id === state.id)).toBe(true);
-  }, 15000);
+  });
 });

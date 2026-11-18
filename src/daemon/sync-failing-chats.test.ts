@@ -374,5 +374,5 @@ describe("a chat that fails in one account", () => {
     expect(first.chatSyncState.get(FAILING_CHAT)?.forward_cursor).toBe(1200);
     expect(second.chatSyncState.get(FAILING_CHAT)?.forward_cursor).toBe(1000);
     expect(failedRows(second.jobsService)).toEqual([FAILING_CHAT]);
-  }, 30_000);
+  });
 });

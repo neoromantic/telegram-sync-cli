@@ -235,13 +235,13 @@ describe("E2E: two accounts, each with its own cache", () => {
 
       expect(await snapshot(env, flag)).toEqual(BETA_VIEW);
       expect(await messageText(env, BOOK_CLUB_ID, flag)).toBe("lunch at one");
-    }, 30_000);
+    });
   }
 
   it("reads only the active account without --account", async () => {
     expect(await snapshot(env, [])).toEqual(ALPHA_VIEW);
     expect(await messageText(env, ALICE_ID, [])).toBe("lunch at noon");
-  }, 30_000);
+  });
 
   it("doesn't find a chat of the other account", async () => {
     const result = await failure(env, [
@@ -344,7 +344,7 @@ describe("E2E: switching accounts", () => {
       expectNoRootCache(env);
       env.cleanup();
     }
-  }, 30_000);
+  });
 
   it("writes the new account to activeAccount and keeps the other keys", async () => {
     const env = createTwoAccounts("multi-account-switch-config");
@@ -374,7 +374,7 @@ describe("E2E: switching accounts", () => {
       expectNoRootCache(env);
       env.cleanup();
     }
-  }, 30_000);
+  });
 
   it("leaves a config.json without activeAccount byte for byte", async () => {
     const env = createTwoAccounts("multi-account-switch-no-key");
