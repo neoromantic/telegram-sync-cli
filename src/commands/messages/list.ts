@@ -95,7 +95,7 @@ export const listMessagesCommand = defineCommand({
         { after, before },
       )
     }
-    const types = parseTypeArg(rawArgs ?? [])
+    const types = parseTypeArg(rawArgs ?? [], listArgs)
     const { since, until } = parseTimeWindow(args)
     const filtered =
       types !== undefined || since !== undefined || until !== undefined

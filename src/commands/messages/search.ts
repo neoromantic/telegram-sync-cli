@@ -162,7 +162,7 @@ export const searchMessagesCommand = defineCommand({
     }
 
     const { since, until } = parseTimeWindow(args)
-    const types = parseTypeArg(rawArgs ?? [])
+    const types = parseTypeArg(rawArgs ?? [], searchArgs)
 
     const { account, db: cacheDb } = openAccountCache(args.account)
     const chatFilter = parseIdentifier(args.chat, 'chat', account.user_id)

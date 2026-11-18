@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
+import type { ArgsDef } from 'citty'
 
 import { parseTimeWindow, parseTypeArg } from '../commands/messages/filters'
 
 const NOW = Date.UTC(2026, 10, 18, 12, 0, 0)
+
+/** The string flags of tg messages search that matter here */
+const DEFS = {
+  query: { type: 'string' },
+  type: { type: 'string' },
+} satisfies ArgsDef
 
 let errorSpy: ReturnType<typeof spyOn>
 
@@ -25,18 +32,34 @@ function codeOf(run: () => unknown): string | undefined {
 
 describe('parseTypeArg', () => {
   it('is undefined without --type', () => {
-    expect(parseTypeArg(['--chat', '@alice'])).toBeUndefined()
+    expect(parseTypeArg(['--chat', '@alice'], DEFS)).toBeUndefined()
   })
 
   it('reads comma-separated and repeated values, once each', () => {
-    expect(parseTypeArg(['--type', 'voice,round'])).toEqual(['voice', 'round'])
+    expect(parseTypeArg(['--type', 'voice,round'], DEFS)).toEqual([
+      'voice',
+      'round',
+    ])
     expect(
-      parseTypeArg(['--type', 'voice', '--type=round', '--type', ' voice ']),
+      parseTypeArg(
+        ['--type', 'voice', '--type=round', '--type', ' voice '],
+        DEFS,
+      ),
     ).toEqual(['voice', 'round'])
   })
 
+  it('reads --type=voice given as the value of --query as the query', () => {
+    expect(parseTypeArg(['--query', '--type=voice'], DEFS)).toBeUndefined()
+    expect(parseTypeArg(['--query=--type=voice'], DEFS)).toBeUndefined()
+    expect(
+      parseTypeArg(['--query', '--type=voice', '--type', 'round'], DEFS),
+    ).toEqual(['round'])
+  })
+
   it.each(['nope', 'voice,', 'Voice', ''])('rejects %p', (value) => {
-    expect(codeOf(() => parseTypeArg(['--type', value]))).toBe('INVALID_ARGS')
+    expect(codeOf(() => parseTypeArg(['--type', value], DEFS))).toBe(
+      'INVALID_ARGS',
+    )
   })
 })
 

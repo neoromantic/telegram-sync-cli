@@ -49,5 +49,6 @@ export function parseTimeBound(
     return null
   }
 
-  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null
+  // Message dates are whole seconds: `date >= 100.5` and `date < 100.5` both mean 101
+  return Number.isFinite(ms) ? Math.ceil(ms / 1000) : null
 }

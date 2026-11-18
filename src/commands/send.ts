@@ -1,7 +1,7 @@
 import { accessSync, constants, statSync } from 'node:fs'
 import { basename } from 'node:path'
 import { tl } from '@mtcute/bun'
-import { defineCommand } from 'citty'
+import { type ArgsDef, defineCommand } from 'citty'
 
 import { accountsDb } from '../db'
 import { createChatsCache } from '../db/chats-cache'
@@ -197,7 +197,7 @@ function readSendContent(
   }
   const format = args.markdown ? 'markdown' : args.html ? 'html' : null
 
-  const files = flagValues(rawArgs, 'file')
+  const files = flagValues(rawArgs, 'file', sendArgs)
   if (files.length > 1) {
     error(
       ErrorCodes.INVALID_ARGS,
@@ -244,6 +244,58 @@ function readSendContent(
   }
 }
 
+const sendArgs = {
+  to: {
+    type: 'string',
+    description:
+      'Recipient: @username, user or chat ID (as tg chats list or tg messages search print it), phone number (+…), or me (Saved Messages)',
+    required: true,
+  },
+  message: {
+    type: 'string',
+    alias: 'm',
+    description: 'Message text (or use --file)',
+  },
+  file: {
+    type: 'string',
+    description:
+      'Send this file: a photo for JPEG/PNG/WebP images up to 10 MB, otherwise a document. One per message',
+  },
+  caption: {
+    type: 'string',
+    description: 'Text sent with --file',
+  },
+  'force-document': {
+    type: 'boolean',
+    default: false,
+    description: 'Send an image as a file (document), not as a photo',
+  },
+  markdown: {
+    type: 'boolean',
+    default: false,
+    description:
+      'Send --message as a rich message written in Markdown: headings, tables, lists, quotes, code, formulas',
+  },
+  html: {
+    type: 'boolean',
+    default: false,
+    description: 'Send --message as a rich message written in HTML',
+  },
+  account: {
+    type: 'string',
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+  silent: {
+    type: 'boolean',
+    description: 'Send without notification sound',
+    default: false,
+  },
+  'reply-to': {
+    type: 'string',
+    description: 'Message ID to reply to',
+  },
+} satisfies ArgsDef
+
 /**
  * Send message command
  */
@@ -252,57 +304,7 @@ export const sendCommand = defineCommand({
     name: 'send',
     description: 'Send a message or a file to a user, group, or channel',
   },
-  args: {
-    to: {
-      type: 'string',
-      description:
-        'Recipient: @username, user or chat ID (as tg chats list or tg messages search print it), phone number (+…), or me (Saved Messages)',
-      required: true,
-    },
-    message: {
-      type: 'string',
-      alias: 'm',
-      description: 'Message text (or use --file)',
-    },
-    file: {
-      type: 'string',
-      description:
-        'Send this file: a photo for JPEG/PNG/WebP images up to 10 MB, otherwise a document. One per message',
-    },
-    caption: {
-      type: 'string',
-      description: 'Text sent with --file',
-    },
-    'force-document': {
-      type: 'boolean',
-      default: false,
-      description: 'Send an image as a file (document), not as a photo',
-    },
-    markdown: {
-      type: 'boolean',
-      default: false,
-      description:
-        'Send --message as a rich message written in Markdown: headings, tables, lists, quotes, code, formulas',
-    },
-    html: {
-      type: 'boolean',
-      default: false,
-      description: 'Send --message as a rich message written in HTML',
-    },
-    account: {
-      type: 'string',
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-    silent: {
-      type: 'boolean',
-      description: 'Send without notification sound',
-      default: false,
-    },
-    'reply-to': {
-      type: 'string',
-      description: 'Message ID to reply to',
-    },
-  },
+  args: sendArgs,
   setup(ctx) {
     // A chat allowlist can resolve the recipient before run().
     if (ctx.args.markdown || ctx.args.html) {

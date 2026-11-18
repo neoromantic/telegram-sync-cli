@@ -2,6 +2,8 @@
  * The --type, --since and --until flags of `tg messages list` and
  * `tg messages search`
  */
+import type { ArgsDef } from 'citty'
+
 import type { MessageFilter } from '../../db/messages-history'
 import { ErrorCodes } from '../../types'
 import { flagValues } from '../../utils/args'
@@ -22,8 +24,11 @@ export const UNTIL_ARG_DESCRIPTION =
  * round` alike, or undefined without the flag. citty keeps only the last
  * of a repeated flag, so they are read from rawArgs.
  */
-export function parseTypeArg(rawArgs: string[]): string[] | undefined {
-  const given = flagValues(rawArgs, 'type')
+export function parseTypeArg(
+  rawArgs: string[],
+  defs: ArgsDef,
+): string[] | undefined {
+  const given = flagValues(rawArgs, 'type', defs)
   if (given.length === 0) return undefined
 
   const types = [
