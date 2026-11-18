@@ -17,7 +17,7 @@ import {
   rawMessageId,
 } from '../../daemon/sync-worker-real-helpers'
 import type { AccountsDbInterface } from '../../db'
-import { readMigrationStatus } from '../../db/background-migrations'
+import { isMigrationPending } from '../../db/background-migrations'
 import { type ChatsCache, createChatsCache } from '../../db/chats-cache'
 import { createGroupParticipation } from '../../db/group-participation'
 import { createHistoryRanges, type PageBounds } from '../../db/history-ranges'
@@ -30,6 +30,7 @@ import type { MessageSearchRow } from '../../db/messages-search'
 import { MESSAGE_TYPES_MIGRATION } from '../../db/raw-json-migrations'
 import { createUsersCache, type UsersCache } from '../../db/users-cache'
 import type { MessageSearchItem } from '../../types'
+import { normalizeUsername } from '../../utils/identifiers'
 import { verbose } from '../../utils/output'
 import { toPeerIdFromInputPeer } from '../../utils/telegram-peer-ids'
 import { type DmLookup, resolvePeer } from '../send/peer-resolver'
@@ -84,6 +85,30 @@ export async function resolveHistoryChat(
     throw new Error(`Could not resolve chat ${identifier}`)
   }
   return { chatId, inputPeer }
+}
+
+/** A username as --chat takes it; me and self name Saved Messages */
+const CHAT_USERNAME = /^@?(?!(?:me|self)$)[a-z]\w*$/i
+
+/**
+ * The marked chat ID for `--chat`, from the cache when it knows the
+ * username: only the ID is read, so no access hash is needed. Anything else
+ * resolves as resolveHistoryChat does, which reads the cache first too.
+ */
+export async function resolveHistoryChatId(
+  client: HistoryClient,
+  identifier: string,
+  deps: ResolveHistoryChatDeps,
+): Promise<number> {
+  const value = identifier.trim()
+  if (CHAT_USERNAME.test(value)) {
+    const username = normalizeUsername(value)
+    const user = deps.usersCache.getByUsername(username)
+    if (user) return Number(user.user_id)
+    const chat = deps.chatsCache.getByUsername(username)
+    if (chat) return Number(chat.chat_id)
+  }
+  return (await resolveHistoryChat(client, identifier, deps)).chatId
 }
 
 /** A page of history. Both bounds are exclusive message IDs. */
@@ -303,9 +328,19 @@ export interface HistoryGap {
   fillable: boolean
 }
 
+/** Why `--type` may miss cached messages of the page's span */
+export interface UntypedRows {
+  /** The migration that types older rows is unfinished */
+  migrating: boolean
+  /** The newest media row still waiting for its raw message, or null */
+  newestAwaitingRaw: number | null
+}
+
 export interface FilteredPage {
   page: ListHistoryResult & FilteredCoverage
   gap: HistoryGap | null
+  /** Null without --type, or when every row of the span has its type */
+  untyped: UntypedRows | null
 }
 
 interface CachedWindow {
@@ -466,12 +501,6 @@ function newestGap(
   }
 }
 
-function typesMigrating(cacheDb: Database): boolean {
-  return readMigrationStatus(cacheDb).some(
-    (m) => m.name === MESSAGE_TYPES_MIGRATION && m.state !== 'done',
-  )
-}
-
 function historyPage(
   cacheDb: Database,
   chatId: number,
@@ -513,10 +542,17 @@ export function readFilteredPage(
     const top = knownTop(cacheDb, chatId)
     const span = vouchedSpan(cacheDb, chatId, window, filter, ids, top)
     const gap = span && newestGap(cacheDb, chatId, span, top)
-    const untyped =
+    const migrating =
       filter.types !== undefined &&
-      (typesMigrating(cacheDb) ||
-        (span !== null && history.hasUntyped(chatId, span.low, span.high)))
+      isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION)
+    const newestAwaitingRaw =
+      filter.types !== undefined && span !== null
+        ? history.newestUntyped(chatId, span.low, span.high)
+        : null
+    const untyped =
+      migrating || newestAwaitingRaw !== null
+        ? { migrating, newestAwaitingRaw }
+        : null
 
     const missing: MissingPart[] = []
     if (gap) missing.push('history')
@@ -529,6 +565,7 @@ export function readFilteredPage(
         missingBefore: gap?.before ?? null,
       },
       gap,
+      untyped,
     }
   })()
 }

@@ -66,6 +66,17 @@ function parseBound(
   return seconds
 }
 
+/**
+ * A resolved bound as `next` carries it: UTC to the second, so a relative
+ * bound (`60s`) keeps the window the first page read
+ */
+export function formatTimeBound(
+  seconds: number | undefined,
+): string | undefined {
+  if (seconds === undefined) return undefined
+  return new Date(seconds * 1000).toISOString().replace('.000Z', 'Z')
+}
+
 /** --since and --until as Unix seconds; INVALID_ARGS unless since < until */
 export function parseTimeWindow(
   args: { since?: string; until?: string },

@@ -15,6 +15,7 @@ import {
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { chatRow } from '../__tests__/helpers/cache-db'
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
 import { range } from '../__tests__/helpers/fake-history'
 import { LEGACY } from '../__tests__/helpers/legacy-cache'
@@ -1033,8 +1034,14 @@ const PIER_START = Date.UTC(2025, 9, 10) / 1000
 
 type FilteredListData = ListData & {
   complete: boolean
+  missing: Array<'history' | 'types'>
   missingBefore: number | null
   suggestion: string | null
+}
+
+interface FilteredAnswer {
+  data: FilteredListData
+  next?: Array<{ command: string; why: string }>
 }
 
 describe('E2E: Messages List filters', () => {
@@ -1111,9 +1118,13 @@ describe('E2E: Messages List filters', () => {
     env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
   })
 
-  async function list(...args: string[]): Promise<FilteredListData> {
+  async function answer(...args: string[]): Promise<FilteredAnswer> {
     const result = await runCliSuccess(['messages', 'list', ...args], options())
-    return (result.json as { data: FilteredListData }).data
+    return result.json as FilteredAnswer
+  }
+
+  async function list(...args: string[]): Promise<FilteredListData> {
+    return (await answer(...args)).data
   }
 
   const ids = (data: ListData) => data.items.map((item) => item.messageId)
@@ -1221,18 +1232,28 @@ describe('E2E: Messages List filters', () => {
 
   it('says the page is incomplete where the cache has gaps', async () => {
     // 61-62 arrived live: no range says what lies between them and 60
-    const voices = await list('--chat', '@dockclub', '--type', 'voice')
-    expect(ids(voices)).toEqual([60, 55, 50, 45])
-    expect(voices).toMatchObject({ complete: false, missingBefore: 63 })
-    expect(voices.suggestion).toContain(
-      `tg messages list --chat ${DOCK_CLUB_ID} --before 63 --limit 100`,
-    )
+    const voices = await answer('--chat', '@dockclub', '--type', 'voice')
+    expect(ids(voices.data)).toEqual([60, 55, 50, 45])
+    expect(voices.data).toMatchObject({
+      complete: false,
+      missing: ['history'],
+      missingBefore: null,
+    })
+    expect(voices.data.suggestion).toContain('lacks messages 61-62')
+    // Fill the gap, then read the same page again; never the older page
+    expect(voices.next?.map((n) => n.command)).toEqual([
+      'tg messages list --chat=@dockclub --limit=100 --fresh',
+      'tg messages list --chat=@dockclub --type=voice',
+    ])
 
     // Nothing below 41 is cached, and a two-day window reaches below it
     const twoDays = ['--chat', '@dockclub', '--since', '2d', '--until', '90m']
-    const all = await list(...twoDays, '--limit', '50')
-    expect(ids(all)).toEqual(range(41, 60).reverse())
-    expect(all).toMatchObject({ complete: false, missingBefore: 41 })
+    const all = await answer(...twoDays, '--limit', '50')
+    expect(ids(all.data)).toEqual(range(41, 60).reverse())
+    expect(all.data).toMatchObject({ complete: false, missingBefore: 41 })
+    expect(all.next?.[0]?.command).toBe(
+      'tg messages list --chat=@dockclub --limit=100 --before=41 --fresh',
+    )
 
     // A full page vouches only down to its last item; the next one doesn't
     const full = await list(...twoDays, '--limit', '20')
@@ -1255,6 +1276,64 @@ describe('E2E: Messages List filters', () => {
     )
     expect(ids(halfDay)).toEqual(range(50, 60).reverse())
     expect(halfDay.complete).toBe(true)
+  })
+
+  it('says when search --type may miss messages still being typed', async () => {
+    const search = async (...args: string[]) =>
+      (
+        await runCliSuccess(
+          [
+            'messages',
+            'search',
+            '--query',
+            'note',
+            '--chat',
+            '@pierclub',
+            '--count',
+            ...args,
+          ],
+          options(),
+        )
+      ).json as {
+        data: { count: number; typesPending: boolean }
+        next?: Array<{ command: string }>
+      }
+
+    expect((await search('--type', 'text')).data).toMatchObject({
+      count: 2,
+      typesPending: false,
+    })
+    const db = env.openCacheDb(1)
+    db.run(
+      "UPDATE cache_migrations SET state = 'pending' WHERE name = 'messages_raw_json_v2'",
+    )
+    try {
+      const pending = await search('--type', 'text')
+      expect(pending.data.typesPending).toBe(true)
+      expect(pending.next?.[0]?.command).toBe('tg db migrate')
+      // Without --type the types don't matter
+      expect((await search()).data.typesPending).toBe(false)
+    } finally {
+      db.run(
+        "UPDATE cache_migrations SET state = 'done' WHERE name = 'messages_raw_json_v2'",
+      )
+    }
+  })
+
+  it('reads --type=voice as the query in both spellings', async () => {
+    const query = async (...args: string[]) =>
+      (
+        (
+          await runCliSuccess(
+            ['messages', 'search', ...args, '--count'],
+            options(),
+          )
+        ).json as { data: { query: string; count: number; filters: object } }
+      ).data
+
+    const spaced = await query('--query', '--type=voice')
+    expect(spaced).toEqual(await query('--query=--type=voice'))
+    expect(spaced.filters).toMatchObject({ type: null })
   })
 
   it('adds no keys without filters', async () => {
@@ -1287,6 +1366,123 @@ describe('E2E: Messages List filters', () => {
     const json = result.json as ErrorData
     expect(json.error.code).toBe('INVALID_ARGS')
     expect(json.error.message).toContain(message)
+  })
+})
+
+/** A supergroup cached by username alone, without an access hash */
+const QUAY_CLUB_RAW_ID = 1_555_000_005
+const QUAY_CLUB_ID = -1_001_555_000_005
+
+describe('E2E: Messages List filters offline and on another account', () => {
+  let env: TestEnvironment
+
+  beforeAll(() => {
+    env = createTestEnvironment('messages-list-filters-accounts')
+    env.initDatabase()
+    env.seedAccounts([
+      { phone: '+15550000000', user_id: SELF_ID, is_active: true },
+      { phone: '+15550000001', user_id: SELF_ID + 1, is_active: false },
+    ])
+    env.openCacheDb(1)
+    const db = env.openCacheDb(2)
+    takePartIn(db, QUAY_CLUB_ID)
+    createChatsCache(db).upsert(
+      chatRow(QUAY_CLUB_ID, 'supergroup', { username: 'quayclub' }),
+    )
+    const quay = { _: 'peerChannel' as const, channelId: QUAY_CLUB_RAW_ID }
+    // 1-10 cached by one history run, 21 live; 5 and 21 are voice notes
+    createMessagesCache(db).upsertBatch(
+      [...range(1, 10), 21].map(
+        (id) =>
+          parseRawMessage(
+            {
+              ...(id % 5 === 0 || id === 21
+                ? voiceMessage(quay, id)
+                : { _: 'message', id, peerId: quay, message: `note ${id}` }),
+              date: PIER_START + id * 60,
+            },
+            QUAY_CLUB_ID,
+          )!,
+      ),
+    )
+    createHistoryRanges(db).add(QUAY_CLUB_ID, { low: 1, high: 10 })
+  })
+
+  afterAll(() => {
+    env.cleanup()
+  })
+
+  const options = (extra: Record<string, string> = {}) => ({
+    env: { ...env.getCliOptions().env, ...NO_CREDENTIALS, ...extra },
+  })
+
+  async function list(
+    extra: Record<string, string>,
+    ...args: string[]
+  ): Promise<FilteredAnswer> {
+    const result = await runCliSuccess(
+      ['messages', 'list', '--account', '2', ...args],
+      options(extra),
+    )
+    return result.json as FilteredAnswer
+  }
+
+  it('reads a chat by a cached username without credentials, allowedChats included', async () => {
+    const page = ['--chat', '@quayclub', '--type', 'voice', '--before', '11']
+    const envs: Array<Record<string, string>> = [
+      {},
+      { TELEGRAM_SYNC_CLI_ALLOWED_CHATS: '@quayclub' },
+    ]
+    for (const extra of envs) {
+      const { data } = await list(extra, ...page)
+      expect(data.items.map((item) => item.messageId)).toEqual([10, 5])
+      expect(data.complete).toBe(true)
+    }
+  })
+
+  it('keeps --account in every command it suggests', async () => {
+    const { data, next } = await list(
+      {},
+      '--chat',
+      '@quayclub',
+      '--type',
+      'voice',
+      '--before',
+      '21',
+    )
+
+    expect(data).toMatchObject({ complete: false, missingBefore: 21 })
+    expect(next?.map((n) => n.command)).toEqual([
+      'tg messages list --chat=@quayclub --limit=100 --before=21 --fresh --account=2',
+      'tg messages list --chat=@quayclub --before=21 --type=voice --account=2',
+    ])
+  })
+
+  it('suggests the migration of its own account while types are pending', async () => {
+    const db = env.openCacheDb(2)
+    db.run(
+      "UPDATE cache_migrations SET state = 'pending' WHERE name = 'messages_raw_json_v2'",
+    )
+    try {
+      const { data, next } = await list(
+        {},
+        '--chat',
+        '@quayclub',
+        '--type',
+        'voice',
+        '--before',
+        '11',
+      )
+      expect(data).toMatchObject({ complete: false, missing: ['types'] })
+      expect(next?.map((n) => n.command)).toEqual([
+        'tg db migrate --account=2',
+        'tg messages list --chat=@quayclub --before=11 --type=voice --account=2',
+      ])
+    } finally {
+      db.run(
+        "UPDATE cache_migrations SET state = 'done' WHERE name = 'messages_raw_json_v2'",
+      )
+    }
   })
 })
 

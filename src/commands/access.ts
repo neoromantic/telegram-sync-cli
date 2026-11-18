@@ -11,7 +11,7 @@ import { openAccountCache } from '../utils/account-cache'
 import { positionalChat } from '../utils/args'
 import { error } from '../utils/output'
 import { openHistory, reportHistoryError } from './messages/helpers'
-import { resolveHistoryChat } from './messages/history'
+import { resolveHistoryChatId } from './messages/history'
 
 type Args = Record<string, unknown>
 
@@ -213,8 +213,8 @@ type HistoryDeps = ReturnType<typeof openHistory>
 
 /**
  * The marked IDs of the list: an ID as given, @username and me as
- * `tg messages list --chat` resolves them (cache-first; me is the account's
- * own user ID)
+ * `tg messages list --chat` resolves them (a cached username needs no
+ * connection; me is the account's own user ID)
  */
 async function resolveAllowed(
   entries: string[],
@@ -225,7 +225,7 @@ async function resolveAllowed(
     ids.add(
       /^-?\d+$/.test(entry)
         ? Number(entry)
-        : (await resolveHistoryChat(deps.client, entry, deps)).chatId,
+        : await resolveHistoryChatId(deps.client, entry, deps),
     )
   }
   return ids
@@ -245,7 +245,7 @@ async function checkChatAllowed(
   let id: number
   let ids: Set<number>
   try {
-    id = (await resolveHistoryChat(deps.client, input, deps)).chatId
+    id = await resolveHistoryChatId(deps.client, input, deps)
     ids = await resolveAllowed(allowed, deps)
   } catch (err) {
     reportHistoryError(err, `check ${input} against allowedChats`)

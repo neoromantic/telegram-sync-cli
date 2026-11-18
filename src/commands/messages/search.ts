@@ -1,11 +1,13 @@
 import { type ArgsDef, defineCommand } from 'citty'
 
+import { isMigrationPending } from '../../db/background-migrations'
 import {
   createMessagesSearch,
   isFts5QueryError,
   MESSAGE_SEARCH_SORTS,
   type MessageSearchSort,
 } from '../../db/messages-search'
+import { MESSAGE_TYPES_MIGRATION } from '../../db/raw-json-migrations'
 import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
@@ -13,8 +15,10 @@ import { normalizeUsername } from '../../utils/identifiers'
 import { error, success } from '../../utils/output'
 import { buildSnippet, snippetTerms } from '../../utils/search-snippet'
 import { allowedChatIds } from '../access'
+import { migrateArgs } from '../db'
 import { nextCommand } from '../next'
 import {
+  formatTimeBound,
   parseTimeWindow,
   parseTypeArg,
   SINCE_ARG_DESCRIPTION,
@@ -192,23 +196,41 @@ export const searchMessagesCommand = defineCommand({
         sort,
       })
       const results = rows.slice(0, limit)
-      const next =
-        rows.length > limit
+      const typesPending =
+        types !== undefined &&
+        (isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION) ||
+          search.hasUntypedMatch(query, options))
+      // Resolved bounds, so the next page reads the same window
+      const values = {
+        ...args,
+        query,
+        type: types?.join(','),
+        since: formatTimeBound(since),
+        until: formatTimeBound(until),
+        limit,
+      }
+      const next = [
+        ...(typesPending
+          ? [
+              nextCommand(
+                'db migrate',
+                migrateArgs,
+                { account: args.account },
+                'Some cached messages have no type yet: this finishes the background migration that types them.',
+              ),
+            ]
+          : []),
+        ...(rows.length > limit
           ? [
               nextCommand(
                 'messages search',
                 searchArgs,
-                {
-                  ...args,
-                  query,
-                  type: types?.join(','),
-                  limit,
-                  offset: offset + limit,
-                },
+                { ...values, offset: offset + limit },
                 'The next page of results.',
               ),
             ]
-          : []
+          : []),
+      ]
       const count = args.count ? search.count(query, options) : null
       const terms = args.snippet
         ? snippetTerms(query, { phrase: options.phrase })
@@ -236,6 +258,7 @@ export const searchMessagesCommand = defineCommand({
           }),
           total: results.length,
           count,
+          typesPending,
           limit,
           offset,
           source: 'cache',

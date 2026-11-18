@@ -203,6 +203,13 @@ export function readMigrationStatus(
   return result
 }
 
+/** Whether this migration has rows left to go through */
+export function isMigrationPending(db: Database, name: string): boolean {
+  return readMigrationStatus(db).some(
+    (m) => m.name === name && m.state !== 'done',
+  )
+}
+
 /**
  * Fix the rows a migration covers: up to the largest rowid now. The count
  * reads the table outside the write lock; rows written meanwhile have a

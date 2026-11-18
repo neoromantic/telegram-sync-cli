@@ -62,8 +62,8 @@ export interface MessagesHistory {
     high: number,
     time: number,
   ): number | null
-  /** Whether a message from `low` to `high` has no type yet (AWAITING_RAW_MESSAGE) */
-  hasUntyped(chatId: number, low: number, high: number): boolean
+  /** The newest message from `low` to `high` with no type yet (AWAITING_RAW_MESSAGE) */
+  newestUntyped(chatId: number, low: number, high: number): number | null
 }
 
 export function createMessagesHistory(db: Database): MessagesHistory {
@@ -169,17 +169,15 @@ export function createMessagesHistory(db: Database): MessagesHistory {
       return row.id
     },
 
-    hasUntyped(chatId, low, high) {
-      return (
-        db
-          .query(`
-            SELECT 1 FROM messages_cache m
-            WHERE m.chat_id = ? AND m.message_id BETWEEN ? AND ?
-              AND ${AWAITING_RAW_MESSAGE}
-            LIMIT 1
-          `)
-          .get(chatId, low, high) !== null
-      )
+    newestUntyped(chatId, low, high) {
+      const row = db
+        .query(`
+          SELECT MAX(m.message_id) AS id FROM messages_cache m
+          WHERE m.chat_id = ? AND m.message_id BETWEEN ? AND ?
+            AND ${AWAITING_RAW_MESSAGE}
+        `)
+        .get(chatId, low, high) as { id: number | null }
+      return row.id
     },
   }
 }

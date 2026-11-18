@@ -3,8 +3,10 @@ import { ErrorCodes, type NextCommand } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success } from '../../utils/output'
+import { migrateArgs } from '../db'
 import { nextCommand } from '../next'
 import {
+  formatTimeBound,
   parseTimeWindow,
   parseTypeArg,
   SINCE_ARG_DESCRIPTION,
@@ -19,9 +21,12 @@ import {
   reportHistoryError,
 } from './helpers'
 import {
+  type FilteredPage,
   type ListHistoryResult,
   listHistory,
+  readFilteredPage,
   resolveHistoryChat,
+  resolveHistoryChatId,
 } from './history'
 
 const listArgs = {
@@ -102,26 +107,50 @@ export const listMessagesCommand = defineCommand({
     if (filtered && args.fresh) {
       error(
         ErrorCodes.INVALID_ARGS,
-        '--fresh reads an unfiltered page from Telegram; --type, --since and --until read the cache',
+        '--type, --since and --until read only the cache, and --fresh reads an unfiltered page from Telegram',
         undefined,
         'Fetch pages with tg messages list --fresh (no filters), then filter',
       )
     }
     const { account } = openAccountCache(args.account)
+    const window = { limit, before, after }
+    const includeDeleted = args.includeDeleted ?? false
 
     try {
       const deps = openHistory(account.id, 'cli:messages.list')
+      if (filtered) {
+        const chatId = await resolveHistoryChatId(deps.client, args.chat, deps)
+        const result = readFilteredPage(
+          deps.cacheDb,
+          chatId,
+          window,
+          includeDeleted,
+          { types, since, until },
+        )
+        // Resolved bounds, so every command in next reads the same window
+        const values = {
+          ...args,
+          type: types?.join(','),
+          since: formatTimeBound(since),
+          until: formatTimeBound(until),
+        }
+        success(
+          { ...result.page, suggestion: filteredSuggestion(result) },
+          filteredNext(values, result),
+        )
+        return
+      }
+
       const chat = await resolveHistoryChat(deps.client, args.chat, deps)
       const result = await listHistory({
         cacheDb: deps.cacheDb,
         client: deps.client,
         chat,
-        window: { limit, before, after },
-        includeDeleted: args.includeDeleted ?? false,
+        window,
+        includeDeleted,
         fresh: args.fresh ?? false,
-        filter: filtered ? { types, since, until } : undefined,
       })
-      success(result, nextPage({ ...args, type: types?.join(',') }, result))
+      success(result, nextPage(args, result))
     } catch (err) {
       reportHistoryError(err, 'list messages')
     }
@@ -158,4 +187,103 @@ function nextPage(
       'The next page of older messages.',
     ),
   ]
+}
+
+/** What fills a gap or types the rows a filtered page needs, before it is read again */
+function fillCommands(
+  args: Record<string, unknown>,
+  { gap, untyped }: FilteredPage,
+): NextCommand[] {
+  const fetch = (before: number | null, why: string) =>
+    nextCommand(
+      'messages list',
+      listArgs,
+      {
+        chat: args.chat,
+        account: args.account,
+        limit: 100,
+        before: before ?? undefined,
+        fresh: true,
+      },
+      why,
+    )
+
+  const fills: NextCommand[] = []
+  if (gap?.fillable) {
+    const page =
+      gap.before === null
+        ? 'the newest 100 messages'
+        : `the 100 messages below ${gap.before}`
+    fills.push(
+      fetch(
+        gap.before,
+        `The cache lacks messages ${gap.low}-${gap.high} of this page: this caches ${page} from Telegram.`,
+      ),
+    )
+  }
+  if (untyped?.migrating) {
+    fills.push(
+      nextCommand(
+        'db migrate',
+        migrateArgs,
+        { account: args.account },
+        'Older cached messages are still being typed: this finishes the migration.',
+      ),
+    )
+  } else if (untyped && untyped.newestAwaitingRaw !== null) {
+    fills.push(
+      fetch(
+        untyped.newestAwaitingRaw + 1,
+        `Message ${untyped.newestAwaitingRaw} and maybe older ones were cached without their type: this caches them again from Telegram.`,
+      ),
+    )
+  }
+  return fills
+}
+
+/**
+ * A complete page continues with the next one. An incomplete page first
+ * fills what it lacks and reads the same page again, since filling can add
+ * matches to it; a gap that can't be filled leaves the next page.
+ */
+function filteredNext(
+  args: Record<string, unknown>,
+  result: FilteredPage,
+): NextCommand[] {
+  const fills = fillCommands(args, result)
+  if (fills.length === 0) return nextPage(args, result.page)
+  return [
+    ...fills,
+    nextCommand(
+      'messages list',
+      listArgs,
+      args,
+      'Then read this page again: it stays incomplete until nothing is missing.',
+    ),
+  ]
+}
+
+/** One sentence on what an incomplete page lacks; null when complete */
+function filteredSuggestion({
+  page,
+  gap,
+  untyped,
+}: FilteredPage): string | null {
+  if (page.complete) return null
+  const parts: string[] = []
+  if (gap) {
+    parts.push(
+      gap.fillable
+        ? `the cache lacks messages ${gap.low}-${gap.high}: next fetches them, then reads this page again (tg chats sync turns on history sync for a long gap)`
+        : `the cache lacks messages ${gap.low}-${gap.high}, and it keeps out new messages of a group you don't take part in, so an unfiltered tg messages list reads them from Telegram`,
+    )
+  }
+  if (untyped) {
+    parts.push(
+      untyped.migrating
+        ? 'older cached messages are still being typed: next finishes the migration'
+        : 'some cached media messages have no type yet: next fetches them again',
+    )
+  }
+  return `This page may lack matches: ${parts.join('; ')}.`
 }
