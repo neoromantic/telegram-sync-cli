@@ -77,7 +77,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Contacts, chats and users (`tg contacts`, `tg chats`, `tg me`, `tg user`)
 - Read-only SQL over the cache (`tg sql`) with an annotated schema
 - Rate-limit tracking, config and status tooling (`tg config`, `tg status`)
-- JSON output and a stable error schema for scripts and agents
+- JSON output and a stable error schema for scripts and agents; paged reads add `next`, the
+  command for the next page with the same account and filters
 
 ## How it compares
 
@@ -170,6 +171,11 @@ Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-
   `{"success": false, "error": {"code": "RATE_LIMITED", "message": "…", "details": {"method": "messages.getHistory", "wait_seconds": 30}, "suggestion": "Wait 30s, then run the same command again", "retryable": true}}`.
   `retryable` says whether running the same command again can work (for `RATE_LIMITED`, after
   `details.wait_seconds`); `suggestion`, when present, is what to run or change.
+- A paged read that has more (`tg messages list`, `tg messages search`, `tg chats list`,
+  `tg contacts list`) adds `next` beside `data`: `[{"command": "tg messages list --chat=… --before=…", "why": "…"}]`.
+  Run `next[0].command` as written to get the next page with the same account and filters
+  instead of rebuilding it from `nextBefore` or `offset`. An empty `tg chats search` suggests
+  `tg chats list --fresh` the same way.
 - Exit codes: `0` ok, `1` general error, `2` auth required, `3` invalid arguments,
   `4` network error, `5` Telegram error or rate limit, `6` account not found.
 - "Summarize my unread messages": `tg messages unread` prints each chat with unread messages,

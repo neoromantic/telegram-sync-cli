@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { join } from 'node:path'
-import { defineCommand } from 'citty'
+import { type ArgsDef, defineCommand } from 'citty'
 
 import { createPidFile } from '../../daemon'
 import { getDataDir } from '../../db'
@@ -12,6 +12,7 @@ import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success, verbose } from '../../utils/output'
 import { allowedChatIds } from '../access'
+import { nextCommand } from '../next'
 import {
   CHAT_ARG_DESCRIPTION,
   MAX_MESSAGE_ID,
@@ -91,36 +92,38 @@ const accountArg = {
   description: ACCOUNT_SELECTOR_DESCRIPTION,
 } as const
 
+const waitArgs = {
+  chat: {
+    type: 'string',
+    description: `Only this chat. ${CHAT_ARG_DESCRIPTION}`,
+  },
+  after: {
+    type: 'string',
+    description:
+      "Return the chat's messages newer than this ID, cached ones at once (needs --chat); default: only messages stored after the command starts",
+  },
+  timeout: {
+    type: 'string',
+    description:
+      'Seconds to wait; then messages is [] and timedOut is true (exit 0)',
+    default: '60',
+  },
+  settle: {
+    type: 'string',
+    description:
+      'After the first new message, keep collecting until this many seconds pass without another',
+    default: '0',
+  },
+  account: accountArg,
+} satisfies ArgsDef
+
 export const waitMessagesCommand = defineCommand({
   meta: {
     name: 'wait',
     description:
       'Wait until the daemon stores a new message, then print the new messages oldest first (reads only the cache; needs a running daemon)',
   },
-  args: {
-    chat: {
-      type: 'string',
-      description: `Only this chat. ${CHAT_ARG_DESCRIPTION}`,
-    },
-    after: {
-      type: 'string',
-      description:
-        "Return the chat's messages newer than this ID, cached ones at once (needs --chat); default: only messages stored after the command starts",
-    },
-    timeout: {
-      type: 'string',
-      description:
-        'Seconds to wait; then messages is [] and timedOut is true (exit 0)',
-      default: '60',
-    },
-    settle: {
-      type: 'string',
-      description:
-        'After the first new message, keep collecting until this many seconds pass without another',
-      default: '0',
-    },
-    account: accountArg,
-  },
+  args: waitArgs,
   async run({ args }) {
     const timeout = parseIntegerArg(args.timeout, 'timeout', {
       min: 0,
@@ -148,7 +151,22 @@ export const waitMessagesCommand = defineCommand({
     }
 
     const messages = rows.sort(oldestFirst).map(toItem)
-    success({ messages, timedOut: messages.length === 0 })
+    // Message IDs are per chat, so only a wait on one chat has a cursor
+    const next =
+      args.chat !== undefined && messages.length > 0
+        ? [
+            nextCommand(
+              'messages wait',
+              waitArgs,
+              {
+                ...args,
+                after: Math.max(...messages.map((m) => m.messageId)),
+              },
+              "Waits for the chat's next messages after these, so none is missed.",
+            ),
+          ]
+        : []
+    success({ messages, timedOut: messages.length === 0 }, next)
   },
 })
 

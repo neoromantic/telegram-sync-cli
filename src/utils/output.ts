@@ -10,6 +10,7 @@ import {
 import {
   type ErrorCode,
   ErrorCodes,
+  type NextCommand,
   type Output,
   type OutputFormat,
 } from '../types'
@@ -36,10 +37,11 @@ export function getOutputFormat(): OutputFormat {
  * Note: In production mode, this exits the process to close any active connections.
  * In test mode, this just logs and returns.
  */
-export function success<T>(data: T): void {
+export function success<T>(data: T, next: NextCommand[] = []): void {
   // An exit is under way: the run already printed its result
   if (isExiting()) return
-  const result: Output<T> = { success: true, data }
+  const result: Output<T> =
+    next.length > 0 ? { success: true, data, next } : { success: true, data }
 
   switch (currentFormat) {
     case 'json':
@@ -47,6 +49,10 @@ export function success<T>(data: T): void {
       break
     case 'pretty':
       console.log(JSON.stringify(data, null, 2))
+      // stderr keeps stdout the data's JSON alone
+      for (const { command, why } of next) {
+        console.error(`Next: ${why}\n  ${command}`)
+      }
       break
     case 'quiet':
       // No output for quiet mode
