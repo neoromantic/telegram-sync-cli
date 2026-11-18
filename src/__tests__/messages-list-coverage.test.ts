@@ -15,6 +15,7 @@ import {
   type HistoryWindow,
   type ListHistoryResult,
   listHistory,
+  readFilteredPage,
 } from '../commands/messages/history'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
@@ -198,6 +199,27 @@ describe('filtered list coverage', () => {
     })
     // A date window doesn't read types
     expect((await list(db, { limit: 20 }, { since: DATE })).complete).toBe(true)
+  })
+
+  it('marks a gap it can not fill in a group the account left', async () => {
+    cache(db, [{ id: 1 }, { id: 5 }])
+    cover(db, 1, 1)
+    // No own message for 90 days: new messages of the group stay out
+    db.run(
+      'UPDATE group_participation SET last_own_date = NULL WHERE chat_id = ?',
+      [CHAT_ID],
+    )
+
+    const { page, gap } = readFilteredPage(
+      db,
+      CHAT_ID,
+      { limit: 20 },
+      false,
+      VOICE,
+    )
+
+    expect(page).toMatchObject({ complete: false, missing: ['history'] })
+    expect(gap).toEqual({ low: 2, high: 5, before: null, fillable: false })
   })
 })
 

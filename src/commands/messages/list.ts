@@ -231,14 +231,18 @@ function fillCommands(
       ),
     )
   } else if (untyped && untyped.newestAwaitingRaw !== null) {
+    const newest = untyped.newestAwaitingRaw
     fills.push(
       fetch(
-        untyped.newestAwaitingRaw + 1,
-        `Message ${untyped.newestAwaitingRaw} and maybe older ones were cached without their type: this caches them again from Telegram.`,
+        newest < MAX_MESSAGE_ID ? newest + 1 : null,
+        `Message ${newest} and maybe older ones were cached without their type: this caches them again from Telegram.`,
       ),
     )
   }
-  return fills
+  // A gap and untyped rows can need the same page
+  return fills.filter(
+    (fill, i) => fills.findIndex((f) => f.command === fill.command) === i,
+  )
 }
 
 /**
