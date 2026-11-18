@@ -5,110 +5,105 @@
  * data, no Telegram credentials.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { chatRow } from '../__tests__/helpers/cache-db'
-import { takePartIn } from '../__tests__/helpers/participation'
-import { createChatsCache } from '../db/chats-cache'
-import { createMessagesCache } from '../db/messages-cache'
-import { createUsersCache, type UserCacheInput } from '../db/users-cache'
-import type { MessageSearchItem } from '../types'
-import { NO_CREDENTIALS, runCliSuccess } from './helpers/cli'
-import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { chatRow } from "../__tests__/helpers/cache-db";
+import { takePartIn } from "../__tests__/helpers/participation";
+import { createChatsCache } from "../db/chats-cache";
+import { createMessagesCache } from "../db/messages-cache";
+import { createUsersCache, type UserCacheInput } from "../db/users-cache";
+import type { MessageSearchItem } from "../types";
+import { NO_CREDENTIALS, runCliSuccess } from "./helpers/cli";
+import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
 
-const CHAT_ID = -1009000000002
-const USER_ID = 6001
+const CHAT_ID = -1009000000002;
+const USER_ID = 6001;
 
 const user: UserCacheInput = {
   user_id: String(USER_ID),
   username: null,
-  first_name: 'Marta',
-  last_name: 'Example',
+  first_name: "Marta",
+  last_name: "Example",
   fetched_at: 1,
-  raw_json: '{}',
-}
+  raw_json: "{}",
+};
 
-const chat = chatRow(CHAT_ID, 'supergroup', {
-  title: 'Hiking Group',
+const chat = chatRow(CHAT_ID, "supergroup", {
+  title: "Hiking Group",
   member_count: 40,
   fetched_at: 1,
-})
+});
 
-describe('E2E: names in the search index', () => {
-  let env: TestEnvironment
+describe("E2E: names in the search index", () => {
+  let env: TestEnvironment;
 
   beforeEach(() => {
-    env = createTestEnvironment('search-names')
-    env.initDatabase()
-    env.seedAccounts([{ phone: '+15550000002', is_active: true }])
-  })
+    env = createTestEnvironment("search-names");
+    env.initDatabase();
+    env.seedAccounts([{ phone: "+15550000002", is_active: true }]);
+  });
 
   afterEach(() => {
-    env.cleanup()
-  })
+    env.cleanup();
+  });
 
   const options = () => ({
     env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
-  })
+  });
 
   function seedMessages(): void {
-    const db = env.openCacheDb(1)
-    takePartIn(db, -1009000000002)
+    const db = env.openCacheDb(1);
+    takePartIn(db, -1009000000002);
     createMessagesCache(db).upsertBatch(
       [1, 2, 3].map((id) => ({
         chat_id: CHAT_ID,
         message_id: id,
         from_id: USER_ID,
         text: `trail report ${id}`,
-        message_type: 'text',
+        message_type: "text",
         date: 1_760_000_000 + id,
-        raw_json: '{}',
+        raw_json: "{}",
       })),
-    )
+    );
   }
 
   async function ids(query: string): Promise<number[]> {
-    const result = await runCliSuccess(
-      ['messages', 'search', '--query', query],
-      options(),
-    )
-    return (
-      result.json as { data: { results: MessageSearchItem[] } }
-    ).data.results
+    const result = await runCliSuccess(["messages", "search", "--query", query], options());
+    return (result.json as { data: { results: MessageSearchItem[] } }).data.results
       .map((item) => item.messageId)
-      .sort((a, b) => a - b)
+      .sort((a, b) => a - b);
   }
 
   async function migrate(): Promise<void> {
-    await runCliSuccess(['db', 'migrate', '--account', '1'], options())
+    await runCliSuccess(["db", "migrate", "--account", "1"], options());
   }
 
-  it('finds older messages by the new names after a rename', async () => {
-    const db = env.openCacheDb(1)
-    createUsersCache(db).upsert(user)
-    createChatsCache(db).upsert(chat)
-    seedMessages()
-    expect(await ids('sender:marta')).toEqual([1, 2, 3])
+  it("finds older messages by the new names after a rename", async () => {
+    const db = env.openCacheDb(1);
+    createUsersCache(db).upsert(user);
+    createChatsCache(db).upsert(chat);
+    seedMessages();
+    expect(await ids("sender:marta")).toEqual([1, 2, 3]);
 
-    createUsersCache(db).upsert({ ...user, first_name: 'Martina' })
-    createChatsCache(db).upsert({ ...chat, title: 'Mountain Walkers' })
-    await migrate()
+    createUsersCache(db).upsert({ ...user, first_name: "Martina" });
+    createChatsCache(db).upsert({ ...chat, title: "Mountain Walkers" });
+    await migrate();
 
-    expect(await ids('sender:martina')).toEqual([1, 2, 3])
-    expect(await ids('sender:marta')).toEqual([])
-    expect(await ids('chat:"mountain walkers"')).toEqual([1, 2, 3])
-    expect(await ids('chat:hiking')).toEqual([])
-  })
+    expect(await ids("sender:martina")).toEqual([1, 2, 3]);
+    expect(await ids("sender:marta")).toEqual([]);
+    expect(await ids('chat:"mountain walkers"')).toEqual([1, 2, 3]);
+    expect(await ids("chat:hiking")).toEqual([]);
+  });
 
-  it('finds messages by a sender and chat cached after them', async () => {
-    seedMessages()
-    expect(await ids('sender:marta')).toEqual([])
+  it("finds messages by a sender and chat cached after them", async () => {
+    seedMessages();
+    expect(await ids("sender:marta")).toEqual([]);
 
-    const db = env.openCacheDb(1)
-    createUsersCache(db).upsert(user)
-    createChatsCache(db).upsert(chat)
-    await migrate()
+    const db = env.openCacheDb(1);
+    createUsersCache(db).upsert(user);
+    createChatsCache(db).upsert(chat);
+    await migrate();
 
-    expect(await ids('sender:marta AND trail')).toEqual([1, 2, 3])
-    expect(await ids('chat:hiking')).toEqual([1, 2, 3])
-  })
-})
+    expect(await ids("sender:marta AND trail")).toEqual([1, 2, 3]);
+    expect(await ids("chat:hiking")).toEqual([1, 2, 3]);
+  });
+});

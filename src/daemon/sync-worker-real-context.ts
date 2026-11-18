@@ -1,25 +1,19 @@
-import type { tl } from '@mtcute/bun'
-import { isDaemonStopError } from './daemon-utils'
-import { isPermanentSyncError } from './sync-retry'
-import {
-  buildInputPeer,
-  extractFloodWaitSeconds,
-} from './sync-worker-real-helpers'
-import type {
-  RealJobResult,
-  RealSyncWorkerContext,
-} from './sync-worker-real-types'
+import type { tl } from "@mtcute/bun";
+import { isDaemonStopError } from "./daemon-utils";
+import { isPermanentSyncError } from "./sync-retry";
+import { buildInputPeer, extractFloodWaitSeconds } from "./sync-worker-real-helpers";
+import type { RealJobResult, RealSyncWorkerContext } from "./sync-worker-real-types";
 
 export function canMakeApiCall(ctx: RealSyncWorkerContext): boolean {
-  return !ctx.rateLimits.isBlocked(ctx.config.apiMethod)
+  return !ctx.rateLimits.isBlocked(ctx.config.apiMethod);
 }
 
 export function getWaitTime(ctx: RealSyncWorkerContext): number {
-  return ctx.rateLimits.getWaitTime(ctx.config.apiMethod)
+  return ctx.rateLimits.getWaitTime(ctx.config.apiMethod);
 }
 
 function handleFloodWait(ctx: RealSyncWorkerContext, seconds: number): void {
-  ctx.rateLimits.setFloodWait(ctx.config.apiMethod, seconds)
+  ctx.rateLimits.setFloodWait(ctx.config.apiMethod, seconds);
 }
 
 /**
@@ -39,9 +33,9 @@ export function requestPeer(
         rateLimited: true,
         waitSeconds: getWaitTime(ctx),
       },
-    }
+    };
   }
-  const inputPeer = buildInputPeer(chatId, ctx.chatsCache)
+  const inputPeer = buildInputPeer(chatId, ctx.chatsCache);
   if (!inputPeer) {
     return {
       result: {
@@ -50,30 +44,30 @@ export function requestPeer(
         error: `Could not build InputPeer for chat ${chatId}`,
         permanent: true,
       },
-    }
+    };
   }
-  return { inputPeer }
+  return { inputPeer };
 }
 
 export function resolveFloodWaitResult(
   ctx: RealSyncWorkerContext,
   err: unknown,
 ): RealJobResult | null {
-  const error = err instanceof Error ? err : new Error(String(err))
-  const floodWaitSeconds = extractFloodWaitSeconds(error)
+  const error = err instanceof Error ? err : new Error(String(err));
+  const floodWaitSeconds = extractFloodWaitSeconds(error);
   if (floodWaitSeconds === null) {
-    return null
+    return null;
   }
 
   // FLOOD_WAIT_0 still asks for a pause: wait at least a second.
-  const seconds = Math.max(1, floodWaitSeconds)
-  handleFloodWait(ctx, seconds)
+  const seconds = Math.max(1, floodWaitSeconds);
+  handleFloodWait(ctx, seconds);
   return {
     success: false,
     messagesFetched: 0,
     rateLimited: true,
     waitSeconds: seconds,
-  }
+  };
 }
 
 /**
@@ -81,22 +75,19 @@ export function resolveFloodWaitResult(
  * short is no failure: the job is pending again as it was. A FLOOD_WAIT
  * defers the job; any other error fails it, for good if it is permanent.
  */
-export function resolveJobError(
-  ctx: RealSyncWorkerContext,
-  err: unknown,
-): RealJobResult {
+export function resolveJobError(ctx: RealSyncWorkerContext, err: unknown): RealJobResult {
   if (isDaemonStopError(err)) {
-    return { success: false, messagesFetched: 0, stopped: true }
+    return { success: false, messagesFetched: 0, stopped: true };
   }
-  const floodResult = resolveFloodWaitResult(ctx, err)
+  const floodResult = resolveFloodWaitResult(ctx, err);
   if (floodResult) {
-    return floodResult
+    return floodResult;
   }
-  const error = err instanceof Error ? err : new Error(String(err))
+  const error = err instanceof Error ? err : new Error(String(err));
   return {
     success: false,
     messagesFetched: 0,
     error: error.message,
     permanent: isPermanentSyncError(err),
-  }
+  };
 }

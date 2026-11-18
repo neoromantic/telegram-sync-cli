@@ -6,42 +6,38 @@
 
 /** mtcute's media.type → the cached message_type */
 export const MESSAGE_TYPE_BY_MEDIA_TYPE: Record<string, string> = {
-  photo: 'photo',
-  video: 'video',
-  document: 'document',
-  sticker: 'sticker',
-  voice: 'voice',
-  audio: 'audio',
-  poll: 'poll',
-  contact: 'contact',
-  location: 'location',
-  live_location: 'location',
-  venue: 'venue',
-  game: 'game',
-  invoice: 'invoice',
-  webpage: 'webpage',
-  dice: 'dice',
-}
+  photo: "photo",
+  video: "video",
+  document: "document",
+  sticker: "sticker",
+  voice: "voice",
+  audio: "audio",
+  poll: "poll",
+  contact: "contact",
+  location: "location",
+  live_location: "location",
+  venue: "venue",
+  game: "game",
+  invoice: "invoice",
+  webpage: "webpage",
+  dice: "dice",
+};
 
 /** The cached message_type of a message whose media has this mtcute type */
-export function messageTypeOfMediaType(
-  type: string | undefined | null,
-): string {
-  return (type && MESSAGE_TYPE_BY_MEDIA_TYPE[type]) || 'unknown'
+export function messageTypeOfMediaType(type: string | undefined | null): string {
+  return (type && MESSAGE_TYPE_BY_MEDIA_TYPE[type]) || "unknown";
 }
 
-type RawObject = Record<string, unknown>
+type RawObject = Record<string, unknown>;
 
 function asObject(value: unknown): RawObject | null {
-  return typeof value === 'object' && value !== null
-    ? (value as RawObject)
-    : null
+  return typeof value === "object" && value !== null ? (value as RawObject) : null;
 }
 
 function attributesOf(doc: RawObject): RawObject[] {
-  const attributes = doc.attributes
-  if (!Array.isArray(attributes)) return []
-  return attributes.filter((attr): attr is RawObject => asObject(attr) !== null)
+  const attributes = doc.attributes;
+  if (!Array.isArray(attributes)) return [];
+  return attributes.filter((attr): attr is RawObject => asObject(attr) !== null);
 }
 
 /**
@@ -51,29 +47,27 @@ function attributesOf(doc: RawObject): RawObject[] {
  * plain document. `attr` is the attribute that decided.
  */
 export function classifyDocument(doc: RawObject): {
-  type: 'sticker' | 'voice' | 'audio' | 'video' | 'document'
-  attr: RawObject | null
+  type: "sticker" | "voice" | "audio" | "video" | "document";
+  attr: RawObject | null;
 } {
-  const attributes = attributesOf(doc)
+  const attributes = attributesOf(doc);
   const sticker = attributes.find(
-    (attr) =>
-      attr._ === 'documentAttributeSticker' ||
-      attr._ === 'documentAttributeCustomEmoji',
-  )
-  if (sticker) return { type: 'sticker', attr: sticker }
+    (attr) => attr._ === "documentAttributeSticker" || attr._ === "documentAttributeCustomEmoji",
+  );
+  if (sticker) return { type: "sticker", attr: sticker };
 
   for (const attr of attributes) {
     switch (attr._) {
-      case 'documentAttributeAudio':
-        return { type: attr.voice ? 'voice' : 'audio', attr }
-      case 'documentAttributeVideo':
-        return { type: 'video', attr }
-      case 'documentAttributeImageSize':
-        if (doc.mimeType === 'image/gif') return { type: 'video', attr }
-        break
+      case "documentAttributeAudio":
+        return { type: attr.voice ? "voice" : "audio", attr };
+      case "documentAttributeVideo":
+        return { type: "video", attr };
+      case "documentAttributeImageSize":
+        if (doc.mimeType === "image/gif") return { type: "video", attr };
+        break;
     }
   }
-  return { type: 'document', attr: null }
+  return { type: "document", attr: null };
 }
 
 /**
@@ -82,42 +76,42 @@ export function classifyDocument(doc: RawObject): {
  * that expired, a link preview still pending)
  */
 export function rawMediaType(media: unknown): string | null {
-  const m = asObject(media)
-  if (!m) return null
+  const m = asObject(media);
+  if (!m) return null;
 
   switch (m._) {
-    case 'messageMediaPhoto':
-      return asObject(m.photo)?._ === 'photo' ? 'photo' : null
-    case 'messageMediaDice':
-      return 'dice'
-    case 'messageMediaContact':
-      return 'contact'
-    case 'messageMediaDocument': {
-      const doc = asObject(m.document)
-      return doc?._ === 'document' ? classifyDocument(doc).type : null
+    case "messageMediaPhoto":
+      return asObject(m.photo)?._ === "photo" ? "photo" : null;
+    case "messageMediaDice":
+      return "dice";
+    case "messageMediaContact":
+      return "contact";
+    case "messageMediaDocument": {
+      const doc = asObject(m.document);
+      return doc?._ === "document" ? classifyDocument(doc).type : null;
     }
-    case 'messageMediaGeo':
-      return asObject(m.geo)?._ === 'geoPoint' ? 'location' : null
-    case 'messageMediaGeoLive':
-      return asObject(m.geo)?._ === 'geoPoint' ? 'live_location' : null
-    case 'messageMediaGame':
-      return 'game'
-    case 'messageMediaWebPage':
-      return asObject(m.webpage)?._ === 'webPage' ? 'webpage' : null
-    case 'messageMediaVenue':
-      return 'venue'
-    case 'messageMediaPoll':
-      return 'poll'
-    case 'messageMediaInvoice':
-      return 'invoice'
-    case 'messageMediaStory':
-      return 'story'
-    case 'messageMediaPaidMedia':
-      return 'paid'
-    case 'messageMediaToDo':
-      return 'todo'
+    case "messageMediaGeo":
+      return asObject(m.geo)?._ === "geoPoint" ? "location" : null;
+    case "messageMediaGeoLive":
+      return asObject(m.geo)?._ === "geoPoint" ? "live_location" : null;
+    case "messageMediaGame":
+      return "game";
+    case "messageMediaWebPage":
+      return asObject(m.webpage)?._ === "webPage" ? "webpage" : null;
+    case "messageMediaVenue":
+      return "venue";
+    case "messageMediaPoll":
+      return "poll";
+    case "messageMediaInvoice":
+      return "invoice";
+    case "messageMediaStory":
+      return "story";
+    case "messageMediaPaidMedia":
+      return "paid";
+    case "messageMediaToDo":
+      return "todo";
     default:
-      return null
+      return null;
   }
 }
 
@@ -126,15 +120,15 @@ export function rawMediaType(media: unknown): string | null {
  * the same message stores them
  */
 export function resolveRawMessageType(message: unknown): {
-  messageType: string
-  hasMedia: boolean
+  messageType: string;
+  hasMedia: boolean;
 } {
-  const m = asObject(message)
-  if (m?._ === 'messageService') {
-    return { messageType: 'service', hasMedia: false }
+  const m = asObject(message);
+  if (m?._ === "messageService") {
+    return { messageType: "service", hasMedia: false };
   }
 
-  const type = rawMediaType(m?.media)
-  if (type === null) return { messageType: 'text', hasMedia: false }
-  return { messageType: messageTypeOfMediaType(type), hasMedia: true }
+  const type = rawMediaType(m?.media);
+  if (type === null) return { messageType: "text", hasMedia: false };
+  return { messageType: messageTypeOfMediaType(type), hasMedia: true };
 }

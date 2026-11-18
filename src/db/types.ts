@@ -13,11 +13,11 @@
  */
 export interface CacheStalenessConfig {
   /** TTL for peers (users, groups, channels) - default 7 days */
-  peers: number
+  peers: number;
   /** TTL for dialog list ordering - default 1 hour */
-  dialogs: number
+  dialogs: number;
   /** TTL for extended peer info (about, bio) - default 7 days */
-  fullInfo: number
+  fullInfo: number;
 }
 
 /**
@@ -26,17 +26,17 @@ export interface CacheStalenessConfig {
  */
 export interface CacheRetentionConfig {
   /** api_activity rows - default 7 days */
-  apiActivity: number
+  apiActivity: number;
   /** rate_limits windows; a running FLOOD_WAIT is always kept - default 1 hour */
-  rateLimits: number
+  rateLimits: number;
   /** Completed sync jobs - default 24 hours */
-  completedJobs: number
+  completedJobs: number;
   /**
    * Failed sync jobs - default 24 hours. A failed row keeps its job from
    * being queued again, so this is also the retry delay after the backoff
    * gives up.
    */
-  failedJobs: number
+  failedJobs: number;
 }
 
 /**
@@ -44,21 +44,21 @@ export interface CacheRetentionConfig {
  */
 export interface CacheConfig {
   /** Staleness thresholds for different data types */
-  staleness: CacheStalenessConfig
+  staleness: CacheStalenessConfig;
   /** Enable background refresh for stale data */
-  backgroundRefresh: boolean
+  backgroundRefresh: boolean;
   /** Hard limit before cache eviction in milliseconds */
-  maxCacheAge: number
+  maxCacheAge: number;
   /** How long the bookkeeping tables keep their rows */
-  retention: CacheRetentionConfig
+  retention: CacheRetentionConfig;
 }
 
 // Duration constants in milliseconds
-const SECOND = 1000
-const MINUTE = 60 * SECOND
-const HOUR = 60 * MINUTE
-const DAY = 24 * HOUR
-const WEEK = 7 * DAY
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+const WEEK = 7 * DAY;
 
 /** Default retention of the bookkeeping tables */
 export function getDefaultRetentionConfig(): CacheRetentionConfig {
@@ -67,7 +67,7 @@ export function getDefaultRetentionConfig(): CacheRetentionConfig {
     rateLimits: HOUR,
     completedJobs: DAY,
     failedJobs: DAY,
-  }
+  };
 }
 
 /**
@@ -83,37 +83,32 @@ export function getDefaultCacheConfig(): CacheConfig {
     backgroundRefresh: true,
     maxCacheAge: 30 * DAY, // 30 days
     retention: getDefaultRetentionConfig(),
-  }
+  };
 }
 
 /** Chat type enumeration */
-export type ChatType =
-  | 'private'
-  | 'group'
-  | 'supergroup'
-  | 'channel'
-  | 'community'
+export type ChatType = "private" | "group" | "supergroup" | "channel" | "community";
 
 /**
  * Duration units for human-readable staleness config
  */
-export type DurationUnit = 's' | 'm' | 'h' | 'd' | 'w'
+export type DurationUnit = "s" | "m" | "h" | "d" | "w";
 
 /**
  * Human-readable duration string (e.g., "7d", "1h")
  */
-export type DurationString = `${number}${DurationUnit}`
+export type DurationString = `${number}${DurationUnit}`;
 
 /**
  * Parse a human-readable duration string to milliseconds
  */
 export function parseDuration(duration: DurationString): number {
-  const match = duration.match(/^(\d+)(s|m|h|d|w)$/)
-  const value = match?.[1]
-  const unit = match?.[2] as DurationUnit | undefined
+  const match = duration.match(/^(\d+)(s|m|h|d|w)$/);
+  const value = match?.[1];
+  const unit = match?.[2] as DurationUnit | undefined;
 
   if (!value || !unit) {
-    throw new Error(`Invalid duration: ${duration}`)
+    throw new Error(`Invalid duration: ${duration}`);
   }
   const multipliers: Record<DurationUnit, number> = {
     s: SECOND,
@@ -121,15 +116,15 @@ export function parseDuration(duration: DurationString): number {
     h: HOUR,
     d: DAY,
     w: WEEK,
-  }
+  };
 
-  return Number.parseInt(value, 10) * multipliers[unit]
+  return Number.parseInt(value, 10) * multipliers[unit];
 }
 
 /**
  * Check if a cached entry is stale
  */
 export function isCacheStale(fetchedAt: number | null, ttlMs: number): boolean {
-  if (fetchedAt === null) return true
-  return Date.now() - fetchedAt > ttlMs
+  if (fetchedAt === null) return true;
+  return Date.now() - fetchedAt > ttlMs;
 }

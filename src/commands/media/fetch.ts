@@ -3,27 +3,24 @@
  * file reference, the chat object for the protection check, and the cached
  * row brought up to date
  */
-import type { Database } from 'bun:sqlite'
-import type { TelegramClient, tl } from '@mtcute/bun'
+import type { Database } from "bun:sqlite";
+import type { TelegramClient, tl } from "@mtcute/bun";
 
-import {
-  fetchMessagesByIdRaw,
-  parseRawMessage,
-} from '../../daemon/sync-worker-real-helpers'
-import { createMessagesCache } from '../../db/messages-cache'
-import { createUsersCache } from '../../db/users-cache'
-import { ErrorCodes } from '../../types'
-import { apiUserToCacheInput } from '../../utils/telegram-mappers'
-import { toPeerIdFromRawPeer } from '../../utils/telegram-peer-ids'
-import type { HistoryChat } from '../messages/history'
-import { MediaError } from './errors'
+import { fetchMessagesByIdRaw, parseRawMessage } from "../../daemon/sync-worker-real-helpers";
+import { createMessagesCache } from "../../db/messages-cache";
+import { createUsersCache } from "../../db/users-cache";
+import { ErrorCodes } from "../../types";
+import { apiUserToCacheInput } from "../../utils/telegram-mappers";
+import { toPeerIdFromRawPeer } from "../../utils/telegram-peer-ids";
+import type { HistoryChat } from "../messages/history";
+import { MediaError } from "./errors";
 
-export type FetchedRawMessage = tl.RawMessage | tl.RawMessageService
+export type FetchedRawMessage = tl.RawMessage | tl.RawMessageService;
 
 export interface FetchedMessage {
-  message: FetchedRawMessage
-  chats: tl.TypeChat[]
-  users: tl.TypeUser[]
+  message: FetchedRawMessage;
+  chats: tl.TypeChat[];
+  users: tl.TypeUser[];
 }
 
 function messageNotFound(chatId: number, messageId: number): MediaError {
@@ -31,7 +28,7 @@ function messageNotFound(chatId: number, messageId: number): MediaError {
     ErrorCodes.MESSAGE_NOT_FOUND,
     `Message ${messageId} not found in chat ${chatId}`,
     { chatId, messageId },
-  )
+  );
 }
 
 /**
@@ -41,25 +38,19 @@ function messageNotFound(chatId: number, messageId: number): MediaError {
  * so the message must also belong to the chat. MESSAGE_NOT_FOUND otherwise.
  */
 export async function fetchMessageById(
-  client: Pick<TelegramClient, 'call'>,
+  client: Pick<TelegramClient, "call">,
   chat: HistoryChat,
   messageId: number,
   signal?: AbortSignal,
 ): Promise<FetchedMessage> {
-  const page = await fetchMessagesByIdRaw(
-    client,
-    chat.inputPeer,
-    [messageId],
-    signal,
-  )
+  const page = await fetchMessagesByIdRaw(client, chat.inputPeer, [messageId], signal);
   const message = (page.messages as tl.TypeMessage[]).find(
-    (item): item is FetchedRawMessage =>
-      item._ !== 'messageEmpty' && item.id === messageId,
-  )
+    (item): item is FetchedRawMessage => item._ !== "messageEmpty" && item.id === messageId,
+  );
   if (!message || toPeerIdFromRawPeer(message.peerId) !== chat.chatId) {
-    throw messageNotFound(chat.chatId, messageId)
+    throw messageNotFound(chat.chatId, messageId);
   }
-  return { message, chats: page.chats, users: page.users }
+  return { message, chats: page.chats, users: page.users };
 }
 
 /**
@@ -74,21 +65,21 @@ export function cacheFetchedMessage(
   message: FetchedRawMessage,
   users: tl.TypeUser[],
 ): void {
-  const input = parseRawMessage(message, chatId)
-  if (!input) return
-  const usersCache = createUsersCache(cacheDb)
-  const messagesCache = createMessagesCache(cacheDb)
+  const input = parseRawMessage(message, chatId);
+  if (!input) return;
+  const usersCache = createUsersCache(cacheDb);
+  const messagesCache = createMessagesCache(cacheDb);
   // A group the account doesn't take part in keeps a message it lacks out
   // of the cache (src/db/group-participation.ts). The write reads before it
   // writes, so the transaction takes the write lock first.
   cacheDb
     .transaction(() => {
       for (const user of users) {
-        if (user._ === 'user' && !user.min) {
-          usersCache.upsert(apiUserToCacheInput(user))
+        if (user._ === "user" && !user.min) {
+          usersCache.upsert(apiUserToCacheInput(user));
         }
       }
-      messagesCache.upsert(input)
+      messagesCache.upsert(input);
     })
-    .immediate()
+    .immediate();
 }

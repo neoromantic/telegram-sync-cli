@@ -1,38 +1,34 @@
-import type { Database } from 'bun:sqlite'
-import { defineCommand, runCommand } from 'citty'
+import type { Database } from "bun:sqlite";
+import { defineCommand, runCommand } from "citty";
 
-import { openReadOnlyAccountCacheDb } from '../../db'
-import { getTableNames } from '../../db/schema-annotations'
-import { ErrorCodes } from '../../types'
-import { openAccountCache, reportCacheError } from '../../utils/account-cache'
-import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
-import { outputFormatArg } from '../../utils/args'
-import { stringify as stringifyCsv } from '../../utils/csv'
-import { error, success } from '../../utils/output'
-import {
-  applyQueryLimit,
-  hasSeveralStatements,
-  isReadOnlyQuery,
-} from './helpers'
-import { printSchemaCommand } from './print-schema'
+import { openReadOnlyAccountCacheDb } from "../../db";
+import { getTableNames } from "../../db/schema-annotations";
+import { ErrorCodes } from "../../types";
+import { openAccountCache, reportCacheError } from "../../utils/account-cache";
+import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
+import { outputFormatArg } from "../../utils/args";
+import { stringify as stringifyCsv } from "../../utils/csv";
+import { error, success } from "../../utils/output";
+import { applyQueryLimit, hasSeveralStatements, isReadOnlyQuery } from "./helpers";
+import { printSchemaCommand } from "./print-schema";
 
 type QueryArgs = {
-  command?: string
-  query?: string
-  output?: string
-  limit?: string
-  account?: string
-  _?: string[]
-}
+  command?: string;
+  query?: string;
+  output?: string;
+  limit?: string;
+  account?: string;
+  _?: string[];
+};
 
 function parseQueryArgs(args: QueryArgs) {
-  const positionalArgs = args._ ?? []
-  const query = (args.query ?? positionalArgs.join(' ')) || undefined
-  const output = args.output ?? 'json'
-  const limitStr = args.limit ?? '1000'
-  const limit = Number.parseInt(limitStr, 10)
+  const positionalArgs = args._ ?? [];
+  const query = (args.query ?? positionalArgs.join(" ")) || undefined;
+  const output = args.output ?? "json";
+  const limitStr = args.limit ?? "1000";
+  const limit = Number.parseInt(limitStr, 10);
 
-  return { query, output, limit, limitStr }
+  return { query, output, limit, limitStr };
 }
 
 function validateQueryArgs(
@@ -45,38 +41,32 @@ function validateQueryArgs(
     error(
       ErrorCodes.INVALID_ARGS,
       'No query provided. Usage: tg sql --query "<query>" or tg sql print-schema',
-    )
+    );
   }
 
-  if (output !== 'json' && output !== 'csv') {
-    error(
-      ErrorCodes.INVALID_ARGS,
-      `Invalid output: ${output}. Use 'json' or 'csv'.`,
-    )
+  if (output !== "json" && output !== "csv") {
+    error(ErrorCodes.INVALID_ARGS, `Invalid output: ${output}. Use 'json' or 'csv'.`);
   }
 
   if (Number.isNaN(limit) || limit < 0) {
-    error(
-      ErrorCodes.INVALID_ARGS,
-      `Invalid limit: ${limitStr}. Use a non-negative integer.`,
-    )
+    error(ErrorCodes.INVALID_ARGS, `Invalid limit: ${limitStr}. Use a non-negative integer.`);
   }
 
   if (hasSeveralStatements(query)) {
     error(
       ErrorCodes.SQL_OPERATION_BLOCKED,
-      'Only one statement per query: tg sql runs the first and would drop the rest.',
+      "Only one statement per query: tg sql runs the first and would drop the rest.",
       { query },
-      'Run each statement with its own tg sql',
-    )
+      "Run each statement with its own tg sql",
+    );
   }
 
   if (!isReadOnlyQuery(query)) {
     error(
       ErrorCodes.SQL_WRITE_NOT_ALLOWED,
-      'Write operations are not allowed. Only SELECT queries are permitted.',
+      "Write operations are not allowed. Only SELECT queries are permitted.",
       { query },
-    )
+    );
   }
 }
 
@@ -85,131 +75,127 @@ function formatSqlError(message: string, query: string): never {
   if (/readonly database|read-only/i.test(message)) {
     error(
       ErrorCodes.SQL_WRITE_NOT_ALLOWED,
-      'Write operations are not allowed: the cache is opened read-only.',
+      "Write operations are not allowed: the cache is opened read-only.",
       { query },
-    )
+    );
   }
 
-  if (message.includes('no such table')) {
-    const match = message.match(/no such table: (\w+)/)
-    const tableName = match?.[1] ?? 'unknown'
-    const available = getTableNames().join(', ')
+  if (message.includes("no such table")) {
+    const match = message.match(/no such table: (\w+)/);
+    const tableName = match?.[1] ?? "unknown";
+    const available = getTableNames().join(", ");
     error(
       ErrorCodes.SQL_TABLE_NOT_FOUND,
       `Table '${tableName}' not found. Available tables: ${available}`,
       { query },
-    )
+    );
   }
 
-  if (message.includes('syntax error') || message.includes('near "')) {
-    error(ErrorCodes.SQL_SYNTAX_ERROR, message, { query })
+  if (message.includes("syntax error") || message.includes('near "')) {
+    error(ErrorCodes.SQL_SYNTAX_ERROR, message, { query });
   }
 
-  error(ErrorCodes.GENERAL_ERROR, `Query failed: ${message}`, { query })
+  error(ErrorCodes.GENERAL_ERROR, `Query failed: ${message}`, { query });
 }
 
 export const sqlQueryCommand = defineCommand({
   meta: {
-    name: 'sql',
+    name: "sql",
     description:
       "Execute read-only SQL queries on an account's cache database (--account, else the active account)",
   },
   args: {
     format: outputFormatArg,
     command: {
-      type: 'positional',
-      description: 'Optional subcommand (print-schema)',
+      type: "positional",
+      description: "Optional subcommand (print-schema)",
       required: false,
     },
     query: {
-      type: 'string',
-      description: 'SQL query to execute (required unless using a subcommand)',
+      type: "string",
+      description: "SQL query to execute (required unless using a subcommand)",
     },
     // A string, not an enum: print-schema takes its own formats, and citty
     // would reject them here before the subcommand runs
     output: {
-      type: 'string',
-      alias: 'o',
-      description:
-        'Output format: json or csv (print-schema: json, text or sql)',
-      default: 'json',
+      type: "string",
+      alias: "o",
+      description: "Output format: json or csv (print-schema: json, text or sql)",
+      default: "json",
     },
     limit: {
-      type: 'string',
-      alias: 'l',
-      description: 'Maximum rows to return (default: 1000, 0 = unlimited)',
-      default: '1000',
+      type: "string",
+      alias: "l",
+      description: "Maximum rows to return (default: 1000, 0 = unlimited)",
+      default: "1000",
     },
     account: {
-      type: 'string',
+      type: "string",
       description: `${ACCOUNT_SELECTOR_DESCRIPTION}; the cache to query`,
     },
   },
   async run({ args, rawArgs }) {
-    const sqlArgs = args as QueryArgs
-    const positionalArgs = sqlArgs._ ?? []
-    const command =
-      typeof sqlArgs.command === 'string' ? sqlArgs.command : positionalArgs[0]
+    const sqlArgs = args as QueryArgs;
+    const positionalArgs = sqlArgs._ ?? [];
+    const command = typeof sqlArgs.command === "string" ? sqlArgs.command : positionalArgs[0];
 
-    if (command === 'print-schema') {
+    if (command === "print-schema") {
       if (sqlArgs.query) {
         error(
           ErrorCodes.INVALID_ARGS,
-          'print-schema does not accept --query. Use tg sql print-schema [--table=...]',
-        )
+          "print-schema does not accept --query. Use tg sql print-schema [--table=...]",
+        );
       }
 
       // Flags before the subcommand count too (tg sql -o sql print-schema)
-      const idx = rawArgs?.indexOf('print-schema') ?? -1
+      const idx = rawArgs?.indexOf("print-schema") ?? -1;
       const remainingArgs =
-        idx >= 0
-          ? rawArgs.filter((_, i) => i !== idx)
-          : (rawArgs?.slice(1) ?? [])
-      await runCommand(printSchemaCommand, { rawArgs: remainingArgs })
-      return
+        idx >= 0 ? rawArgs.filter((_, i) => i !== idx) : (rawArgs?.slice(1) ?? []);
+      await runCommand(printSchemaCommand, { rawArgs: remainingArgs });
+      return;
     }
 
     if (sqlArgs.query && positionalArgs.length > 0) {
       error(
         ErrorCodes.INVALID_ARGS,
-        'Unexpected extra arguments. Wrap SQL in quotes or pass only --query.',
-      )
+        "Unexpected extra arguments. Wrap SQL in quotes or pass only --query.",
+      );
     }
 
-    const { query, output, limit, limitStr } = parseQueryArgs(sqlArgs)
-    validateQueryArgs(query, output, limit, limitStr)
+    const { query, output, limit, limitStr } = parseQueryArgs(sqlArgs);
+    validateQueryArgs(query, output, limit, limitStr);
 
     // Each account has its own cache; ATTACH stays blocked, so a query never
     // reads two accounts. openAccountCache creates and migrates the cache;
     // the query then runs on a read-only connection, since the keyword check
     // lets PRAGMA writes (user_version, journal_mode) through
-    const { account } = openAccountCache(sqlArgs.account)
-    let db: Database
+    const { account } = openAccountCache(sqlArgs.account);
+    let db: Database;
     try {
-      db = openReadOnlyAccountCacheDb(account.id)
+      db = openReadOnlyAccountCacheDb(account.id);
     } catch (err) {
-      reportCacheError(err, account.id)
+      reportCacheError(err, account.id);
     }
 
     try {
-      const finalQuery = applyQueryLimit(query!, limit)
-      const rows = db.query(finalQuery).all() as Record<string, unknown>[]
-      const columns = rows.length > 0 ? Object.keys(rows[0]!) : []
+      const finalQuery = applyQueryLimit(query!, limit);
+      const rows = db.query(finalQuery).all() as Record<string, unknown>[];
+      const columns = rows.length > 0 ? Object.keys(rows[0]!) : [];
 
-      if (output === 'csv') {
-        const csv = stringifyCsv(rows, columns)
-        console.log(csv)
-        return
+      if (output === "csv") {
+        const csv = stringifyCsv(rows, columns);
+        console.log(csv);
+        return;
       }
 
       success({
         columns,
         rows,
         rowCount: rows.length,
-      })
+      });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      formatSqlError(message, query!)
+      const message = err instanceof Error ? err.message : String(err);
+      formatSqlError(message, query!);
     }
   },
-})
+});

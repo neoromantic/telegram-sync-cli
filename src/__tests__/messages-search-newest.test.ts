@@ -4,85 +4,81 @@
  * same order as sorting every match by date, then rowid. The cache is too
  * small to walk at the default threshold, so most checks pass a lower one.
  */
-import { beforeAll, describe, expect, it } from 'bun:test'
+import { beforeAll, describe, expect, it } from "bun:test";
 import {
   createMessagesSearch,
   type MessageSearchOptions,
   type NewestFirstWay,
   searchNewestFirst,
   toFts5Query,
-} from '../db/messages-search'
-import {
-  buildChatSearchExpr,
-  buildSenderSearchExpr,
-} from '../db/search-reindex'
-import { createAccountCacheDb } from './helpers/cache-db'
+} from "../db/messages-search";
+import { buildChatSearchExpr, buildSenderSearchExpr } from "../db/search-reindex";
+import { createAccountCacheDb } from "./helpers/cache-db";
 
 /** A seeded PRNG, so a failure repeats */
 function mulberry32(seed: number): () => number {
-  let a = seed
+  let a = seed;
   return () => {
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-const MESSAGES = 12_000
+const MESSAGES = 12_000;
 // The newest messages, all sent in one second: more than a window holds
-const SAME_SECOND = 3_000
-const BASE_DATE = 1_700_000_000
+const SAME_SECOND = 3_000;
+const BASE_DATE = 1_700_000_000;
 /** The walk's clock stands still, so no walk runs out of time */
-const FROZEN = { now: () => 0 }
-const WALK = { ...FROZEN, walkThreshold: 10 }
-const CHATS = [-1001000000001, -1001000000002, -200, 300, 301, 302]
+const FROZEN = { now: () => 0 };
+const WALK = { ...FROZEN, walkThreshold: 10 };
+const CHATS = [-1001000000001, -1001000000002, -200, 300, 301, 302];
 // Most messages in the first chats; the last one has a few dozen
-const CHAT_WEIGHTS = [0.45, 0.25, 0.15, 0.1, 0.045, 0.005]
-const SENDERS = Array.from({ length: 20 }, (_, i) => 1000 + i)
+const CHAT_WEIGHTS = [0.45, 0.25, 0.15, 0.1, 0.045, 0.005];
+const SENDERS = Array.from({ length: 20 }, (_, i) => 1000 + i);
 
-const random = mulberry32(118)
-const pick = <T>(items: readonly T[]): T =>
-  items[Math.floor(random() * items.length)] as T
+const random = mulberry32(118);
+const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
 
 function pickChat(): number {
-  let r = random()
+  let r = random();
   for (const [i, weight] of CHAT_WEIGHTS.entries()) {
-    r -= weight
-    if (r < 0) return CHATS[i] as number
+    r -= weight;
+    if (r < 0) return CHATS[i] as number;
   }
-  return CHATS[0] as number
+  return CHATS[0] as number;
 }
 
 function messageText(): string {
-  const words = ['filler', 'lorem', 'ipsum', 'dolor']
-  const text = Array.from({ length: 3 }, () => pick(words))
-  if (random() < 0.6) text.push('common')
-  if (random() < 0.1) text.push('often')
-  if (random() < 0.002) text.push('rare')
-  return text.join(' ')
+  const words = ["filler", "lorem", "ipsum", "dolor"];
+  const text = Array.from({ length: 3 }, () => pick(words));
+  if (random() < 0.6) text.push("common");
+  if (random() < 0.1) text.push("often");
+  if (random() < 0.002) text.push("rare");
+  return text.join(" ");
 }
 
 /** Like messageText, with a word only the oldest messages have */
 function oldMessageText(page: number): string {
-  return page >= 105 ? `${messageText()} ancient` : messageText()
+  return page >= 105 ? `${messageText()} ancient` : messageText();
 }
 
-describe('search newest first (#118)', () => {
-  const db = createAccountCacheDb()
+describe("search newest first (#118)", () => {
+  const db = createAccountCacheDb();
 
   beforeAll(() => {
     for (const [i, chatId] of CHATS.entries()) {
       db.query(
         `INSERT INTO chats_cache (chat_id, type, title, username, fetched_at, raw_json)
          VALUES (?, 'supergroup', ?, ?, 0, '{}')`,
-      ).run(String(chatId), `Chat ${i}`, `chat${i}`)
+      ).run(String(chatId), `Chat ${i}`, `chat${i}`);
     }
     for (const userId of SENDERS) {
       db.query(
         `INSERT INTO users_cache (user_id, username, first_name, fetched_at, raw_json)
          VALUES (?, ?, 'Test', 0, '{}')`,
-      ).run(String(userId), `user${userId}`)
+      ).run(String(userId), `user${userId}`);
     }
 
     // Like history sync: pages newest first, so rowids don't follow dates.
@@ -91,15 +87,14 @@ describe('search newest first (#118)', () => {
       `INSERT INTO messages_cache
          (chat_id, message_id, from_id, text, is_deleted, date, fetched_at, raw_json)
        VALUES (?, ?, ?, ?, ?, ?, 0, '{}')`,
-    )
+    );
     db.transaction(() => {
       for (let page = 0; page < MESSAGES / 100; page++) {
-        const top = BASE_DATE + 3000 - page * 25
+        const top = BASE_DATE + 3000 - page * 25;
         for (let i = 0; i < 100; i++) {
-          const id = page * 100 + i + 1
+          const id = page * 100 + i + 1;
           // The rarest sender posts about one message in 2,000
-          const sender =
-            random() < 0.0005 ? SENDERS[19] : pick(SENDERS.slice(0, 19))
+          const sender = random() < 0.0005 ? SENDERS[19] : pick(SENDERS.slice(0, 19));
           insert.run(
             pickChat(),
             id,
@@ -107,7 +102,7 @@ describe('search newest first (#118)', () => {
             oldMessageText(page),
             random() < 0.03 ? 1 : 0,
             top - Math.floor(random() * 400),
-          )
+          );
         }
       }
       for (let i = 0; i < SAME_SECOND; i++) {
@@ -118,40 +113,35 @@ describe('search newest first (#118)', () => {
           messageText(),
           random() < 0.03 ? 1 : 0,
           BASE_DATE + 5000,
-        )
+        );
       }
-    })()
-  })
+    })();
+  });
 
   /** Every match sorted by date, then rowid: the order a page must keep */
-  function sortedMatches(
-    query: string,
-    options: MessageSearchOptions,
-  ): string[] {
-    const conditions = ['message_search MATCH ?']
-    const params: Array<string | number> = [
-      toFts5Query(query, { phrase: options.phrase }),
-    ]
-    if (!options.includeDeleted) conditions.push('m.is_deleted = 0')
+  function sortedMatches(query: string, options: MessageSearchOptions): string[] {
+    const conditions = ["message_search MATCH ?"];
+    const params: Array<string | number> = [toFts5Query(query, { phrase: options.phrase })];
+    if (!options.includeDeleted) conditions.push("m.is_deleted = 0");
     if (options.chatId !== undefined) {
-      conditions.push('m.chat_id = ?')
-      params.push(options.chatId)
+      conditions.push("m.chat_id = ?");
+      params.push(options.chatId);
     }
     if (options.chatUsername) {
-      conditions.push('c.username = ?')
-      params.push(options.chatUsername)
+      conditions.push("c.username = ?");
+      params.push(options.chatUsername);
     }
     if (options.senderId !== undefined) {
-      conditions.push('m.from_id = ?')
-      params.push(options.senderId)
+      conditions.push("m.from_id = ?");
+      params.push(options.senderId);
     }
     if (options.since !== undefined) {
-      conditions.push('m.date >= ?')
-      params.push(options.since)
+      conditions.push("m.date >= ?");
+      params.push(options.since);
     }
     if (options.until !== undefined) {
-      conditions.push('m.date < ?')
-      params.push(options.until)
+      conditions.push("m.date < ?");
+      params.push(options.until);
     }
     const rows = db
       .query(
@@ -159,178 +149,163 @@ describe('search newest first (#118)', () => {
          FROM message_search
          JOIN messages_cache m ON m.rowid = message_search.rowid
          LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT)
-         WHERE ${conditions.join(' AND ')}
+         WHERE ${conditions.join(" AND ")}
          ORDER BY m.date DESC, m.rowid`,
       )
-      .all(...params) as Array<{ chat_id: number; message_id: number }>
-    return rows.map((row) => `${row.chat_id}:${row.message_id}`)
+      .all(...params) as Array<{ chat_id: number; message_id: number }>;
+    return rows.map((row) => `${row.chat_id}:${row.message_id}`);
   }
 
   const keys = (rows: Array<{ chat_id: number; message_id: number }>) =>
-    rows.map((row) => `${row.chat_id}:${row.message_id}`)
+    rows.map((row) => `${row.chat_id}:${row.message_id}`);
 
   function randomOptions(): MessageSearchOptions {
     const options: MessageSearchOptions = {
       limit: pick([1, 20, 50, 50, 100]),
       offset: pick([0, 0, 0, 7, 50, 200, 1000]),
-    }
-    const filter = random()
-    if (filter < 0.2) options.chatId = pick(CHATS)
-    else if (filter < 0.25) options.chatUsername = pick(['chat0', 'chat5'])
-    else if (filter < 0.35) options.senderId = pick(SENDERS)
-    if (random() < 0.25) options.since = BASE_DATE + Math.floor(random() * 3000)
-    if (random() < 0.25) options.until = BASE_DATE + Math.floor(random() * 3000)
-    if (random() < 0.15) options.includeDeleted = true
-    return options
+    };
+    const filter = random();
+    if (filter < 0.2) options.chatId = pick(CHATS);
+    else if (filter < 0.25) options.chatUsername = pick(["chat0", "chat5"]);
+    else if (filter < 0.35) options.senderId = pick(SENDERS);
+    if (random() < 0.25) options.since = BASE_DATE + Math.floor(random() * 3000);
+    if (random() < 0.25) options.until = BASE_DATE + Math.floor(random() * 3000);
+    if (random() < 0.15) options.includeDeleted = true;
+    return options;
   }
 
   /** Random queries and filters: each way gives the page of sortedMatches */
   function checkRandomQueries(runs: number): Record<NewestFirstWay, number> {
-    const search = createMessagesSearch(db)
-    const ways = { messages: 0, sort: 0 }
+    const search = createMessagesSearch(db);
+    const ways = { messages: 0, sort: 0 };
     for (let run = 0; run < runs; run++) {
       const query = pick([
-        'common',
-        'common',
-        'often',
-        'rare',
-        'common often',
-        'common OR rare',
-        'comm*',
-      ])
-      const options = randomOptions()
-      const all = sortedMatches(query, options)
-      const offset = options.offset ?? 0
-      const expected = all.slice(offset, offset + (options.limit ?? 50))
-      const context = JSON.stringify({ query, options })
+        "common",
+        "common",
+        "often",
+        "rare",
+        "common often",
+        "common OR rare",
+        "comm*",
+      ]);
+      const options = randomOptions();
+      const all = sortedMatches(query, options);
+      const offset = options.offset ?? 0;
+      const expected = all.slice(offset, offset + (options.limit ?? 50));
+      const context = JSON.stringify({ query, options });
 
       expect({ context, rows: keys(search.search(query, options)) }).toEqual({
         context,
         rows: expected,
-      })
-      const walked = searchNewestFirst(db, query, options, WALK)
+      });
+      const walked = searchNewestFirst(db, query, options, WALK);
       expect({ context, rows: keys(walked.rows) }).toEqual({
         context,
         rows: expected,
-      })
+      });
       expect({ context, n: search.count(query, options) }).toEqual({
         context,
         n: all.length,
-      })
+      });
 
-      ways[walked.way]++
+      ways[walked.way]++;
     }
-    return ways
+    return ways;
   }
 
-  it('returns the same page as sorting every match, for random queries and filters', () => {
-    const ways = checkRandomQueries(200)
+  it("returns the same page as sorting every match, for random queries and filters", () => {
+    const ways = checkRandomQueries(200);
     // Both ways ran
-    expect(ways.messages).toBeGreaterThan(30)
-    expect(ways.sort).toBeGreaterThan(30)
-  }, 60_000)
+    expect(ways.messages).toBeGreaterThan(30);
+    expect(ways.sort).toBeGreaterThan(30);
+  }, 60_000);
 
-  it('goes through the messages for a common word and sorts the matches of a rare one', () => {
+  it("goes through the messages for a common word and sorts the matches of a rare one", () => {
     // At the default threshold, a word in 60% of 15,000 messages, not 10%
-    expect(searchNewestFirst(db, 'common', {}, FROZEN).way).toBe('messages')
-    expect(searchNewestFirst(db, 'often', {}, FROZEN).way).toBe('sort')
-    expect(
-      searchNewestFirst(db, 'common', { chatId: CHATS[0] }, WALK).way,
-    ).toBe('messages')
-    expect(searchNewestFirst(db, 'rare', {}, WALK).way).toBe('sort')
-    expect(searchNewestFirst(db, 'nothing', {}, WALK).rows).toEqual([])
-    expect(searchNewestFirst(db, 'comm*', {}, WALK).way).toBe('sort')
-  })
+    expect(searchNewestFirst(db, "common", {}, FROZEN).way).toBe("messages");
+    expect(searchNewestFirst(db, "often", {}, FROZEN).way).toBe("sort");
+    expect(searchNewestFirst(db, "common", { chatId: CHATS[0] }, WALK).way).toBe("messages");
+    expect(searchNewestFirst(db, "rare", {}, WALK).way).toBe("sort");
+    expect(searchNewestFirst(db, "nothing", {}, WALK).rows).toEqual([]);
+    expect(searchNewestFirst(db, "comm*", {}, WALK).way).toBe("sort");
+  });
 
-  it('finds the page inside a second with more messages than the window', () => {
+  it("finds the page inside a second with more messages than the window", () => {
     for (const options of [
       {},
       { offset: 30, limit: 20 },
       { chatId: CHATS[1] },
       { includeDeleted: true },
     ]) {
-      const { rows, way } = searchNewestFirst(db, 'common', options, WALK)
-      expect(way).toBe('messages')
-      expect(rows.every((row) => row.date === BASE_DATE + 5000)).toBe(true)
-      const offset = options.offset ?? 0
+      const { rows, way } = searchNewestFirst(db, "common", options, WALK);
+      expect(way).toBe("messages");
+      expect(rows.every((row) => row.date === BASE_DATE + 5000)).toBe(true);
+      const offset = options.offset ?? 0;
       expect(keys(rows)).toEqual(
-        sortedMatches('common', options).slice(
-          offset,
-          offset + (options.limit ?? 50),
-        ),
-      )
+        sortedMatches("common", options).slice(offset, offset + (options.limit ?? 50)),
+      );
     }
-  })
+  });
 
-  it('falls back to sorting when the window has too few matches', () => {
+  it("falls back to sorting when the window has too few matches", () => {
     // The rarest sender has a handful of messages, most of them older than
     // the window of the newest messages
-    const options = { senderId: SENDERS[19] }
-    const { rows, way } = searchNewestFirst(db, 'common', options, WALK)
-    expect(way).toBe('sort')
-    expect(keys(rows)).toEqual(sortedMatches('common', options).slice(0, 50))
+    const options = { senderId: SENDERS[19] };
+    const { rows, way } = searchNewestFirst(db, "common", options, WALK);
+    expect(way).toBe("sort");
+    expect(keys(rows)).toEqual(sortedMatches("common", options).slice(0, 50));
 
     // Every match older than the newest second, which fills the window
-    const old = searchNewestFirst(
-      db,
-      'ancient',
-      {},
-      { ...FROZEN, walkThreshold: 1 },
-    )
-    expect(old.way).toBe('sort')
-    expect(keys(old.rows)).toEqual(sortedMatches('ancient', {}).slice(0, 50))
-  })
+    const old = searchNewestFirst(db, "ancient", {}, { ...FROZEN, walkThreshold: 1 });
+    expect(old.way).toBe("sort");
+    expect(keys(old.rows)).toEqual(sortedMatches("ancient", {}).slice(0, 50));
+  });
 
-  it('has pages with ties in date, so the order above covers them', () => {
-    const page = createMessagesSearch(db).search('common', { limit: 500 })
-    const ties = page.filter(
-      (row, i) => i > 0 && row.date === page[i - 1]?.date,
-    )
-    expect(ties.length).toBeGreaterThan(50)
-  })
+  it("has pages with ties in date, so the order above covers them", () => {
+    const page = createMessagesSearch(db).search("common", { limit: 500 });
+    const ties = page.filter((row, i) => i > 0 && row.date === page[i - 1]?.date);
+    expect(ties.length).toBeGreaterThan(50);
+  });
 
-  it('sorts once the walk has taken its time budget', () => {
+  it("sorts once the walk has taken its time budget", () => {
     // Each chunk takes a second on this clock
-    let clock = 0
-    const slow = { ...WALK, now: () => (clock += 1_000) }
-    for (const query of ['common', 'often']) {
-      const { rows, way } = searchNewestFirst(db, query, {}, slow)
-      expect(way).toBe('sort')
-      expect(keys(rows)).toEqual(sortedMatches(query, {}).slice(0, 50))
+    let clock = 0;
+    const slow = { ...WALK, now: () => (clock += 1_000) };
+    for (const query of ["common", "often"]) {
+      const { rows, way } = searchNewestFirst(db, query, {}, slow);
+      expect(way).toBe("sort");
+      expect(keys(rows)).toEqual(sortedMatches(query, {}).slice(0, 50));
     }
-  })
+  });
 
-  it('returns the same pages from an index that keeps the old entries of every message', () => {
+  it("returns the same pages from an index that keeps the old entries of every message", () => {
     // A re-index of every message with no merge after it, as #149 found
     const bytes = () =>
-      (
-        db
-          .query('SELECT SUM(LENGTH(block)) AS n FROM message_search_data')
-          .get() as { n: number }
-      ).n
-    const before = bytes()
-    const rowids = (
-      db.query('SELECT rowid FROM messages_cache').all() as { rowid: number }[]
-    ).map((row) => row.rowid)
-    const remove = db.query('DELETE FROM message_search WHERE rowid = ?')
+      (db.query("SELECT SUM(LENGTH(block)) AS n FROM message_search_data").get() as { n: number })
+        .n;
+    const before = bytes();
+    const rowids = (db.query("SELECT rowid FROM messages_cache").all() as { rowid: number }[]).map(
+      (row) => row.rowid,
+    );
+    const remove = db.query("DELETE FROM message_search WHERE rowid = ?");
     const insert = db.query(`
       INSERT INTO message_search(rowid, text, sender, chat, files)
-      SELECT rowid, COALESCE(text, ''), ${buildSenderSearchExpr('m')},
-        ${buildChatSearchExpr('m')}, ''
+      SELECT rowid, COALESCE(text, ''), ${buildSenderSearchExpr("m")},
+        ${buildChatSearchExpr("m")}, ''
       FROM messages_cache m WHERE rowid = ?
-    `)
+    `);
     for (let i = 0; i < rowids.length; i += 500) {
       db.transaction(() => {
         for (const rowid of rowids.slice(i, i + 500)) {
-          remove.run(rowid)
-          insert.run(rowid)
+          remove.run(rowid);
+          insert.run(rowid);
         }
-      })()
+      })();
     }
-    expect(bytes()).toBeGreaterThan(1.5 * before)
+    expect(bytes()).toBeGreaterThan(1.5 * before);
 
-    const ways = checkRandomQueries(100)
-    expect(ways.messages).toBeGreaterThan(15)
-    expect(ways.sort).toBeGreaterThan(15)
-  }, 20_000)
-})
+    const ways = checkRandomQueries(100);
+    expect(ways.messages).toBeGreaterThan(15);
+    expect(ways.sort).toBeGreaterThan(15);
+  }, 20_000);
+});

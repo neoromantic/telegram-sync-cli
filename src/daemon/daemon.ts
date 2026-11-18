@@ -3,7 +3,7 @@
  * Manages Telegram connections, real-time updates, and background sync
  */
 
-import { join } from 'node:path'
+import { join } from "node:path";
 import {
   type AccountsDbInterface,
   closeAccountCacheDbs,
@@ -12,31 +12,27 @@ import {
   getAccountCacheDb,
   getDataDir,
   isCacheUnavailableError,
-} from '../db'
-import { createDaemonStatusService } from '../db/daemon-status'
-import { getDefaultRetentionConfig } from '../db/types'
-import { requireDefaultConfig } from '../services/telegram'
-import { exitAfterFlush, reportErrorType } from '../telemetry'
-import { VERSION } from '../version'
-import {
-  connectAccount,
-  disconnectAllAccounts,
-  setupSignalHandlers,
-} from './daemon-accounts'
-import { bootstrapDialogs } from './daemon-bootstrap'
-import { loadContactsTtl } from './daemon-contacts'
+} from "../db";
+import { createDaemonStatusService } from "../db/daemon-status";
+import { getDefaultRetentionConfig } from "../db/types";
+import { requireDefaultConfig } from "../services/telegram";
+import { exitAfterFlush, reportErrorType } from "../telemetry";
+import { VERSION } from "../version";
+import { connectAccount, disconnectAllAccounts, setupSignalHandlers } from "./daemon-accounts";
+import { bootstrapDialogs } from "./daemon-bootstrap";
+import { loadContactsTtl } from "./daemon-contacts";
 import {
   createDaemonRuntime,
   type DaemonContext,
   requestShutdown,
   totalMessagesSynced,
-} from './daemon-context'
-import { createLogger } from './daemon-logger'
-import { mainLoop, updateDaemonStatus } from './daemon-loop'
-import { cleanupScheduler, initializeScheduler } from './daemon-scheduler'
-import { formatError } from './daemon-utils'
-import { createPidFile } from './pid-file'
-import { createSyncPacer, DEFAULT_SYNC_PACING } from './sync-pacing'
+} from "./daemon-context";
+import { createLogger } from "./daemon-logger";
+import { mainLoop, updateDaemonStatus } from "./daemon-loop";
+import { cleanupScheduler, initializeScheduler } from "./daemon-scheduler";
+import { formatError } from "./daemon-utils";
+import { createPidFile } from "./pid-file";
+import { createSyncPacer, DEFAULT_SYNC_PACING } from "./sync-pacing";
 import {
   type DaemonConfig,
   DaemonExitCode,
@@ -45,26 +41,26 @@ import {
   type DaemonStatus,
   DEFAULT_RECONNECT_CONFIG,
   DEFAULT_SHUTDOWN_TIMEOUT_MS,
-} from './types'
+} from "./types";
 
 /**
  * Daemon interface
  */
 export interface Daemon {
   /** Start the daemon */
-  start(): Promise<DaemonExitCode>
+  start(): Promise<DaemonExitCode>;
   /** Request graceful shutdown */
-  stop(): void
+  stop(): void;
   /** Get current status */
-  getStatus(): DaemonStatus
+  getStatus(): DaemonStatus;
   /** Check if daemon is running */
-  isRunning(): boolean
+  isRunning(): boolean;
 }
 
 /**
  * Calculate the delay for the next reconnection attempt using exponential backoff
  */
-export { calculateReconnectDelay } from './daemon-utils'
+export { calculateReconnectDelay } from "./daemon-utils";
 
 /** Exported for tests: the context createDaemon starts from */
 export function createContext(
@@ -72,20 +68,19 @@ export function createContext(
   accountsDb: AccountsDbInterface,
   logger: DaemonLogger,
 ): DaemonContext {
-  const dataDir = config.dataDir ?? getDataDir()
-  const pidPath = config.pidPath ?? join(dataDir, 'daemon.pid')
-  const verbosity = config.verbosity ?? 'normal'
-  const reconnectConfig = config.reconnectConfig ?? DEFAULT_RECONNECT_CONFIG
-  const shutdownTimeoutMs =
-    config.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
+  const dataDir = config.dataDir ?? getDataDir();
+  const pidPath = config.pidPath ?? join(dataDir, "daemon.pid");
+  const verbosity = config.verbosity ?? "normal";
+  const reconnectConfig = config.reconnectConfig ?? DEFAULT_RECONNECT_CONFIG;
+  const shutdownTimeoutMs = config.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
-  const pidFile = createPidFile(pidPath)
+  const pidFile = createPidFile(pidPath);
 
   const state: DaemonState = {
     running: false,
     accounts: new Map(),
     shutdownRequested: false,
-  }
+  };
 
   return {
     dataDir,
@@ -100,7 +95,7 @@ export function createContext(
     runtime: createDaemonRuntime(),
     retention: config.retention ?? getDefaultRetentionConfig(),
     pacing: config.pacing ?? DEFAULT_SYNC_PACING,
-  }
+  };
 }
 
 /**
@@ -111,21 +106,21 @@ export function createContext(
 async function initializeDatabase(ctx: DaemonContext): Promise<boolean> {
   try {
     ensureCacheLayout({
-      mode: 'strict',
+      mode: "strict",
       notice: (message) => ctx.logger.info(message),
-    })
+    });
   } catch (err) {
     ctx.logger.error(
       `Failed to move the shared cache: ${formatError(err)}. Stop older tg processes, then start the daemon again.`,
-    )
-    return false
+    );
+    return false;
   }
 
   for (const account of ctx.accountsDb.getAll()) {
     try {
-      const db = getAccountCacheDb(account.id)
-      const statusService = createDaemonStatusService(db)
-      statusService.setDaemonRunning(process.pid, VERSION)
+      const db = getAccountCacheDb(account.id);
+      const statusService = createDaemonStatusService(db);
+      statusService.setDaemonRunning(process.pid, VERSION);
       ctx.runtime.accounts.set(account.id, {
         accountId: account.id,
         db,
@@ -134,64 +129,55 @@ async function initializeDatabase(ctx: DaemonContext): Promise<boolean> {
         worker: null,
         pacer: createSyncPacer(ctx.pacing),
         messagesSynced: 0,
-      })
+      });
     } catch (err) {
       const why = isCacheUnavailableError(err)
         ? `${err.message} (${err.reason})`
-        : formatError(err)
-      ctx.logger.error(
-        `[Account ${account.id}] Failed to open its cache, not syncing it: ${why}`,
-      )
+        : formatError(err);
+      ctx.logger.error(`[Account ${account.id}] Failed to open its cache, not syncing it: ${why}`);
       ctx.state.accounts.set(account.id, {
         accountId: account.id,
         phone: account.phone,
         name: account.name ?? null,
-        status: 'error',
+        status: "error",
         lastError: err instanceof Error ? err.message : String(err),
-      })
+      });
     }
   }
 
-  return true
+  return true;
 }
 
 async function connectAccounts(ctx: DaemonContext): Promise<number> {
   // Only accounts whose cache opened
   const accounts = ctx.accountsDb
     .getAll()
-    .filter((account) => ctx.runtime.accounts.has(account.id))
-  ctx.logger.info(`Connecting ${accounts.length} account(s)...`)
+    .filter((account) => ctx.runtime.accounts.has(account.id));
+  ctx.logger.info(`Connecting ${accounts.length} account(s)...`);
 
   const connectionResults = await Promise.all(
-    accounts.map((account) =>
-      connectAccount(ctx, account.id, account.phone, account.name ?? null),
-    ),
-  )
+    accounts.map((account) => connectAccount(ctx, account.id, account.phone, account.name ?? null)),
+  );
 
-  return connectionResults.filter(Boolean).length
+  return connectionResults.filter(Boolean).length;
 }
 
-async function cleanupWithTimeout(
-  ctx: DaemonContext,
-  task: () => Promise<void>,
-): Promise<void> {
+async function cleanupWithTimeout(ctx: DaemonContext, task: () => Promise<void>): Promise<void> {
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
-      reject(new Error('Shutdown timeout exceeded'))
-    }, ctx.shutdownTimeoutMs)
-  })
+      reject(new Error("Shutdown timeout exceeded"));
+    }, ctx.shutdownTimeoutMs);
+  });
 
   try {
-    await Promise.race([task(), timeoutPromise])
+    await Promise.race([task(), timeoutPromise]);
   } catch (err) {
-    if (err instanceof Error && err.message === 'Shutdown timeout exceeded') {
-      ctx.logger.warn(
-        `Shutdown timeout (${ctx.shutdownTimeoutMs}ms) exceeded - forcing exit`,
-      )
-      ctx.pidFile.release()
-      await exitAfterFlush(1)
+    if (err instanceof Error && err.message === "Shutdown timeout exceeded") {
+      ctx.logger.warn(`Shutdown timeout (${ctx.shutdownTimeoutMs}ms) exceeded - forcing exit`);
+      ctx.pidFile.release();
+      await exitAfterFlush(1);
     }
-    throw err
+    throw err;
   }
 }
 
@@ -199,123 +185,123 @@ async function performCleanup(ctx: DaemonContext): Promise<void> {
   const cleanupWork = async () => {
     // Ends the requests the sync jobs wait on, also after a mainLoop that
     // threw, so the jobs end quickly
-    requestShutdown(ctx)
-    await cleanupScheduler(ctx)
-    await disconnectAllAccounts(ctx)
+    requestShutdown(ctx);
+    await cleanupScheduler(ctx);
+    await disconnectAllAccounts(ctx);
 
     for (const rt of ctx.runtime.accounts.values()) {
       try {
-        rt.statusService.setDaemonStopped()
+        rt.statusService.setDaemonStopped();
       } catch (err) {
         ctx.logger.warn(
           `[Account ${rt.accountId}] Failed to update daemon status on shutdown: ${formatError(err)}`,
-        )
+        );
       }
     }
-    closeAccountCacheDbs()
+    closeAccountCacheDbs();
 
-    ctx.pidFile.release()
-    ctx.state.running = false
-  }
+    ctx.pidFile.release();
+    ctx.state.running = false;
+  };
 
-  await cleanupWithTimeout(ctx, cleanupWork)
+  await cleanupWithTimeout(ctx, cleanupWork);
 }
 
 async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
-  ctx.logger.info(`Starting Telegram Sync CLI daemon ${VERSION}...`)
+  ctx.logger.info(`Starting Telegram Sync CLI daemon ${VERSION}...`);
 
-  let exitCode = DaemonExitCode.Success
+  let exitCode = DaemonExitCode.Success;
 
   if (ctx.pidFile.isRunning()) {
-    const pid = ctx.pidFile.read()
-    ctx.logger.error(`Daemon already running with PID ${pid}`)
-    exitCode = DaemonExitCode.AlreadyRunning
+    const pid = ctx.pidFile.read();
+    ctx.logger.error(`Daemon already running with PID ${pid}`);
+    exitCode = DaemonExitCode.AlreadyRunning;
   }
 
   if (exitCode === DaemonExitCode.Success) {
     try {
-      requireDefaultConfig()
+      requireDefaultConfig();
     } catch (err) {
-      ctx.logger.error(`Configuration error: ${formatError(err)}`)
-      reportErrorType(err)
-      exitCode = DaemonExitCode.Error
+      ctx.logger.error(`Configuration error: ${formatError(err)}`);
+      reportErrorType(err);
+      exitCode = DaemonExitCode.Error;
     }
   }
 
-  const accounts = ctx.accountsDb.getAll()
+  const accounts = ctx.accountsDb.getAll();
   if (exitCode === DaemonExitCode.Success && accounts.length === 0) {
-    ctx.logger.error('No accounts configured. Use "tg auth" to add an account.')
-    exitCode = DaemonExitCode.NoAccounts
+    ctx.logger.error('No accounts configured. Use "tg auth" to add an account.');
+    exitCode = DaemonExitCode.NoAccounts;
   }
 
   if (exitCode !== DaemonExitCode.Success) {
-    return exitCode
+    return exitCode;
   }
 
   try {
-    ctx.pidFile.acquire()
-    ctx.logger.debug(`PID file acquired: ${ctx.pidPath}`)
+    ctx.pidFile.acquire();
+    ctx.logger.debug(`PID file acquired: ${ctx.pidPath}`);
   } catch (err) {
-    ctx.logger.error(`Failed to acquire PID file: ${formatError(err)}`)
-    return DaemonExitCode.Error
+    ctx.logger.error(`Failed to acquire PID file: ${formatError(err)}`);
+    return DaemonExitCode.Error;
   }
 
-  setupSignalHandlers(ctx)
+  setupSignalHandlers(ctx);
 
-  const dbInitialized = await initializeDatabase(ctx)
+  const dbInitialized = await initializeDatabase(ctx);
   if (!dbInitialized) {
-    ctx.pidFile.release()
-    return DaemonExitCode.Error
+    ctx.pidFile.release();
+    return DaemonExitCode.Error;
   }
 
-  ctx.state.running = true
-  ctx.state.startedAt = Date.now()
+  ctx.state.running = true;
+  ctx.state.startedAt = Date.now();
 
   if (ctx.runtime.accounts.size === 0) {
-    ctx.logger.error('No account has a cache the daemon can open')
-    await performCleanup(ctx)
-    return DaemonExitCode.AllAccountsFailed
+    ctx.logger.error("No account has a cache the daemon can open");
+    await performCleanup(ctx);
+    return DaemonExitCode.AllAccountsFailed;
   }
 
-  const connectedCount = await connectAccounts(ctx)
-  ctx.logger.info(`${connectedCount}/${accounts.length} account(s) connected`)
+  const connectedCount = await connectAccounts(ctx);
+  ctx.logger.info(`${connectedCount}/${accounts.length} account(s) connected`);
 
   if (connectedCount === 0) {
-    ctx.logger.error('All accounts failed to connect')
-    await performCleanup(ctx)
-    return DaemonExitCode.AllAccountsFailed
+    ctx.logger.error("All accounts failed to connect");
+    await performCleanup(ctx);
+    return DaemonExitCode.AllAccountsFailed;
   }
 
   // The dialog pass can take minutes on a large account: show each
   // account's connection meanwhile. updateDaemonStatus logs its own errors.
-  await updateDaemonStatus(ctx)
+  await updateDaemonStatus(ctx);
 
   try {
-    await bootstrapDialogs(ctx)
+    await bootstrapDialogs(ctx);
   } catch (err) {
-    ctx.logger.warn(`Failed to bootstrap dialogs: ${formatError(err)}`)
+    ctx.logger.warn(`Failed to bootstrap dialogs: ${formatError(err)}`);
   }
 
   try {
-    await initializeScheduler(ctx)
+    await initializeScheduler(ctx);
   } catch (err) {
-    ctx.logger.error(`Failed to initialize scheduler: ${formatError(err)}`)
+    ctx.logger.error(`Failed to initialize scheduler: ${formatError(err)}`);
   }
-  await updateDaemonStatus(ctx)
+  await updateDaemonStatus(ctx);
 
-  await loadContactsTtl(ctx)
+  await loadContactsTtl(ctx);
 
   try {
-    await mainLoop(ctx)
+    await mainLoop(ctx);
   } catch (err) {
-    ctx.logger.error(`Main loop error: ${formatError(err)}`)
-    reportErrorType(err)
+    ctx.logger.error(`Main loop error: ${formatError(err)}`);
+    reportErrorType(err);
   }
 
-  await performCleanup(ctx)
+  await performCleanup(ctx);
 
-  ctx.logger.info('Daemon stopped')
-  return DaemonExitCode.Success
+  ctx.logger.info("Daemon stopped");
+  return DaemonExitCode.Success;
 }
 
 /**
@@ -325,21 +311,21 @@ export function createDaemon(
   config: Partial<DaemonConfig> = {},
   accountsDb: AccountsDbInterface = defaultAccountsDb,
 ): Daemon {
-  const verbosity = config.verbosity ?? 'normal'
-  const logger = createLogger(verbosity)
-  const ctx = createContext(config, accountsDb, logger)
+  const verbosity = config.verbosity ?? "normal";
+  const logger = createLogger(verbosity);
+  const ctx = createContext(config, accountsDb, logger);
 
   return {
     async start(): Promise<DaemonExitCode> {
-      return startDaemon(ctx)
+      return startDaemon(ctx);
     },
     stop(): void {
-      requestShutdown(ctx)
+      requestShutdown(ctx);
     },
     getStatus(): DaemonStatus {
       const connectedAccounts = Array.from(ctx.state.accounts.values()).filter(
-        (a) => a.status === 'connected',
-      ).length
+        (a) => a.status === "connected",
+      ).length;
 
       return {
         running: ctx.state.running,
@@ -356,10 +342,10 @@ export function createDaemon(
         })),
         messagesSynced: totalMessagesSynced(ctx.runtime),
         lastUpdate: ctx.state.running ? Date.now() : null,
-      }
+      };
     },
     isRunning(): boolean {
-      return ctx.state.running
+      return ctx.state.running;
     },
-  }
+  };
 }

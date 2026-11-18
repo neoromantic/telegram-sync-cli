@@ -1,15 +1,15 @@
-import { Database } from 'bun:sqlite'
-import type { CachedChatInput } from '../../db/chats-cache'
-import { initCacheSchema } from '../../db/schema'
-import { initSyncSchema } from '../../db/sync-schema'
-import type { ChatType } from '../../db/types'
+import { Database } from "bun:sqlite";
+import type { CachedChatInput } from "../../db/chats-cache";
+import { initCacheSchema } from "../../db/schema";
+import { initSyncSchema } from "../../db/sync-schema";
+import type { ChatType } from "../../db/types";
 
 /** An in-memory account cache with the cache and sync schemas */
 export function createAccountCacheDb(): Database {
-  const db = new Database(':memory:')
-  initCacheSchema(db)
-  initSyncSchema(db)
-  return db
+  const db = new Database(":memory:");
+  initCacheSchema(db);
+  initSyncSchema(db);
+  return db;
 }
 
 /** A chats_cache row fetched now, with no username, hash or flags */
@@ -30,7 +30,7 @@ export function chatRow(
     last_message_id: null,
     last_message_at: null,
     fetched_at: Date.now(),
-    raw_json: '{}',
+    raw_json: "{}",
     ...overrides,
-  }
+  };
 }

@@ -2,8 +2,8 @@
  * Chat sync state service
  * Manages per-chat synchronization state with dual cursors
  */
-import type { Database } from 'bun:sqlite'
-import type { GroupParticipation } from './group-participation'
+import type { Database } from "bun:sqlite";
+import type { GroupParticipation } from "./group-participation";
 import {
   ChatSyncStateRow,
   determineSyncPolicy,
@@ -13,23 +13,23 @@ import {
   type SyncMode,
   type SyncPolicyReason,
   SyncPriority,
-} from './sync-schema'
+} from "./sync-schema";
 
 /**
  * Input for creating/updating chat sync state
  */
 export interface ChatSyncStateInput {
-  chat_id: number
-  chat_type: SyncChatType
+  chat_id: number;
+  chat_type: SyncChatType;
   /** Omitted or null keeps the stored count */
-  member_count?: number | null
-  sync_priority: SyncPriority
-  sync_enabled: boolean
-  forward_cursor?: number | null
-  backward_cursor?: number | null
-  total_messages?: number | null
+  member_count?: number | null;
+  sync_priority: SyncPriority;
+  sync_enabled: boolean;
+  forward_cursor?: number | null;
+  backward_cursor?: number | null;
+  total_messages?: number | null;
   /** The policy's reason; omitted or null keeps the stored one */
-  sync_policy?: SyncPolicyReason | null
+  sync_policy?: SyncPolicyReason | null;
 }
 
 /**
@@ -37,13 +37,13 @@ export interface ChatSyncStateInput {
  */
 export interface FirstPageResult {
   /** Newest message ID on the page, 0 for an empty chat */
-  forward_cursor: number
+  forward_cursor: number;
   /** Oldest message ID on the page, 0 for an empty chat */
-  backward_cursor: number
+  backward_cursor: number;
   /** The page reached the start of the chat */
-  history_complete: boolean
+  history_complete: boolean;
   /** Messages on the page that weren't cached yet */
-  new_messages: number
+  new_messages: number;
 }
 
 /**
@@ -51,16 +51,16 @@ export interface FirstPageResult {
  */
 export interface CatchupPageResult {
   /** The newest message ID on the page, or the old cursor if it was empty */
-  forward_cursor: number
+  forward_cursor: number;
   /** Messages on the page that weren't cached yet */
-  new_messages: number
+  new_messages: number;
   /**
    * The page reached the newest message (it wasn't full): settle
    * top_message_id at the new cursor, unless it changed during the fetch
    */
-  caught_up: boolean
+  caught_up: boolean;
   /** top_message_id as read before the fetch */
-  top_before: number | null
+  top_before: number | null;
 }
 
 /**
@@ -71,19 +71,19 @@ export interface CatchupPageResult {
  */
 export type SyncReason =
   | SyncPolicyReason
-  | 'on_by_hand'
-  | 'off_by_hand'
-  | 'group_participation_required'
-  | 'group_participation_unknown'
+  | "on_by_hand"
+  | "off_by_hand"
+  | "group_participation_required"
+  | "group_participation_unknown";
 
 /** A chat's sync as `tg chats list` and `tg chats sync` show it */
 export interface ChatSyncView {
   /** The daemon syncs the chat: its mode allows it and it takes new messages */
-  syncEnabled: boolean
+  syncEnabled: boolean;
   /** Why it syncs or not; null for a chat without sync state that takes messages */
-  syncReason: SyncReason | null
+  syncReason: SyncReason | null;
   /** A group's newest own message known, in ms since the epoch; else null */
-  lastOwnMessageAt: number | null
+  lastOwnMessageAt: number | null;
 }
 
 export function chatSyncView(
@@ -91,41 +91,35 @@ export function chatSyncView(
   chatId: number,
   state: ChatSyncStateRow | null,
 ): ChatSyncView {
-  const group = participation.isGroup(chatId)
-  const last = group ? participation.lastOwnDate(chatId) : null
-  const lastOwnMessageAt = last === null ? null : last * 1000
-  const status = group ? participation.status(chatId) : 'active'
-  if (status !== 'active') {
+  const group = participation.isGroup(chatId);
+  const last = group ? participation.lastOwnDate(chatId) : null;
+  const lastOwnMessageAt = last === null ? null : last * 1000;
+  const status = group ? participation.status(chatId) : "active";
+  if (status !== "active") {
     return {
       syncEnabled: false,
       syncReason:
-        status === 'unknown'
-          ? 'group_participation_unknown'
-          : 'group_participation_required',
+        status === "unknown" ? "group_participation_unknown" : "group_participation_required",
       lastOwnMessageAt,
-    }
+    };
   }
   return {
     syncEnabled: state?.sync_enabled === 1,
     syncReason: state ? syncReason(state) : null,
     lastOwnMessageAt,
-  }
+  };
 }
 
 export function syncReason(
-  state: Pick<
-    ChatSyncStateRow,
-    'sync_mode' | 'sync_policy' | 'chat_type' | 'member_count'
-  >,
+  state: Pick<ChatSyncStateRow, "sync_mode" | "sync_policy" | "chat_type" | "member_count">,
 ): SyncReason {
-  if (state.sync_mode === 'on') return 'on_by_hand'
-  if (state.sync_mode === 'off') return 'off_by_hand'
+  if (state.sync_mode === "on") return "on_by_hand";
+  if (state.sync_mode === "off") return "off_by_hand";
   // Rows of older versions have no reason until the next dialog pass
   return (
     state.sync_policy ??
-    determineSyncPolicy(state.chat_type as SyncChatType, state.member_count)
-      .reason
-  )
+    determineSyncPolicy(state.chat_type as SyncChatType, state.member_count).reason
+  );
 }
 
 /**
@@ -133,54 +127,54 @@ export function syncReason(
  */
 export interface ChatSyncStateService {
   /** Get sync state for a chat */
-  get(chatId: number): ChatSyncStateRow | null
+  get(chatId: number): ChatSyncStateRow | null;
   /** Create or update sync state */
-  upsert(input: ChatSyncStateInput): void
+  upsert(input: ChatSyncStateInput): void;
   /** Move a chat's backward (history) cursor */
-  updateBackwardCursor(chatId: number, backwardCursor: number): void
+  updateBackwardCursor(chatId: number, backwardCursor: number): void;
   /** Mark history as complete */
-  markHistoryComplete(chatId: number): void
+  markHistoryComplete(chatId: number): void;
   /** Increment synced messages count */
-  incrementSyncedMessages(chatId: number, count: number): void
+  incrementSyncedMessages(chatId: number, count: number): void;
   /** Store the chat's message count on the server; the newest one wins */
-  setTotalMessages(chatId: number, total: number): void
+  setTotalMessages(chatId: number, total: number): void;
   /** Enabled chats without a forward cursor: they need their first page */
-  getInitialLoadDue(): ChatSyncStateRow[]
+  getInitialLoadDue(): ChatSyncStateRow[];
   /**
    * Store a chat's first page: both cursors, history_complete and the
    * counter. Does nothing if the chat already has a forward cursor.
    */
-  recordFirstPage(chatId: number, page: FirstPageResult): void
+  recordFirstPage(chatId: number, page: FirstPageResult): void;
   /**
    * Enabled chats whose forward cursor is behind: top_message_id is unknown
    * or above the cursor
    */
-  getCatchupDue(): ChatSyncStateRow[]
+  getCatchupDue(): ChatSyncStateRow[];
   /** Enabled chats with a forward cursor */
-  getEnabledWithCursor(): ChatSyncStateRow[]
+  getEnabledWithCursor(): ChatSyncStateRow[];
   /**
    * Enabled chats that had their first page and have history left, except
    * those the policy gives the newest page only (bots, deleted accounts)
    */
-  getHistoryDue(): ChatSyncStateRow[]
+  getHistoryDue(): ChatSyncStateRow[];
   /** Store one catch-up page: the cursor, the counter and maybe the top */
-  recordCatchupPage(chatId: number, page: CatchupPageResult): void
+  recordCatchupPage(chatId: number, page: CatchupPageResult): void;
   /** Raise top_message_id to the given ID; never lowers it */
-  raiseTopMessageId(chatId: number, topMessageId: number): void
+  raiseTopMessageId(chatId: number, topMessageId: number): void;
   /** Mark chats as caught up: top_message_id = forward_cursor */
-  markCaughtUp(chatIds: Iterable<number>): void
+  markCaughtUp(chatIds: Iterable<number>): void;
   /** Mark chats' newest message as unknown, so each gets one catch-up */
-  markTopUnknown(chatIds: Iterable<number>): void
+  markTopUnknown(chatIds: Iterable<number>): void;
   /** Delete sync state for a chat */
-  delete(chatId: number): void
+  delete(chatId: number): void;
   /** Update last sync timestamp */
-  updateLastSync(chatId: number, type: 'forward' | 'backward'): void
+  updateLastSync(chatId: number, type: "forward" | "backward"): void;
   /**
    * Set the user's choice and the sync_enabled and sync_priority it means:
    * 'on' syncs at High with full history, 'off' doesn't sync, 'auto'
    * follows the policy
    */
-  setSyncMode(chatId: number, mode: SyncMode): void
+  setSyncMode(chatId: number, mode: SyncMode): void;
 }
 
 /**
@@ -287,7 +281,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       WHERE sync_enabled = 1
         AND forward_cursor IS NOT NULL
         AND history_complete = 0
-        AND ${historyAllowedSql('chat_sync_state')}
+        AND ${historyAllowedSql("chat_sync_state")}
       ORDER BY sync_priority ASC, chat_id ASC
     `)
       .as(ChatSyncStateRow),
@@ -352,11 +346,11 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
           updated_at = $now
       WHERE chat_id = $chat_id
     `),
-  }
+  };
 
   return {
     get(chatId: number): ChatSyncStateRow | null {
-      return stmts.get.get({ $chat_id: chatId }) ?? null
+      return stmts.get.get({ $chat_id: chatId }) ?? null;
     },
 
     upsert(input: ChatSyncStateInput): void {
@@ -371,7 +365,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $total_messages: input.total_messages ?? null,
         $sync_policy: input.sync_policy ?? null,
         $now: Date.now(),
-      })
+      });
     },
 
     updateBackwardCursor(chatId: number, backwardCursor: number): void {
@@ -379,14 +373,14 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $chat_id: chatId,
         $backward: backwardCursor,
         $now: Date.now(),
-      })
+      });
     },
 
     markHistoryComplete(chatId: number): void {
       stmts.markHistoryComplete.run({
         $chat_id: chatId,
         $now: Date.now(),
-      })
+      });
     },
 
     incrementSyncedMessages(chatId: number, count: number): void {
@@ -394,7 +388,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $chat_id: chatId,
         $count: count,
         $now: Date.now(),
-      })
+      });
     },
 
     setTotalMessages(chatId: number, total: number): void {
@@ -402,11 +396,11 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $chat_id: chatId,
         $total: total,
         $now: Date.now(),
-      })
+      });
     },
 
     getInitialLoadDue(): ChatSyncStateRow[] {
-      return stmts.getInitialLoadDue.all()
+      return stmts.getInitialLoadDue.all();
     },
 
     recordFirstPage(chatId: number, page: FirstPageResult): void {
@@ -417,19 +411,19 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $complete: page.history_complete ? 1 : 0,
         $count: page.new_messages,
         $now: Date.now(),
-      })
+      });
     },
 
     getCatchupDue(): ChatSyncStateRow[] {
-      return stmts.getCatchupDue.all()
+      return stmts.getCatchupDue.all();
     },
 
     getEnabledWithCursor(): ChatSyncStateRow[] {
-      return stmts.getEnabledWithCursor.all()
+      return stmts.getEnabledWithCursor.all();
     },
 
     getHistoryDue(): ChatSyncStateRow[] {
-      return stmts.getHistoryDue.all()
+      return stmts.getHistoryDue.all();
     },
 
     recordCatchupPage(chatId: number, page: CatchupPageResult): void {
@@ -440,7 +434,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $top_before: page.top_before,
         $count: page.new_messages,
         $now: Date.now(),
-      })
+      });
     },
 
     raiseTopMessageId(chatId: number, topMessageId: number): void {
@@ -448,57 +442,53 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
         $chat_id: chatId,
         $top: topMessageId,
         $now: Date.now(),
-      })
+      });
     },
 
     markCaughtUp(chatIds: Iterable<number>): void {
-      const now = Date.now()
+      const now = Date.now();
       db.transaction(() => {
         for (const chatId of chatIds) {
-          stmts.markCaughtUp.run({ $chat_id: chatId, $now: now })
+          stmts.markCaughtUp.run({ $chat_id: chatId, $now: now });
         }
-      })()
+      })();
     },
 
     markTopUnknown(chatIds: Iterable<number>): void {
-      const now = Date.now()
+      const now = Date.now();
       db.transaction(() => {
         for (const chatId of chatIds) {
-          stmts.markTopUnknown.run({ $chat_id: chatId, $now: now })
+          stmts.markTopUnknown.run({ $chat_id: chatId, $now: now });
         }
-      })()
+      })();
     },
 
     delete(chatId: number): void {
-      stmts.delete.run({ $chat_id: chatId })
+      stmts.delete.run({ $chat_id: chatId });
     },
 
-    updateLastSync(chatId: number, type: 'forward' | 'backward'): void {
-      const stmt =
-        type === 'forward'
-          ? stmts.updateLastForwardSync
-          : stmts.updateLastBackwardSync
-      stmt.run({ $chat_id: chatId, $now: Date.now() })
+    updateLastSync(chatId: number, type: "forward" | "backward"): void {
+      const stmt = type === "forward" ? stmts.updateLastForwardSync : stmts.updateLastBackwardSync;
+      stmt.run({ $chat_id: chatId, $now: Date.now() });
     },
 
     setSyncMode(chatId: number, mode: SyncMode): void {
-      const state = stmts.get.get({ $chat_id: chatId })
-      if (!state) return
+      const state = stmts.get.get({ $chat_id: chatId });
+      if (!state) return;
 
       const policy = determineSyncPolicy(
         state.chat_type as SyncChatType,
         state.member_count,
         policyUserFromReason(state.sync_policy),
-      )
-      const enabled =
-        mode === 'on' ? true : mode === 'off' ? false : policy.enabled
+      );
+      const enabled = mode === "on" ? true : mode === "off" ? false : policy.enabled;
       stmts.setSyncMode.run({
         $chat_id: chatId,
         $mode: mode,
         $enabled: enabled ? 1 : 0,
-        $priority: mode === 'on' ? SyncPriority.High : policy.priority,
+        $priority: mode === "on" ? SyncPriority.High : policy.priority,
         $now: Date.now(),
-      })
+      });
     },
-  }
+  };
 }

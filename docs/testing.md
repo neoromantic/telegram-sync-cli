@@ -4,10 +4,10 @@ This document covers the implemented testing infrastructure for telegram-sync-cl
 
 ## Overview
 
-| Type | Location | Purpose |
-|------|----------|---------|
-| Unit Tests | `src/__tests__/*.test.ts` | Fast, isolated component tests |
-| E2E Tests | `src/__e2e__/*.e2e.test.ts` | CLI execution + exit code behavior |
+| Type              | Location                                    | Purpose                                 |
+| ----------------- | ------------------------------------------- | --------------------------------------- |
+| Unit Tests        | `src/__tests__/*.test.ts`                   | Fast, isolated component tests          |
+| E2E Tests         | `src/__e2e__/*.e2e.test.ts`                 | CLI execution + exit code behavior      |
 | Integration Tests | `src/__integration__/*.integration.test.ts` | Real Telegram API validation (optional) |
 
 > For current coverage, run `bun run test:coverage`.
@@ -59,9 +59,9 @@ differs between macOS and Linux.
 **In-memory database**: Each test gets an isolated SQLite instance.
 
 ```typescript
-import { createTestDatabase } from '../db'
+import { createTestDatabase } from "../db";
 
-const { accountsDb, db } = createTestDatabase()
+const { accountsDb, db } = createTestDatabase();
 ```
 
 **Dependency injection**: Services use interfaces for testability.
@@ -70,7 +70,7 @@ const { accountsDb, db } = createTestDatabase()
 const deps: AuthDependencies = {
   accountsDb: createTestDatabase().accountsDb,
   createClient: mock(() => mockClient),
-}
+};
 ```
 
 ### Core Unit Test Files
@@ -175,10 +175,10 @@ Snapshot tests lock down formatted output to catch regressions.
 - Update snapshots with `bun test -u`
 
 ```typescript
-const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+const logSpy = spyOn(console, "log").mockImplementation(() => {});
 
-setOutputFormat('json')
-success({ message: 'Snapshot test', count: 2, items: ['alpha', 'beta'] })
+setOutputFormat("json");
+success({ message: "Snapshot test", count: 2, items: ["alpha", "beta"] });
 expect(logSpy.mock.calls[0]?.[0]).toMatchInlineSnapshot(`
 "{
   "success": true,
@@ -191,7 +191,7 @@ expect(logSpy.mock.calls[0]?.[0]).toMatchInlineSnapshot(`
     ]
   }
 }"
-`)
+`);
 ```
 
 ## E2E Tests
@@ -285,22 +285,22 @@ is for tests only.
 
 ```typescript
 // Run CLI and capture output
-const result = await runCli(['accounts', 'list'])
+const result = await runCli(["accounts", "list"]);
 // result.stdout, result.stderr, result.exitCode, result.json
 ```
 
 **Test environment** (`src/__e2e__/helpers/setup.ts`):
 
 ```typescript
-const env = createTestEnvironment('my-test')
-env.initDatabase()
-env.seedAccounts([{ phone: '+15550000000', is_active: true }])
+const env = createTestEnvironment("my-test");
+env.initDatabase();
+env.seedAccounts([{ phone: "+15550000000", is_active: true }]);
 // accounts/1/cache.db with the current schema; open until cleanup()
-const cacheDb = env.openCacheDb(1) // env.cachePath(1) is its path
+const cacheDb = env.openCacheDb(1); // env.cachePath(1) is its path
 
-await runCli(['chats', 'list'], env.getCliOptions())
+await runCli(["chats", "list"], env.getCliOptions());
 
-env.cleanup()
+env.cleanup();
 ```
 
 Seed an account before running a cache command: with no account it fails with
@@ -311,15 +311,15 @@ Seed an account before running a cache command: with no account it fails with
 `src/__integration__/` is a live smoke suite: it runs the CLI the way a user would, against the
 real Telegram API. It is skipped unless the variables below are set, and it never runs in CI.
 
-| Test | What it proves |
-|------|----------------|
-| auth status and me | the session is valid; `me --fresh` writes the profile and `me` reads it back from the cache |
-| chats and contacts | dialogs and contacts come from the API, then `chats list` serves them from the cache |
-| send to Saved Messages | `send --to me` delivers a message; `tg api messages.getMessages` reads it back |
-| send caches for search | with no daemon running, `messages search` finds a message right after `send --to me`, under the own user ID |
-| messages list and get | after two sends whose cache rows are dropped, `messages list --chat me --fresh` returns them newest first from the API under the own user ID; the next read comes from the cache with equal items, `messages search` finds them, `--after` pages forward, and `messages get --context 1` reads one in context from the API, then from the cache; a cache-first `get --context 2` returns it with the newer message and up to two older ones |
-| send and download a file | `send --to me --file` uploads 700,000 made-up bytes as a document with a caption; `media download --chat me --id <id>` saves them into `accounts/<id>/media/<uniqueFileId>/` byte for byte (`cached: false`), and a second run serves them from the cache (`cached: true`) |
-| daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs) into `accounts/<id>/cache.db` (no root `cache.db`), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` while sync jobs are queued: exit code 0, one "Received SIGTERM", no updates-loop error, closed-database error or failed close, no job left running and no `DaemonStopError` or `AbortError` in the output |
+| Test                     | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| auth status and me       | the session is valid; `me --fresh` writes the profile and `me` reads it back from the cache                                                                                                                                                                                                                                                                                                                                                                                   |
+| chats and contacts       | dialogs and contacts come from the API, then `chats list` serves them from the cache                                                                                                                                                                                                                                                                                                                                                                                          |
+| send to Saved Messages   | `send --to me` delivers a message; `tg api messages.getMessages` reads it back                                                                                                                                                                                                                                                                                                                                                                                                |
+| send caches for search   | with no daemon running, `messages search` finds a message right after `send --to me`, under the own user ID                                                                                                                                                                                                                                                                                                                                                                   |
+| messages list and get    | after two sends whose cache rows are dropped, `messages list --chat me --fresh` returns them newest first from the API under the own user ID; the next read comes from the cache with equal items, `messages search` finds them, `--after` pages forward, and `messages get --context 1` reads one in context from the API, then from the cache; a cache-first `get --context 2` returns it with the newer message and up to two older ones                                   |
+| send and download a file | `send --to me --file` uploads 700,000 made-up bytes as a document with a caption; `media download --chat me --id <id>` saves them into `accounts/<id>/media/<uniqueFileId>/` byte for byte (`cached: false`), and a second run serves them from the cache (`cached: true`)                                                                                                                                                                                                    |
+| daemon                   | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs) into `accounts/<id>/cache.db` (no root `cache.db`), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` while sync jobs are queued: exit code 0, one "Received SIGTERM", no updates-loop error, closed-database error or failed close, no job left running and no `DaemonStopError` or `AbortError` in the output |
 
 Each test copies the session into its own temp data dir. Messages go only to the account's
 Saved Messages and are deleted after each test. A run takes about a minute.
@@ -397,7 +397,7 @@ Ensure all Telegram clients are closed. mtcute closes a client with `destroy()`:
 
 ```typescript
 // In tests, mock the destroy method
-destroy: mock(() => Promise.resolve())
+destroy: mock(() => Promise.resolve());
 ```
 
 ### Database Locked
@@ -406,6 +406,6 @@ Each test should create its own database:
 
 ```typescript
 beforeEach(() => {
-  const { accountsDb } = createTestDatabase()
-})
+  const { accountsDb } = createTestDatabase();
+});
 ```

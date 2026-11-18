@@ -1,179 +1,175 @@
 /**
  * Tests for sync scheduler
  */
-import type { Database } from 'bun:sqlite'
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { applySyncMode } from '../commands/chats/sync'
-import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
-import { pruneCache } from '../db/cache-maintenance'
-import { createChatSyncStateService } from '../db/chat-sync-state'
-import { createMessagesCache } from '../db/messages-cache'
-import { createSyncJobsService } from '../db/sync-jobs'
-import { SyncJobStatus, SyncJobType, SyncPriority } from '../db/sync-schema'
-import { getDefaultRetentionConfig } from '../db/types'
-import { createAccountCacheDb } from './helpers/cache-db'
-import { takePartIn } from './helpers/participation'
+import type { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { applySyncMode } from "../commands/chats/sync";
+import { createSyncScheduler, type SyncScheduler } from "../daemon/scheduler";
+import { pruneCache } from "../db/cache-maintenance";
+import { createChatSyncStateService } from "../db/chat-sync-state";
+import { createMessagesCache } from "../db/messages-cache";
+import { createSyncJobsService } from "../db/sync-jobs";
+import { SyncJobStatus, SyncJobType, SyncPriority } from "../db/sync-schema";
+import { getDefaultRetentionConfig } from "../db/types";
+import { createAccountCacheDb } from "./helpers/cache-db";
+import { takePartIn } from "./helpers/participation";
 
-const DAY_MS = 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-describe('SyncScheduler', () => {
-  let db: Database
-  let scheduler: SyncScheduler
-  let jobsService: ReturnType<typeof createSyncJobsService>
-  let chatSyncState: ReturnType<typeof createChatSyncStateService>
-  let messagesCache: ReturnType<typeof createMessagesCache>
+describe("SyncScheduler", () => {
+  let db: Database;
+  let scheduler: SyncScheduler;
+  let jobsService: ReturnType<typeof createSyncJobsService>;
+  let chatSyncState: ReturnType<typeof createChatSyncStateService>;
+  let messagesCache: ReturnType<typeof createMessagesCache>;
 
-  const realNow = Date.now
+  const realNow = Date.now;
   afterEach(() => {
-    Date.now = realNow
-  })
+    Date.now = realNow;
+  });
 
   /** Run a job and fail it for good */
-  function failJob(id: number, error = 'CHANNEL_PRIVATE') {
-    jobsService.markRunning(id)
-    jobsService.markFailed(id, error)
+  function failJob(id: number, error = "CHANNEL_PRIVATE") {
+    jobsService.markRunning(id);
+    jobsService.markFailed(id, error);
   }
 
   beforeEach(() => {
-    db = createAccountCacheDb()
-    takePartIn(db, -4001, -4002, -1001234567890)
-    jobsService = createSyncJobsService(db)
-    chatSyncState = createChatSyncStateService(db)
-    messagesCache = createMessagesCache(db)
+    db = createAccountCacheDb();
+    takePartIn(db, -4001, -4002, -1001234567890);
+    jobsService = createSyncJobsService(db);
+    chatSyncState = createChatSyncStateService(db);
+    messagesCache = createMessagesCache(db);
     scheduler = createSyncScheduler({
       db,
       jobsService,
       chatSyncState,
       messagesCache,
-    })
-  })
+    });
+  });
 
-  describe('queueForwardCatchup', () => {
-    it('queues forward catchup job for a chat', () => {
+  describe("queueForwardCatchup", () => {
+    it("queues forward catchup job for a chat", () => {
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
-      })
+      });
 
-      scheduler.queueForwardCatchup(100)
+      scheduler.queueForwardCatchup(100);
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs).toHaveLength(1)
-      expect(jobs[0]!.job_type).toBe(SyncJobType.ForwardCatchup)
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.job_type).toBe(SyncJobType.ForwardCatchup);
       // The chat's tier is the job's priority inside the catch-up lane
-      expect(jobs[0]!.priority).toBe(SyncPriority.High)
-    })
+      expect(jobs[0]!.priority).toBe(SyncPriority.High);
+    });
 
-    it('does not queue duplicate catchup job', () => {
+    it("does not queue duplicate catchup job", () => {
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
-      })
+      });
 
-      scheduler.queueForwardCatchup(100)
-      scheduler.queueForwardCatchup(100) // Duplicate
+      scheduler.queueForwardCatchup(100);
+      scheduler.queueForwardCatchup(100); // Duplicate
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs).toHaveLength(1)
-    })
-  })
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs).toHaveLength(1);
+    });
+  });
 
-  describe('queue methods', () => {
-    it('create no job for a disabled chat or a chat without sync state', () => {
+  describe("queue methods", () => {
+    it("create no job for a disabled chat or a chat without sync state", () => {
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'channel',
+        chat_type: "channel",
         sync_priority: SyncPriority.Low,
         sync_enabled: false,
         forward_cursor: 10,
         backward_cursor: 5,
-      })
+      });
 
       for (const chatId of [100, 999]) {
-        scheduler.queueForwardCatchup(chatId)
-        scheduler.queueInitialLoad(chatId)
-        scheduler.queueBackwardHistory(chatId)
+        scheduler.queueForwardCatchup(chatId);
+        scheduler.queueInitialLoad(chatId);
+        scheduler.queueBackwardHistory(chatId);
       }
 
-      expect(jobsService.getJobsForChat(100)).toHaveLength(0)
-      expect(jobsService.getJobsForChat(999)).toHaveLength(0)
-    })
+      expect(jobsService.getJobsForChat(100)).toHaveLength(0);
+      expect(jobsService.getJobsForChat(999)).toHaveLength(0);
+    });
 
-    it('give each job its chat tier as priority', () => {
+    it("give each job its chat tier as priority", () => {
       chatSyncState.upsert({
         chat_id: -4001,
-        chat_type: 'group',
+        chat_type: "group",
         member_count: 50,
         sync_priority: SyncPriority.Medium,
         sync_enabled: true,
         forward_cursor: 10,
         backward_cursor: 5,
-      })
+      });
       chatSyncState.upsert({
         chat_id: -4002,
-        chat_type: 'group',
+        chat_type: "group",
         member_count: 50,
         sync_priority: SyncPriority.Medium,
         sync_enabled: true,
-      })
+      });
 
-      scheduler.queueForwardCatchup(-4001)
-      scheduler.queueBackwardHistory(-4001)
-      scheduler.queueInitialLoad(-4002)
+      scheduler.queueForwardCatchup(-4001);
+      scheduler.queueBackwardHistory(-4001);
+      scheduler.queueInitialLoad(-4002);
 
-      const priorities = jobsService.getPendingJobs().map((job) => job.priority)
-      expect(priorities).toEqual([
-        SyncPriority.Medium,
-        SyncPriority.Medium,
-        SyncPriority.Medium,
-      ])
-    })
-  })
+      const priorities = jobsService.getPendingJobs().map((job) => job.priority);
+      expect(priorities).toEqual([SyncPriority.Medium, SyncPriority.Medium, SyncPriority.Medium]);
+    });
+  });
 
-  describe('a chat turned on with tg chats sync', () => {
+  describe("a chat turned on with tg chats sync", () => {
     beforeEach(() => {
       chatSyncState.upsert({
         chat_id: -1001234567890,
-        chat_type: 'channel',
+        chat_type: "channel",
         member_count: 5000,
         sync_priority: SyncPriority.Low,
         sync_enabled: false,
-      })
-      chatSyncState.setSyncMode(-1001234567890, 'on')
-    })
+      });
+      chatSyncState.setSyncMode(-1001234567890, "on");
+    });
 
-    it('gets its first page at P0 and its history at its tier', () => {
-      scheduler.refreshQueues()
+    it("gets its first page at P0 and its history at its tier", () => {
+      scheduler.refreshQueues();
       chatSyncState.recordFirstPage(-1001234567890, {
         forward_cursor: 900,
         backward_cursor: 801,
         history_complete: false,
         new_messages: 100,
-      })
-      scheduler.queueBackwardHistory(-1001234567890)
+      });
+      scheduler.queueBackwardHistory(-1001234567890);
 
       const jobs = jobsService
         .getJobsForChat(-1001234567890)
         .map((job) => [job.job_type, job.priority])
-        .sort()
+        .sort();
       expect(jobs).toEqual([
         [SyncJobType.BackwardHistory, SyncPriority.High],
         [SyncJobType.InitialLoad, SyncPriority.Realtime],
-      ])
-    })
+      ]);
+    });
 
-    it('keeps its first page at P0 across a restart', async () => {
+    it("keeps its first page at P0 across a restart", async () => {
       jobsService.create({
         chat_id: -1001234567890,
         job_type: SyncJobType.InitialLoad,
         priority: SyncPriority.Low,
-      })
+      });
 
-      await scheduler.initializeForStartup()
+      await scheduler.initializeForStartup();
 
       expect(jobsService.getPendingJobs()).toMatchObject([
         {
@@ -181,40 +177,36 @@ describe('SyncScheduler', () => {
           job_type: SyncJobType.InitialLoad,
           priority: SyncPriority.Realtime,
         },
-      ])
-    })
-  })
+      ]);
+    });
+  });
 
-  describe('a bot or a deleted account (#131)', () => {
-    const BOT = 7001
-    const DELETED = 7002
+  describe("a bot or a deleted account (#131)", () => {
+    const BOT = 7001;
+    const DELETED = 7002;
 
     beforeEach(() => {
       for (const [chatId, reason] of [
-        [BOT, 'bot'],
-        [DELETED, 'deleted_account'],
+        [BOT, "bot"],
+        [DELETED, "deleted_account"],
       ] as const) {
         chatSyncState.upsert({
           chat_id: chatId,
-          chat_type: 'private',
+          chat_type: "private",
           sync_priority: SyncPriority.Medium,
           sync_enabled: true,
           sync_policy: reason,
-        })
+        });
       }
-    })
+    });
 
-    it('gets its first page at the medium tier and catch-up, but no history', () => {
-      scheduler.refreshQueues()
-      expect(
-        jobsService.getPendingJobs().map((job) => [job.chat_id, job.job_type]),
-      ).toEqual([
+    it("gets its first page at the medium tier and catch-up, but no history", () => {
+      scheduler.refreshQueues();
+      expect(jobsService.getPendingJobs().map((job) => [job.chat_id, job.job_type])).toEqual([
         [BOT, SyncJobType.InitialLoad],
         [DELETED, SyncJobType.InitialLoad],
-      ])
-      expect(jobsService.getPendingJobs()[0]!.priority).toBe(
-        SyncPriority.Medium,
-      )
+      ]);
+      expect(jobsService.getPendingJobs()[0]!.priority).toBe(SyncPriority.Medium);
 
       for (const chatId of [BOT, DELETED]) {
         chatSyncState.recordFirstPage(chatId, {
@@ -222,538 +214,524 @@ describe('SyncScheduler', () => {
           backward_cursor: 801,
           history_complete: false,
           new_messages: 100,
-        })
-        chatSyncState.raiseTopMessageId(chatId, 950)
+        });
+        chatSyncState.raiseTopMessageId(chatId, 950);
         // The first page's job asks for history right away
-        scheduler.queueBackwardHistory(chatId)
+        scheduler.queueBackwardHistory(chatId);
       }
-      scheduler.refreshQueues()
+      scheduler.refreshQueues();
 
       const queued = jobsService
         .getPendingJobs()
         .filter((job) => job.job_type !== SyncJobType.InitialLoad)
-        .map((job) => [job.chat_id, job.job_type])
+        .map((job) => [job.chat_id, job.job_type]);
       expect(queued).toEqual([
         [BOT, SyncJobType.ForwardCatchup],
         [DELETED, SyncJobType.ForwardCatchup],
-      ])
-    })
+      ]);
+    });
 
-    it('loses the pending history jobs an older version queued', () => {
+    it("loses the pending history jobs an older version queued", () => {
       chatSyncState.recordFirstPage(BOT, {
         forward_cursor: 900,
         backward_cursor: 801,
         history_complete: false,
         new_messages: 100,
-      })
-      chatSyncState.raiseTopMessageId(BOT, 900)
+      });
+      chatSyncState.raiseTopMessageId(BOT, 900);
       jobsService.create({
         chat_id: BOT,
         job_type: SyncJobType.BackwardHistory,
         priority: SyncPriority.High,
-      })
+      });
 
-      scheduler.refreshQueues()
+      scheduler.refreshQueues();
 
-      expect(jobsService.getJobsForChat(BOT)).toHaveLength(0)
-    })
+      expect(jobsService.getJobsForChat(BOT)).toHaveLength(0);
+    });
 
-    it('gets its history once turned on by hand, and loses it again on --auto', () => {
+    it("gets its history once turned on by hand, and loses it again on --auto", () => {
       chatSyncState.recordFirstPage(BOT, {
         forward_cursor: 900,
         backward_cursor: 801,
         history_complete: false,
         new_messages: 100,
-      })
-      chatSyncState.raiseTopMessageId(BOT, 900)
+      });
+      chatSyncState.raiseTopMessageId(BOT, 900);
 
-      chatSyncState.setSyncMode(BOT, 'on')
-      scheduler.refreshQueues()
+      chatSyncState.setSyncMode(BOT, "on");
+      scheduler.refreshQueues();
       expect(chatSyncState.get(BOT)).toMatchObject({
         sync_priority: SyncPriority.High,
-        sync_policy: 'bot',
-      })
+        sync_policy: "bot",
+      });
       expect(jobsService.getJobsForChat(BOT)).toMatchObject([
         { job_type: SyncJobType.BackwardHistory },
-      ])
+      ]);
 
-      chatSyncState.setSyncMode(BOT, 'auto')
-      scheduler.refreshQueues()
+      chatSyncState.setSyncMode(BOT, "auto");
+      scheduler.refreshQueues();
       expect(chatSyncState.get(BOT)).toMatchObject({
         sync_priority: SyncPriority.Medium,
         sync_enabled: 1,
-      })
-      expect(jobsService.getJobsForChat(BOT)).toHaveLength(0)
-    })
-  })
+      });
+      expect(jobsService.getJobsForChat(BOT)).toHaveLength(0);
+    });
+  });
 
-  describe('queueBackwardHistory', () => {
-    it('queues backward history job for a chat with existing backward_cursor', () => {
+  describe("queueBackwardHistory", () => {
+    it("queues backward history job for a chat with existing backward_cursor", () => {
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
         forward_cursor: 600,
         backward_cursor: 500, // Has an existing cursor
-      })
+      });
 
-      scheduler.queueBackwardHistory(100)
+      scheduler.queueBackwardHistory(100);
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs).toHaveLength(1)
-      expect(jobs[0]!.job_type).toBe(SyncJobType.BackwardHistory)
-      expect(jobs[0]!.priority).toBe(SyncPriority.High)
-    })
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.job_type).toBe(SyncJobType.BackwardHistory);
+      expect(jobs[0]!.priority).toBe(SyncPriority.High);
+    });
 
-    it('does not queue if history is complete', () => {
+    it("does not queue if history is complete", () => {
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
-      })
-      chatSyncState.markHistoryComplete(100)
+      });
+      chatSyncState.markHistoryComplete(100);
 
-      scheduler.queueBackwardHistory(100)
+      scheduler.queueBackwardHistory(100);
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs).toHaveLength(0)
-    })
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs).toHaveLength(0);
+    });
 
-    it('queues initial load instead when backward_cursor is null and no cached messages (issue-6 fix)', () => {
+    it("queues initial load instead when backward_cursor is null and no cached messages (issue-6 fix)", () => {
       // Set up chat with no backward cursor (null by default) and no cached messages
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
         // backward_cursor defaults to null
-      })
+      });
 
       // Try to queue backward history - should queue initial load instead
-      scheduler.queueBackwardHistory(100)
+      scheduler.queueBackwardHistory(100);
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs).toHaveLength(1)
-      expect(jobs[0]!.job_type).toBe(SyncJobType.InitialLoad)
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.job_type).toBe(SyncJobType.InitialLoad);
       // Should use the chat's sync priority
-      expect(jobs[0]!.priority).toBe(SyncPriority.High)
-    })
+      expect(jobs[0]!.priority).toBe(SyncPriority.High);
+    });
 
-    it('queues backward history when backward_cursor is null but cached messages exist (issue-6 fix)', () => {
+    it("queues backward history when backward_cursor is null but cached messages exist (issue-6 fix)", () => {
       // A chat whose newest page came from catch-up: a forward cursor and
       // cached messages, but no backward cursor yet
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
         forward_cursor: 1000,
-      })
+      });
 
       // Add a cached message
       messagesCache.upsert({
         chat_id: 100,
         message_id: 1000,
-        message_type: 'text',
+        message_type: "text",
         date: Date.now(),
-        raw_json: '{}',
-      })
+        raw_json: "{}",
+      });
 
       // Queue backward history - should work since we have cached messages
-      scheduler.queueBackwardHistory(100)
+      scheduler.queueBackwardHistory(100);
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs).toHaveLength(1)
-      expect(jobs[0]!.job_type).toBe(SyncJobType.BackwardHistory)
-    })
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.job_type).toBe(SyncJobType.BackwardHistory);
+    });
 
-    it('queues backward history when backward_cursor exists (issue-6 fix)', () => {
+    it("queues backward history when backward_cursor exists (issue-6 fix)", () => {
       // Set up chat WITH a backward cursor
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
         forward_cursor: 600,
         backward_cursor: 500, // Has a valid cursor
-      })
+      });
 
       // Queue backward history - should work since we have a cursor
-      scheduler.queueBackwardHistory(100)
+      scheduler.queueBackwardHistory(100);
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs).toHaveLength(1)
-      expect(jobs[0]!.job_type).toBe(SyncJobType.BackwardHistory)
-    })
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.job_type).toBe(SyncJobType.BackwardHistory);
+    });
 
-    it('queues the first page instead for a chat without a forward cursor', () => {
+    it("queues the first page instead for a chat without a forward cursor", () => {
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
-      })
+      });
       // A live message is cached, but the chat has no first page yet
       messagesCache.upsert({
         chat_id: 100,
         message_id: 1000,
-        message_type: 'text',
+        message_type: "text",
         date: Date.now(),
-        raw_json: '{}',
-      })
+        raw_json: "{}",
+      });
 
-      scheduler.queueBackwardHistory(100)
+      scheduler.queueBackwardHistory(100);
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs.map((job) => job.job_type)).toEqual([SyncJobType.InitialLoad])
-    })
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs.map((job) => job.job_type)).toEqual([SyncJobType.InitialLoad]);
+    });
 
-    it('does not queue duplicate initial load when backward_cursor is null (issue-6 fix)', () => {
+    it("does not queue duplicate initial load when backward_cursor is null (issue-6 fix)", () => {
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
-      })
+      });
 
       // Queue backward history twice - should only create one initial load
-      scheduler.queueBackwardHistory(100)
-      scheduler.queueBackwardHistory(100)
+      scheduler.queueBackwardHistory(100);
+      scheduler.queueBackwardHistory(100);
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs).toHaveLength(1)
-      expect(jobs[0]!.job_type).toBe(SyncJobType.InitialLoad)
-    })
-  })
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.job_type).toBe(SyncJobType.InitialLoad);
+    });
+  });
 
-  describe('queueInitialLoad', () => {
-    it('queues initial load job', () => {
+  describe("queueInitialLoad", () => {
+    it("queues initial load job", () => {
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'group',
+        chat_type: "group",
         sync_priority: SyncPriority.Medium,
         sync_enabled: true,
         member_count: 50,
-      })
+      });
 
-      scheduler.queueInitialLoad(100)
+      scheduler.queueInitialLoad(100);
 
-      const jobs = jobsService.getJobsForChat(100)
-      expect(jobs).toHaveLength(1)
-      expect(jobs[0]!.job_type).toBe(SyncJobType.InitialLoad)
-    })
-  })
+      const jobs = jobsService.getJobsForChat(100);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.job_type).toBe(SyncJobType.InitialLoad);
+    });
+  });
 
-  describe('initializeForStartup', () => {
+  describe("initializeForStartup", () => {
     beforeEach(() => {
       // Create some chats with sync enabled
       chatSyncState.upsert({
         chat_id: 1,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
-      })
+      });
       chatSyncState.upsert({
         chat_id: 2,
-        chat_type: 'group',
+        chat_type: "group",
         sync_priority: SyncPriority.Medium,
         sync_enabled: true,
         member_count: 50,
-      })
+      });
       chatSyncState.upsert({
         chat_id: 3,
-        chat_type: 'channel',
+        chat_type: "channel",
         sync_priority: SyncPriority.Low,
         sync_enabled: false, // Disabled
-      })
-    })
+      });
+    });
 
-    it('queues forward catchup for enabled chats', async () => {
-      await scheduler.initializeForStartup()
+    it("queues forward catchup for enabled chats", async () => {
+      await scheduler.initializeForStartup();
 
       // Check jobs were created for enabled chats
-      expect(jobsService.getJobsForChat(1).length).toBeGreaterThan(0)
-      expect(jobsService.getJobsForChat(2).length).toBeGreaterThan(0)
+      expect(jobsService.getJobsForChat(1).length).toBeGreaterThan(0);
+      expect(jobsService.getJobsForChat(2).length).toBeGreaterThan(0);
       // Disabled chat should not have jobs
-      expect(jobsService.getJobsForChat(3).length).toBe(0)
-    })
+      expect(jobsService.getJobsForChat(3).length).toBe(0);
+    });
 
-    it('queues initial load for high priority chats with no synced messages', async () => {
-      await scheduler.initializeForStartup()
+    it("queues initial load for high priority chats with no synced messages", async () => {
+      await scheduler.initializeForStartup();
 
       // Chat 1 is high priority (private DM) with synced_messages = 0
-      const jobs = jobsService.getJobsForChat(1)
-      const initialLoadJobs = jobs.filter(
-        (j) => j.job_type === SyncJobType.InitialLoad,
-      )
-      expect(initialLoadJobs).toHaveLength(1)
-      expect(initialLoadJobs[0]!.priority).toBe(SyncPriority.High)
-    })
+      const jobs = jobsService.getJobsForChat(1);
+      const initialLoadJobs = jobs.filter((j) => j.job_type === SyncJobType.InitialLoad);
+      expect(initialLoadJobs).toHaveLength(1);
+      expect(initialLoadJobs[0]!.priority).toBe(SyncPriority.High);
+    });
 
-    it('queues initial load for medium priority chats with no synced messages', async () => {
-      await scheduler.initializeForStartup()
+    it("queues initial load for medium priority chats with no synced messages", async () => {
+      await scheduler.initializeForStartup();
 
       // Chat 2 is medium priority (group) with synced_messages = 0
-      const jobs = jobsService.getJobsForChat(2)
-      const initialLoadJobs = jobs.filter(
-        (j) => j.job_type === SyncJobType.InitialLoad,
-      )
-      expect(initialLoadJobs).toHaveLength(1)
-      expect(initialLoadJobs[0]!.priority).toBe(SyncPriority.Medium)
-    })
+      const jobs = jobsService.getJobsForChat(2);
+      const initialLoadJobs = jobs.filter((j) => j.job_type === SyncJobType.InitialLoad);
+      expect(initialLoadJobs).toHaveLength(1);
+      expect(initialLoadJobs[0]!.priority).toBe(SyncPriority.Medium);
+    });
 
-    it('queues initial load for a chat whose first messages arrived live', async () => {
+    it("queues initial load for a chat whose first messages arrived live", async () => {
       // Live updates cached and counted messages, but set no cursor
-      chatSyncState.incrementSyncedMessages(1, 5)
+      chatSyncState.incrementSyncedMessages(1, 5);
       messagesCache.upsert({
         chat_id: 1,
         message_id: 100,
-        message_type: 'text',
+        message_type: "text",
         date: Date.now(),
-        raw_json: '{}',
-      })
+        raw_json: "{}",
+      });
 
-      await scheduler.initializeForStartup()
+      await scheduler.initializeForStartup();
 
       const initialLoadJobs = jobsService
         .getJobsForChat(1)
-        .filter((j) => j.job_type === SyncJobType.InitialLoad)
-      expect(initialLoadJobs).toHaveLength(1)
-    })
+        .filter((j) => j.job_type === SyncJobType.InitialLoad);
+      expect(initialLoadJobs).toHaveLength(1);
+    });
 
-    it('queues initial load for a chat with complete history but no cursor', async () => {
+    it("queues initial load for a chat with complete history but no cursor", async () => {
       // An empty chat from an older version: history complete, no cursor
-      chatSyncState.markHistoryComplete(1)
+      chatSyncState.markHistoryComplete(1);
 
-      await scheduler.initializeForStartup()
+      await scheduler.initializeForStartup();
 
       const initialLoadJobs = jobsService
         .getJobsForChat(1)
-        .filter((j) => j.job_type === SyncJobType.InitialLoad)
-      expect(initialLoadJobs).toHaveLength(1)
-    })
+        .filter((j) => j.job_type === SyncJobType.InitialLoad);
+      expect(initialLoadJobs).toHaveLength(1);
+    });
 
-    it('does not queue initial load for chats with a forward cursor', async () => {
+    it("does not queue initial load for chats with a forward cursor", async () => {
       chatSyncState.recordFirstPage(1, {
         forward_cursor: 100,
         backward_cursor: 1,
         history_complete: false,
         new_messages: 100,
-      })
+      });
 
-      await scheduler.initializeForStartup()
+      await scheduler.initializeForStartup();
 
       const initialLoadJobs = jobsService
         .getJobsForChat(1)
-        .filter((j) => j.job_type === SyncJobType.InitialLoad)
-      expect(initialLoadJobs).toHaveLength(0)
-    })
-  })
+        .filter((j) => j.job_type === SyncJobType.InitialLoad);
+      expect(initialLoadJobs).toHaveLength(0);
+    });
+  });
 
-  describe('refreshQueues', () => {
+  describe("refreshQueues", () => {
     function seed(
       chatId: number,
       options: {
-        enabled?: boolean
-        cursor?: number
-        top?: number | null
-        historyComplete?: boolean
+        enabled?: boolean;
+        cursor?: number;
+        top?: number | null;
+        historyComplete?: boolean;
       } = {},
     ) {
       chatSyncState.upsert({
         chat_id: chatId,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: options.enabled ?? true,
         forward_cursor: options.cursor,
         backward_cursor: options.cursor === undefined ? undefined : 1,
-      })
+      });
       if (options.historyComplete ?? true) {
-        chatSyncState.markHistoryComplete(chatId)
+        chatSyncState.markHistoryComplete(chatId);
       }
       if (options.top !== undefined && options.top !== null) {
-        chatSyncState.raiseTopMessageId(chatId, options.top)
+        chatSyncState.raiseTopMessageId(chatId, options.top);
       }
     }
 
     const jobsOf = (chatId: number, jobType: SyncJobType) =>
-      jobsService.getJobsForChat(chatId).filter((j) => j.job_type === jobType)
+      jobsService.getJobsForChat(chatId).filter((j) => j.job_type === jobType);
 
-    it('queues no catch-up for a chat that is caught up', () => {
-      seed(1, { cursor: 1000, top: 1000 })
-      seed(2, { cursor: 1000, top: 900 })
+    it("queues no catch-up for a chat that is caught up", () => {
+      seed(1, { cursor: 1000, top: 1000 });
+      seed(2, { cursor: 1000, top: 900 });
 
-      for (let i = 0; i < 10; i++) scheduler.refreshQueues()
+      for (let i = 0; i < 10; i++) scheduler.refreshQueues();
 
-      expect(jobsService.getJobsForChat(1)).toHaveLength(0)
-      expect(jobsService.getJobsForChat(2)).toHaveLength(0)
-    })
+      expect(jobsService.getJobsForChat(1)).toHaveLength(0);
+      expect(jobsService.getJobsForChat(2)).toHaveLength(0);
+    });
 
-    it('queues one catch-up for a chat that is behind', () => {
-      seed(1, { cursor: 1000, top: 1150 })
-      seed(2, { cursor: 1000, top: null })
+    it("queues one catch-up for a chat that is behind", () => {
+      seed(1, { cursor: 1000, top: 1150 });
+      seed(2, { cursor: 1000, top: null });
 
-      for (let i = 0; i < 10; i++) scheduler.refreshQueues()
+      for (let i = 0; i < 10; i++) scheduler.refreshQueues();
 
-      expect(jobsOf(1, SyncJobType.ForwardCatchup)).toHaveLength(1)
-      expect(jobsOf(2, SyncJobType.ForwardCatchup)).toHaveLength(1)
-      expect(jobsService.getPendingJobs()).toHaveLength(2)
-    })
+      expect(jobsOf(1, SyncJobType.ForwardCatchup)).toHaveLength(1);
+      expect(jobsOf(2, SyncJobType.ForwardCatchup)).toHaveLength(1);
+      expect(jobsService.getPendingJobs()).toHaveLength(2);
+    });
 
-    it('queues no catch-up for a disabled chat or a chat without a cursor', () => {
-      seed(1, { enabled: false, cursor: 1000, top: 1150 })
-      seed(2, { top: 1150 })
+    it("queues no catch-up for a disabled chat or a chat without a cursor", () => {
+      seed(1, { enabled: false, cursor: 1000, top: 1150 });
+      seed(2, { top: 1150 });
 
-      scheduler.refreshQueues()
+      scheduler.refreshQueues();
 
-      expect(jobsService.getJobsForChat(1)).toHaveLength(0)
-      expect(jobsOf(2, SyncJobType.ForwardCatchup)).toHaveLength(0)
-    })
+      expect(jobsService.getJobsForChat(1)).toHaveLength(0);
+      expect(jobsOf(2, SyncJobType.ForwardCatchup)).toHaveLength(0);
+    });
 
-    it('queues history for any enabled tier once the chat has a cursor', () => {
-      seed(1, { cursor: 1000, top: 1000, historyComplete: false })
+    it("queues history for any enabled tier once the chat has a cursor", () => {
+      seed(1, { cursor: 1000, top: 1000, historyComplete: false });
       chatSyncState.upsert({
         chat_id: -4001,
-        chat_type: 'group',
+        chat_type: "group",
         member_count: 50,
         sync_priority: SyncPriority.Medium,
         sync_enabled: true,
         forward_cursor: 300,
         backward_cursor: 201,
-      })
-      chatSyncState.raiseTopMessageId(-4001, 300)
+      });
+      chatSyncState.raiseTopMessageId(-4001, 300);
       // Turned on by hand: a channel in the Low tier
       chatSyncState.upsert({
         chat_id: -1001234567890,
-        chat_type: 'channel',
+        chat_type: "channel",
         sync_priority: SyncPriority.Low,
         sync_enabled: true,
         forward_cursor: 900,
         backward_cursor: 801,
-      })
-      chatSyncState.raiseTopMessageId(-1001234567890, 900)
-      seed(2, { enabled: false, cursor: 50, top: 50, historyComplete: false })
-      seed(3, { historyComplete: false })
+      });
+      chatSyncState.raiseTopMessageId(-1001234567890, 900);
+      seed(2, { enabled: false, cursor: 50, top: 50, historyComplete: false });
+      seed(3, { historyComplete: false });
 
-      for (let i = 0; i < 3; i++) scheduler.refreshQueues()
+      for (let i = 0; i < 3; i++) scheduler.refreshQueues();
 
       const history = jobsService
         .getPendingJobs()
         .filter((job) => job.job_type === SyncJobType.BackwardHistory)
         .map((job) => job.chat_id)
-        .sort((a, b) => a - b)
-      expect(history).toEqual([-1001234567890, -4001, 1])
+        .sort((a, b) => a - b);
+      expect(history).toEqual([-1001234567890, -4001, 1]);
       // No history before the first page
-      expect(jobsOf(3, SyncJobType.BackwardHistory)).toHaveLength(0)
-      expect(jobsOf(3, SyncJobType.InitialLoad)).toHaveLength(1)
-    })
+      expect(jobsOf(3, SyncJobType.BackwardHistory)).toHaveLength(0);
+      expect(jobsOf(3, SyncJobType.InitialLoad)).toHaveLength(1);
+    });
 
-    it('queues no history for a chat with complete history', () => {
-      seed(1, { cursor: 1000, top: 1000 })
+    it("queues no history for a chat with complete history", () => {
+      seed(1, { cursor: 1000, top: 1000 });
 
-      scheduler.refreshQueues()
+      scheduler.refreshQueues();
 
-      expect(jobsService.getJobsForChat(1)).toHaveLength(0)
-    })
+      expect(jobsService.getJobsForChat(1)).toHaveLength(0);
+    });
 
-    it('queues no job of a type whose job failed, until the failed row is gone', () => {
-      const t0 = 1_700_000_000_000
-      Date.now = () => t0
-      seed(1, { cursor: 1000, top: 1150 })
-      seed(2, { historyComplete: false })
-      seed(3, { cursor: 1000, top: 1000, historyComplete: false })
+    it("queues no job of a type whose job failed, until the failed row is gone", () => {
+      const t0 = 1_700_000_000_000;
+      Date.now = () => t0;
+      seed(1, { cursor: 1000, top: 1150 });
+      seed(2, { historyComplete: false });
+      seed(3, { cursor: 1000, top: 1000, historyComplete: false });
       const cases = [
         [1, SyncJobType.ForwardCatchup],
         [2, SyncJobType.InitialLoad],
         [3, SyncJobType.BackwardHistory],
-      ] as const
+      ] as const;
 
-      scheduler.refreshQueues()
+      scheduler.refreshQueues();
       for (const [chatId, jobType] of cases) {
-        const jobs = jobsOf(chatId, jobType)
-        expect(jobs).toHaveLength(1)
-        failJob(jobs[0]!.id)
+        const jobs = jobsOf(chatId, jobType);
+        expect(jobs).toHaveLength(1);
+        failJob(jobs[0]!.id);
       }
 
-      for (let i = 0; i < 3; i++) scheduler.refreshQueues()
+      for (let i = 0; i < 3; i++) scheduler.refreshQueues();
       for (const [chatId, jobType] of cases) {
-        expect(jobsOf(chatId, jobType).map((job) => job.status)).toEqual([
-          'failed',
-        ])
+        expect(jobsOf(chatId, jobType).map((job) => job.status)).toEqual(["failed"]);
       }
 
       // tg chats sync deletes the chat's failed rows
-      jobsService.deleteFailed(1)
-      scheduler.refreshQueues()
-      expect(
-        jobsOf(1, SyncJobType.ForwardCatchup).map((job) => job.status),
-      ).toEqual(['pending'])
-      expect(jobsOf(2, SyncJobType.InitialLoad)).toHaveLength(1)
+      jobsService.deleteFailed(1);
+      scheduler.refreshQueues();
+      expect(jobsOf(1, SyncJobType.ForwardCatchup).map((job) => job.status)).toEqual(["pending"]);
+      expect(jobsOf(2, SyncJobType.InitialLoad)).toHaveLength(1);
 
       // Pruning deletes them a day later
-      Date.now = () => t0 + DAY_MS + 1
-      pruneCache(
-        db,
-        { ...getDefaultRetentionConfig(), failedJobs: DAY_MS },
-        { now: Date.now() },
-      )
-      scheduler.refreshQueues()
+      Date.now = () => t0 + DAY_MS + 1;
+      pruneCache(db, { ...getDefaultRetentionConfig(), failedJobs: DAY_MS }, { now: Date.now() });
+      scheduler.refreshQueues();
       for (const [chatId, jobType] of cases) {
-        expect(jobsOf(chatId, jobType).map((job) => job.status)).toEqual([
-          'pending',
-        ])
+        expect(jobsOf(chatId, jobType).map((job) => job.status)).toEqual(["pending"]);
       }
-    })
+    });
 
-    it('queues a chat again once tg chats sync cleared its failed job', () => {
+    it("queues a chat again once tg chats sync cleared its failed job", () => {
       const chat = {
         id: 1234567890,
         peerId: -1001234567890,
-        type: 'channel' as const,
-        title: 'Example News',
-        username: 'examplenews',
+        type: "channel" as const,
+        title: "Example News",
+        username: "examplenews",
         memberCount: 5000,
-      }
-      applySyncMode(db, chat, 'on')
-      scheduler.refreshQueues()
-      const [firstPage] = jobsOf(chat.peerId, SyncJobType.InitialLoad)
-      failJob(firstPage!.id)
+      };
+      applySyncMode(db, chat, "on");
+      scheduler.refreshQueues();
+      const [firstPage] = jobsOf(chat.peerId, SyncJobType.InitialLoad);
+      failJob(firstPage!.id);
 
-      scheduler.refreshQueues()
-      expect(jobsService.getPendingJobs()).toEqual([])
+      scheduler.refreshQueues();
+      expect(jobsService.getPendingJobs()).toEqual([]);
 
-      expect(applySyncMode(db, chat, 'on')).toMatchObject({
+      expect(applySyncMode(db, chat, "on")).toMatchObject({
         changed: false,
         clearedFailedJobs: 1,
-      })
-      scheduler.refreshQueues()
+      });
+      scheduler.refreshQueues();
       expect(jobsService.getPendingJobs()).toMatchObject([
         { chat_id: chat.peerId, job_type: SyncJobType.InitialLoad },
-      ])
-    })
+      ]);
+    });
 
-    it('queues the first page for an enabled chat without a cursor', () => {
-      seed(1, { historyComplete: false })
-      chatSyncState.incrementSyncedMessages(1, 3)
-      seed(2, { enabled: false, historyComplete: false })
+    it("queues the first page for an enabled chat without a cursor", () => {
+      seed(1, { historyComplete: false });
+      chatSyncState.incrementSyncedMessages(1, 3);
+      seed(2, { enabled: false, historyComplete: false });
 
-      scheduler.refreshQueues()
-      scheduler.refreshQueues()
+      scheduler.refreshQueues();
+      scheduler.refreshQueues();
 
-      expect(jobsOf(1, SyncJobType.InitialLoad)).toHaveLength(1)
-      expect(jobsService.getJobsForChat(2)).toHaveLength(0)
-    })
-  })
+      expect(jobsOf(1, SyncJobType.InitialLoad)).toHaveLength(1);
+      expect(jobsService.getJobsForChat(2)).toHaveLength(0);
+    });
+  });
 
-  describe('lanes', () => {
+  describe("lanes", () => {
     const laneOf = (jobType: string) =>
       jobType === SyncJobType.ForwardCatchup
-        ? 'catchup'
+        ? "catchup"
         : jobType === SyncJobType.InitialLoad
-          ? 'firstPage'
-          : 'history'
+          ? "firstPage"
+          : "history";
 
     function queue(jobType: SyncJobType, count: number, priority = 1) {
       for (let i = 0; i < count; i++) {
@@ -761,419 +739,410 @@ describe('SyncScheduler', () => {
           chat_id: 1000 + i,
           job_type: jobType,
           priority,
-        })
+        });
       }
     }
 
     /** Take `count` jobs the way processJobs does: peek, run, record */
     function run(count: number): string[] {
-      const lanes: string[] = []
+      const lanes: string[] = [];
       for (let i = 0; i < count; i++) {
-        const job = scheduler.getNextJob()
-        if (!job) break
-        jobsService.markRunning(job.id)
-        jobsService.markCompleted(job.id)
-        scheduler.recordJobRun(job)
-        lanes.push(laneOf(job.job_type))
+        const job = scheduler.getNextJob();
+        if (!job) break;
+        jobsService.markRunning(job.id);
+        jobsService.markCompleted(job.id);
+        scheduler.recordJobRun(job);
+        lanes.push(laneOf(job.job_type));
       }
-      return lanes
+      return lanes;
     }
 
-    it('take turns: catch-up, first page, catch-up, history', () => {
-      queue(SyncJobType.ForwardCatchup, 10)
-      queue(SyncJobType.InitialLoad, 10)
-      queue(SyncJobType.BackwardHistory, 5)
-      queue(SyncJobType.FullSync, 5)
+    it("take turns: catch-up, first page, catch-up, history", () => {
+      queue(SyncJobType.ForwardCatchup, 10);
+      queue(SyncJobType.InitialLoad, 10);
+      queue(SyncJobType.BackwardHistory, 5);
+      queue(SyncJobType.FullSync, 5);
 
       expect(run(8)).toEqual([
-        'catchup',
-        'firstPage',
-        'catchup',
-        'history',
-        'catchup',
-        'firstPage',
-        'catchup',
-        'history',
-      ])
-    })
+        "catchup",
+        "firstPage",
+        "catchup",
+        "history",
+        "catchup",
+        "firstPage",
+        "catchup",
+        "history",
+      ]);
+    });
 
-    it('give an empty lane slot to the first lane with work', () => {
-      queue(SyncJobType.InitialLoad, 10)
-      queue(SyncJobType.BackwardHistory, 10)
+    it("give an empty lane slot to the first lane with work", () => {
+      queue(SyncJobType.InitialLoad, 10);
+      queue(SyncJobType.BackwardHistory, 10);
       // No catch-up: its slots go to first pages
-      expect(run(4)).toEqual(['firstPage', 'firstPage', 'firstPage', 'history'])
+      expect(run(4)).toEqual(["firstPage", "firstPage", "firstPage", "history"]);
 
-      jobsService.deletePendingOfType(SyncJobType.InitialLoad)
-      queue(SyncJobType.ForwardCatchup, 10)
+      jobsService.deletePendingOfType(SyncJobType.InitialLoad);
+      queue(SyncJobType.ForwardCatchup, 10);
       // No first pages: their slot goes to catch-up
-      expect(run(4)).toEqual(['catchup', 'catchup', 'catchup', 'history'])
+      expect(run(4)).toEqual(["catchup", "catchup", "catchup", "history"]);
 
-      jobsService.deletePendingOfType(SyncJobType.ForwardCatchup)
-      expect(run(3)).toEqual(['history', 'history', 'history'])
-    })
+      jobsService.deletePendingOfType(SyncJobType.ForwardCatchup);
+      expect(run(3)).toEqual(["history", "history", "history"]);
+    });
 
-    it('give the slot of a lane whose jobs all wait for a retry to the next lane', () => {
-      const now = 1_700_000_000_000
-      Date.now = () => now
+    it("give the slot of a lane whose jobs all wait for a retry to the next lane", () => {
+      const now = 1_700_000_000_000;
+      Date.now = () => now;
       const history = jobsService.create({
         chat_id: 2000,
         job_type: SyncJobType.BackwardHistory,
         priority: 1,
-      })
-      db.run('UPDATE sync_jobs SET next_run_at = ? WHERE id = ?', [
-        now + 60_000,
-        history.id,
-      ])
-      queue(SyncJobType.InitialLoad, 1)
+      });
+      db.run("UPDATE sync_jobs SET next_run_at = ? WHERE id = ?", [now + 60_000, history.id]);
+      queue(SyncJobType.InitialLoad, 1);
 
       // Catch-up, first page and catch-up slots used: it is history's turn
-      for (let i = 0; i < 3; i++) scheduler.recordJobRun(history)
-      expect(scheduler.getNextJob()?.job_type).toBe(SyncJobType.InitialLoad)
+      for (let i = 0; i < 3; i++) scheduler.recordJobRun(history);
+      expect(scheduler.getNextJob()?.job_type).toBe(SyncJobType.InitialLoad);
 
-      Date.now = () => now + 60_000
-      expect(scheduler.getNextJob()?.id).toBe(history.id)
-    })
+      Date.now = () => now + 60_000;
+      expect(scheduler.getNextJob()?.id).toBe(history.id);
+    });
 
-    it('only move to the next slot when a job ran', () => {
-      queue(SyncJobType.ForwardCatchup, 2)
-      queue(SyncJobType.InitialLoad, 2)
+    it("only move to the next slot when a job ran", () => {
+      queue(SyncJobType.ForwardCatchup, 2);
+      queue(SyncJobType.InitialLoad, 2);
 
-      const first = scheduler.getNextJob()
-      expect(scheduler.getNextJob()).toEqual(first)
-      expect(first?.job_type).toBe(SyncJobType.ForwardCatchup)
+      const first = scheduler.getNextJob();
+      expect(scheduler.getNextJob()).toEqual(first);
+      expect(first?.job_type).toBe(SyncJobType.ForwardCatchup);
 
-      scheduler.recordJobRun(first!)
+      scheduler.recordJobRun(first!);
       // The catch-up job is still pending, but it is the first page's turn
-      expect(scheduler.getNextJob()?.job_type).toBe(SyncJobType.InitialLoad)
-    })
+      expect(scheduler.getNextJob()?.job_type).toBe(SyncJobType.InitialLoad);
+    });
 
-    it('run jobs inside a lane by priority, then age, then id', () => {
-      const realNow = Date.now
+    it("run jobs inside a lane by priority, then age, then id", () => {
+      const realNow = Date.now;
       try {
-        Date.now = () => 1_700_000_000_000
+        Date.now = () => 1_700_000_000_000;
         const medium = jobsService.create({
           chat_id: 1,
           job_type: SyncJobType.BackwardHistory,
           priority: SyncPriority.Medium,
-        })
+        });
         const high1 = jobsService.create({
           chat_id: 2,
           job_type: SyncJobType.BackwardHistory,
           priority: SyncPriority.High,
-        })
+        });
         const high2 = jobsService.create({
           chat_id: 3,
           job_type: SyncJobType.FullSync,
           priority: SyncPriority.High,
-        })
-        Date.now = () => 1_699_999_999_000
+        });
+        Date.now = () => 1_699_999_999_000;
         const older = jobsService.create({
           chat_id: 4,
           job_type: SyncJobType.BackwardHistory,
           priority: SyncPriority.High,
-        })
+        });
 
-        const order: number[] = []
+        const order: number[] = [];
         for (let i = 0; i < 4; i++) {
           const job = jobsService.getNextPendingOfTypes([
             SyncJobType.BackwardHistory,
             SyncJobType.FullSync,
-          ])!
-          order.push(job.id)
-          jobsService.markRunning(job.id)
+          ])!;
+          order.push(job.id);
+          jobsService.markRunning(job.id);
         }
-        expect(order).toEqual([older.id, high1.id, high2.id, medium.id])
+        expect(order).toEqual([older.id, high1.id, high2.id, medium.id]);
       } finally {
-        Date.now = realNow
+        Date.now = realNow;
       }
-    })
-  })
+    });
+  });
 
-  describe('getNextJob', () => {
-    it('returns highest priority job first', () => {
+  describe("getNextJob", () => {
+    it("returns highest priority job first", () => {
       // Queue jobs with different priorities
       jobsService.create({
         chat_id: 100,
         job_type: SyncJobType.BackwardHistory,
         priority: SyncPriority.Background,
-      })
+      });
       jobsService.create({
         chat_id: 200,
         job_type: SyncJobType.ForwardCatchup,
         priority: SyncPriority.Realtime,
-      })
+      });
       jobsService.create({
         chat_id: 300,
         job_type: SyncJobType.InitialLoad,
         priority: SyncPriority.Medium,
-      })
+      });
 
-      const nextJob = scheduler.getNextJob()
-      expect(nextJob).not.toBeNull()
-      expect(nextJob?.chat_id).toBe(200) // Realtime priority is highest
-    })
+      const nextJob = scheduler.getNextJob();
+      expect(nextJob).not.toBeNull();
+      expect(nextJob?.chat_id).toBe(200); // Realtime priority is highest
+    });
 
-    it('returns null when no pending jobs', () => {
-      expect(scheduler.getNextJob()).toBeNull()
-    })
-  })
+    it("returns null when no pending jobs", () => {
+      expect(scheduler.getNextJob()).toBeNull();
+    });
+  });
 
-  describe('getStatus', () => {
-    it('returns current scheduler status', () => {
+  describe("getStatus", () => {
+    it("returns current scheduler status", () => {
       // Add some jobs
       jobsService.create({
         chat_id: 100,
         job_type: SyncJobType.ForwardCatchup,
         priority: SyncPriority.High,
-      })
+      });
       const runningJob = jobsService.create({
         chat_id: 200,
         job_type: SyncJobType.BackwardHistory,
         priority: SyncPriority.Background,
-      })
-      jobsService.markRunning(runningJob.id)
+      });
+      jobsService.markRunning(runningJob.id);
 
-      const status = scheduler.getStatus()
+      const status = scheduler.getStatus();
 
-      expect(status.pendingJobs).toBe(1)
-      expect(status.runningJobs).toBe(1)
-    })
-  })
+      expect(status.pendingJobs).toBe(1);
+      expect(status.runningJobs).toBe(1);
+    });
+  });
 
-  describe('recoverCrashedJobs', () => {
-    it('recovers running jobs from crashed daemon', () => {
+  describe("recoverCrashedJobs", () => {
+    it("recovers running jobs from crashed daemon", () => {
       const job1 = jobsService.create({
         chat_id: 100,
         job_type: SyncJobType.ForwardCatchup,
         priority: SyncPriority.High,
-      })
+      });
       const job2 = jobsService.create({
         chat_id: 200,
         job_type: SyncJobType.BackwardHistory,
         priority: SyncPriority.Background,
-      })
+      });
 
       // Simulate jobs being in running state (daemon crashed)
-      jobsService.markRunning(job1.id)
-      jobsService.markRunning(job2.id)
+      jobsService.markRunning(job1.id);
+      jobsService.markRunning(job2.id);
 
       // Verify jobs are running
-      expect(jobsService.getRunningJobs()).toHaveLength(2)
-      expect(scheduler.getNextJob()).toBeNull() // No pending jobs
+      expect(jobsService.getRunningJobs()).toHaveLength(2);
+      expect(scheduler.getNextJob()).toBeNull(); // No pending jobs
 
       // Recover crashed jobs
-      const recovered = scheduler.recoverCrashedJobs()
+      const recovered = scheduler.recoverCrashedJobs();
 
-      expect(recovered).toBe(2)
-      expect(jobsService.getRunningJobs()).toHaveLength(0)
+      expect(recovered).toBe(2);
+      expect(jobsService.getRunningJobs()).toHaveLength(0);
 
       // Now jobs should be available
-      const nextJob = scheduler.getNextJob()
-      expect(nextJob).not.toBeNull()
-    })
-  })
+      const nextJob = scheduler.getNextJob();
+      expect(nextJob).not.toBeNull();
+    });
+  });
 
-  describe('initializeForStartup with old pending jobs', () => {
-    it('drops pending catch-ups and queues them only where due', async () => {
+  describe("initializeForStartup with old pending jobs", () => {
+    it("drops pending catch-ups and queues them only where due", async () => {
       // 0.1.4 left a pending catch-up for every enabled chat
       for (const chatId of [1, 2]) {
         chatSyncState.upsert({
           chat_id: chatId,
-          chat_type: 'private',
+          chat_type: "private",
           sync_priority: SyncPriority.High,
           sync_enabled: true,
           forward_cursor: 1000,
           backward_cursor: 1,
-        })
-        chatSyncState.markHistoryComplete(chatId)
+        });
+        chatSyncState.markHistoryComplete(chatId);
         jobsService.create({
           chat_id: chatId,
           job_type: SyncJobType.ForwardCatchup,
           priority: SyncPriority.Realtime,
-        })
+        });
       }
-      chatSyncState.raiseTopMessageId(1, 1000)
-      chatSyncState.raiseTopMessageId(2, 1150)
+      chatSyncState.raiseTopMessageId(1, 1000);
+      chatSyncState.raiseTopMessageId(2, 1150);
 
-      await scheduler.initializeForStartup()
+      await scheduler.initializeForStartup();
 
-      expect(jobsService.getJobsForChat(1)).toHaveLength(0)
-      const pending = jobsService.getPendingJobs()
-      expect(pending).toHaveLength(1)
+      expect(jobsService.getJobsForChat(1)).toHaveLength(0);
+      const pending = jobsService.getPendingJobs();
+      expect(pending).toHaveLength(1);
       expect(pending[0]).toMatchObject({
         chat_id: 2,
         job_type: SyncJobType.ForwardCatchup,
-      })
-    })
-  })
+      });
+    });
+  });
 
-  describe('initializeForStartup with pending jobs of other chats', () => {
-    it('drops jobs of disabled chats and aligns the rest to their tier', async () => {
+  describe("initializeForStartup with pending jobs of other chats", () => {
+    it("drops jobs of disabled chats and aligns the rest to their tier", async () => {
       chatSyncState.upsert({
         chat_id: 1,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
         forward_cursor: 100,
         backward_cursor: 50,
-      })
-      chatSyncState.raiseTopMessageId(1, 100)
+      });
+      chatSyncState.raiseTopMessageId(1, 100);
       chatSyncState.upsert({
         chat_id: -4001,
-        chat_type: 'group',
+        chat_type: "group",
         member_count: 50,
         sync_priority: SyncPriority.Medium,
         sync_enabled: true,
-      })
+      });
       chatSyncState.upsert({
         chat_id: -1001234567890,
-        chat_type: 'channel',
+        chat_type: "channel",
         sync_priority: SyncPriority.Low,
         sync_enabled: false,
         forward_cursor: 10,
-      })
+      });
       // Jobs queued by an older version
       const history = jobsService.create({
         chat_id: 1,
         job_type: SyncJobType.BackwardHistory,
         priority: SyncPriority.Background,
-      })
+      });
       const firstPage = jobsService.create({
         chat_id: -4001,
         job_type: SyncJobType.InitialLoad,
         priority: SyncPriority.High,
-      })
+      });
       jobsService.create({
         chat_id: -1001234567890,
         job_type: SyncJobType.BackwardHistory,
         priority: SyncPriority.Background,
-      })
+      });
       jobsService.create({
         chat_id: 777,
         job_type: SyncJobType.InitialLoad,
         priority: SyncPriority.High,
-      })
+      });
 
-      await scheduler.initializeForStartup()
+      await scheduler.initializeForStartup();
 
-      const pending = jobsService.getPendingJobs()
-      expect(
-        pending.map((job) => [job.id, job.chat_id, job.priority]).sort(),
-      ).toEqual(
+      const pending = jobsService.getPendingJobs();
+      expect(pending.map((job) => [job.id, job.chat_id, job.priority]).sort()).toEqual(
         [
           [history.id, 1, SyncPriority.High],
           [firstPage.id, -4001, SyncPriority.Medium],
         ].sort(),
-      )
-    })
-  })
+      );
+    });
+  });
 
-  describe('initializeForStartup with failed jobs', () => {
-    it('deletes every failed job and queues its chat again', async () => {
-      const t0 = 1_700_000_000_000
-      Date.now = () => t0
+  describe("initializeForStartup with failed jobs", () => {
+    it("deletes every failed job and queues its chat again", async () => {
+      const t0 = 1_700_000_000_000;
+      Date.now = () => t0;
       // No cursor yet: the first page failed in this very millisecond
       chatSyncState.upsert({
         chat_id: 1,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
-      })
+      });
       const firstPage = jobsService.create({
         chat_id: 1,
         job_type: SyncJobType.InitialLoad,
         priority: SyncPriority.High,
-      })
-      failJob(firstPage.id)
+      });
+      failJob(firstPage.id);
       // Behind, with a failed catch-up an older version left
       chatSyncState.upsert({
         chat_id: 2,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
         forward_cursor: 1000,
         backward_cursor: 1,
-      })
-      chatSyncState.markHistoryComplete(2)
-      chatSyncState.raiseTopMessageId(2, 1150)
+      });
+      chatSyncState.markHistoryComplete(2);
+      chatSyncState.raiseTopMessageId(2, 1150);
       db.run(
         `INSERT INTO sync_jobs (chat_id, job_type, priority, status, error_message, completed_at)
          VALUES (2, 'forward_catchup', 0, 'failed', 'Rate limited: wait 30s', ?)`,
         [t0 - 60_000],
-      )
+      );
       // History waiting for its third try
       chatSyncState.upsert({
         chat_id: 3,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
         forward_cursor: 1000,
         backward_cursor: 500,
-      })
-      chatSyncState.raiseTopMessageId(3, 1000)
+      });
+      chatSyncState.raiseTopMessageId(3, 1000);
       const history = jobsService.create({
         chat_id: 3,
         job_type: SyncJobType.BackwardHistory,
         priority: SyncPriority.High,
-      })
-      db.run(
-        'UPDATE sync_jobs SET attempts = 2, next_run_at = ? WHERE id = ?',
-        [t0 + 240_000, history.id],
-      )
+      });
+      db.run("UPDATE sync_jobs SET attempts = 2, next_run_at = ? WHERE id = ?", [
+        t0 + 240_000,
+        history.id,
+      ]);
 
-      await scheduler.initializeForStartup()
+      await scheduler.initializeForStartup();
 
-      expect(jobsService.getFailedJobs(10)).toEqual([])
+      expect(jobsService.getFailedJobs(10)).toEqual([]);
       expect(jobsService.getJobsForChat(1)).toMatchObject([
-        { job_type: SyncJobType.InitialLoad, status: 'pending', attempts: 0 },
-      ])
-      expect(jobsService.getJobsForChat(1)[0]?.id).not.toBe(firstPage.id)
+        { job_type: SyncJobType.InitialLoad, status: "pending", attempts: 0 },
+      ]);
+      expect(jobsService.getJobsForChat(1)[0]?.id).not.toBe(firstPage.id);
       expect(jobsService.getJobsForChat(2)).toMatchObject([
-        { job_type: SyncJobType.ForwardCatchup, status: 'pending' },
-      ])
+        { job_type: SyncJobType.ForwardCatchup, status: "pending" },
+      ]);
       expect(jobsService.getJobsForChat(3)).toMatchObject([
         {
           id: history.id,
-          status: 'pending',
+          status: "pending",
           attempts: 2,
           next_run_at: t0 + 240_000,
         },
-      ])
-    })
-  })
+      ]);
+    });
+  });
 
-  describe('initializeForStartup with crashed jobs', () => {
-    it('recovers crashed jobs during initialization', async () => {
+  describe("initializeForStartup with crashed jobs", () => {
+    it("recovers crashed jobs during initialization", async () => {
       // Create a chat
       chatSyncState.upsert({
         chat_id: 100,
-        chat_type: 'private',
+        chat_type: "private",
         sync_priority: SyncPriority.High,
         sync_enabled: true,
-      })
+      });
 
       // Create a job and mark it as running (simulating crash)
       const crashedJob = jobsService.create({
         chat_id: 100,
         job_type: SyncJobType.BackwardHistory,
         priority: SyncPriority.Background,
-      })
-      jobsService.markRunning(crashedJob.id)
+      });
+      jobsService.markRunning(crashedJob.id);
 
       // Verify job is stuck in running state
-      expect(jobsService.getById(crashedJob.id)?.status).toBe(
-        SyncJobStatus.Running,
-      )
+      expect(jobsService.getById(crashedJob.id)?.status).toBe(SyncJobStatus.Running);
 
       // Initialize scheduler (should recover crashed job first)
-      await scheduler.initializeForStartup()
+      await scheduler.initializeForStartup();
 
       // Verify crashed job was recovered
-      const recoveredJob = jobsService.getById(crashedJob.id)
-      expect(recoveredJob?.status).toBe(SyncJobStatus.Pending)
-      expect(recoveredJob?.error_message).toBe(
-        'Daemon crashed during execution',
-      )
-    })
-  })
-})
+      const recoveredJob = jobsService.getById(crashedJob.id);
+      expect(recoveredJob?.status).toBe(SyncJobStatus.Pending);
+      expect(recoveredJob?.error_message).toBe("Daemon crashed during execution");
+    });
+  });
+});

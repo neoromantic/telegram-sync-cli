@@ -13,9 +13,9 @@ export interface FloodWaitOptions {
    * raised while the wait is being set up would start it with an aborted
    * signal, which mtcute ignores
    */
-  onWait?: () => void
+  onWait?: () => void;
   /** How long the wait may last before it fails the test */
-  guardMs?: number
+  guardMs?: number;
 }
 
 export function waitLikeFloodWait(
@@ -23,22 +23,17 @@ export function waitLikeFloodWait(
   { onWait, guardMs = 1500 }: FloodWaitOptions = {},
 ): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
-    const signal = params?.abortSignal
-    const timers: ReturnType<typeof setTimeout>[] = []
+    const signal = params?.abortSignal;
+    const timers: ReturnType<typeof setTimeout>[] = [];
     const settle = (reason: unknown) => {
-      for (const timer of timers) clearTimeout(timer)
-      reject(reason)
-    }
+      for (const timer of timers) clearTimeout(timer);
+      reject(reason);
+    };
 
-    signal?.addEventListener('abort', () => settle(signal.reason), {
+    signal?.addEventListener("abort", () => settle(signal.reason), {
       once: true,
-    })
-    if (onWait) timers.push(setTimeout(onWait, 5))
-    timers.push(
-      setTimeout(
-        () => settle(new Error('FLOOD_WAIT was not cut short')),
-        guardMs,
-      ),
-    )
-  })
+    });
+    if (onWait) timers.push(setTimeout(onWait, 5));
+    timers.push(setTimeout(() => settle(new Error("FLOOD_WAIT was not cut short")), guardMs));
+  });
 }

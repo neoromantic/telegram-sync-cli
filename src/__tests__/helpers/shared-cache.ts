@@ -2,21 +2,21 @@
  * The shared cache of 0.3 and older in the cache-layout tests: its row
  * counts, and an older tg that keeps it open
  */
-import { Database } from 'bun:sqlite'
+import { Database } from "bun:sqlite";
 
 /** Rows of the tables that make a shared cache worth keeping */
 export function rowCounts(path: string) {
-  const db = new Database(path, { readonly: true })
+  const db = new Database(path, { readonly: true });
   try {
     const count = (table: string) =>
-      (db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
+      (db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
     return {
-      messages_cache: count('messages_cache'),
-      chats_cache: count('chats_cache'),
-      users_cache: count('users_cache'),
-    }
+      messages_cache: count("messages_cache"),
+      chats_cache: count("chats_cache"),
+      users_cache: count("users_cache"),
+    };
   } finally {
-    db.close()
+    db.close();
   }
 }
 
@@ -24,9 +24,9 @@ export function rowCounts(path: string) {
 export function holdOpen(path: string) {
   const holder = Bun.spawn(
     [
-      'bun',
-      '--no-env-file',
-      '-e',
+      "bun",
+      "--no-env-file",
+      "-e",
       `
         import { Database } from 'bun:sqlite'
         const db = new Database(process.env.HOLD_PATH)
@@ -38,25 +38,25 @@ export function holdOpen(path: string) {
     ],
     {
       env: { ...process.env, HOLD_PATH: path },
-      stdin: 'pipe',
-      stdout: 'pipe',
+      stdin: "pipe",
+      stdout: "pipe",
     },
-  )
+  );
   return {
     pid: holder.pid,
     async ready() {
-      const decoder = new TextDecoder()
-      let text = ''
+      const decoder = new TextDecoder();
+      let text = "";
       for await (const chunk of holder.stdout) {
-        text += decoder.decode(chunk, { stream: true })
-        if (text.includes('open')) return
+        text += decoder.decode(chunk, { stream: true });
+        if (text.includes("open")) return;
       }
-      throw new Error('holder exited before it opened the file')
+      throw new Error("holder exited before it opened the file");
     },
     async release() {
-      holder.stdin.write('done\n')
-      holder.stdin.end()
-      await holder.exited
+      holder.stdin.write("done\n");
+      holder.stdin.end();
+      await holder.exited;
     },
-  }
+  };
 }

@@ -3,34 +3,32 @@
  * made-up content. The shape follows what Telegram returns for a message
  * sent with rich Markdown.
  */
-import { Long, type tl } from '@mtcute/bun'
+import { Long, type tl } from "@mtcute/bun";
 
 export const plain = (text: string): tl.RawTextPlain => ({
-  _: 'textPlain',
+  _: "textPlain",
   text,
-})
+});
 
 export const concat = (...texts: tl.TypeRichText[]): tl.RawTextConcat => ({
-  _: 'textConcat',
+  _: "textConcat",
   texts,
-})
+});
 
-export const paragraph = (
-  text: tl.TypeRichText | string,
-): tl.RawPageBlockParagraph => ({
-  _: 'pageBlockParagraph',
-  text: typeof text === 'string' ? plain(text) : text,
-})
+export const paragraph = (text: tl.TypeRichText | string): tl.RawPageBlockParagraph => ({
+  _: "pageBlockParagraph",
+  text: typeof text === "string" ? plain(text) : text,
+});
 
 export function cell(
   text: tl.TypeRichText | string,
   extra: Partial<tl.RawPageTableCell> = {},
 ): tl.RawPageTableCell {
   return {
-    _: 'pageTableCell',
-    text: typeof text === 'string' ? plain(text) : text,
+    _: "pageTableCell",
+    text: typeof text === "string" ? plain(text) : text,
     ...extra,
-  }
+  };
 }
 
 export function richMessage(
@@ -38,12 +36,12 @@ export function richMessage(
   extra: Partial<tl.RawRichMessage> = {},
 ): tl.RawRichMessage {
   return {
-    _: 'richMessage',
+    _: "richMessage",
     blocks,
     photos: [],
     documents: [],
     ...extra,
-  }
+  };
 }
 
 /** A message whose content is these blocks: its own text is empty */
@@ -54,61 +52,56 @@ export function richTlMessage(
   extra: Partial<tl.RawRichMessage> = {},
 ): tl.RawMessage {
   return {
-    _: 'message',
+    _: "message",
     id,
     peerId,
     date: 1_760_000_000 + id,
-    message: '',
+    message: "",
     richMessage: richMessage(blocks, extra),
-  }
+  };
 }
 
 /** A short made-up report: a heading, a paragraph and a table */
 export const REPORT_BLOCKS: tl.TypePageBlock[] = [
-  { _: 'pageBlockHeading1', text: plain('Garden report') },
-  paragraph(
-    concat(plain('Harvest is '), { _: 'textBold', text: plain('on track') }),
-  ),
+  { _: "pageBlockHeading1", text: plain("Garden report") },
+  paragraph(concat(plain("Harvest is "), { _: "textBold", text: plain("on track") })),
   {
-    _: 'pageBlockTable',
-    title: { _: 'textEmpty' },
+    _: "pageBlockTable",
+    title: { _: "textEmpty" },
     rows: [
       {
-        _: 'pageTableRow',
-        cells: [
-          cell('Crop', { header: true }),
-          cell('Kg', { header: true, alignRight: true }),
-        ],
+        _: "pageTableRow",
+        cells: [cell("Crop", { header: true }), cell("Kg", { header: true, alignRight: true })],
       },
       {
-        _: 'pageTableRow',
-        cells: [cell('Zucchini'), cell('12', { alignRight: true })],
+        _: "pageTableRow",
+        cells: [cell("Zucchini"), cell("12", { alignRight: true })],
       },
     ],
   },
-]
+];
 
 export const REPORT_TEXT = [
-  '# Garden report',
-  '',
-  'Harvest is **on track**',
-  '',
-  '| Crop | Kg |',
-  '|---|---:|',
-  '| Zucchini | 12 |',
-].join('\n')
+  "# Garden report",
+  "",
+  "Harvest is **on track**",
+  "",
+  "| Crop | Kg |",
+  "|---|---:|",
+  "| Zucchini | 12 |",
+].join("\n");
 
 /** A document of a rich message, with this file name */
 export function namedDocument(id: string, fileName: string): tl.RawDocument {
   return {
-    _: 'document',
+    _: "document",
     id: Long.fromString(id),
-    accessHash: Long.fromString('5000000000000000001'),
+    accessHash: Long.fromString("5000000000000000001"),
     fileReference: new Uint8Array([1, 2, 3]),
     date: 1_760_000_000,
-    mimeType: 'application/pdf',
+    mimeType: "application/pdf",
     size: 2048,
     dcId: 2,
-    attributes: [{ _: 'documentAttributeFilename', fileName }],
-  }
+    attributes: [{ _: "documentAttributeFilename", fileName }],
+  };
 }

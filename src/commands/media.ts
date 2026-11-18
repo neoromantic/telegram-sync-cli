@@ -1,7 +1,7 @@
-import { defineCommand } from 'citty'
+import { defineCommand } from "citty";
 
-import { cleanMediaCommand } from './media/clean'
-import { downloadMediaCommand } from './media/download'
+import { cleanMediaCommand } from "./media/clean";
+import { downloadMediaCommand } from "./media/download";
 
 /**
  * Media subcommand group: the account's cache of message files,
@@ -9,13 +9,13 @@ import { downloadMediaCommand } from './media/download'
  */
 export const mediaCommand = defineCommand({
   meta: {
-    name: 'media',
+    name: "media",
     description: "Files of messages, kept in the account's media cache",
   },
   subCommands: {
     download: downloadMediaCommand,
     clean: cleanMediaCommand,
   },
-})
+});
 
-export { cleanMediaCommand, downloadMediaCommand }
+export { cleanMediaCommand, downloadMediaCommand };

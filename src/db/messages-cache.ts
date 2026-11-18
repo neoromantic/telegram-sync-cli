@@ -2,69 +2,69 @@
  * Messages cache service
  * Provides typed access to the messages_cache table
  */
-import type { Database } from 'bun:sqlite'
-import { extractAttachment } from '../utils/attachment'
-import { richMessageText } from '../utils/rich-message'
-import { sharesAccountMessageIds } from '../utils/telegram-peer-ids'
+import type { Database } from "bun:sqlite";
+import { extractAttachment } from "../utils/attachment";
+import { richMessageText } from "../utils/rich-message";
+import { sharesAccountMessageIds } from "../utils/telegram-peer-ids";
 import {
   createGroupParticipation,
   type GroupParticipation,
   isOwnOrdinaryMessage,
   nowSeconds,
-} from './group-participation'
-import { createMessageAttachmentsStore } from './message-attachments'
-import { MessageCacheRow } from './sync-schema'
+} from "./group-participation";
+import { createMessageAttachmentsStore } from "./message-attachments";
+import { MessageCacheRow } from "./sync-schema";
 
 /**
  * Input for inserting/updating a message
  */
 export interface MessageInput {
-  chat_id: number
-  message_id: number
-  from_id?: number | null
-  reply_to_id?: number | null
-  forward_from_id?: number | null
-  text?: string | null
-  message_type: string
-  has_media?: boolean
-  media_path?: string | null
-  is_outgoing?: boolean
-  is_edited?: boolean
-  is_pinned?: boolean
-  is_deleted?: boolean
-  edit_date?: number | null
-  date: number
-  raw_json: string
+  chat_id: number;
+  message_id: number;
+  from_id?: number | null;
+  reply_to_id?: number | null;
+  forward_from_id?: number | null;
+  text?: string | null;
+  message_type: string;
+  has_media?: boolean;
+  media_path?: string | null;
+  is_outgoing?: boolean;
+  is_edited?: boolean;
+  is_pinned?: boolean;
+  is_deleted?: boolean;
+  edit_date?: number | null;
+  date: number;
+  raw_json: string;
 }
 
 /** A message ID that more than one private chat or basic group has live */
 export interface AmbiguousMessageId {
-  messageId: number
+  messageId: number;
   /** Marked IDs of those chats, ascending */
-  chatIds: number[]
+  chatIds: number[];
 }
 
 /** Where the message IDs of a delete without chat context live */
 export interface MessageChatLookup {
   /** Message ID → the one private chat or basic group that has it live */
-  chatIds: Map<number, number>
-  ambiguous: AmbiguousMessageId[]
+  chatIds: Map<number, number>;
+  ambiguous: AmbiguousMessageId[];
 }
 
 /** What a delete without chat context marked, and what it left */
 export interface DeleteWithoutChatResult {
-  deleted: number
-  ambiguous: AmbiguousMessageId[]
+  deleted: number;
+  ambiguous: AmbiguousMessageId[];
 }
 
 /** What a write of messages did */
 export interface CacheWriteResult {
   /** The messages written: new rows and updates of cached ones */
-  written: number
+  written: number;
   /** New rows */
-  inserted: number
+  inserted: number;
   /** New messages the group participation rule kept out */
-  skipped: number
+  skipped: number;
 }
 
 /**
@@ -72,9 +72,9 @@ export interface CacheWriteResult {
  */
 export interface MessagesCache {
   /** The group participation rule every write follows */
-  participation: GroupParticipation
+  participation: GroupParticipation;
   /** Insert or update a message (see upsertBatch) */
-  upsert(message: MessageInput): CacheWriteResult
+  upsert(message: MessageInput): CacheWriteResult;
   /**
    * Insert or update messages in one transaction. Own ordinary messages
    * count as participation first, oldest first. A cached message is always
@@ -82,39 +82,34 @@ export interface MessagesCache {
    * (GroupParticipation.canInsert), else it is skipped before anything of
    * it (attachment, search index) is written.
    */
-  upsertBatch(messages: MessageInput[]): CacheWriteResult
+  upsertBatch(messages: MessageInput[]): CacheWriteResult;
   /**
    * IDs of the chat's messages cached with raw_json '{}' (#130), above
    * `afterId`, oldest first
    */
-  listEmptyRawJsonIds(chatId: number, afterId: number, limit: number): number[]
+  listEmptyRawJsonIds(chatId: number, afterId: number, limit: number): number[];
   /** Get a message by chat_id and message_id */
-  get(chatId: number, messageId: number): MessageCacheRow | null
+  get(chatId: number, messageId: number): MessageCacheRow | null;
   /**
    * Find the chat of each message ID among the account's private chats and
    * basic groups, for delete events without chat context
    */
-  findChatIdsByMessageIds(messageIds: number[]): MessageChatLookup
+  findChatIdsByMessageIds(messageIds: number[]): MessageChatLookup;
   /** Mark messages as deleted */
-  markDeleted(chatId: number, messageIds: number[]): void
+  markDeleted(chatId: number, messageIds: number[]): void;
   /**
    * Mark messages as deleted when the chat is unknown, each in the one chat
    * among the account's private chats and basic groups that has it live
    */
-  markDeletedByMessageIds(messageIds: number[]): DeleteWithoutChatResult
+  markDeletedByMessageIds(messageIds: number[]): DeleteWithoutChatResult;
   /** Update message text (for edits) */
-  updateText(
-    chatId: number,
-    messageId: number,
-    newText: string,
-    editDate: number,
-  ): void
+  updateText(chatId: number, messageId: number, newText: string, editDate: number): void;
   /** Get the latest message ID for a chat */
-  getLatestMessageId(chatId: number): number | null
+  getLatestMessageId(chatId: number): number | null;
   /** Get the oldest message ID for a chat */
-  getOldestMessageId(chatId: number): number | null
+  getOldestMessageId(chatId: number): number | null;
   /** Count messages in a chat */
-  countByChatId(chatId: number): number
+  countByChatId(chatId: number): number;
 }
 
 /**
@@ -123,21 +118,21 @@ export interface MessagesCache {
  * fetched_at and updated_at keep the last write that changed something.
  */
 const UPSERT_COLUMNS = [
-  'from_id',
-  'reply_to_id',
-  'forward_from_id',
-  'text',
-  'message_type',
-  'has_media',
-  'media_path',
-  'is_outgoing',
-  'is_edited',
-  'is_pinned',
-  'is_deleted',
-  'edit_date',
-  'date',
-  'raw_json',
-] as const
+  "from_id",
+  "reply_to_id",
+  "forward_from_id",
+  "text",
+  "message_type",
+  "has_media",
+  "media_path",
+  "is_outgoing",
+  "is_edited",
+  "is_pinned",
+  "is_deleted",
+  "edit_date",
+  "date",
+  "raw_json",
+] as const;
 
 /**
  * Create a messages cache service
@@ -158,10 +153,10 @@ export function createMessagesCache(db: Database): MessagesCache {
         $date, $fetched_at, $raw_json, $updated_at
       )
       ON CONFLICT (chat_id, message_id) DO UPDATE SET
-        ${UPSERT_COLUMNS.map((col) => `${col} = excluded.${col}`).join(',\n')},
+        ${UPSERT_COLUMNS.map((col) => `${col} = excluded.${col}`).join(",\n")},
         fetched_at = excluded.fetched_at,
         updated_at = excluded.updated_at
-      WHERE ${UPSERT_COLUMNS.map((col) => `messages_cache.${col} IS NOT excluded.${col}`).join('\n        OR ')}
+      WHERE ${UPSERT_COLUMNS.map((col) => `messages_cache.${col} IS NOT excluded.${col}`).join("\n        OR ")}
     `),
 
     get: db
@@ -214,15 +209,15 @@ export function createMessagesCache(db: Database): MessagesCache {
       SELECT COUNT(*) as count FROM messages_cache
       WHERE chat_id = $chat_id AND is_deleted = 0
     `),
-  }
+  };
 
-  const attachments = createMessageAttachmentsStore(db)
+  const attachments = createMessageAttachmentsStore(db);
 
   // The message and its attachment row change together. Each statement
   // writes only what changed, so a message fetched again unchanged writes
   // nothing.
   function writeMessage(message: MessageInput): void {
-    const now = Date.now()
+    const now = Date.now();
     stmts.upsert.run({
       $chat_id: message.chat_id,
       $message_id: message.message_id,
@@ -230,10 +225,7 @@ export function createMessagesCache(db: Database): MessagesCache {
       $reply_to_id: message.reply_to_id ?? null,
       $forward_from_id: message.forward_from_id ?? null,
       // A rich message has no text of its own: search indexes its blocks
-      $text:
-        message.text ||
-        richMessageText(message.raw_json) ||
-        (message.text ?? null),
+      $text: message.text || richMessageText(message.raw_json) || (message.text ?? null),
       $message_type: message.message_type,
       $has_media: message.has_media ? 1 : 0,
       $media_path: message.media_path ?? null,
@@ -246,180 +238,162 @@ export function createMessagesCache(db: Database): MessagesCache {
       $fetched_at: now,
       $raw_json: message.raw_json,
       $updated_at: now,
-    })
+    });
     // A message without media has no file: skip parsing its raw_json
     attachments.sync(
       message.chat_id,
       message.message_id,
       message.has_media ? extractAttachment(message.raw_json) : null,
-    )
+    );
   }
 
-  const participation = createGroupParticipation(db)
+  const participation = createGroupParticipation(db);
 
   // Inside a caller's transaction this runs as a savepoint. It reads before
   // it writes, so it takes the write lock first: a deferred transaction
   // would fail at once if another process wrote after its read.
-  const upsertMany = db.transaction(
-    (messages: MessageInput[]): CacheWriteResult => {
-      const now = nowSeconds()
-      const own = messages
-        .filter(
-          (message) => message.chat_id < 0 && isOwnOrdinaryMessage(message),
-        )
-        .sort((a, b) => a.date - b.date)
-      for (const message of own) {
-        participation.observeOwnMessage(message.chat_id, message.date, now)
-      }
+  const upsertMany = db.transaction((messages: MessageInput[]): CacheWriteResult => {
+    const now = nowSeconds();
+    const own = messages
+      .filter((message) => message.chat_id < 0 && isOwnOrdinaryMessage(message))
+      .sort((a, b) => a.date - b.date);
+    for (const message of own) {
+      participation.observeOwnMessage(message.chat_id, message.date, now);
+    }
 
-      const result: CacheWriteResult = { written: 0, inserted: 0, skipped: 0 }
-      for (const message of messages) {
-        const key = {
-          $chat_id: message.chat_id,
-          $message_id: message.message_id,
-        }
-        const cached = stmts.exists.get(key) !== null
-        if (
-          !cached &&
-          !participation.canInsert(message.chat_id, message.date, now)
-        ) {
-          result.skipped++
-          continue
-        }
-        writeMessage(message)
-        if (!cached) result.inserted++
-        result.written++
+    const result: CacheWriteResult = { written: 0, inserted: 0, skipped: 0 };
+    for (const message of messages) {
+      const key = {
+        $chat_id: message.chat_id,
+        $message_id: message.message_id,
+      };
+      const cached = stmts.exists.get(key) !== null;
+      if (!cached && !participation.canInsert(message.chat_id, message.date, now)) {
+        result.skipped++;
+        continue;
       }
-      return result
-    },
-  )
+      writeMessage(message);
+      if (!cached) result.inserted++;
+      result.written++;
+    }
+    return result;
+  });
 
   return {
     participation,
 
     upsert(message: MessageInput): CacheWriteResult {
-      return upsertMany.immediate([message])
+      return upsertMany.immediate([message]);
     },
 
-    listEmptyRawJsonIds(
-      chatId: number,
-      afterId: number,
-      limit: number,
-    ): number[] {
+    listEmptyRawJsonIds(chatId: number, afterId: number, limit: number): number[] {
       const rows = stmts.listEmptyRawJsonIds.all({
         $chat_id: chatId,
         $after: afterId,
         $limit: limit,
-      }) as { message_id: number }[]
-      return rows.map((row) => row.message_id)
+      }) as { message_id: number }[];
+      return rows.map((row) => row.message_id);
     },
 
     upsertBatch(messages: MessageInput[]): CacheWriteResult {
-      return upsertMany.immediate(messages)
+      return upsertMany.immediate(messages);
     },
 
     get(chatId: number, messageId: number): MessageCacheRow | null {
-      return stmts.get.get({ $chat_id: chatId, $message_id: messageId }) ?? null
+      return stmts.get.get({ $chat_id: chatId, $message_id: messageId }) ?? null;
     },
 
     findChatIdsByMessageIds(messageIds: number[]): MessageChatLookup {
-      const chatIds = new Map<number, number>()
-      const ambiguous: AmbiguousMessageId[] = []
+      const chatIds = new Map<number, number>();
+      const ambiguous: AmbiguousMessageId[] = [];
 
       for (const messageId of new Set(messageIds)) {
         const rows = stmts.findChatIdsByMessageId.all({
           $message_id: messageId,
-        }) as Array<{ chat_id: number }>
+        }) as Array<{ chat_id: number }>;
         // Each channel and supergroup numbers its own messages, so its rows
         // say nothing about a delete without chat context. The primary key
         // makes the chat IDs unique.
-        const candidates = rows
-          .map((row) => row.chat_id)
-          .filter(sharesAccountMessageIds)
+        const candidates = rows.map((row) => row.chat_id).filter(sharesAccountMessageIds);
 
         if (candidates.length > 1) {
           ambiguous.push({
             messageId,
             chatIds: candidates.sort((a, b) => a - b),
-          })
+          });
         } else if (candidates[0] !== undefined) {
-          chatIds.set(messageId, candidates[0])
+          chatIds.set(messageId, candidates[0]);
         }
       }
 
-      return { chatIds, ambiguous }
+      return { chatIds, ambiguous };
     },
 
     markDeleted(chatId: number, messageIds: number[]): void {
-      const now = Date.now()
+      const now = Date.now();
       const transaction = db.transaction(() => {
         for (const messageId of messageIds) {
           stmts.markDeleted.run({
             $chat_id: chatId,
             $message_id: messageId,
             $now: now,
-          })
+          });
         }
-      })
-      transaction()
+      });
+      transaction();
     },
 
     markDeletedByMessageIds(messageIds: number[]): DeleteWithoutChatResult {
-      if (messageIds.length === 0) return { deleted: 0, ambiguous: [] }
+      if (messageIds.length === 0) return { deleted: 0, ambiguous: [] };
 
-      const lookup = this.findChatIdsByMessageIds(messageIds)
+      const lookup = this.findChatIdsByMessageIds(messageIds);
       if (lookup.chatIds.size === 0) {
-        return { deleted: 0, ambiguous: lookup.ambiguous }
+        return { deleted: 0, ambiguous: lookup.ambiguous };
       }
 
-      const now = Date.now()
+      const now = Date.now();
       db.transaction(() => {
         for (const [messageId, chatId] of lookup.chatIds) {
           stmts.markDeleted.run({
             $chat_id: chatId,
             $message_id: messageId,
             $now: now,
-          })
+          });
         }
-      })()
+      })();
 
-      return { deleted: lookup.chatIds.size, ambiguous: lookup.ambiguous }
+      return { deleted: lookup.chatIds.size, ambiguous: lookup.ambiguous };
     },
 
-    updateText(
-      chatId: number,
-      messageId: number,
-      newText: string,
-      editDate: number,
-    ): void {
+    updateText(chatId: number, messageId: number, newText: string, editDate: number): void {
       stmts.updateText.run({
         $chat_id: chatId,
         $message_id: messageId,
         $text: newText,
         $edit_date: editDate,
         $now: Date.now(),
-      })
+      });
     },
 
     getLatestMessageId(chatId: number): number | null {
       const result = stmts.getLatestMessageId.get({ $chat_id: chatId }) as {
-        max_id: number | null
-      } | null
-      return result?.max_id ?? null
+        max_id: number | null;
+      } | null;
+      return result?.max_id ?? null;
     },
 
     getOldestMessageId(chatId: number): number | null {
       const result = stmts.getOldestMessageId.get({ $chat_id: chatId }) as {
-        min_id: number | null
-      } | null
-      return result?.min_id ?? null
+        min_id: number | null;
+      } | null;
+      return result?.min_id ?? null;
     },
 
     countByChatId(chatId: number): number {
       const result = stmts.countByChatId.get({ $chat_id: chatId }) as {
-        count: number
-      } | null
-      return result?.count ?? 0
+        count: number;
+      } | null;
+      return result?.count ?? 0;
     },
-  }
+  };
 }

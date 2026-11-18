@@ -1,73 +1,72 @@
-import { defineCommand } from 'citty'
+import { defineCommand } from "citty";
 
-import { openAccountCache } from '../../utils/account-cache'
-import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
-import { success } from '../../utils/output'
+import { openAccountCache } from "../../utils/account-cache";
+import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
+import { success } from "../../utils/output";
 import {
   CHAT_ARG_DESCRIPTION,
   MAX_MESSAGE_ID,
   openHistory,
   parseIntegerArg,
   reportHistoryError,
-} from './helpers'
-import { getMessageWithContext, resolveHistoryChat } from './history'
+} from "./helpers";
+import { getMessageWithContext, resolveHistoryChat } from "./history";
 
 /** 2 * 49 + 1 = 99 messages: one getHistory page holds the whole window */
-const MAX_CONTEXT = 49
+const MAX_CONTEXT = 49;
 
 export const getMessageCommand = defineCommand({
   meta: {
-    name: 'get',
+    name: "get",
     description:
-      'Get one message of a chat, with --context messages on each side (newer and older, newest first; cache-first)',
+      "Get one message of a chat, with --context messages on each side (newer and older, newest first; cache-first)",
   },
   args: {
     chat: {
-      type: 'string',
+      type: "string",
       description: CHAT_ARG_DESCRIPTION,
       required: true,
     },
     id: {
-      type: 'string',
-      description: 'Message ID',
+      type: "string",
+      description: "Message ID",
       required: true,
     },
     context: {
-      type: 'string',
+      type: "string",
       description: `Messages to include on each side, 0-${MAX_CONTEXT}`,
-      default: '0',
+      default: "0",
     },
     includeDeleted: {
-      type: 'boolean',
-      description: 'Include deleted messages in the context',
+      type: "boolean",
+      description: "Include deleted messages in the context",
       default: false,
     },
     fresh: {
-      type: 'boolean',
-      description:
-        'Fetch the message and its context from Telegram and cache them',
+      type: "boolean",
+      description: "Fetch the message and its context from Telegram and cache them",
       default: false,
     },
     account: {
-      type: 'string',
+      type: "string",
       description: ACCOUNT_SELECTOR_DESCRIPTION,
     },
   },
   async run({ args }) {
-    const messageId = parseIntegerArg(args.id, 'id', {
+    const messageId = parseIntegerArg(args.id, "id", {
       min: 1,
       max: MAX_MESSAGE_ID - 1,
-    })
-    const context = parseIntegerArg(args.context, 'context', {
+    });
+    const context = parseIntegerArg(args.context, "context", {
       min: 0,
       max: MAX_CONTEXT,
       default: 0,
-    })
-    const { account } = openAccountCache(args.account)
+    });
+    const { account } = openAccountCache(args.account);
 
     try {
-      const deps = openHistory(account.id, 'cli:messages.get')
-      const chat = await resolveHistoryChat(deps.client, args.chat, deps)
+      const deps = openHistory(account.id, "cli:messages.get");
+      const chat = await resolveHistoryChat(deps.client, args.chat, deps);
       const result = await getMessageWithContext({
         cacheDb: deps.cacheDb,
         client: deps.client,
@@ -76,10 +75,10 @@ export const getMessageCommand = defineCommand({
         context,
         includeDeleted: args.includeDeleted ?? false,
         fresh: args.fresh ?? false,
-      })
-      success(result)
+      });
+      success(result);
     } catch (err) {
-      reportHistoryError(err, 'get message')
+      reportHistoryError(err, "get message");
     }
   },
-})
+});

@@ -222,13 +222,13 @@ longer exists since mtcute 0.29.
   `TELEGRAM_SYNC_CLI_DATA_DIR`:
 
   ```ts
-  const env = createTestEnvironment('my-test')
-  env.initDatabase()
-  env.seedAccounts([{ phone: '+15550000000', is_active: true }])
-  createChatsCache(env.openCacheDb(1)).upsertMany(chats) // env.cachePath(1)
-  const result = await runCliSuccess(['chats', 'list'], env.getCliOptions())
-  expect(result.json?.success).toBe(true)
-  env.cleanup()
+  const env = createTestEnvironment("my-test");
+  env.initDatabase();
+  env.seedAccounts([{ phone: "+15550000000", is_active: true }]);
+  createChatsCache(env.openCacheDb(1)).upsertMany(chats); // env.cachePath(1)
+  const result = await runCliSuccess(["chats", "list"], env.getCliOptions());
+  expect(result.json?.success).toBe(true);
+  env.cleanup();
   ```
 
   A test that writes `<dataDir>/cache.db` (the shared cache of 0.3 and older) seeds it from a

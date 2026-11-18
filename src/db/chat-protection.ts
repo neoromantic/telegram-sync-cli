@@ -3,21 +3,21 @@
  * content-protection check of `tg media download`, so a cache hit refuses
  * a protected chat's files offline too. Written only by the CLI.
  */
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 
 /** Why a chat's content is protected */
-export type ChatProtectionReason = 'chat' | 'private_chat'
+export type ChatProtectionReason = "chat" | "private_chat";
 
 export interface ChatProtectionRow {
-  chat_id: number
-  protected: 0 | 1
-  reason: ChatProtectionReason | null
+  chat_id: number;
+  protected: 0 | 1;
+  reason: ChatProtectionReason | null;
   /** When the online check ran, ms */
-  fetched_at: number
+  fetched_at: number;
 }
 
 export interface ChatProtectionStore {
-  get(chatId: number): ChatProtectionRow | null
+  get(chatId: number): ChatProtectionRow | null;
   /**
    * Record an online check, a negative answer too: protection turned off
    * clears the block
@@ -26,7 +26,7 @@ export interface ChatProtectionStore {
     chatId: number,
     result: { protected: boolean; reason: ChatProtectionReason | null },
     fetchedAt: number,
-  ): void
+  ): void;
 }
 
 export function createChatProtectionStore(db: Database): ChatProtectionStore {
@@ -44,11 +44,11 @@ export function createChatProtectionStore(db: Database): ChatProtectionStore {
         reason = excluded.reason,
         fetched_at = excluded.fetched_at
     `),
-  }
+  };
 
   return {
     get(chatId) {
-      return stmts.get.get(chatId) ?? null
+      return stmts.get.get(chatId) ?? null;
     },
 
     record(chatId, result, fetchedAt) {
@@ -57,7 +57,7 @@ export function createChatProtectionStore(db: Database): ChatProtectionStore {
         $protected: result.protected ? 1 : 0,
         $reason: result.protected ? result.reason : null,
         $fetched_at: fetchedAt,
-      })
+      });
     },
-  }
+  };
 }

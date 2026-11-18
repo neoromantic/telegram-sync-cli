@@ -4,23 +4,23 @@
  * Implements window-based rate tracking and flood wait handling
  * as described in docs/rate-limiting.md
  */
-import type { Database, Statement } from 'bun:sqlite'
-import { RateLimitRow } from './schema'
+import type { Database, Statement } from "bun:sqlite";
+import { RateLimitRow } from "./schema";
 
 /** Duration of rate tracking windows in seconds */
-export const RATE_WINDOW_SECONDS = 60
+export const RATE_WINDOW_SECONDS = 60;
 
 /** The span `getStatus` counts calls over, in ms: the last 60 seconds */
-export const RECENT_CALLS_MS = 60_000
+export const RECENT_CALLS_MS = 60_000;
 
 /**
  * Flood wait information for a blocked method
  */
 export interface FloodWaitInfo {
   /** Unix timestamp (seconds) when the block expires */
-  blockedUntil: number
+  blockedUntil: number;
   /** Original wait duration in seconds */
-  waitSeconds: number
+  waitSeconds: number;
 }
 
 /**
@@ -28,20 +28,20 @@ export interface FloodWaitInfo {
  */
 export interface RateLimitStatus {
   /** API calls logged in api_activity in the last 60 seconds */
-  totalCalls: number
+  totalCalls: number;
   /** The same calls by method */
-  callsByMethod: Record<string, number>
+  callsByMethod: Record<string, number>;
   /** Currently active flood waits */
   activeFloodWaits: Array<{
-    method: string
-    blockedUntil: number
-    waitSeconds: number
-  }>
+    method: string;
+    blockedUntil: number;
+    waitSeconds: number;
+  }>;
 }
 
 export interface RateLimitsOptions {
   /** The current time in ms; tests inject it */
-  now?: () => number
+  now?: () => number;
 }
 
 /**
@@ -49,17 +49,17 @@ export interface RateLimitsOptions {
  */
 export class RateLimitsService {
   /** The current time in ms */
-  readonly now: () => number
+  readonly now: () => number;
 
-  private recordCallStmt: Statement
-  private setFloodWaitStmt: Statement
-  private getFloodWaitStmt: Statement
-  private logActivityStmt: Statement
-  private getRecentCallsStmt: Statement
-  private getActiveFloodWaitsStmt: Statement
+  private recordCallStmt: Statement;
+  private setFloodWaitStmt: Statement;
+  private getFloodWaitStmt: Statement;
+  private logActivityStmt: Statement;
+  private getRecentCallsStmt: Statement;
+  private getActiveFloodWaitsStmt: Statement;
 
   constructor(db: Database, options: RateLimitsOptions = {}) {
-    this.now = options.now ?? (() => Date.now())
+    this.now = options.now ?? (() => Date.now());
     // Prepare all statements for better performance
 
     // Record an API call in the current window
@@ -69,7 +69,7 @@ export class RateLimitsService {
       ON CONFLICT(method, window_start) DO UPDATE SET
         call_count = call_count + 1,
         last_call_at = $now
-    `)
+    `);
 
     // Set flood wait for a method
     this.setFloodWaitStmt = db.query(`
@@ -77,7 +77,7 @@ export class RateLimitsService {
       VALUES ($method, $window_start, 0, $now, $flood_wait_until)
       ON CONFLICT(method, window_start) DO UPDATE SET
         flood_wait_until = $flood_wait_until
-    `)
+    `);
 
     // Get flood wait info for a method
     this.getFloodWaitStmt = db
@@ -90,13 +90,13 @@ export class RateLimitsService {
       LIMIT 1
     `,
       )
-      .as(RateLimitRow)
+      .as(RateLimitRow);
 
     // Log API activity
     this.logActivityStmt = db.query(`
       INSERT INTO api_activity (timestamp, method, success, error_code, response_ms, context)
       VALUES ($timestamp, $method, $success, $error_code, $response_ms, $context)
-    `)
+    `);
 
     // Calls by method since a time, for status. The rate windows are
     // calendar minutes; api_activity has each call's own time.
@@ -111,10 +111,10 @@ export class RateLimitsService {
       )
       .as(
         class Row {
-          method!: string
-          total!: number
+          method!: string;
+          total!: number;
         },
-      )
+      );
 
     // Get active flood waits
     this.getActiveFloodWaitsStmt = db
@@ -127,110 +127,110 @@ export class RateLimitsService {
       ORDER BY flood_wait_until ASC
     `,
       )
-      .as(RateLimitRow)
+      .as(RateLimitRow);
   }
 
   private nowSeconds(): number {
-    return Math.floor(this.now() / 1000)
+    return Math.floor(this.now() / 1000);
   }
 
   /**
    * Get the current window start timestamp
    */
   private getCurrentWindowStart(): number {
-    const now = this.nowSeconds()
-    return Math.floor(now / RATE_WINDOW_SECONDS) * RATE_WINDOW_SECONDS
+    const now = this.nowSeconds();
+    return Math.floor(now / RATE_WINDOW_SECONDS) * RATE_WINDOW_SECONDS;
   }
 
   /**
    * Record an API call for rate tracking
    */
   recordCall(method: string): void {
-    const now = this.nowSeconds()
-    const windowStart = this.getCurrentWindowStart()
+    const now = this.nowSeconds();
+    const windowStart = this.getCurrentWindowStart();
 
     this.recordCallStmt.run({
       $method: method,
       $window_start: windowStart,
       $now: now,
-    })
+    });
   }
 
   /**
    * Set flood wait for a method
    */
   setFloodWait(method: string, seconds: number): void {
-    const now = this.nowSeconds()
-    const windowStart = this.getCurrentWindowStart()
-    const blockedUntil = now + seconds
+    const now = this.nowSeconds();
+    const windowStart = this.getCurrentWindowStart();
+    const blockedUntil = now + seconds;
 
     this.setFloodWaitStmt.run({
       $method: method,
       $window_start: windowStart,
       $now: now,
       $flood_wait_until: blockedUntil,
-    })
+    });
   }
 
   /**
    * Get flood wait info for a method
    */
   getFloodWait(method: string): FloodWaitInfo | null {
-    const now = this.nowSeconds()
+    const now = this.nowSeconds();
 
     const row = this.getFloodWaitStmt.get({
       $method: method,
       $now: now,
-    }) as RateLimitRow | null
+    }) as RateLimitRow | null;
 
     if (!row?.flood_wait_until) {
-      return null
+      return null;
     }
 
     // Calculate original wait seconds from window_start
     // The flood_wait_until was set as: window_time + seconds
     // We stored it with the window, so we can approximate
-    const waitSeconds = row.flood_wait_until - row.window_start
+    const waitSeconds = row.flood_wait_until - row.window_start;
 
     return {
       blockedUntil: row.flood_wait_until,
       waitSeconds: waitSeconds > 0 ? waitSeconds : row.flood_wait_until - now,
-    }
+    };
   }
 
   /**
    * Check if a method is currently blocked
    */
   isBlocked(method: string): boolean {
-    return this.getFloodWait(method) !== null
+    return this.getFloodWait(method) !== null;
   }
 
   /**
    * Get time until method is unblocked (0 if not blocked)
    */
   getWaitTime(method: string): number {
-    const floodWait = this.getFloodWait(method)
+    const floodWait = this.getFloodWait(method);
     if (!floodWait) {
-      return 0
+      return 0;
     }
 
-    const now = this.nowSeconds()
-    const remaining = floodWait.blockedUntil - now
+    const now = this.nowSeconds();
+    const remaining = floodWait.blockedUntil - now;
 
-    return Math.max(0, remaining)
+    return Math.max(0, remaining);
   }
 
   /**
    * Log API activity; `timestamp` is when the call started, in ms
    */
   logActivity(entry: {
-    timestamp: number
-    method: string
-    success: number
-    error_code?: number | null
-    error_message?: string | null
-    response_ms?: number | null
-    context?: string | null
+    timestamp: number;
+    method: string;
+    success: number;
+    error_code?: number | null;
+    error_message?: string | null;
+    response_ms?: number | null;
+    context?: string | null;
   }): void {
     this.logActivityStmt.run({
       $timestamp: entry.timestamp,
@@ -239,7 +239,7 @@ export class RateLimitsService {
       $error_code: entry.error_code ?? null,
       $response_ms: entry.response_ms ?? null,
       $context: entry.context ?? null,
-    })
+    });
   }
 
   /**
@@ -247,25 +247,25 @@ export class RateLimitsService {
    * api_activity, and the FLOOD_WAITs still running
    */
   getStatus(): RateLimitStatus {
-    const now = this.nowSeconds()
+    const now = this.nowSeconds();
 
     const methodRows = this.getRecentCallsStmt.all({
       $cutoff: this.now() - RECENT_CALLS_MS,
     }) as Array<{
-      method: string
-      total: number
-    }>
-    let totalCalls = 0
-    const callsByMethod: Record<string, number> = {}
+      method: string;
+      total: number;
+    }>;
+    let totalCalls = 0;
+    const callsByMethod: Record<string, number> = {};
     for (const row of methodRows) {
-      callsByMethod[row.method] = row.total
-      totalCalls += row.total
+      callsByMethod[row.method] = row.total;
+      totalCalls += row.total;
     }
 
     // Get active flood waits
     const floodWaitRows = this.getActiveFloodWaitsStmt.all({
       $now: now,
-    }) as RateLimitRow[]
+    }) as RateLimitRow[];
 
     const activeFloodWaits = floodWaitRows
       .filter((row) => row.flood_wait_until !== null)
@@ -273,13 +273,13 @@ export class RateLimitsService {
         method: row.method,
         blockedUntil: row.flood_wait_until!,
         waitSeconds: row.flood_wait_until! - row.window_start,
-      }))
+      }));
 
     return {
       totalCalls,
       callsByMethod,
       activeFloodWaits,
-    }
+    };
   }
 }
 
@@ -290,5 +290,5 @@ export function createRateLimitsService(
   db: Database,
   options?: RateLimitsOptions,
 ): RateLimitsService {
-  return new RateLimitsService(db, options)
+  return new RateLimitsService(db, options);
 }

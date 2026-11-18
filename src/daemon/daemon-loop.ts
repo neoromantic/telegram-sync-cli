@@ -1,21 +1,16 @@
-import { SyncJobStatus } from '../db/sync-schema'
-import { attemptReconnect, scheduleReconnect } from './daemon-accounts'
-import { detectWake, runDueCatchUps } from './daemon-catch-up'
-import { maybeSyncContacts } from './daemon-contacts'
-import type { AccountRuntime, DaemonContext } from './daemon-context'
-import { accountLabel } from './daemon-logger'
-import { runMigrationsTick } from './daemon-migrations'
-import {
-  cleanupOldJobs,
-  nextJobDueAt,
-  refreshAllQueues,
-  startDueJobs,
-} from './daemon-scheduler'
-import { formatError, getErrorMessage } from './daemon-utils'
+import { SyncJobStatus } from "../db/sync-schema";
+import { attemptReconnect, scheduleReconnect } from "./daemon-accounts";
+import { detectWake, runDueCatchUps } from "./daemon-catch-up";
+import { maybeSyncContacts } from "./daemon-contacts";
+import type { AccountRuntime, DaemonContext } from "./daemon-context";
+import { accountLabel } from "./daemon-logger";
+import { runMigrationsTick } from "./daemon-migrations";
+import { cleanupOldJobs, nextJobDueAt, refreshAllQueues, startDueJobs } from "./daemon-scheduler";
+import { formatError, getErrorMessage } from "./daemon-utils";
 
-const HEALTH_CHECK_INTERVAL_TICKS = 60
-const HEALTH_CHECK_COOLDOWN_MS = 60_000
-const SCHEDULER_REFRESH_INTERVAL_TICKS = 30
+const HEALTH_CHECK_INTERVAL_TICKS = 60;
+const HEALTH_CHECK_COOLDOWN_MS = 60_000;
+const SCHEDULER_REFRESH_INTERVAL_TICKS = 30;
 
 function jobCounts(rt: AccountRuntime): { pending: number; running: number } {
   // db.query caches the statement
@@ -28,8 +23,8 @@ function jobCounts(rt: AccountRuntime): { pending: number; running: number } {
     .get({
       $pending: SyncJobStatus.Pending,
       $running: SyncJobStatus.Running,
-    }) as { pending: number; running: number } | null
-  return { pending: row?.pending ?? 0, running: row?.running ?? 0 }
+    }) as { pending: number; running: number } | null;
+  return { pending: row?.pending ?? 0, running: row?.running ?? 0 };
 }
 
 /**
@@ -40,21 +35,21 @@ function jobCounts(rt: AccountRuntime): { pending: number; running: number } {
  */
 export async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
   for (const rt of ctx.runtime.accounts.values()) {
-    const accountState = ctx.state.accounts.get(rt.accountId)
+    const accountState = ctx.state.accounts.get(rt.accountId);
     try {
-      const { pending, running } = jobCounts(rt)
+      const { pending, running } = jobCounts(rt);
       rt.statusService.writeTick({
-        connectionStatus: accountState?.status ?? 'disconnected',
+        connectionStatus: accountState?.status ?? "disconnected",
         lastError: accountState?.lastError ?? null,
         messagesSynced: rt.messagesSynced,
         pendingJobs: pending,
         runningJobs: running,
         pacing: rt.pacer.snapshot(),
-      })
+      });
     } catch (err) {
       ctx.logger.warn(
         `[Account ${rt.accountId}] Failed to update daemon status: ${formatError(err)}`,
-      )
+      );
     }
   }
 }
@@ -64,17 +59,17 @@ export async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
  * a test's setTimeout may call `done` at once.
  */
 function sleepUnlessStopped(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve()
+  if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const done = () => {
-      if (timer !== undefined) clearTimeout(timer)
-      signal.removeEventListener('abort', done)
-      resolve()
-    }
-    signal.addEventListener('abort', done, { once: true })
-    timer = setTimeout(done, ms)
-  })
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    signal.addEventListener("abort", done, { once: true });
+    timer = setTimeout(done, ms);
+  });
 }
 
 /**
@@ -86,127 +81,122 @@ export async function waitForNextTick(
   ctx: DaemonContext,
   tickMs: number,
   clock: {
-    now: () => number
-    sleep: (ms: number, signal: AbortSignal) => Promise<void>
+    now: () => number;
+    sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   } = { now: () => Date.now(), sleep: sleepUnlessStopped },
 ): Promise<void> {
-  const signal = ctx.runtime.shutdown.signal
-  let now = clock.now()
-  const end = now + tickMs
+  const signal = ctx.runtime.shutdown.signal;
+  let now = clock.now();
+  const end = now + tickMs;
   for (;;) {
-    const due = nextJobDueAt(ctx, now)
-    if (due === null || due >= end) break
-    await clock.sleep(due - now, signal)
-    if (ctx.state.shutdownRequested) return
-    startDueJobs(ctx)
-    const after = clock.now()
+    const due = nextJobDueAt(ctx, now);
+    if (due === null || due >= end) break;
+    await clock.sleep(due - now, signal);
+    if (ctx.state.shutdownRequested) return;
+    startDueJobs(ctx);
+    const after = clock.now();
     // A clock that stands still (a test's) would wake for the same job
     // forever
-    if (after <= now) break
-    now = after
+    if (after <= now) break;
+    now = after;
   }
-  await clock.sleep(Math.max(0, end - now), signal)
+  await clock.sleep(Math.max(0, end - now), signal);
 }
 
 async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
   for (const accountState of ctx.state.accounts.values()) {
     // The check runs beside a running job, on the same client: a job starts
     // on the same tick, so skipping busy accounts could skip one every time
-    if (accountState.status === 'connected' && accountState.client) {
-      const lastActivity = accountState.lastActivity ?? 0
+    if (accountState.status === "connected" && accountState.client) {
+      const lastActivity = accountState.lastActivity ?? 0;
       if (now - lastActivity < HEALTH_CHECK_COOLDOWN_MS) {
-        continue
+        continue;
       }
       try {
-        await accountState.client.getMe()
-        accountState.lastActivity = Date.now()
+        await accountState.client.getMe();
+        accountState.lastActivity = Date.now();
       } catch (err) {
         ctx.logger.warn(
           `Connection health check failed for ${accountLabel(accountState)}: ${getErrorMessage(err)}`,
-        )
-        accountState.status = 'error'
-        accountState.lastError = getErrorMessage(err)
+        );
+        accountState.status = "error";
+        accountState.lastError = getErrorMessage(err);
         // The reconnect's log line and tg status say how long it was down
-        if (accountState.watch) accountState.watch.offlineSince ??= now
-        scheduleReconnect(ctx, accountState)
+        if (accountState.watch) accountState.watch.offlineSince ??= now;
+        scheduleReconnect(ctx, accountState);
       }
     }
 
     // A reconnect would close the client under a running job: it waits for
     // a later health check, after the job ends
     if (
-      accountState.status === 'error' &&
+      accountState.status === "error" &&
       accountState.nextReconnectAt &&
       now >= accountState.nextReconnectAt &&
       !ctx.runtime.jobsInFlight.has(accountState.accountId)
     ) {
       attemptReconnect(ctx, accountState).catch((err) => {
-        ctx.logger.error(
-          `Unexpected error during reconnection: ${formatError(err)}`,
-        )
-      })
+        ctx.logger.error(`Unexpected error during reconnection: ${formatError(err)}`);
+      });
     }
   }
 }
 
 export async function mainLoop(ctx: DaemonContext): Promise<void> {
-  ctx.logger.debug('Starting main event loop...')
+  ctx.logger.debug("Starting main event loop...");
 
-  let loopIteration = 0
-  const cleanupInterval = 300
+  let loopIteration = 0;
+  const cleanupInterval = 300;
 
   while (!ctx.state.shutdownRequested) {
-    loopIteration++
-    const now = Date.now()
+    loopIteration++;
+    const now = Date.now();
 
     try {
       // Each account's job runs on its own; the loop doesn't wait for it
-      startDueJobs(ctx)
+      startDueJobs(ctx);
     } catch (err) {
-      ctx.logger.warn(`Error processing jobs: ${formatError(err)}`)
+      ctx.logger.warn(`Error processing jobs: ${formatError(err)}`);
     }
 
     // A stop as a job starts: no health check, refresh, tick or wait. The
     // shutdown waits for the jobs and marks every account stopped.
-    if (ctx.state.shutdownRequested) break
+    if (ctx.state.shutdownRequested) break;
 
     // After a sleep or a reconnect mtcute handled itself, a dialog pass on
     // the account's client queues catch-up for the chats that moved (#124)
-    detectWake(ctx, now)
-    void runDueCatchUps(ctx, now)
+    detectWake(ctx, now);
+    void runDueCatchUps(ctx, now);
 
     // Contacts: due on start (after the dialog pass) and every 30 ticks
     // after. A due check runs in the background (#8).
-    if (
-      loopIteration === 1 ||
-      loopIteration % SCHEDULER_REFRESH_INTERVAL_TICKS === 0
-    ) {
-      void maybeSyncContacts(ctx, now)
+    if (loopIteration === 1 || loopIteration % SCHEDULER_REFRESH_INTERVAL_TICKS === 0) {
+      void maybeSyncContacts(ctx, now);
     }
 
     if (loopIteration % HEALTH_CHECK_INTERVAL_TICKS === 0) {
-      await runHealthChecks(ctx, now)
+      await runHealthChecks(ctx, now);
     }
 
     if (loopIteration % SCHEDULER_REFRESH_INTERVAL_TICKS === 0) {
-      refreshAllQueues(ctx)
+      refreshAllQueues(ctx);
     }
 
     try {
-      await updateDaemonStatus(ctx)
+      await updateDaemonStatus(ctx);
     } catch (err) {
-      ctx.logger.warn(`Failed to update daemon status: ${formatError(err)}`)
+      ctx.logger.warn(`Failed to update daemon status: ${formatError(err)}`);
     }
 
     if (loopIteration % cleanupInterval === 0) {
-      cleanupOldJobs(ctx)
+      cleanupOldJobs(ctx);
     }
 
     // Last and lowest: a few batches of each cache's background migrations
-    await runMigrationsTick(ctx)
+    await runMigrationsTick(ctx);
 
-    await waitForNextTick(ctx, 1000)
+    await waitForNextTick(ctx, 1000);
   }
 
-  ctx.logger.debug('Main loop exiting...')
+  ctx.logger.debug("Main loop exiting...");
 }

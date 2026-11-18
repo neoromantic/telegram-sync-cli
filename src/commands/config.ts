@@ -1,4 +1,4 @@
-import { defineCommand } from 'citty'
+import { defineCommand } from "citty";
 
 import {
   ConfigError,
@@ -8,96 +8,96 @@ import {
   isConfigLeafKey,
   parseConfigValue,
   setConfigValue,
-} from '../config'
-import { ErrorCodes } from '../types'
-import { error, success } from '../utils/output'
+} from "../config";
+import { ErrorCodes } from "../types";
+import { error, success } from "../utils/output";
 
 export const configGetCommand = defineCommand({
   meta: {
-    name: 'get',
-    description: 'Get a configuration value',
+    name: "get",
+    description: "Get a configuration value",
   },
   args: {
     key: {
-      type: 'positional',
-      description: 'Config key to read (e.g. cache.staleness.peers)',
+      type: "positional",
+      description: "Config key to read (e.g. cache.staleness.peers)",
       required: true,
     },
   },
   async run({ args }) {
-    const key = args.key.trim()
+    const key = args.key.trim();
 
     if (!isConfigKey(key)) {
-      error(ErrorCodes.INVALID_ARGS, `Unsupported config key: ${key}`)
+      error(ErrorCodes.INVALID_ARGS, `Unsupported config key: ${key}`);
     }
 
     try {
-      const value = await getConfigValue(key, { strict: true })
-      success({ key, value: value ?? null })
+      const value = await getConfigValue(key, { strict: true });
+      success({ key, value: value ?? null });
     } catch (err) {
       if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues });
       }
-      throw err
+      throw err;
     }
   },
-})
+});
 
 export const configSetCommand = defineCommand({
   meta: {
-    name: 'set',
-    description: 'Set a configuration value',
+    name: "set",
+    description: "Set a configuration value",
   },
   args: {
     key: {
-      type: 'positional',
-      description: 'Config key to update',
+      type: "positional",
+      description: "Config key to update",
       required: true,
     },
     value: {
-      type: 'positional',
-      description: 'Value to set',
+      type: "positional",
+      description: "Value to set",
       required: true,
     },
   },
   async run({ args }) {
-    const key = args.key.trim()
+    const key = args.key.trim();
 
     if (!isConfigLeafKey(key)) {
-      error(ErrorCodes.INVALID_ARGS, `Unsupported config key: ${key}`)
+      error(ErrorCodes.INVALID_ARGS, `Unsupported config key: ${key}`);
     }
 
     try {
-      const value = parseConfigValue(key, args.value)
-      await setConfigValue(key, value)
-      success({ key, value })
+      const value = parseConfigValue(key, args.value);
+      await setConfigValue(key, value);
+      success({ key, value });
     } catch (err) {
       if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues });
       }
-      throw err
+      throw err;
     }
   },
-})
+});
 
 export const configPathCommand = defineCommand({
   meta: {
-    name: 'path',
-    description: 'Show the config file path',
+    name: "path",
+    description: "Show the config file path",
   },
   async run() {
-    success({ path: getConfigPath() })
+    success({ path: getConfigPath() });
   },
-})
+});
 
 export const configCommand = defineCommand({
   meta: {
-    name: 'config',
-    description: 'Manage configuration values',
+    name: "config",
+    description: "Manage configuration values",
   },
   subCommands: {
     get: configGetCommand,
     set: configSetCommand,
     path: configPathCommand,
   },
-})
+});

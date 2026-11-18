@@ -1,28 +1,21 @@
-import type { Database } from 'bun:sqlite'
-import type { TelegramClient } from '@mtcute/bun'
+import type { Database } from "bun:sqlite";
+import type { TelegramClient } from "@mtcute/bun";
 
-import { accountsDb, getAccountCacheDb } from '../../db'
-import { createChatsCache } from '../../db/chats-cache'
-import type { MessageSearchRow } from '../../db/messages-search'
-import { createUsersCache } from '../../db/users-cache'
-import { getClientForAccount } from '../../services/telegram'
-import { ErrorCodes, type MessageSearchItem } from '../../types'
-import { type AttachmentInfo, extractAttachment } from '../../utils/attachment'
-import { error } from '../../utils/output'
-import { richMessageText } from '../../utils/rich-message'
-import {
-  extractServiceAction,
-  type MessageAction,
-} from '../../utils/service-action'
+import { accountsDb, getAccountCacheDb } from "../../db";
+import { createChatsCache } from "../../db/chats-cache";
+import type { MessageSearchRow } from "../../db/messages-search";
+import { createUsersCache } from "../../db/users-cache";
+import { getClientForAccount } from "../../services/telegram";
+import { ErrorCodes, type MessageSearchItem } from "../../types";
+import { type AttachmentInfo, extractAttachment } from "../../utils/attachment";
+import { error } from "../../utils/output";
+import { richMessageText } from "../../utils/rich-message";
+import { extractServiceAction, type MessageAction } from "../../utils/service-action";
 import {
   reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
-} from '../../utils/telegram-rate-limits'
-import {
-  AmbiguousPeerError,
-  createDmLookup,
-  InvalidPeerError,
-} from '../send/peer-resolver'
+} from "../../utils/telegram-rate-limits";
+import { AmbiguousPeerError, createDmLookup, InvalidPeerError } from "../send/peer-resolver";
 
 /** The JSON item for a message row, shared by every `tg messages` command */
 export function messageRowToItem(
@@ -60,7 +53,7 @@ export function messageRowToItem(
       firstName: row.sender_first_name,
       lastName: row.sender_last_name,
     },
-  }
+  };
 }
 
 /**
@@ -70,52 +63,47 @@ export function messageRowToItem(
  * row without text). Every cached message has raw_json, so this works for
  * rows cached before message_attachments existed too.
  */
-export function messageItemReader(
-  db: Database,
-): (row: MessageRow) => MessageSearchItem {
+export function messageItemReader(db: Database): (row: MessageRow) => MessageSearchItem {
   const rawJson = db.query<{ raw_json: string }, [number, number]>(
-    'SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?',
-  )
+    "SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?",
+  );
   return (row) => {
-    const isService = row.message_type === 'service'
-    const mayBeRich = !row.text && row.message_type === 'text'
+    const isService = row.message_type === "service";
+    const mayBeRich = !row.text && row.message_type === "text";
     const raw =
       row.has_media === 1 || isService || mayBeRich
         ? (row.raw_json ?? rawJson.get(row.chat_id, row.message_id)?.raw_json)
-        : null
-    if (!raw) return messageRowToItem(row, null, null)
-    const text = mayBeRich ? richMessageText(raw) : null
+        : null;
+    if (!raw) return messageRowToItem(row, null, null);
+    const text = mayBeRich ? richMessageText(raw) : null;
     return messageRowToItem(
       text ? { ...row, text } : row,
       row.has_media === 1 ? extractAttachment(raw) : null,
       isService ? extractServiceAction(raw) : null,
-    )
-  }
+    );
+  };
 }
 
 /**
  * A message row; one built from a Telegram page carries its raw_json,
  * since the cache may not hold the message
  */
-export type MessageRow = MessageSearchRow & { raw_json?: string }
+export type MessageRow = MessageSearchRow & { raw_json?: string };
 
 /** Items for rows, each with its attachment and action (see messageItemReader) */
-export function messageRowsToItems(
-  db: Database,
-  rows: MessageRow[],
-): MessageSearchItem[] {
-  return rows.map(messageItemReader(db))
+export function messageRowsToItems(db: Database, rows: MessageRow[]): MessageSearchItem[] {
+  return rows.map(messageItemReader(db));
 }
 
 /**
  * Message IDs are TL int32, and mtcute wraps a larger value silently.
  * `--after` and `--id` go to getHistory as ID + 1, so they stop one lower.
  */
-export const MAX_MESSAGE_ID = 2_147_483_647
+export const MAX_MESSAGE_ID = 2_147_483_647;
 
 interface IntegerRange {
-  min: number
-  max?: number
+  min: number;
+  max?: number;
 }
 
 /**
@@ -127,91 +115,81 @@ export function parseIntegerArg(
   value: string | undefined,
   name: string,
   range: IntegerRange & { default: number },
-): number
-export function parseIntegerArg(
-  value: string,
-  name: string,
-  range: IntegerRange,
-): number
+): number;
+export function parseIntegerArg(value: string, name: string, range: IntegerRange): number;
 export function parseIntegerArg(
   value: string | undefined,
   name: string,
   range: IntegerRange,
-): number | undefined
+): number | undefined;
 export function parseIntegerArg(
   value: string | undefined,
   name: string,
   { min, max, default: fallback }: IntegerRange & { default?: number },
 ): number | undefined {
-  if (value === undefined) return fallback
+  if (value === undefined) return fallback;
 
-  const bounds = max === undefined ? `>= ${min}` : `from ${min} to ${max}`
-  const parsed = /^\d+$/.test(value.trim()) ? Number(value.trim()) : Number.NaN
-  if (
-    !Number.isSafeInteger(parsed) ||
-    parsed < min ||
-    (max !== undefined && parsed > max)
-  ) {
-    error(
-      ErrorCodes.INVALID_ARGS,
-      `Invalid --${name}: ${value}. Expected an integer ${bounds}.`,
-      { [name]: value },
-    )
+  const bounds = max === undefined ? `>= ${min}` : `from ${min} to ${max}`;
+  const parsed = /^\d+$/.test(value.trim()) ? Number(value.trim()) : Number.NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < min || (max !== undefined && parsed > max)) {
+    error(ErrorCodes.INVALID_ARGS, `Invalid --${name}: ${value}. Expected an integer ${bounds}.`, {
+      [name]: value,
+    });
   }
-  return parsed
+  return parsed;
 }
 
 /** The chat has no message with this ID, in the cache or on Telegram */
 export class MessageNotFoundError extends Error {
-  readonly details: { chatId: number; messageId: number }
+  readonly details: { chatId: number; messageId: number };
 
   constructor(chatId: number, messageId: number) {
-    super(`Message ${messageId} not found in chat ${chatId}`)
-    this.name = 'MessageNotFoundError'
-    this.details = { chatId, messageId }
+    super(`Message ${messageId} not found in chat ${chatId}`);
+    this.name = "MessageNotFoundError";
+    this.details = { chatId, messageId };
   }
 }
 
 /** Report a failed history read with the error codes other commands use */
 export function reportHistoryError(err: unknown, action: string): never {
   if (err instanceof MessageNotFoundError) {
-    error(ErrorCodes.TELEGRAM_ERROR, err.message, err.details)
+    error(ErrorCodes.TELEGRAM_ERROR, err.message, err.details);
   }
   if (err instanceof AmbiguousPeerError) {
     error(ErrorCodes.INVALID_ARGS, err.message, {
       chat: err.identifier,
       candidates: err.candidates,
-    })
+    });
   }
   if (err instanceof InvalidPeerError) {
     error(
       ErrorCodes.INVALID_ARGS,
       `Invalid --chat: ${err.identifier}. Expected @username, a user or chat ID, a phone number (+…) or me.`,
       { chat: err.identifier },
-    )
+    );
   }
-  reportConfigOrRateLimitError(err)
-  const message = err instanceof Error ? err.message : 'Unknown error'
-  error(ErrorCodes.TELEGRAM_ERROR, `Failed to ${action}: ${message}`)
+  reportConfigOrRateLimitError(err);
+  const message = err instanceof Error ? err.message : "Unknown error";
+  error(ErrorCodes.TELEGRAM_ERROR, `Failed to ${action}: ${message}`);
 }
 
-export type HistoryClient = Pick<TelegramClient, 'call' | 'getMe'>
+export type HistoryClient = Pick<TelegramClient, "call" | "getMe">;
 
 /**
  * A client that is created on first use, so a read the cache answers needs
  * no credentials and opens no connection.
  */
 export function createLazyClient(create: () => HistoryClient): HistoryClient {
-  let client: HistoryClient | undefined
+  let client: HistoryClient | undefined;
   const get = () => {
-    client ??= create()
-    return client
-  }
+    client ??= create();
+    return client;
+  };
   return {
-    call: ((...args: Parameters<HistoryClient['call']>) =>
-      get().call(...args)) as HistoryClient['call'],
+    call: ((...args: Parameters<HistoryClient["call"]>) =>
+      get().call(...args)) as HistoryClient["call"],
     getMe: () => get().getMe(),
-  }
+  };
 }
 
 /**
@@ -219,7 +197,7 @@ export function createLazyClient(create: () => HistoryClient): HistoryClient {
  * read with
  */
 export function openHistory(accountId: number, context: string) {
-  const cacheDb = getAccountCacheDb(accountId)
+  const cacheDb = getAccountCacheDb(accountId);
   return {
     cacheDb,
     client: createLazyClient(() =>
@@ -233,8 +211,8 @@ export function openHistory(accountId: number, context: string) {
     dms: createDmLookup(cacheDb),
     accounts: accountsDb,
     accountId,
-  }
+  };
 }
 
 export const CHAT_ARG_DESCRIPTION =
-  'Chat: @username, user or chat ID (as tg chats list or tg messages search print it), phone number (+…), or me'
+  "Chat: @username, user or chat ID (as tg chats list or tg messages search print it), phone number (+…), or me";

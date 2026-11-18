@@ -2,45 +2,45 @@
  * Users cache service
  * Provides typed access to the users_cache table
  */
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 
-import { UserCacheRow } from './schema'
+import { UserCacheRow } from "./schema";
 
 /**
  * Cached user with computed display_name
  */
 export interface CachedUser {
-  user_id: string
-  username: string | null
-  first_name: string | null
-  last_name: string | null
-  display_name: string | null
-  phone: string | null
-  access_hash: string | null
-  is_contact: number
-  is_bot: number
-  is_premium: number
-  fetched_at: number
-  created_at: number
-  updated_at: number
-  raw_json: string
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string | null;
+  phone: string | null;
+  access_hash: string | null;
+  is_contact: number;
+  is_bot: number;
+  is_premium: number;
+  fetched_at: number;
+  created_at: number;
+  updated_at: number;
+  raw_json: string;
 }
 
 /**
  * Input for creating/updating a cached user
  */
 export interface UserCacheInput {
-  user_id: string
-  username?: string | null
-  first_name?: string | null
-  last_name?: string | null
-  phone?: string | null
-  access_hash?: string | null
-  is_contact?: number
-  is_bot?: number
-  is_premium?: number
-  fetched_at: number
-  raw_json: string
+  user_id: string;
+  username?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+  access_hash?: string | null;
+  is_contact?: number;
+  is_bot?: number;
+  is_premium?: number;
+  fetched_at: number;
+  raw_json: string;
 }
 
 /**
@@ -50,27 +50,27 @@ function computeDisplayName(
   firstName: string | null | undefined,
   lastName: string | null | undefined,
 ): string | null {
-  const parts: string[] = []
-  if (firstName) parts.push(firstName)
-  if (lastName) parts.push(lastName)
-  return parts.length > 0 ? parts.join(' ') : null
+  const parts: string[] = [];
+  if (firstName) parts.push(firstName);
+  if (lastName) parts.push(lastName);
+  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 /**
  * Users cache service
  */
 export class UsersCache {
-  private statements: ReturnType<typeof createStatements>
+  private statements: ReturnType<typeof createStatements>;
 
   constructor(private db: Database) {
-    this.statements = createStatements(db)
+    this.statements = createStatements(db);
   }
 
   /**
    * Get user by ID
    */
   getById(userId: string): CachedUser | null {
-    return this.statements.getById.get({ $user_id: userId }) ?? null
+    return this.statements.getById.get({ $user_id: userId }) ?? null;
   }
 
   /**
@@ -78,12 +78,12 @@ export class UsersCache {
    */
   getByUsername(username: string): CachedUser | null {
     // Normalize: remove @ if present
-    const normalized = username.startsWith('@') ? username.slice(1) : username
+    const normalized = username.startsWith("@") ? username.slice(1) : username;
     return (
       this.statements.getByUsername.get({
         $username: normalized.toLowerCase(),
       }) ?? null
-    )
+    );
   }
 
   /**
@@ -91,17 +91,17 @@ export class UsersCache {
    */
   getByPhone(phone: string): CachedUser | null {
     // Normalize: remove + and spaces
-    const normalized = phone.replace(/[\s+\-()]/g, '')
-    return this.statements.getByPhone.get({ $phone: normalized }) ?? null
+    const normalized = phone.replace(/[\s+\-()]/g, "");
+    return this.statements.getByPhone.get({ $phone: normalized }) ?? null;
   }
 
   /**
    * Insert or update user
    */
   upsert(user: UserCacheInput): void {
-    const now = Date.now()
-    const displayName = computeDisplayName(user.first_name, user.last_name)
-    const normalizedUsername = user.username?.toLowerCase() ?? null
+    const now = Date.now();
+    const displayName = computeDisplayName(user.first_name, user.last_name);
+    const normalizedUsername = user.username?.toLowerCase() ?? null;
 
     this.statements.upsert.run({
       $user_id: user.user_id,
@@ -117,7 +117,7 @@ export class UsersCache {
       $fetched_at: user.fetched_at,
       $raw_json: user.raw_json,
       $now: now,
-    })
+    });
   }
 
   /**
@@ -129,15 +129,15 @@ export class UsersCache {
   mergeMany(users: UserCacheInput[]): void {
     const transaction = this.db.transaction(() => {
       for (const user of users) {
-        const stored = this.getById(user.user_id)
+        const stored = this.getById(user.user_id);
         if (!stored) {
-          this.upsert(user)
-          continue
+          this.upsert(user);
+          continue;
         }
         const given = Object.fromEntries(
           Object.entries(user).filter(([, value]) => value !== undefined),
-        )
-        const complete = user.access_hash !== undefined
+        );
+        const complete = user.access_hash !== undefined;
         this.upsert({
           user_id: stored.user_id,
           username: stored.username,
@@ -151,10 +151,10 @@ export class UsersCache {
           ...given,
           fetched_at: complete ? user.fetched_at : stored.fetched_at,
           raw_json: complete ? user.raw_json : stored.raw_json,
-        })
+        });
       }
-    })
-    transaction()
+    });
+    transaction();
   }
 
   /**
@@ -163,44 +163,44 @@ export class UsersCache {
   upsertMany(users: UserCacheInput[]): void {
     const transaction = this.db.transaction(() => {
       for (const user of users) {
-        this.upsert(user)
+        this.upsert(user);
       }
-    })
-    transaction()
+    });
+    transaction();
   }
 
   /**
    * Search users by query (name, username, phone)
    */
   search(query: string, limit = 50): CachedUser[] {
-    const searchPattern = `%${query}%`
+    const searchPattern = `%${query}%`;
     return this.statements.search.all({
       $query: searchPattern,
       $limit: limit,
-    })
+    });
   }
 
   /**
    * Get all users
    */
   getAll(opts?: { limit?: number; offset?: number }): CachedUser[] {
-    const limit = opts?.limit ?? 100
-    const offset = opts?.offset ?? 0
-    return this.statements.getAll.all({ $limit: limit, $offset: offset })
+    const limit = opts?.limit ?? 100;
+    const offset = opts?.offset ?? 0;
+    return this.statements.getAll.all({ $limit: limit, $offset: offset });
   }
 
   /**
    * Get all cached contacts
    */
   getContacts(): CachedUser[] {
-    return this.statements.getContacts.all()
+    return this.statements.getContacts.all();
   }
 
   /**
    * Count total cached users
    */
   count(): number {
-    return (this.statements.count.get() as { count: number } | null)?.count ?? 0
+    return (this.statements.count.get() as { count: number } | null)?.count ?? 0;
   }
 }
 
@@ -209,19 +209,13 @@ export class UsersCache {
  */
 function createStatements(db: Database) {
   return {
-    getById: db
-      .query('SELECT * FROM users_cache WHERE user_id = $user_id')
-      .as(UserCacheRow),
+    getById: db.query("SELECT * FROM users_cache WHERE user_id = $user_id").as(UserCacheRow),
 
     getByUsername: db
-      .query(
-        'SELECT * FROM users_cache WHERE LOWER(username) = $username COLLATE NOCASE',
-      )
+      .query("SELECT * FROM users_cache WHERE LOWER(username) = $username COLLATE NOCASE")
       .as(UserCacheRow),
 
-    getByPhone: db
-      .query('SELECT * FROM users_cache WHERE phone = $phone')
-      .as(UserCacheRow),
+    getByPhone: db.query("SELECT * FROM users_cache WHERE phone = $phone").as(UserCacheRow),
 
     upsert: db.query(`
       INSERT INTO users_cache (
@@ -277,13 +271,13 @@ function createStatements(db: Database) {
       `)
       .as(UserCacheRow),
 
-    count: db.query('SELECT COUNT(*) as count FROM users_cache'),
-  }
+    count: db.query("SELECT COUNT(*) as count FROM users_cache"),
+  };
 }
 
 /**
  * Create a users cache instance
  */
 export function createUsersCache(db: Database): UsersCache {
-  return new UsersCache(db)
+  return new UsersCache(db);
 }

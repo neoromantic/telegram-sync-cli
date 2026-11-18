@@ -8,10 +8,10 @@
  * reaches the rate-limit wrapper (telegram-rate-limits.ts), which records
  * it for the account and throws RateLimitError.
  */
-import type { TelegramClient } from '@mtcute/bun'
+import type { TelegramClient } from "@mtcute/bun";
 
 /** Flood waits up to this long are slept through during a transfer */
-export const MEDIA_FLOOD_SLEEP_MS = 10_000
+export const MEDIA_FLOOD_SLEEP_MS = 10_000;
 
 /**
  * The client with every call's `floodSleepThreshold` set to
@@ -21,14 +21,14 @@ export const MEDIA_FLOOD_SLEEP_MS = 10_000
  * client's own methods call an inner client that bypasses the wrapper.
  */
 export function transferClient(client: TelegramClient): TelegramClient {
-  const facade = Object.create(client) as TelegramClient
+  const facade = Object.create(client) as TelegramClient;
   facade.call = ((
-    request: Parameters<TelegramClient['call']>[0],
-    options?: Parameters<TelegramClient['call']>[1],
+    request: Parameters<TelegramClient["call"]>[0],
+    options?: Parameters<TelegramClient["call"]>[1],
   ) =>
     client.call(request, {
       ...options,
       floodSleepThreshold: MEDIA_FLOOD_SLEEP_MS,
-    })) as TelegramClient['call']
-  return facade
+    })) as TelegramClient["call"];
+  return facade;
 }

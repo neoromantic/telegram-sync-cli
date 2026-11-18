@@ -5,15 +5,15 @@
 
 export interface CsvOptions {
   /** Include header row (default: true) */
-  includeHeader?: boolean
+  includeHeader?: boolean;
   /** Field delimiter (default: ',') */
-  delimiter?: string
+  delimiter?: string;
 }
 
 const DEFAULT_OPTIONS: Required<CsvOptions> = {
   includeHeader: true,
-  delimiter: ',',
-}
+  delimiter: ",",
+};
 
 /**
  * Escape a value for CSV output
@@ -22,25 +22,22 @@ const DEFAULT_OPTIONS: Required<CsvOptions> = {
 function escapeValue(value: unknown, delimiter: string): string {
   // Handle null/undefined
   if (value === null || value === undefined) {
-    return ''
+    return "";
   }
 
-  const str = String(value)
+  const str = String(value);
 
   // Check if quoting is needed
   const needsQuoting =
-    str.includes(delimiter) ||
-    str.includes('"') ||
-    str.includes('\n') ||
-    str.includes('\r')
+    str.includes(delimiter) || str.includes('"') || str.includes("\n") || str.includes("\r");
 
   if (!needsQuoting) {
-    return str
+    return str;
   }
 
   // Escape quotes by doubling them (RFC 4180)
-  const escaped = str.replace(/"/g, '""')
-  return `"${escaped}"`
+  const escaped = str.replace(/"/g, '""');
+  return `"${escaped}"`;
 }
 
 /**
@@ -51,40 +48,36 @@ export function stringify<T extends Record<string, unknown>>(
   columns?: string[],
   options: CsvOptions = {},
 ): string {
-  const opts: Required<CsvOptions> = { ...DEFAULT_OPTIONS, ...options }
+  const opts: Required<CsvOptions> = { ...DEFAULT_OPTIONS, ...options };
 
   if (data.length === 0) {
     // Return just headers if we have columns specified
     if (columns && opts.includeHeader) {
-      return columns
-        .map((h) => escapeValue(h, opts.delimiter))
-        .join(opts.delimiter)
+      return columns.map((h) => escapeValue(h, opts.delimiter)).join(opts.delimiter);
     }
-    return ''
+    return "";
   }
 
   // Determine headers from first object if not provided
-  const headers = columns ?? Object.keys(data[0]!)
+  const headers = columns ?? Object.keys(data[0]!);
 
-  const lines: string[] = []
+  const lines: string[] = [];
 
   // Add header row
   if (opts.includeHeader) {
-    lines.push(
-      headers.map((h) => escapeValue(h, opts.delimiter)).join(opts.delimiter),
-    )
+    lines.push(headers.map((h) => escapeValue(h, opts.delimiter)).join(opts.delimiter));
   }
 
   // Add data rows
   for (const row of data) {
     const values = headers.map((header) => {
-      const value = row[header]
-      return escapeValue(value, opts.delimiter)
-    })
-    lines.push(values.join(opts.delimiter))
+      const value = row[header];
+      return escapeValue(value, opts.delimiter);
+    });
+    lines.push(values.join(opts.delimiter));
   }
 
-  return lines.join('\n')
+  return lines.join("\n");
 }
 
 /**
@@ -96,5 +89,5 @@ export function stringifyTable(
   rows: Record<string, unknown>[],
   options: CsvOptions = {},
 ): string {
-  return stringify(rows, columns, options)
+  return stringify(rows, columns, options);
 }

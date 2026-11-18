@@ -6,45 +6,39 @@
  * Parse named arguments from argv-style array into an object
  * Supports: --key value, --key=value, --nested.key value
  */
-export function parseNamedArgs(
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {}
+export function parseNamedArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(args)) {
     // Skip internal citty keys
-    if (key === '_' || key === '--') continue
+    if (key === "_" || key === "--") continue;
 
     // Handle nested keys (e.g., peer.username -> { peer: { username: value } })
-    if (key.includes('.')) {
-      setNestedValue(result, key.split('.'), value)
+    if (key.includes(".")) {
+      setNestedValue(result, key.split("."), value);
     } else {
-      result[key] = parseValue(value)
+      result[key] = parseValue(value);
     }
   }
 
-  return result
+  return result;
 }
 
 /**
  * Set a value in a nested object structure
  */
-function setNestedValue(
-  obj: Record<string, unknown>,
-  path: string[],
-  value: unknown,
-): void {
-  let current = obj
+function setNestedValue(obj: Record<string, unknown>, path: string[], value: unknown): void {
+  let current = obj;
   for (let i = 0; i < path.length - 1; i++) {
-    const key = path[i]!
-    if (!(key in current) || typeof current[key] !== 'object') {
-      current[key] = {}
+    const key = path[i]!;
+    if (!(key in current) || typeof current[key] !== "object") {
+      current[key] = {};
     }
-    current = current[key] as Record<string, unknown>
+    current = current[key] as Record<string, unknown>;
   }
-  const lastKey = path[path.length - 1]
+  const lastKey = path[path.length - 1];
   if (lastKey !== undefined) {
-    current[lastKey] = parseValue(value)
+    current[lastKey] = parseValue(value);
   }
 }
 
@@ -52,32 +46,32 @@ function setNestedValue(
  * Parse a value to its appropriate type
  */
 function parseValue(value: unknown): unknown {
-  if (value === undefined || value === null || typeof value !== 'string') {
-    return value
+  if (value === undefined || value === null || typeof value !== "string") {
+    return value;
   }
 
-  let parsed: unknown = value
+  let parsed: unknown = value;
 
-  if (value === 'true') {
-    parsed = true
-  } else if (value === 'false') {
-    parsed = false
+  if (value === "true") {
+    parsed = true;
+  } else if (value === "false") {
+    parsed = false;
   } else if (/^-?\d+$/.test(value)) {
-    parsed = parseInt(value, 10)
+    parsed = parseInt(value, 10);
   } else if (/^-?\d+\.\d+$/.test(value)) {
-    parsed = parseFloat(value)
+    parsed = parseFloat(value);
   } else if (
-    (value.startsWith('{') && value.endsWith('}')) ||
-    (value.startsWith('[') && value.endsWith(']'))
+    (value.startsWith("{") && value.endsWith("}")) ||
+    (value.startsWith("[") && value.endsWith("]"))
   ) {
     try {
-      parsed = JSON.parse(value)
+      parsed = JSON.parse(value);
     } catch {
-      parsed = value
+      parsed = value;
     }
   }
 
-  return parsed
+  return parsed;
 }
 
 /**
@@ -87,24 +81,22 @@ export function mergeArgs(
   cliArgs: Record<string, unknown>,
   jsonInput?: string,
 ): Record<string, unknown> {
-  const parsed = parseNamedArgs(cliArgs)
+  const parsed = parseNamedArgs(cliArgs);
 
   if (jsonInput) {
     try {
-      const jsonArgs = JSON.parse(jsonInput)
-      return { ...parsed, ...jsonArgs }
+      const jsonArgs = JSON.parse(jsonInput);
+      return { ...parsed, ...jsonArgs };
     } catch (e) {
-      throw new Error(
-        `Invalid JSON input: ${e instanceof Error ? e.message : 'unknown error'}`,
-      )
+      throw new Error(`Invalid JSON input: ${e instanceof Error ? e.message : "unknown error"}`);
     }
   }
 
-  return parsed
+  return parsed;
 }
 
 /** A negative number after a flag is its value (`--addOffset -10`), not short options */
-const NEGATIVE_NUMBER = /^-\d+(\.\d+)?$/
+const NEGATIVE_NUMBER = /^-\d+(\.\d+)?$/;
 
 /**
  * Values of method arguments written as `--name value` after the method.
@@ -115,22 +107,22 @@ export function spacedFlagValues(
   method: string,
   args: Record<string, unknown>,
 ): Map<string, string> {
-  const values = new Map<string, string>()
+  const values = new Map<string, string>();
   for (let i = rawArgs.indexOf(method) + 1; i < rawArgs.length - 1; i++) {
-    const arg = rawArgs[i]!
-    if (arg === '--') break
-    const next = rawArgs[i + 1]!
-    const name = arg.slice(2)
+    const arg = rawArgs[i]!;
+    if (arg === "--") break;
+    const next = rawArgs[i + 1]!;
+    const name = arg.slice(2);
     if (
-      arg.startsWith('--') &&
+      arg.startsWith("--") &&
       args[name] === true &&
-      (!next.startsWith('-') || NEGATIVE_NUMBER.test(next))
+      (!next.startsWith("-") || NEGATIVE_NUMBER.test(next))
     ) {
-      values.set(name, next)
-      i++
+      values.set(name, next);
+      i++;
     }
   }
-  return values
+  return values;
 }
 
 /**
@@ -138,29 +130,29 @@ export function spacedFlagValues(
  * bare `--`. citty keeps only the last value of a repeated string flag.
  */
 export function flagValues(rawArgs: string[], name: string): string[] {
-  const flag = `--${name}`
-  const values: string[] = []
+  const flag = `--${name}`;
+  const values: string[] = [];
   for (let i = 0; i < rawArgs.length; i++) {
-    const arg = rawArgs[i]!
-    if (arg === '--') break
+    const arg = rawArgs[i]!;
+    if (arg === "--") break;
     if (arg === flag) {
       // A string flag takes the next argument whatever it is, as citty does
-      values.push(rawArgs[i + 1] ?? '')
-      i++
+      values.push(rawArgs[i + 1] ?? "");
+      i++;
     } else if (arg.startsWith(`${flag}=`)) {
-      values.push(arg.slice(flag.length + 1))
+      values.push(arg.slice(flag.length + 1));
     }
   }
-  return values
+  return values;
 }
 
 export const outputFormatArg = {
-  type: 'enum' as const,
-  alias: 'f',
-  description: 'Output format: json, pretty, or quiet',
-  options: ['json', 'pretty', 'quiet'],
-  default: 'json',
-}
+  type: "enum" as const,
+  alias: "f",
+  description: "Output format: json, pretty, or quiet",
+  options: ["json", "pretty", "quiet"],
+  default: "json",
+};
 
 /**
  * A chat given as a positional arg (`tg chats sync <chat>`). The parser reads
@@ -168,10 +160,7 @@ export const outputFormatArg = {
  * know (the global --format pretty) as the positional, so a marked ID in
  * rawArgs wins.
  */
-export function positionalChat(
-  value: unknown,
-  rawArgs: string[],
-): string | undefined {
-  const input = rawArgs.find((arg) => /^-\d+$/.test(arg)) ?? value
-  return typeof input === 'string' ? input.trim() : undefined
+export function positionalChat(value: unknown, rawArgs: string[]): string | undefined {
+  const input = rawArgs.find((arg) => /^-\d+$/.test(arg)) ?? value;
+  return typeof input === "string" ? input.trim() : undefined;
 }

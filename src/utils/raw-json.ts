@@ -8,34 +8,30 @@
  *   fetches the message again for a fresh one (#95)
  * Everything else is written as JSON.stringify writes it.
  */
-import Long from 'long'
+import Long from "long";
 
 export function toRawJson(value: unknown): string {
-  return JSON.stringify(value, rawJsonReplacer)
+  return JSON.stringify(value, rawJsonReplacer);
 }
 
-function rawJsonReplacer(
-  this: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): unknown {
-  if (key === 'fileReference') return undefined
+function rawJsonReplacer(this: Record<string, unknown>, key: string, value: unknown): unknown {
+  if (key === "fileReference") return undefined;
   // JSON.stringify calls toJSON before the replacer, so a Buffer arrives as
   // { type, data }: look at the holder's own value
-  const original = this[key]
+  const original = this[key];
   if (original instanceof Uint8Array) {
-    return original.toBase64()
+    return original.toBase64();
   }
-  if (typeof value === 'bigint') {
-    return value.toString()
+  if (typeof value === "bigint") {
+    return value.toString();
   }
   if (Long.isLong(value)) {
-    return value.toString()
+    return value.toString();
   }
-  return value
+  return value;
 }
 
-type JsonObject = Record<string, unknown>
+type JsonObject = Record<string, unknown>;
 
 /**
  * A byte array as plain JSON.stringify writes it, which tg 0.5.0 and older
@@ -44,35 +40,35 @@ type JsonObject = Record<string, unknown>
  * and is kept; any other object is not a byte array.
  */
 function bytesOfByteObject(value: JsonObject): Uint8Array | null {
-  const keys = Object.keys(value)
-  if (keys.length === 0) return null
-  const bytes = new Uint8Array(keys.length)
+  const keys = Object.keys(value);
+  if (keys.length === 0) return null;
+  const bytes = new Uint8Array(keys.length);
   for (let i = 0; i < keys.length; i++) {
-    if (keys[i] !== String(i)) return null
-    const byte = value[keys[i] as string]
+    if (keys[i] !== String(i)) return null;
+    const byte = value[keys[i] as string];
     if (
-      typeof byte !== 'number' ||
+      typeof byte !== "number" ||
       !Number.isInteger(byte) ||
       byte < 0 ||
       byte > 255 ||
       Object.is(byte, -0)
     ) {
-      return null
+      return null;
     }
-    bytes[i] = byte
+    bytes[i] = byte;
   }
-  return bytes
+  return bytes;
 }
 
 /** A 32-bit word of a `long` object: an integer in [-2^31, 2^31 - 1] */
 function isInt32(value: unknown): value is number {
   return (
-    typeof value === 'number' &&
+    typeof value === "number" &&
     Number.isInteger(value) &&
     value >= -0x8000_0000 &&
     value <= 0x7fff_ffff &&
     !Object.is(value, -0)
-  )
+  );
 }
 
 /**
@@ -81,20 +77,17 @@ function isInt32(value: unknown): value is number {
  * unless `unsigned` is true. Any other object is not a Long and is kept.
  */
 function decimalOfLongObject(value: JsonObject): string | null {
-  const keys = Object.keys(value)
+  const keys = Object.keys(value);
   if (
     keys.length !== 3 ||
     !isInt32(value.low) ||
     !isInt32(value.high) ||
-    typeof value.unsigned !== 'boolean'
+    typeof value.unsigned !== "boolean"
   ) {
-    return null
+    return null;
   }
-  const bits =
-    (BigInt(value.high as number) << 32n) | BigInt((value.low as number) >>> 0)
-  return (
-    value.unsigned ? BigInt.asUintN(64, bits) : BigInt.asIntN(64, bits)
-  ).toString()
+  const bits = (BigInt(value.high as number) << 32n) | BigInt((value.low as number) >>> 0);
+  return (value.unsigned ? BigInt.asUintN(64, bits) : BigInt.asIntN(64, bits)).toString();
 }
 
 /**
@@ -104,40 +97,40 @@ function decimalOfLongObject(value: JsonObject): string | null {
  */
 function reencodeValue(value: unknown): { value: unknown; changed: boolean } {
   if (Array.isArray(value)) {
-    let changed = false
+    let changed = false;
     for (let i = 0; i < value.length; i++) {
-      const item = reencodeValue(value[i])
+      const item = reencodeValue(value[i]);
       if (item.changed) {
-        value[i] = item.value
-        changed = true
+        value[i] = item.value;
+        changed = true;
       }
     }
-    return { value, changed }
+    return { value, changed };
   }
-  if (typeof value !== 'object' || value === null) {
-    return { value, changed: false }
+  if (typeof value !== "object" || value === null) {
+    return { value, changed: false };
   }
 
-  const object = value as JsonObject
-  const decimal = decimalOfLongObject(object)
-  if (decimal !== null) return { value: decimal, changed: true }
-  const bytes = bytesOfByteObject(object)
-  if (bytes !== null) return { value: bytes.toBase64(), changed: true }
+  const object = value as JsonObject;
+  const decimal = decimalOfLongObject(object);
+  if (decimal !== null) return { value: decimal, changed: true };
+  const bytes = bytesOfByteObject(object);
+  if (bytes !== null) return { value: bytes.toBase64(), changed: true };
 
-  let changed = false
+  let changed = false;
   for (const key of Object.keys(object)) {
-    if (key === 'fileReference') {
-      delete object[key]
-      changed = true
-      continue
+    if (key === "fileReference") {
+      delete object[key];
+      changed = true;
+      continue;
     }
-    const item = reencodeValue(object[key])
+    const item = reencodeValue(object[key]);
     if (item.changed) {
-      object[key] = item.value
-      changed = true
+      object[key] = item.value;
+      changed = true;
     }
   }
-  return { value: object, changed }
+  return { value: object, changed };
 }
 
 /** Text that may hold a form toRawJson no longer writes; false is certain */
@@ -146,7 +139,7 @@ export function mayNeedReencode(rawJson: string): boolean {
     rawJson.includes('"unsigned":') ||
     rawJson.includes('"0":') ||
     rawJson.includes('"fileReference"')
-  )
+  );
 }
 
 /**
@@ -155,15 +148,15 @@ export function mayNeedReencode(rawJson: string): boolean {
  * isn't JSON, which is kept as it is.
  */
 export function reencodeRawJson(rawJson: string): {
-  value: unknown
-  changed: boolean
+  value: unknown;
+  changed: boolean;
 } {
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(rawJson)
+    parsed = JSON.parse(rawJson);
   } catch {
-    return { value: null, changed: false }
+    return { value: null, changed: false };
   }
-  if (!mayNeedReencode(rawJson)) return { value: parsed, changed: false }
-  return reencodeValue(parsed)
+  if (!mayNeedReencode(rawJson)) return { value: parsed, changed: false };
+  return reencodeValue(parsed);
 }

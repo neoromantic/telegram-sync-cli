@@ -1,12 +1,7 @@
-import {
-  ConfigError,
-  getConfigPath,
-  getConfigValue,
-  setConfigValue,
-} from '../config'
-import { reportLocalError } from '../telemetry'
-import { ErrorCodes } from '../types'
-import { error } from './output'
+import { ConfigError, getConfigPath, getConfigValue, setConfigValue } from "../config";
+import { reportLocalError } from "../telemetry";
+import { ErrorCodes } from "../types";
+import { error } from "./output";
 
 /**
  * Every start makes the account that activeAccount in config.json names
@@ -23,33 +18,33 @@ import { error } from './output'
 export async function keepActiveAccountInConfig(
   accountId: number,
   options: {
-    dataDir?: string
-    context?: string
-    details?: Record<string, unknown>
-    suggestion?: string
+    dataDir?: string;
+    context?: string;
+    details?: Record<string, unknown>;
+    suggestion?: string;
   } = {},
 ): Promise<void> {
-  const { dataDir, context, details, suggestion } = options
+  const { dataDir, context, details, suggestion } = options;
   try {
-    const configured = await getConfigValue('activeAccount', { dataDir })
+    const configured = await getConfigValue("activeAccount", { dataDir });
     if (configured !== undefined && configured !== accountId) {
-      await setConfigValue('activeAccount', accountId, { dataDir })
+      await setConfigValue("activeAccount", accountId, { dataDir });
     }
   } catch (err) {
     if (err instanceof ConfigError) {
       error(ErrorCodes.INVALID_ARGS, err.message, {
         issues: err.issues,
         ...details,
-      })
+      });
     }
-    reportLocalError(err)
-    const path = getConfigPath(dataDir)
-    const failure = `write activeAccount to ${path}: ${(err as Error).message}`
+    reportLocalError(err);
+    const path = getConfigPath(dataDir);
+    const failure = `write activeAccount to ${path}: ${(err as Error).message}`;
     error(
       ErrorCodes.GENERAL_ERROR,
       context ? `${context}, but could not ${failure}` : `Could not ${failure}`,
       { path, ...details },
-      suggestion ?? 'Make config.json writable or remove activeAccount from it',
-    )
+      suggestion ?? "Make config.json writable or remove activeAccount from it",
+    );
   }
 }

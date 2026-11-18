@@ -22,18 +22,18 @@
  * in Telegram's active sessions doesn't change. CLI clients keep the stock
  * platform.
  */
-import { BunPlatform } from '@mtcute/bun'
+import { BunPlatform } from "@mtcute/bun";
 
-const closeOnExit = new Set<() => void>()
-let exitListenerInstalled = false
+const closeOnExit = new Set<() => void>();
+let exitListenerInstalled = false;
 
 function closeSessionsOnExit(): void {
   // A driver's cleanup removes itself from the set, which is safe mid-loop
   for (const close of closeOnExit) {
     try {
-      close()
+      close();
     } catch (err) {
-      console.error(`Failed to save a session file on exit: ${err}`)
+      console.error(`Failed to save a session file on exit: ${err}`);
     }
   }
 }
@@ -43,14 +43,14 @@ export class DaemonPlatform extends BunPlatform {
     // One listener for the process: with 5 accounts, two callbacks each, a
     // listener per callback would pass Node's MaxListeners warning
     if (!exitListenerInstalled) {
-      exitListenerInstalled = true
-      process.once('exit', closeSessionsOnExit)
+      exitListenerInstalled = true;
+      process.once("exit", closeSessionsOnExit);
     }
-    closeOnExit.add(fn)
+    closeOnExit.add(fn);
     return () => {
-      closeOnExit.delete(fn)
-    }
-  }
+      closeOnExit.delete(fn);
+    };
+  };
 }
 
-export const daemonPlatform = new DaemonPlatform()
+export const daemonPlatform = new DaemonPlatform();

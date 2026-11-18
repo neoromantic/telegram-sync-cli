@@ -4,31 +4,31 @@
  * Provides utilities to run the CLI binary and capture output/exit codes.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 export interface CliOptions {
   /** Environment variables to pass to the CLI */
-  env?: Record<string, string | undefined>
+  env?: Record<string, string | undefined>;
   /** Timeout in milliseconds (default: 10000) */
-  timeout?: number
+  timeout?: number;
   /** Working directory */
-  cwd?: string
+  cwd?: string;
   /** Script to run instead of src/index.ts, such as a wrapper that mocks a module */
-  entry?: string
+  entry?: string;
 }
 
 export interface CliResult {
   /** Standard output */
-  stdout: string
+  stdout: string;
   /** Standard error output */
-  stderr: string
+  stderr: string;
   /** Exit code */
-  exitCode: number
+  exitCode: number;
   /** Parsed JSON from stdout (if valid JSON) */
-  json?: unknown
+  json?: unknown;
   /** Execution duration in milliseconds */
-  duration: number
+  duration: number;
 }
 
 /**
@@ -39,23 +39,20 @@ export interface CliResult {
 export const NO_CREDENTIALS = {
   TELEGRAM_API_ID: undefined,
   TELEGRAM_API_HASH: undefined,
-}
+};
 
 /** Path to the CLI entry point */
-const CLI_PATH = `${import.meta.dir}/../../index.ts`
+const CLI_PATH = `${import.meta.dir}/../../index.ts`;
 
 /**
  * Start the CLI without waiting for it to exit (for long-running commands
  * such as `daemon start`)
  */
-export function spawnCli(
-  args: string[],
-  options: Omit<CliOptions, 'timeout'> = {},
-) {
-  const { env = {}, cwd, entry = CLI_PATH } = options
+export function spawnCli(args: string[], options: Omit<CliOptions, "timeout"> = {}) {
+  const { env = {}, cwd, entry = CLI_PATH } = options;
 
   // --no-env-file: never pick up a developer's .env from the working directory
-  return Bun.spawn(['bun', '--no-env-file', 'run', entry, ...args], {
+  return Bun.spawn(["bun", "--no-env-file", "run", entry, ...args], {
     env: {
       ...process.env,
       // Don't throw on errors - let the CLI handle them and exit with codes
@@ -64,48 +61,45 @@ export function spawnCli(
       ...env,
     },
     cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 }
 
 /**
  * Run the CLI with given arguments
  */
-export async function runCli(
-  args: string[],
-  options: CliOptions = {},
-): Promise<CliResult> {
-  const { timeout = 10000 } = options
+export async function runCli(args: string[], options: CliOptions = {}): Promise<CliResult> {
+  const { timeout = 10000 } = options;
 
-  const startTime = performance.now()
+  const startTime = performance.now();
 
-  const proc = spawnCli(args, options)
+  const proc = spawnCli(args, options);
 
   // Set up timeout
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
-      proc.kill()
-      reject(new Error(`CLI command timed out after ${timeout}ms`))
-    }, timeout)
-  })
+      proc.kill();
+      reject(new Error(`CLI command timed out after ${timeout}ms`));
+    }, timeout);
+  });
 
   // Wait for process to complete or timeout
-  const exitCode = await Promise.race([proc.exited, timeoutPromise])
+  const exitCode = await Promise.race([proc.exited, timeoutPromise]);
 
-  const duration = performance.now() - startTime
+  const duration = performance.now() - startTime;
 
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
+  const stdout = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
 
   // Try to parse stdout as JSON, fall back to stderr (error output)
-  let json: unknown
+  let json: unknown;
   try {
-    json = JSON.parse(stdout.trim())
+    json = JSON.parse(stdout.trim());
   } catch {
     // stdout not valid JSON, try stderr (error responses go there)
     try {
-      json = JSON.parse(stderr.trim())
+      json = JSON.parse(stderr.trim());
     } catch {
       // Neither is valid JSON, that's fine
     }
@@ -117,28 +111,25 @@ export async function runCli(
     exitCode,
     json,
     duration,
-  }
+  };
 }
 
 /**
  * Run CLI and expect success (exit code 0)
  * Throws if exit code is non-zero
  */
-export async function runCliSuccess(
-  args: string[],
-  options: CliOptions = {},
-): Promise<CliResult> {
-  const result = await runCli(args, options)
+export async function runCliSuccess(args: string[], options: CliOptions = {}): Promise<CliResult> {
+  const result = await runCli(args, options);
 
   if (result.exitCode !== 0) {
     throw new Error(
       `Expected CLI to succeed but got exit code ${result.exitCode}\n` +
         `stdout: ${result.stdout}\n` +
         `stderr: ${result.stderr}`,
-    )
+    );
   }
 
-  return result
+  return result;
 }
 
 /**
@@ -150,14 +141,14 @@ export async function runCliFailure(
   expectedExitCode?: number,
   options: CliOptions = {},
 ): Promise<CliResult> {
-  const result = await runCli(args, options)
+  const result = await runCli(args, options);
 
   if (result.exitCode === 0) {
     throw new Error(
       `Expected CLI to fail but got exit code 0\n` +
         `stdout: ${result.stdout}\n` +
         `stderr: ${result.stderr}`,
-    )
+    );
   }
 
   if (expectedExitCode !== undefined && result.exitCode !== expectedExitCode) {
@@ -165,10 +156,10 @@ export async function runCliFailure(
       `Expected exit code ${expectedExitCode} but got ${result.exitCode}\n` +
         `stdout: ${result.stdout}\n` +
         `stderr: ${result.stderr}`,
-    )
+    );
   }
 
-  return result
+  return result;
 }
 
 /**
@@ -177,40 +168,38 @@ export async function runCliFailure(
  */
 export async function runShellCommand(
   command: string,
-  options: Omit<CliOptions, 'entry'> = {},
+  options: Omit<CliOptions, "entry"> = {},
 ): Promise<CliResult> {
-  const shimDir = join(process.cwd(), '.tmp', `tg-shim-${process.pid}`)
-  const shim = join(shimDir, 'tg')
+  const shimDir = join(process.cwd(), ".tmp", `tg-shim-${process.pid}`);
+  const shim = join(shimDir, "tg");
   if (!existsSync(shim)) {
-    mkdirSync(shimDir, { recursive: true })
-    writeFileSync(
-      shim,
-      `#!/bin/sh\nexec bun --no-env-file run '${CLI_PATH}' "$@"\n`,
-      { mode: 0o755 },
-    )
+    mkdirSync(shimDir, { recursive: true });
+    writeFileSync(shim, `#!/bin/sh\nexec bun --no-env-file run '${CLI_PATH}' "$@"\n`, {
+      mode: 0o755,
+    });
   }
-  const { env = {}, timeout = 10000 } = options
-  const startTime = performance.now()
-  const proc = Bun.spawn(['sh', '-c', command], {
+  const { env = {}, timeout = 10000 } = options;
+  const startTime = performance.now();
+  const proc = Bun.spawn(["sh", "-c", command], {
     env: {
       ...process.env,
       BUN_ENV: undefined,
       NODE_ENV: undefined,
       ...env,
-      PATH: `${shimDir}:${process.env.PATH ?? ''}`,
+      PATH: `${shimDir}:${process.env.PATH ?? ""}`,
     },
     cwd: options.cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  const timer = setTimeout(() => proc.kill(), timeout)
-  const exitCode = await proc.exited
-  clearTimeout(timer)
-  const stdout = (await new Response(proc.stdout).text()).trim()
-  const stderr = (await new Response(proc.stderr).text()).trim()
-  let json: unknown
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const timer = setTimeout(() => proc.kill(), timeout);
+  const exitCode = await proc.exited;
+  clearTimeout(timer);
+  const stdout = (await new Response(proc.stdout).text()).trim();
+  const stderr = (await new Response(proc.stderr).text()).trim();
+  let json: unknown;
   try {
-    json = JSON.parse(stdout || stderr)
+    json = JSON.parse(stdout || stderr);
   } catch {
     // Not JSON
   }
@@ -220,5 +209,5 @@ export async function runShellCommand(
     exitCode,
     json,
     duration: performance.now() - startTime,
-  }
+  };
 }

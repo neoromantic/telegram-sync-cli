@@ -1,39 +1,32 @@
-import type { Database } from 'bun:sqlite'
-import { defineCommand } from 'citty'
-import {
-  chatSyncView,
-  createChatSyncStateService,
-} from '../../db/chat-sync-state'
-import { type CachedChat, createChatsCache } from '../../db/chats-cache'
-import { createGroupParticipation } from '../../db/group-participation'
-import { createSyncJobsService } from '../../db/sync-jobs'
-import {
-  determineSyncPolicy,
-  type SyncChatType,
-  type SyncMode,
-} from '../../db/sync-schema'
-import { ErrorCodes } from '../../types'
-import { openAccountCache } from '../../utils/account-cache'
-import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
-import { positionalChat } from '../../utils/args'
-import { isUsernameIdentifier } from '../../utils/identifiers'
-import { error, success } from '../../utils/output'
-import { AmbiguousPeerError } from '../send/peer-resolver'
-import { findCachedChatById } from './lookup'
+import type { Database } from "bun:sqlite";
+import { defineCommand } from "citty";
+import { chatSyncView, createChatSyncStateService } from "../../db/chat-sync-state";
+import { type CachedChat, createChatsCache } from "../../db/chats-cache";
+import { createGroupParticipation } from "../../db/group-participation";
+import { createSyncJobsService } from "../../db/sync-jobs";
+import { determineSyncPolicy, type SyncChatType, type SyncMode } from "../../db/sync-schema";
+import { ErrorCodes } from "../../types";
+import { openAccountCache } from "../../utils/account-cache";
+import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
+import { positionalChat } from "../../utils/args";
+import { isUsernameIdentifier } from "../../utils/identifiers";
+import { error, success } from "../../utils/output";
+import { AmbiguousPeerError } from "../send/peer-resolver";
+import { findCachedChatById } from "./lookup";
 
 export interface ResolvedChat {
   /** Marked peer ID, as `tg chats list` shows it and every cache table stores it */
-  id: number
+  id: number;
   /** The same marked ID; kept for scripts written against 0.2.0 */
-  peerId: number
-  type: SyncChatType
-  title: string | null
-  username: string | null
-  memberCount: number | null
+  peerId: number;
+  type: SyncChatType;
+  title: string | null;
+  username: string | null;
+  memberCount: number | null;
 }
 
 function fromCachedChat(chat: CachedChat): ResolvedChat {
-  const id = Number(chat.chat_id)
+  const id = Number(chat.chat_id);
   return {
     id,
     peerId: id,
@@ -41,7 +34,7 @@ function fromCachedChat(chat: CachedChat): ResolvedChat {
     title: chat.title,
     username: chat.username,
     memberCount: chat.member_count,
-  }
+  };
 }
 
 /**
@@ -53,17 +46,17 @@ function fromCachedChat(chat: CachedChat): ResolvedChat {
  */
 function resolveChat(db: Database, input: string): ResolvedChat | null {
   if (isUsernameIdentifier(input)) {
-    const chat = createChatsCache(db).getByUsername(input)
-    return chat ? fromCachedChat(chat) : null
+    const chat = createChatsCache(db).getByUsername(input);
+    return chat ? fromCachedChat(chat) : null;
   }
 
-  const cached = findCachedChatById(db, input)
-  if (cached) return fromCachedChat(cached)
+  const cached = findCachedChatById(db, input);
+  if (cached) return fromCachedChat(cached);
 
-  if (!/^-?\d+$/.test(input)) return null
-  const id = Number(input)
-  const state = createChatSyncStateService(db).get(id)
-  if (!state) return null
+  if (!/^-?\d+$/.test(input)) return null;
+  const id = Number(input);
+  const state = createChatSyncStateService(db).get(id);
+  if (!state) return null;
   return {
     id,
     peerId: id,
@@ -71,20 +64,20 @@ function resolveChat(db: Database, input: string): ResolvedChat | null {
     title: null,
     username: null,
     memberCount: state.member_count,
-  }
+  };
 }
 
 function resolveChatOrFail(db: Database, input: string): ResolvedChat | null {
   try {
-    return resolveChat(db, input)
+    return resolveChat(db, input);
   } catch (err) {
     if (err instanceof AmbiguousPeerError) {
       error(ErrorCodes.INVALID_ARGS, err.message, {
         chat: input,
         candidates: err.candidates,
-      })
+      });
     }
-    throw err
+    throw err;
   }
 }
 
@@ -100,112 +93,103 @@ function resolveChatOrFail(db: Database, input: string): ResolvedChat | null {
  * after the daemon committed fails at once with SQLITE_BUSY_SNAPSHOT,
  * busy_timeout or not.
  */
-export function applySyncMode(
-  db: Database,
-  chat: ResolvedChat,
-  mode: SyncMode,
-) {
-  const chatSyncState = createChatSyncStateService(db)
-  const jobsService = createSyncJobsService(db)
+export function applySyncMode(db: Database, chat: ResolvedChat, mode: SyncMode) {
+  const chatSyncState = createChatSyncStateService(db);
+  const jobsService = createSyncJobsService(db);
 
   const apply = db.transaction(() => {
     if (!chatSyncState.get(chat.peerId)) {
-      const policy = determineSyncPolicy(chat.type, chat.memberCount)
+      const policy = determineSyncPolicy(chat.type, chat.memberCount);
       chatSyncState.upsert({
         chat_id: chat.peerId,
         chat_type: chat.type,
         member_count: chat.memberCount,
         sync_priority: policy.priority,
         sync_enabled: policy.enabled,
-      })
+      });
     }
 
-    const changed = chatSyncState.get(chat.peerId)?.sync_mode !== mode
-    chatSyncState.setSyncMode(chat.peerId, mode)
+    const changed = chatSyncState.get(chat.peerId)?.sync_mode !== mode;
+    chatSyncState.setSyncMode(chat.peerId, mode);
     if (changed) {
-      jobsService.cancelPendingForChat(chat.peerId)
+      jobsService.cancelPendingForChat(chat.peerId);
     }
-    const clearedFailedJobs = jobsService.deleteFailed(chat.peerId)
+    const clearedFailedJobs = jobsService.deleteFailed(chat.peerId);
 
     return {
       state: chatSyncState.get(chat.peerId)!,
       changed,
       clearedFailedJobs,
-    }
-  })
-  return apply.immediate()
+    };
+  });
+  return apply.immediate();
 }
 
 export const syncChatCommand = defineCommand({
   meta: {
-    name: 'sync',
-    description:
-      'Turn background sync on or off for a chat (on by default; --off, --auto)',
+    name: "sync",
+    description: "Turn background sync on or off for a chat (on by default; --off, --auto)",
   },
   args: {
     chat: {
-      type: 'positional',
+      type: "positional",
       description:
         'Chat: @username or the ID from "tg chats list" (-100… for channels, -N for basic groups)',
       // Checked in run(): the parser reads a marked ID such as -100… as flags
       required: false,
     },
     off: {
-      type: 'boolean',
+      type: "boolean",
       description:
-        'Stop catch-up and history for the chat (live messages are still cached; in a group, only while you take part in it)',
+        "Stop catch-up and history for the chat (live messages are still cached; in a group, only while you take part in it)",
       default: false,
     },
     auto: {
-      type: 'boolean',
+      type: "boolean",
       description:
-        'Follow the default policy again (DMs and groups up to 100 members; the newest page only for bots and deleted accounts)',
+        "Follow the default policy again (DMs and groups up to 100 members; the newest page only for bots and deleted accounts)",
       default: false,
     },
     account: {
-      type: 'string',
+      type: "string",
       description: ACCOUNT_SELECTOR_DESCRIPTION,
     },
   },
   run({ args, rawArgs }) {
     if (args.off && args.auto) {
-      error(ErrorCodes.INVALID_ARGS, 'Use either --off or --auto, not both')
+      error(ErrorCodes.INVALID_ARGS, "Use either --off or --auto, not both");
     }
-    const input = positionalChat(args.chat, rawArgs)
+    const input = positionalChat(args.chat, rawArgs);
     if (!input) {
-      error(
-        ErrorCodes.INVALID_ARGS,
-        'Missing chat: pass @username or a chat ID',
-      )
+      error(ErrorCodes.INVALID_ARGS, "Missing chat: pass @username or a chat ID");
     }
-    const mode: SyncMode = args.off ? 'off' : args.auto ? 'auto' : 'on'
+    const mode: SyncMode = args.off ? "off" : args.auto ? "auto" : "on";
 
-    const { account, db } = openAccountCache(args.account)
-    const chat = resolveChatOrFail(db, input)
+    const { account, db } = openAccountCache(args.account);
+    const chat = resolveChatOrFail(db, input);
     if (!chat) {
       error(
         ErrorCodes.INVALID_ARGS,
         `Chat not found in the cache: ${input}`,
         { chat: input, account_id: account.id },
-        'Start the daemon (its dialog pass lists every chat, archived ones too) or run tg chats get --id @username, then retry',
-      )
+        "Start the daemon (its dialog pass lists every chat, archived ones too) or run tg chats get --id @username, then retry",
+      );
     }
 
     // A community only groups linked chats: there is no history to fetch,
     // so jobs for it would only fail (#58)
-    if (mode === 'on' && chat.type === 'community') {
+    if (mode === "on" && chat.type === "community") {
       // 0.4 turned a community on, and its jobs keep failing until it's off
-      const turnedOn =
-        createChatSyncStateService(db).get(chat.peerId)?.sync_mode === 'on'
+      const turnedOn = createChatSyncStateService(db).get(chat.peerId)?.sync_mode === "on";
       error(
         ErrorCodes.INVALID_ARGS,
         `${chat.title ?? input} is a Telegram community: it has no messages of its own, so there is nothing to sync`,
-        { chat: input, id: chat.id, type: 'community', account_id: account.id },
-        `Its linked chats are ordinary supergroups and channels: find them with tg chats list --type supergroup or --type channel and turn each on with tg chats sync <chat>${turnedOn ? `. An earlier version turned this community on: tg chats sync ${input} --auto turns it off and clears its failed jobs` : ''}`,
-      )
+        { chat: input, id: chat.id, type: "community", account_id: account.id },
+        `Its linked chats are ordinary supergroups and channels: find them with tg chats list --type supergroup or --type channel and turn each on with tg chats sync <chat>${turnedOn ? `. An earlier version turned this community on: tg chats sync ${input} --auto turns it off and clears its failed jobs` : ""}`,
+      );
     }
 
-    const { state, changed, clearedFailedJobs } = applySyncMode(db, chat, mode)
+    const { state, changed, clearedFailedJobs } = applySyncMode(db, chat, mode);
 
     success({
       id: chat.id,
@@ -221,6 +205,6 @@ export const syncChatCommand = defineCommand({
       syncedMessages: state.synced_messages,
       changed,
       clearedFailedJobs,
-    })
+    });
   },
-})
+});

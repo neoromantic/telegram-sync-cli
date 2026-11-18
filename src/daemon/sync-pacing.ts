@@ -11,59 +11,59 @@
  * `calmIntervalMs`. Intervals count from each job's start, so a slow page
  * doesn't stretch them. In memory: a restart starts at 0.7 again.
  */
-import type { DaemonPacing } from '../db/daemon-status'
+import type { DaemonPacing } from "../db/daemon-status";
 
 /** The pacing config.json sets (`sync.pacing.*`), read at daemon start */
 export interface SyncPacingConfig {
   /** The fastest pace while history is due, in calls per second */
-  maxCallsPerSecond: number
+  maxCallsPerSecond: number;
   /** The interval between job starts with no history due, in ms */
-  calmIntervalMs: number
+  calmIntervalMs: number;
 }
 
 export const DEFAULT_SYNC_PACING: SyncPacingConfig = {
   maxCallsPerSecond: 0.9,
   calmIntervalMs: 3000,
-}
+};
 
 /** The pace history starts at: a probe ran 150 s at 0.7/s with no FLOOD_WAIT */
-export const PACING_START_CALLS_PER_SECOND = 0.7
+export const PACING_START_CALLS_PER_SECOND = 0.7;
 /**
  * The slowest the history pace halves down to, whatever the calm interval:
  * one call every 5 s
  */
-export const PACING_MIN_CALLS_PER_SECOND = 0.2
+export const PACING_MIN_CALLS_PER_SECOND = 0.2;
 /** How much the pace grows after a clean run */
-export const PACING_STEP_CALLS_PER_SECOND = 0.05
+export const PACING_STEP_CALLS_PER_SECOND = 0.05;
 /** Calls without a FLOOD_WAIT that make a clean run */
-export const PACING_CLEAN_RUN_CALLS = 30
+export const PACING_CLEAN_RUN_CALLS = 30;
 
-export type SyncPacingMode = DaemonPacing['mode']
+export type SyncPacingMode = DaemonPacing["mode"];
 
 /** The interval of a history pace, rounded up to whole ms */
 function historyIntervalMs(callsPerSecond: number): number {
-  return Math.ceil(1000 / callsPerSecond)
+  return Math.ceil(1000 / callsPerSecond);
 }
 
 export class SyncPacer {
-  private readonly maxRate: number
+  private readonly maxRate: number;
   /** The floor of the halving; never above the cap */
-  private readonly minRate: number
-  private readonly calmIntervalMs: number
+  private readonly minRate: number;
+  private readonly calmIntervalMs: number;
   /** The pace while history is due, in calls per second */
-  private rate: number
-  private mode: SyncPacingMode = 'calm'
-  private lastStartAt: number | null = null
+  private rate: number;
+  private mode: SyncPacingMode = "calm";
+  private lastStartAt: number | null = null;
   /** No job starts before this: the end of a FLOOD_WAIT and one interval */
-  private notBefore = 0
-  private cleanCalls = 0
-  private floodWaits = 0
+  private notBefore = 0;
+  private cleanCalls = 0;
+  private floodWaits = 0;
 
   constructor(config: SyncPacingConfig = DEFAULT_SYNC_PACING) {
-    this.maxRate = config.maxCallsPerSecond
-    this.calmIntervalMs = config.calmIntervalMs
-    this.minRate = Math.min(PACING_MIN_CALLS_PER_SECOND, this.maxRate)
-    this.rate = Math.min(PACING_START_CALLS_PER_SECOND, this.maxRate)
+    this.maxRate = config.maxCallsPerSecond;
+    this.calmIntervalMs = config.calmIntervalMs;
+    this.minRate = Math.min(PACING_MIN_CALLS_PER_SECOND, this.maxRate);
+    this.rate = Math.min(PACING_START_CALLS_PER_SECOND, this.maxRate);
   }
 
   /**
@@ -71,30 +71,27 @@ export class SyncPacer {
    * so the pace never goes above the cap
    */
   intervalMs(): number {
-    return this.mode === 'history'
-      ? historyIntervalMs(this.rate)
-      : this.calmIntervalMs
+    return this.mode === "history" ? historyIntervalMs(this.rate) : this.calmIntervalMs;
   }
 
   /** Whether history is due; the scheduler asks before each pick */
   setHistoryDue(due: boolean): void {
-    this.mode = due ? 'history' : 'calm'
+    this.mode = due ? "history" : "calm";
   }
 
   /** When the next job may start */
   nextStartAt(): number {
-    const paced =
-      this.lastStartAt === null ? 0 : this.lastStartAt + this.intervalMs()
-    return Math.max(paced, this.notBefore)
+    const paced = this.lastStartAt === null ? 0 : this.lastStartAt + this.intervalMs();
+    return Math.max(paced, this.notBefore);
   }
 
   isDue(now: number): boolean {
-    return now >= this.nextStartAt()
+    return now >= this.nextStartAt();
   }
 
   /** A job started, or a pick failed and the account waits an interval */
   recordStart(now: number): void {
-    this.lastStartAt = now
+    this.lastStartAt = now;
   }
 
   /**
@@ -102,17 +99,14 @@ export class SyncPacer {
    * pace when this call ended a clean run and sped it up, else null.
    */
   recordCleanCall(): number | null {
-    if (this.mode !== 'history') return null
-    this.cleanCalls++
-    if (this.cleanCalls < PACING_CLEAN_RUN_CALLS) return null
-    this.cleanCalls = 0
-    const faster = Math.min(
-      this.maxRate,
-      this.rate + PACING_STEP_CALLS_PER_SECOND,
-    )
-    if (faster === this.rate) return null
-    this.rate = faster
-    return faster
+    if (this.mode !== "history") return null;
+    this.cleanCalls++;
+    if (this.cleanCalls < PACING_CLEAN_RUN_CALLS) return null;
+    this.cleanCalls = 0;
+    const faster = Math.min(this.maxRate, this.rate + PACING_STEP_CALLS_PER_SECOND);
+    if (faster === this.rate) return null;
+    this.rate = faster;
+    return faster;
   }
 
   /**
@@ -123,15 +117,12 @@ export class SyncPacer {
    * the new history pace.
    */
   recordFloodWait(now: number, seconds: number): number {
-    this.floodWaits++
-    this.cleanCalls = 0
-    this.rate = Math.max(this.minRate, this.rate / 2)
-    const waitEnd = now + Math.max(1, seconds) * 1000
-    this.notBefore = Math.max(
-      this.notBefore,
-      waitEnd + historyIntervalMs(this.rate),
-    )
-    return this.rate
+    this.floodWaits++;
+    this.cleanCalls = 0;
+    this.rate = Math.max(this.minRate, this.rate / 2);
+    const waitEnd = now + Math.max(1, seconds) * 1000;
+    this.notBefore = Math.max(this.notBefore, waitEnd + historyIntervalMs(this.rate));
+    return this.rate;
   }
 
   /** What the daemon writes to the account's daemon_status every tick */
@@ -140,15 +131,15 @@ export class SyncPacer {
       mode: this.mode,
       targetCallsPerSecond: 1000 / this.intervalMs(),
       floodWaits: this.floodWaits,
-    }
+    };
   }
 }
 
 /** A pace for logs and `tg status`: calls per second, two decimals */
 export function formatPace(callsPerSecond: number): string {
-  return callsPerSecond.toFixed(2)
+  return callsPerSecond.toFixed(2);
 }
 
 export function createSyncPacer(config?: SyncPacingConfig): SyncPacer {
-  return new SyncPacer(config)
+  return new SyncPacer(config);
 }

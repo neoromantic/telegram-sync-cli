@@ -4,34 +4,32 @@
  * this one, so a directory moved by hand or a data.db that was recreated
  * and reused an ID can't mix two accounts' data.
  */
-import type { Database } from 'bun:sqlite'
-import { CacheUnavailableError } from './cache-layout'
+import type { Database } from "bun:sqlite";
+import { CacheUnavailableError } from "./cache-layout";
 
 export interface CacheOwner {
   /** `accounts.id` in data.db */
-  id: number
+  id: number;
   /** The Telegram user ID, once the account knows it */
-  user_id: number | null
+  user_id: number | null;
 }
 
 export interface CacheMeta {
-  account_id: string | null
-  user_id: string | null
+  account_id: string | null;
+  user_id: string | null;
 }
 
 export function readCacheMeta(db: Database): CacheMeta {
   const rows = db
-    .query(
-      "SELECT key, value FROM cache_meta WHERE key IN ('account_id', 'user_id')",
-    )
-    .all() as Array<{ key: string; value: string }>
-  const meta: CacheMeta = { account_id: null, user_id: null }
+    .query("SELECT key, value FROM cache_meta WHERE key IN ('account_id', 'user_id')")
+    .all() as Array<{ key: string; value: string }>;
+  const meta: CacheMeta = { account_id: null, user_id: null };
   for (const row of rows) {
-    if (row.key === 'account_id' || row.key === 'user_id') {
-      meta[row.key] = row.value
+    if (row.key === "account_id" || row.key === "user_id") {
+      meta[row.key] = row.value;
     }
   }
-  return meta
+  return meta;
 }
 
 export interface CacheOwnerOptions {
@@ -43,52 +41,38 @@ export interface CacheOwnerOptions {
    * account, so a re-login can take its old cache back. Without it, any
    * other account ID is a mismatch.
    */
-  accountUserId?: (accountId: number) => number | null | undefined
+  accountUserId?: (accountId: number) => number | null | undefined;
 }
 
-type Ownership = 'own' | 'reclaim' | 'foreign'
+type Ownership = "own" | "reclaim" | "foreign";
 
-function ownership(
-  meta: CacheMeta,
-  owner: CacheOwner,
-  options: CacheOwnerOptions,
-): Ownership {
-  if (
-    meta.user_id !== null &&
-    owner.user_id !== null &&
-    meta.user_id !== String(owner.user_id)
-  ) {
-    return 'foreign'
+function ownership(meta: CacheMeta, owner: CacheOwner, options: CacheOwnerOptions): Ownership {
+  if (meta.user_id !== null && owner.user_id !== null && meta.user_id !== String(owner.user_id)) {
+    return "foreign";
   }
   if (meta.account_id === null || meta.account_id === String(owner.id)) {
-    return 'own'
+    return "own";
   }
   // Another account ID: only one that no longer is this Telegram user's
-  const stampedId = Number(meta.account_id)
+  const stampedId = Number(meta.account_id);
   const sameUser =
-    meta.user_id !== null &&
-    owner.user_id !== null &&
-    meta.user_id === String(owner.user_id)
+    meta.user_id !== null && owner.user_id !== null && meta.user_id === String(owner.user_id);
   if (!sameUser || !Number.isSafeInteger(stampedId) || !options.accountUserId) {
-    return 'foreign'
+    return "foreign";
   }
-  const stampedUser = options.accountUserId(stampedId)
+  const stampedUser = options.accountUserId(stampedId);
   const stampedAccountGone =
-    stampedUser === undefined ||
-    (stampedUser !== null && String(stampedUser) !== meta.user_id)
-  return stampedAccountGone ? 'reclaim' : 'foreign'
+    stampedUser === undefined || (stampedUser !== null && String(stampedUser) !== meta.user_id);
+  return stampedAccountGone ? "reclaim" : "foreign";
 }
 
-function missingStamps(
-  meta: CacheMeta,
-  owner: CacheOwner,
-): Array<[string, string]> {
-  const stamps: Array<[string, string]> = []
-  if (meta.account_id === null) stamps.push(['account_id', String(owner.id)])
+function missingStamps(meta: CacheMeta, owner: CacheOwner): Array<[string, string]> {
+  const stamps: Array<[string, string]> = [];
+  if (meta.account_id === null) stamps.push(["account_id", String(owner.id)]);
   if (meta.user_id === null && owner.user_id !== null) {
-    stamps.push(['user_id', String(owner.user_id)])
+    stamps.push(["user_id", String(owner.user_id)]);
   }
-  return stamps
+  return stamps;
 }
 
 /**
@@ -104,31 +88,31 @@ export function checkCacheOwner(
   path: string,
   options: CacheOwnerOptions = {},
 ): void {
-  const meta = readCacheMeta(db)
-  const found = ownership(meta, owner, options)
-  if (found === 'foreign') {
-    throw new CacheUnavailableError('owner_mismatch', path)
+  const meta = readCacheMeta(db);
+  const found = ownership(meta, owner, options);
+  if (found === "foreign") {
+    throw new CacheUnavailableError("owner_mismatch", path);
   }
-  if (found === 'own' && missingStamps(meta, owner).length === 0) return
+  if (found === "own" && missingStamps(meta, owner).length === 0) return;
 
   const stamp = db.transaction(() => {
     // Read again under the write lock: another process may have stamped it
-    const current = readCacheMeta(db)
-    const now = ownership(current, owner, options)
-    if (now === 'foreign') {
-      throw new CacheUnavailableError('owner_mismatch', path)
+    const current = readCacheMeta(db);
+    const now = ownership(current, owner, options);
+    if (now === "foreign") {
+      throw new CacheUnavailableError("owner_mismatch", path);
     }
-    if (now === 'reclaim') {
+    if (now === "reclaim") {
       db.prepare(
         "INSERT OR REPLACE INTO cache_meta (key, value) VALUES ('account_id', $value)",
-      ).run({ $value: String(owner.id) })
+      ).run({ $value: String(owner.id) });
     }
     const insert = db.prepare(
-      'INSERT OR IGNORE INTO cache_meta (key, value) VALUES ($key, $value)',
-    )
+      "INSERT OR IGNORE INTO cache_meta (key, value) VALUES ($key, $value)",
+    );
     for (const [key, value] of missingStamps(current, owner)) {
-      insert.run({ $key: key, $value: value })
+      insert.run({ $key: key, $value: value });
     }
-  })
-  stamp.immediate()
+  });
+  stamp.immediate();
 }

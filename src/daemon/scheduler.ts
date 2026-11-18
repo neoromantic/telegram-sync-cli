@@ -4,11 +4,11 @@
  * turns: forward catch-up, first pages and history. A fourth lane, sender
  * fetches (#143), gets a slot only when the other three are empty.
  */
-import type { Database } from 'bun:sqlite'
-import type { ChatSyncStateService } from '../db/chat-sync-state'
-import type { MessagesCache } from '../db/messages-cache'
-import { createSenderLookups } from '../db/sender-lookups'
-import type { SyncJobsService } from '../db/sync-jobs'
+import type { Database } from "bun:sqlite";
+import type { ChatSyncStateService } from "../db/chat-sync-state";
+import type { MessagesCache } from "../db/messages-cache";
+import { createSenderLookups } from "../db/sender-lookups";
+import type { SyncJobsService } from "../db/sync-jobs";
 import {
   CHAT_INDEPENDENT_JOB_TYPES,
   type ChatSyncStateRow,
@@ -16,16 +16,16 @@ import {
   type SyncJobRow,
   SyncJobType,
   SyncPriority,
-} from '../db/sync-schema'
+} from "../db/sync-schema";
 
 /**
  * Scheduler status
  */
 export interface SchedulerStatus {
   /** Number of pending jobs */
-  pendingJobs: number
+  pendingJobs: number;
   /** Number of running jobs */
-  runningJobs: number
+  runningJobs: number;
 }
 
 /**
@@ -33,41 +33,41 @@ export interface SchedulerStatus {
  */
 export interface SyncScheduler {
   /** Queue forward catchup job for a chat */
-  queueForwardCatchup(chatId: number): void
+  queueForwardCatchup(chatId: number): void;
   /** Queue backward history sync job for a chat */
-  queueBackwardHistory(chatId: number): void
+  queueBackwardHistory(chatId: number): void;
   /** Queue initial load job for a chat */
-  queueInitialLoad(chatId: number): void
+  queueInitialLoad(chatId: number): void;
   /** Initialize scheduler with startup jobs */
-  initializeForStartup(): Promise<void>
+  initializeForStartup(): Promise<void>;
   /** Refresh job queue based on current sync state */
-  refreshQueues(): void
+  refreshQueues(): void;
   /**
    * Next job to process, taking lane turns into account. Only looks: call
    * recordJobRun after running it
    */
-  getNextJob(): SyncJobRow | null
+  getNextJob(): SyncJobRow | null;
   /**
    * Whether a first page or a history page is due: the account then runs
    * at its adaptive history pace (#133)
    */
-  hasHistoryDue(): boolean
+  hasHistoryDue(): boolean;
   /** Move to the next lane slot after a job ran */
-  recordJobRun(job: SyncJobRow): void
+  recordJobRun(job: SyncJobRow): void;
   /** Get scheduler status */
-  getStatus(): SchedulerStatus
+  getStatus(): SchedulerStatus;
   /** Recover jobs that were running when daemon crashed */
-  recoverCrashedJobs(): number
+  recoverCrashedJobs(): number;
 }
 
 /**
  * Options for creating sync scheduler
  */
 export interface SyncSchedulerOptions {
-  db: Database
-  jobsService: SyncJobsService
-  chatSyncState: ChatSyncStateService
-  messagesCache: MessagesCache
+  db: Database;
+  jobsService: SyncJobsService;
+  chatSyncState: ChatSyncStateService;
+  messagesCache: MessagesCache;
 }
 
 /**
@@ -84,54 +84,44 @@ export const SYNC_LANES = {
   // Senders missing from the cache (#143): never in the cycle, only a slot
   // the other lanes leave empty
   senders: [SyncJobType.FetchSenders],
-} as const satisfies Record<string, readonly SyncJobType[]>
+} as const satisfies Record<string, readonly SyncJobType[]>;
 
-export type SyncLane = keyof typeof SYNC_LANES
+export type SyncLane = keyof typeof SYNC_LANES;
 
 /**
  * Whose turn each job slot is: half for catch-up, a quarter each for first
  * pages and history when every lane has work.
  */
-export const SYNC_SLOT_CYCLE: readonly SyncLane[] = [
-  'catchup',
-  'firstPage',
-  'catchup',
-  'history',
-]
+export const SYNC_SLOT_CYCLE: readonly SyncLane[] = ["catchup", "firstPage", "catchup", "history"];
 
 /** Who gets an empty lane's slot */
-const SYNC_LANE_FALLBACK: readonly SyncLane[] = [
-  'catchup',
-  'firstPage',
-  'history',
-  'senders',
-]
+const SYNC_LANE_FALLBACK: readonly SyncLane[] = ["catchup", "firstPage", "history", "senders"];
 
 /** How often the scheduler looks for senders missing from the cache */
-export const SENDER_SCAN_INTERVAL_MS = 24 * 60 * 60 * 1000
+export const SENDER_SCAN_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Create sync scheduler
  */
 class SyncSchedulerImpl implements SyncScheduler {
   /** Position in SYNC_SLOT_CYCLE; in memory, so it restarts with the daemon */
-  private slot = 0
+  private slot = 0;
   /** When it last looked for missing senders; in memory, so a start looks */
-  private sendersScannedAt: number | null = null
-  private readonly senderLookups
-  private readonly participation
+  private sendersScannedAt: number | null = null;
+  private readonly senderLookups;
+  private readonly participation;
 
   constructor(private readonly options: SyncSchedulerOptions) {
-    this.senderLookups = createSenderLookups(options.db)
-    this.participation = options.messagesCache.participation
+    this.senderLookups = createSenderLookups(options.db);
+    this.participation = options.messagesCache.participation;
   }
 
   private get jobsService() {
-    return this.options.jobsService
+    return this.options.jobsService;
   }
 
   private get chatSyncState() {
-    return this.options.chatSyncState
+    return this.options.chatSyncState;
   }
 
   /**
@@ -139,9 +129,9 @@ class SyncSchedulerImpl implements SyncScheduler {
    * messages: a group only while the account takes part in it
    */
   private enabledState(chatId: number): ChatSyncStateRow | null {
-    const state = this.chatSyncState.get(chatId)
-    if (!state?.sync_enabled) return null
-    return this.participation.captures(chatId) ? state : null
+    const state = this.chatSyncState.get(chatId);
+    if (!state?.sync_enabled) return null;
+    return this.participation.captures(chatId) ? state : null;
   }
 
   /**
@@ -154,10 +144,10 @@ class SyncSchedulerImpl implements SyncScheduler {
         .getPendingJobs()
         .filter((job) => !CHAT_INDEPENDENT_JOB_TYPES.includes(job.job_type))
         .map((job) => job.chat_id),
-    )
+    );
     for (const chatId of chats) {
       if (!this.participation.captures(chatId)) {
-        this.jobsService.cancelPendingForChat(chatId)
+        this.jobsService.cancelPendingForChat(chatId);
       }
     }
   }
@@ -167,85 +157,78 @@ class SyncSchedulerImpl implements SyncScheduler {
    * medium groups. A chat turned on by hand gets its first page ahead of
    * everything, so the user sees it soon.
    */
-  private lanePriority(
-    state: ChatSyncStateRow,
-    jobType: SyncJobType,
-  ): SyncPriority {
-    if (jobType === SyncJobType.InitialLoad && state.sync_mode === 'on') {
-      return SyncPriority.Realtime
+  private lanePriority(state: ChatSyncStateRow, jobType: SyncJobType): SyncPriority {
+    if (jobType === SyncJobType.InitialLoad && state.sync_mode === "on") {
+      return SyncPriority.Realtime;
     }
-    return state.sync_priority
+    return state.sync_priority;
   }
 
   queueForwardCatchup(chatId: number): void {
-    const state = this.enabledState(chatId)
-    if (!state) return
+    const state = this.enabledState(chatId);
+    if (!state) return;
 
-    if (
-      this.jobsService.hasActiveJobForChat(chatId, SyncJobType.ForwardCatchup)
-    ) {
-      return
+    if (this.jobsService.hasActiveJobForChat(chatId, SyncJobType.ForwardCatchup)) {
+      return;
     }
 
     this.jobsService.create({
       chat_id: chatId,
       job_type: SyncJobType.ForwardCatchup,
       priority: this.lanePriority(state, SyncJobType.ForwardCatchup),
-    })
+    });
   }
 
   queueBackwardHistory(chatId: number): void {
-    const state = this.enabledState(chatId)
-    if (!state || state.history_complete) return
+    const state = this.enabledState(chatId);
+    if (!state || state.history_complete) return;
     // Bots and deleted accounts get their first page only (#131)
-    if (!isHistoryAllowed(state)) return
+    if (!isHistoryAllowed(state)) return;
 
     // The first page sets both cursors, so it comes before any history.
     if (state.forward_cursor === null) {
-      this.queueInitialLoad(chatId)
-      return
+      this.queueInitialLoad(chatId);
+      return;
     }
 
-    if (
-      this.jobsService.hasActiveJobForChat(chatId, SyncJobType.BackwardHistory)
-    ) {
-      return
+    if (this.jobsService.hasActiveJobForChat(chatId, SyncJobType.BackwardHistory)) {
+      return;
     }
 
     this.jobsService.create({
       chat_id: chatId,
       job_type: SyncJobType.BackwardHistory,
       priority: this.lanePriority(state, SyncJobType.BackwardHistory),
-    })
+    });
   }
 
   queueInitialLoad(chatId: number): void {
-    const state = this.enabledState(chatId)
-    if (!state) return
+    const state = this.enabledState(chatId);
+    if (!state) return;
 
     if (this.jobsService.hasActiveJobForChat(chatId, SyncJobType.InitialLoad)) {
-      return
+      return;
     }
 
     this.jobsService.create({
       chat_id: chatId,
       job_type: SyncJobType.InitialLoad,
       priority: this.lanePriority(state, SyncJobType.InitialLoad),
-    })
+    });
   }
 
   async initializeForStartup(): Promise<void> {
     // A crash doesn't count as an attempt.
-    this.recoverCrashedJobs()
+    this.recoverCrashedJobs();
     // A restart retries every failed job, and removes the failed rows older
     // versions left: refreshQueues below queues their chats again.
-    this.jobsService.deleteFailed()
+    this.jobsService.deleteFailed();
     // Catch-up is queued again below for the chats that are behind; older
     // versions left one pending for every enabled chat.
-    this.jobsService.deletePendingOfType(SyncJobType.ForwardCatchup)
-    this.jobsService.deletePendingForInactiveChats()
-    this.jobsService.alignPendingPriorities()
-    this.refreshQueues()
+    this.jobsService.deletePendingOfType(SyncJobType.ForwardCatchup);
+    this.jobsService.deletePendingForInactiveChats();
+    this.jobsService.alignPendingPriorities();
+    this.refreshQueues();
   }
 
   /**
@@ -258,28 +241,28 @@ class SyncSchedulerImpl implements SyncScheduler {
     // A dialog pass may have found that a chat is a bot or a deleted
     // account, which gets no older history (#131): its pending history jobs
     // go, its cached messages stay.
-    this.jobsService.deletePendingHistoryOfFirstPageOnlyChats()
-    this.dropJobsOfPausedGroups()
+    this.jobsService.deletePendingHistoryOfFirstPageOnlyChats();
+    this.dropJobsOfPausedGroups();
 
     // Catch-up only for chats whose newest message is above the cursor or
     // unknown. Live updates don't move the cursor or the top, so a chat
     // that is caught up stays that way until a dialog pass sees more.
     for (const chat of this.chatSyncState.getCatchupDue()) {
-      this.queueForwardCatchup(chat.chat_id)
+      this.queueForwardCatchup(chat.chat_id);
     }
 
     // Every enabled chat without a forward cursor gets its first page, even
     // if live updates already cached some of its messages.
     for (const chat of this.chatSyncState.getInitialLoadDue()) {
-      this.queueInitialLoad(chat.chat_id)
+      this.queueInitialLoad(chat.chat_id);
     }
 
     // History for every enabled chat that had its first page, in any tier.
     for (const chat of this.chatSyncState.getHistoryDue()) {
-      this.queueBackwardHistory(chat.chat_id)
+      this.queueBackwardHistory(chat.chat_id);
     }
 
-    this.queueSenderFetches()
+    this.queueSenderFetches();
   }
 
   /**
@@ -288,31 +271,26 @@ class SyncSchedulerImpl implements SyncScheduler {
    * only when the other lanes are empty.
    */
   private queueSenderFetches(): void {
-    const now = Date.now()
-    if (
-      this.sendersScannedAt === null ||
-      now - this.sendersScannedAt >= SENDER_SCAN_INTERVAL_MS
-    ) {
-      this.senderLookups.scan(now)
-      this.sendersScannedAt = now
+    const now = Date.now();
+    if (this.sendersScannedAt === null || now - this.sendersScannedAt >= SENDER_SCAN_INTERVAL_MS) {
+      this.senderLookups.scan(now);
+      this.sendersScannedAt = now;
     }
     for (const chatId of this.senderLookups.chatsDue()) {
-      if (
-        this.jobsService.hasActiveJobForChat(chatId, SyncJobType.FetchSenders)
-      ) {
-        continue
+      if (this.jobsService.hasActiveJobForChat(chatId, SyncJobType.FetchSenders)) {
+        continue;
       }
       this.jobsService.create({
         chat_id: chatId,
         job_type: SyncJobType.FetchSenders,
         priority: SyncPriority.Background,
-      })
+      });
     }
   }
 
   /** The lane's next job that is due; jobs waiting for a retry are skipped */
   private nextInLane(lane: SyncLane): SyncJobRow | null {
-    return this.jobsService.getNextPendingOfTypes(SYNC_LANES[lane])
+    return this.jobsService.getNextPendingOfTypes(SYNC_LANES[lane]);
   }
 
   /**
@@ -321,43 +299,38 @@ class SyncSchedulerImpl implements SyncScheduler {
    * Only looks; recordJobRun moves to the next slot.
    */
   getNextJob(): SyncJobRow | null {
-    const lane = SYNC_SLOT_CYCLE[this.slot % SYNC_SLOT_CYCLE.length]!
-    const job = this.nextInLane(lane)
-    if (job) return job
+    const lane = SYNC_SLOT_CYCLE[this.slot % SYNC_SLOT_CYCLE.length]!;
+    const job = this.nextInLane(lane);
+    if (job) return job;
 
     for (const fallback of SYNC_LANE_FALLBACK) {
-      if (fallback === lane) continue
-      const fallbackJob = this.nextInLane(fallback)
-      if (fallbackJob) return fallbackJob
+      if (fallback === lane) continue;
+      const fallbackJob = this.nextInLane(fallback);
+      if (fallbackJob) return fallbackJob;
     }
-    return null
+    return null;
   }
 
   hasHistoryDue(): boolean {
-    return (
-      this.nextInLane('firstPage') !== null ||
-      this.nextInLane('history') !== null
-    )
+    return this.nextInLane("firstPage") !== null || this.nextInLane("history") !== null;
   }
 
   recordJobRun(_job: SyncJobRow): void {
-    this.slot = (this.slot + 1) % SYNC_SLOT_CYCLE.length
+    this.slot = (this.slot + 1) % SYNC_SLOT_CYCLE.length;
   }
 
   getStatus(): SchedulerStatus {
     return {
       pendingJobs: this.jobsService.getPendingJobs().length,
       runningJobs: this.jobsService.getRunningJobs().length,
-    }
+    };
   }
 
   recoverCrashedJobs(): number {
-    return this.jobsService.recoverCrashedJobs()
+    return this.jobsService.recoverCrashedJobs();
   }
 }
 
-export function createSyncScheduler(
-  options: SyncSchedulerOptions,
-): SyncScheduler {
-  return new SyncSchedulerImpl(options)
+export function createSyncScheduler(options: SyncSchedulerOptions): SyncScheduler {
+  return new SyncSchedulerImpl(options);
 }

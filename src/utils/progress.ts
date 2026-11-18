@@ -2,12 +2,12 @@
  * Transfer progress on stderr, for a person at a terminal: never on stdout,
  * and nothing when stderr is not a TTY or the output is quiet
  */
-import { formatBytes } from './formatting'
-import { getOutputFormat } from './output'
+import { formatBytes } from "./formatting";
+import { getOutputFormat } from "./output";
 
 interface ProgressStream {
-  isTTY?: boolean
-  write(text: string): unknown
+  isTTY?: boolean;
+  write(text: string): unknown;
 }
 
 /**
@@ -18,20 +18,20 @@ export function createProgress(
   label: string,
   stream: ProgressStream = process.stderr,
 ): ((done: number, total: number) => void) | undefined {
-  if (!stream.isTTY || getOutputFormat() === 'quiet') return undefined
+  if (!stream.isTTY || getOutputFormat() === "quiet") return undefined;
 
-  let finished = false
+  let finished = false;
   return (done, total) => {
-    if (finished) return
-    const known = Number.isFinite(total) && total > 0
+    if (finished) return;
+    const known = Number.isFinite(total) && total > 0;
     const text = known
       ? `${label} ${Math.floor((Math.min(done, total) / total) * 100)}% ${formatBytes(done)} / ${formatBytes(total)}`
-      : `${label} ${formatBytes(done)}`
+      : `${label} ${formatBytes(done)}`;
     // \x1b[K clears what a longer line left
-    stream.write(`\r${text}\x1b[K`)
+    stream.write(`\r${text}\x1b[K`);
     if (known && done >= total) {
-      finished = true
-      stream.write('\n')
+      finished = true;
+      stream.write("\n");
     }
-  }
+  };
 }

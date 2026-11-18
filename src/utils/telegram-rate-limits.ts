@@ -1,29 +1,26 @@
-import type { Database } from 'bun:sqlite'
-import { type TelegramClient, tl } from '@mtcute/bun'
-import { ConfigError } from '../config'
-import { getErrorMessage } from '../daemon/daemon-utils'
-import { getAccountCacheDb } from '../db'
-import {
-  createRateLimitsService,
-  type RateLimitsService,
-} from '../db/rate-limits'
-import { ErrorCodes } from '../types'
-import { error } from './output'
+import type { Database } from "bun:sqlite";
+import { type TelegramClient, tl } from "@mtcute/bun";
+import { ConfigError } from "../config";
+import { getErrorMessage } from "../daemon/daemon-utils";
+import { getAccountCacheDb } from "../db";
+import { createRateLimitsService, type RateLimitsService } from "../db/rate-limits";
+import { ErrorCodes } from "../types";
+import { error } from "./output";
 
 export class RateLimitError extends Error {
-  readonly method: string
-  readonly waitSeconds: number
+  readonly method: string;
+  readonly waitSeconds: number;
 
   constructor(method: string, waitSeconds: number, options?: ErrorOptions) {
-    super(`Rate limited for ${method}: wait ${waitSeconds}s`, options)
-    this.name = 'RateLimitError'
-    this.method = method
-    this.waitSeconds = waitSeconds
+    super(`Rate limited for ${method}: wait ${waitSeconds}s`, options);
+    this.name = "RateLimitError";
+    this.method = method;
+    this.waitSeconds = waitSeconds;
   }
 }
 
 export function isRateLimitError(err: unknown): err is RateLimitError {
-  return err instanceof RateLimitError
+  return err instanceof RateLimitError;
 }
 
 /**
@@ -35,27 +32,24 @@ export function describeRateLimit(method: string, waitSeconds: number) {
     message: `Rate limited for ${method}. Wait ${waitSeconds}s before retrying.`,
     details: { method, wait_seconds: waitSeconds },
     suggestion: `Wait ${waitSeconds}s, then run the same command again`,
-  }
+  };
 }
 
 /** Report a flood wait as RATE_LIMITED (exit 5), retryable after the wait */
 export function reportRateLimit(err: RateLimitError): never {
-  const { message, details, suggestion } = describeRateLimit(
-    err.method,
-    err.waitSeconds,
-  )
-  error(ErrorCodes.RATE_LIMITED, message, details, suggestion)
+  const { message, details, suggestion } = describeRateLimit(err.method, err.waitSeconds);
+  error(ErrorCodes.RATE_LIMITED, message, details, suggestion);
 }
 
 /** Report a config error or a rate limit and exit; any other error returns */
 export function reportConfigOrRateLimitError(err: unknown): void {
   if (err instanceof ConfigError) {
-    error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+    error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues });
   }
-  if (isRateLimitError(err)) reportRateLimit(err)
+  if (isRateLimitError(err)) reportRateLimit(err);
 }
 
-const services = new Map<number, { db: Database; service: RateLimitsService }>()
+const services = new Map<number, { db: Database; service: RateLimitsService }>();
 
 /**
  * The account's rate limits, kept in its own cache: the CLI and the daemon
@@ -63,45 +57,45 @@ const services = new Map<number, { db: Database; service: RateLimitsService }>()
  * blocks another
  */
 export function getRateLimitsService(accountId: number): RateLimitsService {
-  const db = getAccountCacheDb(accountId)
-  const cached = services.get(accountId)
-  if (cached && cached.db === db) return cached.service
-  const service = createRateLimitsService(db)
-  services.set(accountId, { db, service })
-  return service
+  const db = getAccountCacheDb(accountId);
+  const cached = services.get(accountId);
+  if (cached && cached.db === db) return cached.service;
+  const service = createRateLimitsService(db);
+  services.set(accountId, { db, service });
+  return service;
 }
 
 function extractFloodWaitSeconds(error: unknown): number | null {
   if (error instanceof Error) {
-    const match = error.message.match(/FLOOD_WAIT_(\d+)/)
+    const match = error.message.match(/FLOOD_WAIT_(\d+)/);
     if (match?.[1]) {
-      return parseInt(match[1], 10)
+      return parseInt(match[1], 10);
     }
 
-    const waitMatch = error.message.match(/[Ww]ait of (\d+) seconds/)
+    const waitMatch = error.message.match(/[Ww]ait of (\d+) seconds/);
     if (waitMatch?.[1]) {
-      return parseInt(waitMatch[1], 10)
+      return parseInt(waitMatch[1], 10);
     }
   }
 
-  const anyError = error as { seconds?: number }
-  if (typeof anyError?.seconds === 'number') {
-    return anyError.seconds
+  const anyError = error as { seconds?: number };
+  if (typeof anyError?.seconds === "number") {
+    return anyError.seconds;
   }
 
-  return null
+  return null;
 }
 
 /** A FLOOD_WAIT from Telegram, as opposed to another error that has seconds */
 function isFloodWait(error: unknown): boolean {
-  if (tl.RpcError.is(error)) return error.code === tl.RpcError.FLOOD
-  return error instanceof Error && /FLOOD_WAIT_\d+/.test(error.message)
+  if (tl.RpcError.is(error)) return error.code === tl.RpcError.FLOOD;
+  return error instanceof Error && /FLOOD_WAIT_\d+/.test(error.message);
 }
 
 /** Telegram's error code (420 for a FLOOD_WAIT), or null for another error */
 function apiErrorCode(error: unknown): number | null {
-  if (tl.RpcError.is(error)) return error.code
-  return extractFloodWaitSeconds(error) ? tl.RpcError.FLOOD : null
+  if (tl.RpcError.is(error)) return error.code;
+  return extractFloodWaitSeconds(error) ? tl.RpcError.FLOOD : null;
 }
 
 /**
@@ -117,23 +111,23 @@ export async function trackApiCall<T>(
   call: () => Promise<T>,
   context?: string,
 ): Promise<T> {
-  const start = rateLimits.now()
-  rateLimits.recordCall(method)
+  const start = rateLimits.now();
+  rateLimits.recordCall(method);
 
   try {
-    const result = await call()
+    const result = await call();
     rateLimits.logActivity({
       timestamp: start,
       method,
       success: 1,
       response_ms: rateLimits.now() - start,
       context,
-    })
-    return result
+    });
+    return result;
   } catch (err) {
-    const waitSeconds = extractFloodWaitSeconds(err)
+    const waitSeconds = extractFloodWaitSeconds(err);
     if (waitSeconds) {
-      rateLimits.setFloodWait(method, waitSeconds)
+      rateLimits.setFloodWait(method, waitSeconds);
     }
 
     rateLimits.logActivity({
@@ -143,8 +137,8 @@ export async function trackApiCall<T>(
       error_code: apiErrorCode(err),
       response_ms: rateLimits.now() - start,
       context: getErrorMessage(err),
-    })
-    throw err
+    });
+    throw err;
   }
 }
 
@@ -154,34 +148,34 @@ async function callWithRateLimits<T>({
   rateLimits,
   context,
 }: {
-  method: string
-  call: () => Promise<T>
-  rateLimits: RateLimitsService
-  context?: string
+  method: string;
+  call: () => Promise<T>;
+  rateLimits: RateLimitsService;
+  context?: string;
 }): Promise<T> {
   if (rateLimits.isBlocked(method)) {
-    throw new RateLimitError(method, rateLimits.getWaitTime(method))
+    throw new RateLimitError(method, rateLimits.getWaitTime(method));
   }
 
   try {
-    return await trackApiCall(rateLimits, method, call, context)
+    return await trackApiCall(rateLimits, method, call, context);
   } catch (err) {
-    const waitSeconds = extractFloodWaitSeconds(err)
+    const waitSeconds = extractFloodWaitSeconds(err);
     // The first flood wait reads like a call to a method that is blocked
     if (waitSeconds && isFloodWait(err)) {
-      throw new RateLimitError(method, waitSeconds, { cause: err })
+      throw new RateLimitError(method, waitSeconds, { cause: err });
     }
-    throw err
+    throw err;
   }
 }
 
-type ClientCallRequest = Parameters<TelegramClient['call']>[0]
-type ClientCallOptions = Parameters<TelegramClient['call']>[1]
+type ClientCallRequest = Parameters<TelegramClient["call"]>[0];
+type ClientCallOptions = Parameters<TelegramClient["call"]>[1];
 
 export type RateLimitsTarget = { context?: string } & (
   | { accountId: number; rateLimits?: undefined }
   | { rateLimits: RateLimitsService; accountId?: undefined }
-)
+);
 
 /**
  * Check and record every call of the client in the rate limits of the
@@ -192,39 +186,34 @@ export function wrapClientCallWithRateLimits(
   options: RateLimitsTarget,
 ): TelegramClient {
   const rateLimits =
-    options.rateLimits === undefined
-      ? getRateLimitsService(options.accountId)
-      : options.rateLimits
+    options.rateLimits === undefined ? getRateLimitsService(options.accountId) : options.rateLimits;
   const clientAny = client as TelegramClient & {
-    __rateLimitWrapped?: boolean
-    __rateLimitContext?: string
-    __rateLimitOriginalCall?: TelegramClient['call']
-  }
+    __rateLimitWrapped?: boolean;
+    __rateLimitContext?: string;
+    __rateLimitOriginalCall?: TelegramClient["call"];
+  };
 
   if (clientAny.__rateLimitWrapped) {
     if (options.context) {
-      clientAny.__rateLimitContext = options.context
+      clientAny.__rateLimitContext = options.context;
     }
-    return client
+    return client;
   }
 
-  clientAny.__rateLimitWrapped = true
-  clientAny.__rateLimitContext = options.context
-  const originalCall = client.call.bind(client)
-  clientAny.__rateLimitOriginalCall = originalCall
+  clientAny.__rateLimitWrapped = true;
+  clientAny.__rateLimitContext = options.context;
+  const originalCall = client.call.bind(client);
+  clientAny.__rateLimitOriginalCall = originalCall;
 
-  clientAny.call = (async (
-    request: ClientCallRequest,
-    callOptions?: ClientCallOptions,
-  ) => {
-    const method = request._ ?? 'unknown'
+  clientAny.call = (async (request: ClientCallRequest, callOptions?: ClientCallOptions) => {
+    const method = request._ ?? "unknown";
     return callWithRateLimits({
       method,
       rateLimits,
       context: clientAny.__rateLimitContext,
       call: () => originalCall(request, callOptions),
-    })
-  }) as TelegramClient['call']
+    });
+  }) as TelegramClient["call"];
 
-  return client
+  return client;
 }

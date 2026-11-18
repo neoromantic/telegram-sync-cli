@@ -2,7 +2,24 @@
   "name": "@goodit/telegram-sync-cli",
   "version": "0.14.0",
   "description": "Agent-friendly Telegram sync CLI with full API support",
-  "type": "module",
+  "keywords": [
+    "agent",
+    "automation",
+    "cli",
+    "mtproto",
+    "telegram",
+    "telegram-api"
+  ],
+  "homepage": "https://tg.sergeybaus.com",
+  "bugs": {
+    "url": "https://github.com/neoromantic/telegram-sync-cli/issues"
+  },
+  "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neoromantic/telegram-sync-cli.git"
+  },
   "bin": {
     "tg": "bin/tg.js"
   },
@@ -14,6 +31,10 @@
     "!src/__integration__/**",
     "CHANGELOG.md"
   ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
@@ -37,31 +58,13 @@
     "format:check": "oxfmt --check",
     "prepare": "bunx lefthook install"
   },
-  "keywords": [
-    "telegram",
-    "cli",
-    "mtproto",
-    "telegram-api",
-    "agent",
-    "automation"
-  ],
-  "author": "",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/neoromantic/telegram-sync-cli.git"
+  "dependencies": {
+    "@mtcute/bun": "^0.32.6",
+    "@mtcute/core": "^0.32.6",
+    "citty": "^0.2.2",
+    "long": "^5.3.2",
+    "uqr": "^0.1.3"
   },
-  "bugs": {
-    "url": "https://github.com/neoromantic/telegram-sync-cli/issues"
-  },
-  "homepage": "https://tg.sergeybaus.com",
-  "publishConfig": {
-    "access": "public"
-  },
-  "engines": {
-    "bun": ">=1.4.0"
-  },
-  "packageManager": "bun@1.4.3",
   "devDependencies": {
     "@interfere/landmines": "0.1.0",
     "@types/bun": "1.4.3",
@@ -72,11 +75,8 @@
     "typescript": "^7.0.2",
     "zod": "^4.6.7"
   },
-  "dependencies": {
-    "@mtcute/bun": "^0.32.6",
-    "@mtcute/core": "^0.32.6",
-    "citty": "^0.2.2",
-    "long": "^5.3.2",
-    "uqr": "^0.1.3"
-  }
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "packageManager": "bun@1.4.3"
 }

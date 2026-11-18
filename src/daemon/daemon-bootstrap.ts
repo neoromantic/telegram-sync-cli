@@ -1,46 +1,40 @@
-import type { Database } from 'bun:sqlite'
-import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
-import {
-  dialogToCacheInput,
-  fetchJoinedCommunities,
-} from '../commands/chats/helpers'
-import {
-  type ChatSyncStateService,
-  createChatSyncStateService,
-} from '../db/chat-sync-state'
-import { createChatsCache } from '../db/chats-cache'
-import type { CatchUpReason } from '../db/daemon-status'
-import { isOwnOrdinaryMessage } from '../db/group-participation'
-import { createMessagesCache, type MessageInput } from '../db/messages-cache'
-import { createSyncJobsService } from '../db/sync-jobs'
+import type { Database } from "bun:sqlite";
+import type { Dialog, TelegramClient, tl } from "@mtcute/bun";
+import { dialogToCacheInput, fetchJoinedCommunities } from "../commands/chats/helpers";
+import { type ChatSyncStateService, createChatSyncStateService } from "../db/chat-sync-state";
+import { createChatsCache } from "../db/chats-cache";
+import type { CatchUpReason } from "../db/daemon-status";
+import { isOwnOrdinaryMessage } from "../db/group-participation";
+import { createMessagesCache, type MessageInput } from "../db/messages-cache";
+import { createSyncJobsService } from "../db/sync-jobs";
 import {
   determineSyncPolicy,
   rawUserPolicy,
   type SyncChatType,
   SyncJobType,
   SyncPriority,
-} from '../db/sync-schema'
-import { createUsersCache } from '../db/users-cache'
-import { apiUserToCacheInput } from '../utils/telegram-mappers'
-import type { AccountRuntime, DaemonContext } from './daemon-context'
-import { formatError, isDaemonStopError } from './daemon-utils'
-import { parseRawMessage } from './sync-worker-real-helpers'
+} from "../db/sync-schema";
+import { createUsersCache } from "../db/users-cache";
+import { apiUserToCacheInput } from "../utils/telegram-mappers";
+import type { AccountRuntime, DaemonContext } from "./daemon-context";
+import { formatError, isDaemonStopError } from "./daemon-utils";
+import { parseRawMessage } from "./sync-worker-real-helpers";
 
-const DIALOG_BOOTSTRAP_BATCH_SIZE = 200
+const DIALOG_BOOTSTRAP_BATCH_SIZE = 200;
 
 export interface DialogPassResult {
   /** Marked peer IDs of every dialog the pass listed */
-  visited: Set<number>
+  visited: Set<number>;
   /** The pass listed every dialog without an error */
-  complete: boolean
+  complete: boolean;
   /** A daemon stop ended the pass early */
-  stopped: boolean
+  stopped: boolean;
 }
 
 function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
-  const rt = ctx.runtime.accounts.get(accountId)
-  if (!rt) throw new Error(`Account ${accountId} has no cache open`)
-  return rt
+  const rt = ctx.runtime.accounts.get(accountId);
+  if (!rt) throw new Error(`Account ${accountId} has no cache open`);
+  return rt;
 }
 
 /**
@@ -81,100 +75,96 @@ export async function syncAccountDialogs(
   options: { quiet?: boolean } = {},
 ): Promise<DialogPassResult> {
   const info = (message: string) =>
-    options.quiet ? ctx.logger.debug(message) : ctx.logger.info(message)
-  const cacheDb = requireRuntime(ctx, accountId).db
-  const chatsCache = createChatsCache(cacheDb)
-  const usersCache = createUsersCache(cacheDb)
-  const chatSyncState = createChatSyncStateService(cacheDb)
-  const messagesCache = createMessagesCache(cacheDb)
+    options.quiet ? ctx.logger.debug(message) : ctx.logger.info(message);
+  const cacheDb = requireRuntime(ctx, accountId).db;
+  const chatsCache = createChatsCache(cacheDb);
+  const usersCache = createUsersCache(cacheDb);
+  const chatSyncState = createChatSyncStateService(cacheDb);
+  const messagesCache = createMessagesCache(cacheDb);
 
-  info(`[Account ${accountId}] Bootstrapping dialogs...`)
-  const start = Date.now()
+  info(`[Account ${accountId}] Bootstrapping dialogs...`);
+  const start = Date.now();
 
-  const visited = new Set<number>()
-  const chatsBatch = [] as ReturnType<typeof dialogToCacheInput>[]
-  const usersBatch = [] as ReturnType<typeof apiUserToCacheInput>[]
-  const messagesBatch: MessageInput[] = []
-  const groups: number[] = []
-  let dialogsCount = 0
-  let archivedCount = 0
-  let usersCount = 0
-  let complete = false
-  let stopped = false
+  const visited = new Set<number>();
+  const chatsBatch = [] as ReturnType<typeof dialogToCacheInput>[];
+  const usersBatch = [] as ReturnType<typeof apiUserToCacheInput>[];
+  const messagesBatch: MessageInput[] = [];
+  const groups: number[] = [];
+  let dialogsCount = 0;
+  let archivedCount = 0;
+  let usersCount = 0;
+  let complete = false;
+  let stopped = false;
 
   const flushChats = () => {
     if (chatsBatch.length > 0) {
-      chatsCache.upsertMany(chatsBatch.splice(0, chatsBatch.length))
+      chatsCache.upsertMany(chatsBatch.splice(0, chatsBatch.length));
     }
-  }
+  };
   const flushMessages = () => {
     if (messagesBatch.length > 0) {
-      messagesCache.upsertBatch(messagesBatch.splice(0, messagesBatch.length))
+      messagesCache.upsertBatch(messagesBatch.splice(0, messagesBatch.length));
     }
-  }
+  };
   const flushUsers = () => {
     if (usersBatch.length > 0) {
-      const batch = usersBatch.splice(0, usersBatch.length)
-      usersCache.upsertMany(batch)
-      usersCount += batch.length
+      const batch = usersBatch.splice(0, usersBatch.length);
+      usersCache.upsertMany(batch);
+      usersCount += batch.length;
     }
-  }
+  };
 
   const newestMessage = (dialog: Dialog, chatId: number) => {
-    const newest = dialog.lastMessage?.raw
-    return newest ? parseRawMessage(newest, chatId) : null
-  }
+    const newest = dialog.lastMessage?.raw;
+    return newest ? parseRawMessage(newest, chatId) : null;
+  };
 
   /** Keep the dialog's newest message: the chat gets no catch-up. */
   const keepNewestMessage = (dialog: Dialog, chatId: number) => {
-    const input = newestMessage(dialog, chatId)
-    if (!input) return
-    messagesBatch.push(input)
-    if (messagesBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushMessages()
-  }
+    const input = newestMessage(dialog, chatId);
+    if (!input) return;
+    messagesBatch.push(input);
+    if (messagesBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushMessages();
+  };
 
   const onDialog = (dialog: Dialog) => {
-    dialogsCount++
-    const chatInput = dialogToCacheInput(dialog)
-    chatsBatch.push(chatInput)
-    if (chatsBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushChats()
+    dialogsCount++;
+    const chatInput = dialogToCacheInput(dialog);
+    chatsBatch.push(chatInput);
+    if (chatsBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushChats();
 
-    if (dialog.peer.type === 'user' && dialog.peer.raw) {
-      usersBatch.push(apiUserToCacheInput(dialog.peer.raw as tl.RawUser))
-      if (usersBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushUsers()
+    if (dialog.peer.type === "user" && dialog.peer.raw) {
+      usersBatch.push(apiUserToCacheInput(dialog.peer.raw as tl.RawUser));
+      if (usersBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushUsers();
     }
 
     // chats_cache and chat_sync_state share the marked peer ID
-    const chatId = Number(chatInput.chat_id)
-    visited.add(chatId)
+    const chatId = Number(chatInput.chat_id);
+    visited.add(chatId);
 
-    if (chatInput.type === 'group' || chatInput.type === 'supergroup') {
-      groups.push(chatId)
-      const newest = newestMessage(dialog, chatId)
+    if (chatInput.type === "group" || chatInput.type === "supergroup") {
+      groups.push(chatId);
+      const newest = newestMessage(dialog, chatId);
       if (newest && isOwnOrdinaryMessage(newest)) {
-        messagesCache.participation.observeOwnMessage(chatId, newest.date)
+        messagesCache.participation.observeOwnMessage(chatId, newest.date);
       }
     }
 
-    const existing = chatSyncState.get(chatId)
+    const existing = chatSyncState.get(chatId);
     if (dialog.isArchived) {
-      archivedCount++
+      archivedCount++;
       // Without a sync state it doesn't sync, so it is off too
       if (!existing) {
-        keepNewestMessage(dialog, chatId)
-        return
+        keepNewestMessage(dialog, chatId);
+        return;
       }
     }
 
     // Dialogs often leave the member count out; the stored one keeps a
     // chat from flipping on or off between starts.
-    const syncType = chatInput.type as SyncChatType
-    const memberCount = chatInput.member_count ?? existing?.member_count ?? null
-    const policy = determineSyncPolicy(
-      syncType,
-      memberCount,
-      rawUserPolicy(dialog.peer.raw),
-    )
+    const syncType = chatInput.type as SyncChatType;
+    const memberCount = chatInput.member_count ?? existing?.member_count ?? null;
+    const policy = determineSyncPolicy(syncType, memberCount, rawUserPolicy(dialog.peer.raw));
 
     chatSyncState.upsert({
       chat_id: chatId,
@@ -183,60 +173,60 @@ export async function syncAccountDialogs(
       sync_priority: policy.priority,
       sync_enabled: policy.enabled,
       sync_policy: policy.reason,
-    })
+    });
 
-    const topMessage = dialog.raw?.topMessage
+    const topMessage = dialog.raw?.topMessage;
     if (topMessage && topMessage > 0) {
-      chatSyncState.raiseTopMessageId(chatId, topMessage)
+      chatSyncState.raiseTopMessageId(chatId, topMessage);
     }
 
     // The upsert keeps an explicit on or off; auto follows the policy
-    const mode = existing?.sync_mode ?? 'auto'
-    const syncOn = mode === 'on' || (mode === 'auto' && policy.enabled)
-    if (!syncOn) keepNewestMessage(dialog, chatId)
-  }
+    const mode = existing?.sync_mode ?? "auto";
+    const syncOn = mode === "on" || (mode === "auto" && policy.enabled);
+    if (!syncOn) keepNewestMessage(dialog, chatId);
+  };
 
   // The stop signal ends a page request at once, a FLOOD_WAIT it waits out
   // included (#64)
   const pages = client.withParams({
     abortSignal: ctx.runtime.shutdown.signal,
-  })
+  });
 
   try {
-    for await (const dialog of pages.iterDialogs({ archived: 'keep' })) {
+    for await (const dialog of pages.iterDialogs({ archived: "keep" })) {
       // Leaving the loop fetches no further page. The stop signal is a
       // macrotask, so it can't land between this check and the next page's
       // request: no page starts with the signal already aborted.
       if (ctx.state.shutdownRequested) {
-        stopped = true
-        break
+        stopped = true;
+        break;
       }
-      onDialog(dialog)
+      onDialog(dialog);
     }
-    complete = !stopped
+    complete = !stopped;
   } catch (err) {
     if (ctx.state.shutdownRequested) {
       // A page that fails while the daemon stops is no fault of the account;
       // one the stop cut short is the stop itself, not worth a line
-      stopped = true
+      stopped = true;
       if (!isDaemonStopError(err)) {
         ctx.logger.debug(
           `[Account ${accountId}] Dialog page failed during the stop: ${formatError(err)}`,
-        )
+        );
       }
     } else {
       ctx.logger.warn(
         `[Account ${accountId}] Failed to bootstrap dialogs after ${dialogsCount}: ${formatError(err)}`,
-      )
+      );
     }
   }
 
   // Keep what the pass listed before an error, too.
-  flushChats()
-  flushUsers()
-  flushMessages()
+  flushChats();
+  flushUsers();
+  flushMessages();
 
-  let communitiesCount = 0
+  let communitiesCount = 0;
   if (!stopped && !ctx.state.shutdownRequested) {
     try {
       // The dialogs are saved and the next pass retries, so the request
@@ -246,42 +236,42 @@ export async function syncAccountDialogs(
           abortSignal: ctx.runtime.shutdown.signal,
           floodSleepThreshold: 0,
         }),
-      )
-      if (rows.length > 0) chatsCache.upsertMany(rows)
-      communitiesCount = rows.length
+      );
+      if (rows.length > 0) chatsCache.upsertMany(rows);
+      communitiesCount = rows.length;
     } catch (err) {
       if (!ctx.state.shutdownRequested) {
         ctx.logger.warn(
           `[Account ${accountId}] Failed to list joined communities: ${formatError(err)}`,
-        )
+        );
       } else if (!isDaemonStopError(err)) {
         ctx.logger.debug(
           `[Account ${accountId}] Communities request failed during the stop: ${formatError(err)}`,
-        )
+        );
       }
     }
     // A stop during the request ends the pass like one during a page: it
     // marks nothing and refreshes no queues
     if (ctx.state.shutdownRequested) {
-      stopped = true
-      complete = false
+      stopped = true;
+      complete = false;
     }
   }
 
-  if (!stopped) queueParticipationChecks(cacheDb, groups)
+  if (!stopped) queueParticipationChecks(cacheDb, groups);
 
   if (complete) {
-    const elapsedMs = Date.now() - start
+    const elapsedMs = Date.now() - start;
     info(
       `[Account ${accountId}] Bootstrapped ${dialogsCount} dialogs (${archivedCount} archived), ${usersCount} users, ${communitiesCount} communities in ${Math.round(elapsedMs / 1000)}s`,
-    )
+    );
   } else if (stopped) {
     ctx.logger.debug(
       `[Account ${accountId}] Dialog pass stopped after ${dialogsCount} dialogs: the daemon is stopping`,
-    )
+    );
   }
 
-  return { visited, complete, stopped }
+  return { visited, complete, stopped };
 }
 
 /**
@@ -289,21 +279,19 @@ export async function syncAccountDialogs(
  * (src/db/group-participation.ts).
  */
 function queueParticipationChecks(cacheDb: Database, groups: number[]): void {
-  const jobs = createSyncJobsService(cacheDb)
+  const jobs = createSyncJobsService(cacheDb);
   cacheDb.transaction(() => {
     for (const chatId of groups) {
-      if (
-        jobs.hasActiveJobForChat(chatId, SyncJobType.CheckGroupParticipation)
-      ) {
-        continue
+      if (jobs.hasActiveJobForChat(chatId, SyncJobType.CheckGroupParticipation)) {
+        continue;
       }
       jobs.create({
         chat_id: chatId,
         job_type: SyncJobType.CheckGroupParticipation,
         priority: SyncPriority.Background,
-      })
+      });
     }
-  })()
+  })();
 }
 
 /**
@@ -326,23 +314,21 @@ export function markUnvisitedChats(
 ): number {
   const unvisited = chatSyncState
     .getEnabledWithCursor()
-    .filter((chat) => !visited.has(chat.chat_id))
+    .filter((chat) => !visited.has(chat.chat_id));
 
   if (!passComplete) {
-    chatSyncState.markTopUnknown(unvisited.map((chat) => chat.chat_id))
-    return unvisited.length
+    chatSyncState.markTopUnknown(unvisited.map((chat) => chat.chat_id));
+    return unvisited.length;
   }
 
-  const optedIn = unvisited.filter((chat) => chat.sync_mode === 'on')
-  chatSyncState.markTopUnknown(optedIn.map((chat) => chat.chat_id))
+  const optedIn = unvisited.filter((chat) => chat.sync_mode === "on");
+  chatSyncState.markTopUnknown(optedIn.map((chat) => chat.chat_id));
   if (markLeftCaughtUp) {
     chatSyncState.markCaughtUp(
-      unvisited
-        .filter((chat) => chat.sync_mode !== 'on')
-        .map((chat) => chat.chat_id),
-    )
+      unvisited.filter((chat) => chat.sync_mode !== "on").map((chat) => chat.chat_id),
+    );
   }
-  return unvisited.length
+  return unvisited.length;
 }
 
 /**
@@ -356,10 +342,10 @@ export function markUnvisitedChats(
  */
 export async function bootstrapDialogs(ctx: DaemonContext): Promise<void> {
   for (const [accountId, accountState] of ctx.state.accounts) {
-    if (ctx.state.shutdownRequested) return
-    const rt = ctx.runtime.accounts.get(accountId)
-    if (!rt || accountState.status !== 'connected' || !accountState.client) {
-      continue
+    if (ctx.state.shutdownRequested) return;
+    const rt = ctx.runtime.accounts.get(accountId);
+    if (!rt || accountState.status !== "connected" || !accountState.client) {
+      continue;
     }
 
     try {
@@ -367,55 +353,53 @@ export async function bootstrapDialogs(ctx: DaemonContext): Promise<void> {
         ctx,
         accountId,
         accountState.client,
-      )
-      if (stopped) return
+      );
+      if (stopped) return;
       const unvisited = markUnvisitedChats(
         createChatSyncStateService(rt.db),
         visited,
         complete,
         true,
-      )
+      );
       if (unvisited > 0) {
         ctx.logger.debug(
           complete
             ? `[Account ${accountId}] ${unvisited} synced chat(s) are not in the dialog list`
             : `[Account ${accountId}] ${unvisited} synced chat(s) were not listed; checking each for new messages`,
-        )
+        );
       }
     } catch (err) {
-      ctx.logger.warn(
-        `[Account ${accountId}] Failed to bootstrap dialogs: ${formatError(err)}`,
-      )
+      ctx.logger.warn(`[Account ${accountId}] Failed to bootstrap dialogs: ${formatError(err)}`);
     }
   }
 }
 
 /** What started a dialog pass after the daemon's start (#124) */
 export interface CatchUpTrigger {
-  reason: CatchUpReason
+  reason: CatchUpReason;
   /** How long the account was offline or the computer asleep, if known */
-  offlineMs: number | null
+  offlineMs: number | null;
 }
 
 /** `25 s`, `12 min`, `9 h` */
 export function formatDuration(ms: number): string {
-  const seconds = Math.round(ms / 1000)
-  if (seconds < 60) return `${seconds} s`
-  const minutes = Math.round(ms / 60_000)
-  if (minutes < 60) return `${minutes} min`
-  const hours = ms / 3_600_000
-  return `${hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours)} h`
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = ms / 3_600_000;
+  return `${hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours)} h`;
 }
 
 function describeTrigger({ reason, offlineMs }: CatchUpTrigger): string {
-  const after = offlineMs === null ? '' : ` after ${formatDuration(offlineMs)}`
+  const after = offlineMs === null ? "" : ` after ${formatDuration(offlineMs)}`;
   switch (reason) {
-    case 'reconnect':
-      return `Reconnected${after}${offlineMs === null ? '' : ' offline'}`
-    case 'wake':
-      return `Woke${after}${offlineMs === null ? '' : ' asleep'}`
-    case 'new_client':
-      return `Reconnected on a new client${after}${offlineMs === null ? '' : ' offline'}`
+    case "reconnect":
+      return `Reconnected${after}${offlineMs === null ? "" : " offline"}`;
+    case "wake":
+      return `Woke${after}${offlineMs === null ? "" : " asleep"}`;
+    case "new_client":
+      return `Reconnected on a new client${after}${offlineMs === null ? "" : " offline"}`;
   }
 }
 
@@ -433,43 +417,40 @@ export async function refreshDialogsAfterReconnect(
   ctx: DaemonContext,
   accountId: number,
   client: TelegramClient,
-  trigger: CatchUpTrigger = { reason: 'new_client', offlineMs: null },
+  trigger: CatchUpTrigger = { reason: "new_client", offlineMs: null },
 ): Promise<boolean> {
-  if (ctx.state.shutdownRequested) return false
-  if (ctx.runtime.dialogPassesInFlight.has(accountId)) return false
-  ctx.runtime.dialogPassesInFlight.add(accountId)
+  if (ctx.state.shutdownRequested) return false;
+  if (ctx.runtime.dialogPassesInFlight.has(accountId)) return false;
+  ctx.runtime.dialogPassesInFlight.add(accountId);
 
   try {
-    const rt = requireRuntime(ctx, accountId)
-    const { visited, complete, stopped } = await syncAccountDialogs(
-      ctx,
-      accountId,
-      client,
-      { quiet: true },
-    )
-    if (stopped) return true
+    const rt = requireRuntime(ctx, accountId);
+    const { visited, complete, stopped } = await syncAccountDialogs(ctx, accountId, client, {
+      quiet: true,
+    });
+    if (stopped) return true;
     // The pass covers this account's own cache, so a complete one marks the
     // chats it didn't list caught up, as on start
-    const chatSyncState = createChatSyncStateService(rt.db)
-    markUnvisitedChats(chatSyncState, visited, complete, true)
-    rt.scheduler?.refreshQueues()
+    const chatSyncState = createChatSyncStateService(rt.db);
+    markUnvisitedChats(chatSyncState, visited, complete, true);
+    rt.scheduler?.refreshQueues();
 
-    const chats = chatSyncState.getCatchupDue().length
+    const chats = chatSyncState.getCatchupDue().length;
     ctx.logger.info(
       `[Account ${accountId}] ${describeTrigger(trigger)}: dialog pass, ${chats} chat(s) to catch up`,
-    )
+    );
     rt.statusService.recordCatchUp({
       at: Date.now(),
       reason: trigger.reason,
       offlineMs: trigger.offlineMs,
       chats,
-    })
+    });
   } catch (err) {
-    const message = `[Account ${accountId}] Dialog pass after reconnect failed: ${formatError(err)}`
-    if (ctx.state.shutdownRequested) ctx.logger.debug(message)
-    else ctx.logger.warn(message)
+    const message = `[Account ${accountId}] Dialog pass after reconnect failed: ${formatError(err)}`;
+    if (ctx.state.shutdownRequested) ctx.logger.debug(message);
+    else ctx.logger.warn(message);
   } finally {
-    ctx.runtime.dialogPassesInFlight.delete(accountId)
+    ctx.runtime.dialogPassesInFlight.delete(accountId);
   }
-  return true
+  return true;
 }

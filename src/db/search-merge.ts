@@ -30,36 +30,35 @@
  * whole level, 1.3 s on a 1M-message cache. Merging every segment into one
  * writes the entries that stay as it goes.
  */
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 
-import type { BatchLimits } from './background-migrations'
+import type { BatchLimits } from "./background-migrations";
 
 /**
  * Pages FTS5 writes per 'merge' step, a few ms on a 1M-message cache. A
  * step ends only between two words, after the word's whole entry list, so
  * the longest steps (a common word) take tens of ms whatever this is.
  */
-const MERGE_STEP_PAGES = 16
+const MERGE_STEP_PAGES = 16;
 
-export type SearchMergeMode = 'rest' | 'bulk'
+export type SearchMergeMode = "rest" | "bulk";
 
 /** The segments on one level that have it merged, per mode (`usermerge`) */
-const LEVEL_SEGMENTS: Record<SearchMergeMode, number> = { rest: 2, bulk: 4 }
+const LEVEL_SEGMENTS: Record<SearchMergeMode, number> = { rest: 2, bulk: 4 };
 
 /** The share of deleted entries that has 'rest' merge every segment into one */
-const DELETED_SHARE = 0.1
+const DELETED_SHARE = 0.1;
 
 /** FTS5 keeps the list of segments in this row of message_search_data */
-const STRUCTURE_ROWID = 10
+const STRUCTURE_ROWID = 10;
 
-const SET_OPTION =
-  'INSERT INTO message_search(message_search, rank) VALUES(?, ?)'
+const SET_OPTION = "INSERT INTO message_search(message_search, rank) VALUES(?, ?)";
 
 function readOption(db: Database, option: string): unknown {
-  const row = db
-    .query('SELECT v FROM message_search_config WHERE k = ?')
-    .get(option) as { v: unknown } | null
-  return row?.v
+  const row = db.query("SELECT v FROM message_search_config WHERE k = ?").get(option) as {
+    v: unknown;
+  } | null;
+  return row?.v;
 }
 
 /**
@@ -67,20 +66,17 @@ function readOption(db: Database, option: string): unknown {
  * is only read. Only contentless-delete tables (SQLite 3.43+) know
  * `deletemerge`; caches from 0.9.0 to 0.11.1 have it at 0 already (#141).
  */
-export function configureSearchMerges(
-  db: Database,
-  contentless: boolean,
-): void {
-  if (readOption(db, 'automerge') === 0) return
+export function configureSearchMerges(db: Database, contentless: boolean): void {
+  if (readOption(db, "automerge") === 0) return;
   // Preparing an FTS5 write opens the virtual table. Hold the write lock
   // first so another process cannot change its schema or settings meanwhile.
   db.transaction(() => {
-    if (readOption(db, 'automerge') === 0) return
-    const set = db.query(SET_OPTION)
-    set.run('usermerge', LEVEL_SEGMENTS.rest)
-    if (contentless) set.run('deletemerge', 0)
-    set.run('automerge', 0)
-  }).immediate()
+    if (readOption(db, "automerge") === 0) return;
+    const set = db.query(SET_OPTION);
+    set.run("usermerge", LEVEL_SEGMENTS.rest);
+    if (contentless) set.run("deletemerge", 0);
+    set.run("automerge", 0);
+  }).immediate();
 }
 
 /**
@@ -89,28 +85,25 @@ export function configureSearchMerges(
  * it stays the same there is nothing to merge in that mode, and checking
  * costs one read.
  */
-const merged = new WeakMap<
-  Database,
-  { mode: SearchMergeMode; structure: Uint8Array }
->()
+const merged = new WeakMap<Database, { mode: SearchMergeMode; structure: Uint8Array }>();
 
 /** FTS5 writes this row when it creates the table */
 function readStructure(db: Database): Uint8Array {
   const row = db
-    .query('SELECT block FROM message_search_data WHERE id = ?')
-    .get(STRUCTURE_ROWID) as { block: Uint8Array }
-  return row.block
+    .query("SELECT block FROM message_search_data WHERE id = ?")
+    .get(STRUCTURE_ROWID) as { block: Uint8Array };
+  return row.block;
 }
 
 /** A varint as SQLite writes it: 7 bits a byte, big end first, the 9th byte whole */
 function readVarint(bytes: Uint8Array, at: number): [number, number] {
-  let value = 0
+  let value = 0;
   for (let i = 0; i < 8; i++) {
-    const byte = bytes[at + i] ?? 0
-    value = value * 128 + (byte & 0x7f)
-    if (byte < 0x80) return [value, at + i + 1]
+    const byte = bytes[at + i] ?? 0;
+    value = value * 128 + (byte & 0x7f);
+    if (byte < 0x80) return [value, at + i + 1];
   }
-  return [value * 256 + (bytes[at + 8] ?? 0), at + 9]
+  return [value * 256 + (bytes[at + 8] ?? 0), at + 9];
 }
 
 /**
@@ -123,46 +116,43 @@ function readVarint(bytes: Uint8Array, at: number): [number, number] {
  * version.
  */
 function deletedShare(structure: Uint8Array): number {
-  const counted = [0xff, 0, 0, 1].every((byte, i) => structure[4 + i] === byte)
-  if (!counted) return 0
-  let at = 8
+  const counted = [0xff, 0, 0, 1].every((byte, i) => structure[4 + i] === byte);
+  if (!counted) return 0;
+  let at = 8;
   const next = () => {
-    const [value, end] = readVarint(structure, at)
-    at = end
-    return value
-  }
-  const levels = next()
-  next() // segments
-  next() // writes
-  let entries = 0
-  let deleted = 0
+    const [value, end] = readVarint(structure, at);
+    at = end;
+    return value;
+  };
+  const levels = next();
+  next(); // segments
+  next(); // writes
+  let entries = 0;
+  let deleted = 0;
   for (let level = 0; level < levels; level++) {
-    next() // segments in a merge in progress
-    const segments = next()
+    next(); // segments in a merge in progress
+    const segments = next();
     for (let segment = 0; segment < segments; segment++) {
-      for (let field = 0; field < 6; field++) next()
-      deleted += next()
-      entries += next()
+      for (let field = 0; field < 6; field++) next();
+      deleted += next();
+      entries += next();
     }
   }
-  return entries > 0 ? deleted / entries : 0
+  return entries > 0 ? deleted / entries : 0;
 }
 
 /** Whether the index may have segments to merge in `mode`; only reads */
-export function isSearchMergeDue(
-  db: Database,
-  mode: SearchMergeMode = 'rest',
-): boolean {
-  const last = merged.get(db)
-  if (last?.mode !== mode) return true
-  return !Buffer.from(readStructure(db)).equals(last.structure)
+export function isSearchMergeDue(db: Database, mode: SearchMergeMode = "rest"): boolean {
+  const last = merged.get(db);
+  if (last?.mode !== mode) return true;
+  return !Buffer.from(readStructure(db)).equals(last.structure);
 }
 
 export interface MergeBatchResult {
   /** 'merge' steps that did work */
-  steps: number
+  steps: number;
   /** Whether nothing is left to merge */
-  finished: boolean
+  finished: boolean;
 }
 
 /**
@@ -175,39 +165,37 @@ export interface MergeBatchResult {
  */
 export function runSearchMergeBatch(
   db: Database,
-  limits: Pick<BatchLimits, 'maxMs' | 'now'>,
-  mode: SearchMergeMode = 'rest',
+  limits: Pick<BatchLimits, "maxMs" | "now">,
+  mode: SearchMergeMode = "rest",
 ): MergeBatchResult {
-  const now = limits.now ?? Date.now
-  const merge = db.query(
-    `INSERT INTO message_search(message_search, rank) VALUES('merge', ?)`,
-  )
-  const changes = db.query('SELECT total_changes() AS n')
-  const totalChanges = () => (changes.get() as { n: number }).n
+  const now = limits.now ?? Date.now;
+  const merge = db.query(`INSERT INTO message_search(message_search, rank) VALUES('merge', ?)`);
+  const changes = db.query("SELECT total_changes() AS n");
+  const totalChanges = () => (changes.get() as { n: number }).n;
 
   return db
     .transaction((): MergeBatchResult => {
-      if (readOption(db, 'usermerge') !== LEVEL_SEGMENTS[mode]) {
-        db.query(SET_OPTION).run('usermerge', LEVEL_SEGMENTS[mode])
+      if (readOption(db, "usermerge") !== LEVEL_SEGMENTS[mode]) {
+        db.query(SET_OPTION).run("usermerge", LEVEL_SEGMENTS[mode]);
       }
-      const started = now()
-      let steps = 0
-      let mergeAll = mode === 'rest'
+      const started = now();
+      let steps = 0;
+      let mergeAll = mode === "rest";
       for (;;) {
-        const before = totalChanges()
-        merge.run(MERGE_STEP_PAGES)
+        const before = totalChanges();
+        merge.run(MERGE_STEP_PAGES);
         if (totalChanges() - before < 2) {
-          const structure = readStructure(db)
+          const structure = readStructure(db);
           if (!mergeAll || deletedShare(structure) < DELETED_SHARE) {
-            merged.set(db, { mode, structure })
-            return { steps, finished: true }
+            merged.set(db, { mode, structure });
+            return { steps, finished: true };
           }
-          mergeAll = false
-          merge.run(-MERGE_STEP_PAGES)
+          mergeAll = false;
+          merge.run(-MERGE_STEP_PAGES);
         }
-        steps += 1
-        if (now() - started >= limits.maxMs) return { steps, finished: false }
+        steps += 1;
+        if (now() - started >= limits.maxMs) return { steps, finished: false };
       }
     })
-    .immediate()
+    .immediate();
 }

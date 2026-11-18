@@ -1,34 +1,34 @@
 /**
  * Tests for CSV formatting helpers
  */
-import { describe, expect, it } from 'bun:test'
-import { stringify, stringifyTable } from '../utils/csv'
+import { describe, expect, it } from "bun:test";
+import { stringify, stringifyTable } from "../utils/csv";
 
-describe('csv stringify', () => {
-  it('stringifyTable delegates to stringify with headers', () => {
+describe("csv stringify", () => {
+  it("stringifyTable delegates to stringify with headers", () => {
     const rows = [
-      { id: 1, name: 'Alice' },
-      { id: 2, name: 'Bob' },
-    ]
+      { id: 1, name: "Alice" },
+      { id: 2, name: "Bob" },
+    ];
 
-    const csv = stringifyTable(['id', 'name'], rows)
+    const csv = stringifyTable(["id", "name"], rows);
 
-    expect(csv.split('\n')[0]).toBe('id,name')
-    expect(csv).toContain('1,Alice')
-    expect(csv).toContain('2,Bob')
-  })
+    expect(csv.split("\n")[0]).toBe("id,name");
+    expect(csv).toContain("1,Alice");
+    expect(csv).toContain("2,Bob");
+  });
 
-  it('stringify respects includeHeader option', () => {
+  it("stringify respects includeHeader option", () => {
     const csv = stringify(
       [
-        { id: 1, note: 'hello' },
-        { id: 2, note: 'world' },
+        { id: 1, note: "hello" },
+        { id: 2, note: "world" },
       ],
-      ['id', 'note'],
+      ["id", "note"],
       { includeHeader: false },
-    )
+    );
 
-    expect(csv.startsWith('id')).toBe(false)
-    expect(csv).toContain('1,hello')
-  })
-})
+    expect(csv.startsWith("id")).toBe(false);
+    expect(csv).toContain("1,hello");
+  });
+});

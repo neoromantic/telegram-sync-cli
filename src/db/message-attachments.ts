@@ -2,67 +2,61 @@
  * message_attachments: the file of each cached message that has one, kept
  * next to its messages_cache row by messages-cache.ts
  */
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 
-import type { AttachmentInfo } from '../utils/attachment'
+import type { AttachmentInfo } from "../utils/attachment";
 
 export interface MessageAttachmentRow {
-  chat_id: number
-  message_id: number
-  kind: string
-  source: string
-  file_name: string | null
-  mime_type: string | null
-  file_size: number | null
-  duration: number | null
-  width: number | null
-  height: number | null
-  unique_file_id: string
-  grouped_id: string | null
+  chat_id: number;
+  message_id: number;
+  kind: string;
+  source: string;
+  file_name: string | null;
+  mime_type: string | null;
+  file_size: number | null;
+  duration: number | null;
+  width: number | null;
+  height: number | null;
+  unique_file_id: string;
+  grouped_id: string | null;
 }
 
 export interface MessageAttachmentsStore {
   /** Write the row, or delete it when attachment is null; an unchanged row is not written */
-  sync(
-    chatId: number,
-    messageId: number,
-    attachment: AttachmentInfo | null,
-  ): void
-  get(chatId: number, messageId: number): MessageAttachmentRow | null
+  sync(chatId: number, messageId: number, attachment: AttachmentInfo | null): void;
+  get(chatId: number, messageId: number): MessageAttachmentRow | null;
   /** unique_file_id of every attachment of a chat */
-  uniqueFileIdsOfChat(chatId: number): string[]
+  uniqueFileIdsOfChat(chatId: number): string[];
   /** Whether a message outside chatId holds this file */
-  heldOutsideChat(uniqueFileId: string, chatId: number): boolean
+  heldOutsideChat(uniqueFileId: string, chatId: number): boolean;
 }
 
 /** The columns a message written again overwrites */
 const ATTACHMENT_COLUMNS = [
-  'kind',
-  'source',
-  'file_name',
-  'mime_type',
-  'file_size',
-  'duration',
-  'width',
-  'height',
-  'unique_file_id',
-  'grouped_id',
-] as const
+  "kind",
+  "source",
+  "file_name",
+  "mime_type",
+  "file_size",
+  "duration",
+  "width",
+  "height",
+  "unique_file_id",
+  "grouped_id",
+] as const;
 
-export function createMessageAttachmentsStore(
-  db: Database,
-): MessageAttachmentsStore {
+export function createMessageAttachmentsStore(db: Database): MessageAttachmentsStore {
   const stmts = {
     // A row written again unchanged writes nothing
     upsert: db.prepare(`
       INSERT INTO message_attachments (
-        chat_id, message_id, ${ATTACHMENT_COLUMNS.join(', ')}
+        chat_id, message_id, ${ATTACHMENT_COLUMNS.join(", ")}
       ) VALUES (
-        $chat_id, $message_id, ${ATTACHMENT_COLUMNS.map((col) => `$${col}`).join(', ')}
+        $chat_id, $message_id, ${ATTACHMENT_COLUMNS.map((col) => `$${col}`).join(", ")}
       )
       ON CONFLICT (chat_id, message_id) DO UPDATE SET
-        ${ATTACHMENT_COLUMNS.map((col) => `${col} = excluded.${col}`).join(',\n        ')}
-      WHERE ${ATTACHMENT_COLUMNS.map((col) => `message_attachments.${col} IS NOT excluded.${col}`).join('\n        OR ')}
+        ${ATTACHMENT_COLUMNS.map((col) => `${col} = excluded.${col}`).join(",\n        ")}
+      WHERE ${ATTACHMENT_COLUMNS.map((col) => `message_attachments.${col} IS NOT excluded.${col}`).join("\n        OR ")}
     `),
     delete: db.prepare(`
       DELETE FROM message_attachments
@@ -81,13 +75,13 @@ export function createMessageAttachmentsStore(
       WHERE unique_file_id = ? AND chat_id != ?
       LIMIT 1
     `),
-  }
+  };
 
   return {
     sync(chatId, messageId, attachment) {
       if (!attachment) {
-        stmts.delete.run({ $chat_id: chatId, $message_id: messageId })
-        return
+        stmts.delete.run({ $chat_id: chatId, $message_id: messageId });
+        return;
       }
       stmts.upsert.run({
         $chat_id: chatId,
@@ -102,21 +96,19 @@ export function createMessageAttachmentsStore(
         $height: attachment.height,
         $unique_file_id: attachment.uniqueFileId,
         $grouped_id: attachment.groupedId,
-      })
+      });
     },
 
     get(chatId, messageId) {
-      return stmts.get.get(chatId, messageId) ?? null
+      return stmts.get.get(chatId, messageId) ?? null;
     },
 
     uniqueFileIdsOfChat(chatId) {
-      return stmts.uniqueFileIdsOfChat
-        .all(chatId)
-        .map((row) => row.unique_file_id)
+      return stmts.uniqueFileIdsOfChat.all(chatId).map((row) => row.unique_file_id);
     },
 
     heldOutsideChat(uniqueFileId, chatId) {
-      return stmts.heldOutsideChat.get(uniqueFileId, chatId) !== null
+      return stmts.heldOutsideChat.get(uniqueFileId, chatId) !== null;
     },
-  }
+  };
 }

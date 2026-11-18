@@ -5,9 +5,9 @@
  * online) and the file downloaded to a partial download that a later run
  * resumes, then renamed into the cache.
  */
-import type { Database } from 'bun:sqlite'
-import { open, rename, rm, stat } from 'node:fs/promises'
-import { basename } from 'node:path'
+import type { Database } from "bun:sqlite";
+import { open, rename, rm, stat } from "node:fs/promises";
+import { basename } from "node:path";
 import {
   Document,
   type FileDownloadLocation,
@@ -17,16 +17,13 @@ import {
   type TelegramClient,
   Thumbnail,
   tl,
-} from '@mtcute/bun'
-import { downloadAsIterable } from '@mtcute/bun/methods.js'
+} from "@mtcute/bun";
+import { downloadAsIterable } from "@mtcute/bun/methods.js";
 
-import { createChatProtectionStore } from '../../db/chat-protection'
-import { createMessagesCache } from '../../db/messages-cache'
-import {
-  createRateLimitsService,
-  type RateLimitsService,
-} from '../../db/rate-limits'
-import { ErrorCodes } from '../../types'
+import { createChatProtectionStore } from "../../db/chat-protection";
+import { createMessagesCache } from "../../db/messages-cache";
+import { createRateLimitsService, type RateLimitsService } from "../../db/rate-limits";
+import { ErrorCodes } from "../../types";
 import {
   type AttachmentInfo,
   type AttachmentKind,
@@ -34,7 +31,7 @@ import {
   extractAttachment,
   type MediaThumb,
   pickThumb,
-} from '../../utils/attachment'
+} from "../../utils/attachment";
 import {
   acquireDownloadLock,
   cachedFileName,
@@ -44,31 +41,24 @@ import {
   mediaPaths,
   thumbPaths,
   touch,
-} from '../../utils/media-cache'
-import { resolveRawMessageType } from '../../utils/message-type'
-import {
-  describeRateLimit,
-  isRateLimitError,
-} from '../../utils/telegram-rate-limits'
-import { transferClient } from '../../utils/telegram-transfer'
-import type { HistoryClient } from '../messages/helpers'
+} from "../../utils/media-cache";
+import { resolveRawMessageType } from "../../utils/message-type";
+import { describeRateLimit, isRateLimitError } from "../../utils/telegram-rate-limits";
+import { transferClient } from "../../utils/telegram-transfer";
+import type { HistoryClient } from "../messages/helpers";
 import {
   type HistoryChat,
   type ResolveHistoryChatDeps,
   resolveHistoryChat,
-} from '../messages/history'
-import { DownloadInterruptedError, MediaError } from './errors'
-import {
-  cacheFetchedMessage,
-  type FetchedRawMessage,
-  fetchMessageById,
-} from './fetch'
+} from "../messages/history";
+import { DownloadInterruptedError, MediaError } from "./errors";
+import { cacheFetchedMessage, type FetchedRawMessage, fetchMessageById } from "./fetch";
 import {
   checkCachedProtection,
   checkOnlineProtection,
   knownChatProtection,
   type ProtectionReason,
-} from './protection'
+} from "./protection";
 
 /**
  * Download part size. A partial download resumes from a multiple of it:
@@ -76,43 +66,43 @@ import {
  * stays inside one 1 MB block, which any 4096 multiple plus 512 KB parts
  * would cross.
  */
-export const PART_SIZE_KB = 512
-export const PART_BYTES = PART_SIZE_KB * 1024
+export const PART_SIZE_KB = 512;
+export const PART_BYTES = PART_SIZE_KB * 1024;
 /** A download that receives nothing for this long ends with NETWORK_ERROR */
-export const STALL_TIMEOUT_MS = 60_000
+export const STALL_TIMEOUT_MS = 60_000;
 
-const GET_FILE = 'upload.getFile'
+const GET_FILE = "upload.getFile";
 
-type ProgressCallback = (done: number, total: number) => void
+type ProgressCallback = (done: number, total: number) => void;
 
 export interface DownloadDeps {
   /** The account's cache */
-  cacheDb: Database
+  cacheDb: Database;
   /** The account's media cache, accounts/<id>/media */
-  mediaDir: string
+  mediaDir: string;
   /** Lazy: calling it is the first thing that needs credentials */
-  getClient: () => TelegramClient
+  getClient: () => TelegramClient;
   /** Resolves --chat, offline for cached peers (openHistory()) */
-  history: ResolveHistoryChatDeps & { client: HistoryClient }
-  now?: () => number
-  stallTimeoutMs?: number
+  history: ResolveHistoryChatDeps & { client: HistoryClient };
+  now?: () => number;
+  stallTimeoutMs?: number;
   /** Aborted on SIGINT/SIGTERM: the partial download is kept */
-  signal?: AbortSignal
+  signal?: AbortSignal;
   /** Progress for the file being downloaded, undefined when nobody watches */
-  progress?: (fileName: string) => ProgressCallback | undefined
+  progress?: (fileName: string) => ProgressCallback | undefined;
   /** Tests inject a fake transfer */
-  download?: typeof downloadAsIterable
+  download?: typeof downloadAsIterable;
   /** Where flood waits of the transfer are recorded; cacheDb's by default */
-  rateLimits?: RateLimitsService
+  rateLimits?: RateLimitsService;
   /** How long to wait for another process's download of the file */
-  lockWaitMs?: number
+  lockWaitMs?: number;
 }
 
 export interface DownloadRequest {
-  chat: string
-  messageId: number
-  thumb: boolean
-  fresh: boolean
+  chat: string;
+  messageId: number;
+  thumb: boolean;
+  fresh: boolean;
 }
 
 /**
@@ -121,33 +111,33 @@ export interface DownloadRequest {
  */
 export interface DownloadResult {
   /** The file in the media cache */
-  path: string
-  fileName: string
-  mimeType: string | null
-  size: number
-  kind: AttachmentKind | 'thumbnail'
-  chatId: number
-  messageId: number
-  uniqueFileId: string
+  path: string;
+  fileName: string;
+  mimeType: string | null;
+  size: number;
+  kind: AttachmentKind | "thumbnail";
+  chatId: number;
+  messageId: number;
+  uniqueFileId: string;
   /** The message's album ID */
-  groupedId: string | null
+  groupedId: string | null;
   /** True when no bytes were downloaded this run */
-  cached: boolean
+  cached: boolean;
   /** Byte offset a partial download continued from */
-  resumedFrom: number | null
-  thumb: { type: string; width: number; height: number } | null
+  resumedFrom: number | null;
+  thumb: { type: string; width: number; height: number } | null;
 }
 
 /** What a run downloads: the original file, or its preview with --thumb */
 interface DownloadTarget {
-  paths: MediaCachePaths
+  paths: MediaCachePaths;
   /** Bytes the complete file has, when Telegram gives it */
-  expectedSize: number | null
-  fileName: string
-  mimeType: string | null
-  uniqueFileId: string
-  kind: AttachmentKind | 'thumbnail'
-  thumb: MediaThumb | null
+  expectedSize: number | null;
+  fileName: string;
+  mimeType: string | null;
+  uniqueFileId: string;
+  kind: AttachmentKind | "thumbnail";
+  thumb: MediaThumb | null;
 }
 
 function downloadTarget(
@@ -164,24 +154,24 @@ function downloadTarget(
       uniqueFileId: info.uniqueFileId,
       kind: info.kind,
       thumb: null,
-    }
+    };
   }
-  const paths = thumbPaths(mediaDir, info, thumb)
+  const paths = thumbPaths(mediaDir, info, thumb);
   return {
     paths,
     expectedSize: thumb.size,
     fileName: basename(paths.file),
-    mimeType: info.kind === 'sticker' ? 'image/webp' : 'image/jpeg',
+    mimeType: info.kind === "sticker" ? "image/webp" : "image/jpeg",
     uniqueFileId: thumb.uniqueFileId,
-    kind: 'thumbnail',
+    kind: "thumbnail",
     thumb,
-  }
+  };
 }
 
 interface MessageRef {
-  chatId: number
-  messageId: number
-  groupedId: string | null
+  chatId: number;
+  messageId: number;
+  groupedId: string | null;
 }
 
 function toResult(
@@ -209,7 +199,7 @@ function toResult(
           height: target.thumb.height,
         }
       : null,
-  }
+  };
 }
 
 function noMedia(
@@ -223,24 +213,24 @@ function noMedia(
     `Message ${messageId} in chat ${chatId} has no file to download`,
     { chatId, messageId, messageType },
     suggestion,
-  )
+  );
 }
 
 function noThumbnail(chatId: number, messageId: number): MediaError {
   return new MediaError(
     ErrorCodes.NO_MEDIA,
     `The file of message ${messageId} in chat ${chatId} has no preview`,
-    { chatId, messageId, reason: 'no_thumbnail' },
-    'download the file without --thumb',
-  )
+    { chatId, messageId, reason: "no_thumbnail" },
+    "download the file without --thumb",
+  );
 }
 
 const PROTECTION_MESSAGES: Record<ProtectionReason, string> = {
-  message: 'This message has content protection',
-  chat: 'This chat has content protection',
-  private_chat: 'This private chat has content protection',
-  self_destructing: 'This media self-destructs',
-}
+  message: "This message has content protection",
+  chat: "This chat has content protection",
+  private_chat: "This private chat has content protection",
+  self_destructing: "This media self-destructs",
+};
 
 function contentProtected(
   chatId: number,
@@ -253,11 +243,11 @@ function contentProtected(
     `${PROTECTION_MESSAGES[reason]}: Telegram doesn't allow saving its media`,
     { chatId, messageId, reason },
     suggestion,
-  )
+  );
 }
 
 function lockTimeout(err: DownloadLockTimeoutError): MediaError {
-  const holder = err.holder === null ? '' : ` (pid ${err.holder})`
+  const holder = err.holder === null ? "" : ` (pid ${err.holder})`;
   return new MediaError(
     ErrorCodes.GENERAL_ERROR,
     `Another tg process${holder} is still downloading this file after ${Math.round(err.waitedMs / 1000)}s`,
@@ -266,9 +256,9 @@ function lockTimeout(err: DownloadLockTimeoutError): MediaError {
       pid: err.holder,
       waited_seconds: Math.round(err.waitedMs / 1000),
     },
-    'run the command again when the other download ends',
+    "run the command again when the other download ends",
     true,
-  )
+  );
 }
 
 /**
@@ -281,124 +271,104 @@ function readFromCache(
   chat: HistoryChat,
   request: DownloadRequest,
 ): DownloadResult | null {
-  const { chatId } = chat
-  const { messageId } = request
-  const row = createMessagesCache(deps.cacheDb).get(chatId, messageId)
-  if (!row) return null
+  const { chatId } = chat;
+  const { messageId } = request;
+  const row = createMessagesCache(deps.cacheDb).get(chatId, messageId);
+  if (!row) return null;
 
-  const info = extractAttachment(row.raw_json)
+  const info = extractAttachment(row.raw_json);
   if (!info) {
-    throw noMedia(
-      chatId,
-      messageId,
-      row.message_type,
-      'pass --fresh to fetch the message again',
-    )
+    throw noMedia(chatId, messageId, row.message_type, "pass --fresh to fetch the message again");
   }
-  const thumb = request.thumb ? pickThumb(row.raw_json) : null
-  if (request.thumb && !thumb) throw noThumbnail(chatId, messageId)
+  const thumb = request.thumb ? pickThumb(row.raw_json) : null;
+  if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
 
   const verdict = checkCachedProtection(
     row.raw_json,
     deps.history.chatsCache.getById(String(chatId)),
     createChatProtectionStore(deps.cacheDb).get(chatId),
-  )
+  );
   if (verdict.protected) {
-    throw contentProtected(
-      chatId,
-      messageId,
-      verdict.reason,
-      'pass --fresh to check again',
-    )
+    throw contentProtected(chatId, messageId, verdict.reason, "pass --fresh to check again");
   }
 
-  const target = downloadTarget(deps.mediaDir, info, thumb)
-  const file = findCachedFile(target.paths.file, target.expectedSize)
-  if (!file) return null
-  touch(file.path)
-  return toResult(
-    target,
-    { chatId, messageId, groupedId: info.groupedId },
-    file,
-    { cached: true, resumedFrom: null },
-  )
+  const target = downloadTarget(deps.mediaDir, info, thumb);
+  const file = findCachedFile(target.paths.file, target.expectedSize);
+  if (!file) return null;
+  touch(file.path);
+  return toResult(target, { chatId, messageId, groupedId: info.groupedId }, file, {
+    cached: true,
+    resumedFrom: null,
+  });
 }
 
 /** mtcute's location of the file (or preview) in the fresh message */
-function fileLocation(
-  message: FetchedRawMessage,
-  thumb: MediaThumb | null,
-): FileDownloadLocation {
-  const media = attachmentMedia(message)
-  if (!media) throw new Error('The message has no file')
+function fileLocation(message: FetchedRawMessage, thumb: MediaThumb | null): FileDownloadLocation {
+  const media = attachmentMedia(message);
+  if (!media) throw new Error("The message has no file");
   if (!thumb) {
-    return media.file === 'photo'
+    return media.file === "photo"
       ? new Photo(media.raw as unknown as tl.RawPhoto)
-      : new Document(media.raw as unknown as tl.RawDocument)
+      : new Document(media.raw as unknown as tl.RawDocument);
   }
-  const owner = media.raw as unknown as tl.RawPhoto | tl.RawDocument
-  const sizes: tl.TypePhotoSize[] =
-    owner._ === 'photo' ? owner.sizes : (owner.thumbs ?? [])
+  const owner = media.raw as unknown as tl.RawPhoto | tl.RawDocument;
+  const sizes: tl.TypePhotoSize[] = owner._ === "photo" ? owner.sizes : (owner.thumbs ?? []);
   const size = sizes.find(
     (item) =>
-      (item._ === 'photoSize' || item._ === 'photoSizeProgressive') &&
-      item.type === thumb.type,
-  )
-  if (!size) throw new Error(`The file has no ${thumb.type} preview`)
-  return new Thumbnail(owner, size)
+      (item._ === "photoSize" || item._ === "photoSizeProgressive") && item.type === thumb.type,
+  );
+  if (!size) throw new Error(`The file has no ${thumb.type} preview`);
+  return new Thumbnail(owner, size);
 }
 
 function errorCode(err: unknown): string | undefined {
-  const code = (err as { code?: unknown } | null)?.code
-  return typeof code === 'string' ? code : undefined
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : undefined;
 }
 
 const NETWORK_ERROR_CODES = new Set([
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'ECONNABORTED',
-  'ETIMEDOUT',
-  'EPIPE',
-  'ENETUNREACH',
-  'ENETDOWN',
-  'EHOSTUNREACH',
-  'ENOTFOUND',
-  'EAI_AGAIN',
-])
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "EPIPE",
+  "ENETUNREACH",
+  "ENETDOWN",
+  "EHOSTUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+]);
 
 /** Telegram wants a fresh file reference: fetching the message again gives one */
 function isFileReferenceError(err: unknown): boolean {
-  if (tl.RpcError.is(err)) return err.text.startsWith('FILE_REFERENCE_')
-  return err instanceof MtUnsupportedError && /file ref/i.test(err.message)
+  if (tl.RpcError.is(err)) return err.text.startsWith("FILE_REFERENCE_");
+  return err instanceof MtUnsupportedError && /file ref/i.test(err.message);
 }
 
 /** Seconds of a 420 error mtcute gives as `seconds` or Telegram as `_N` */
 function floodWaitSeconds(err: tl.RpcError): number | null {
-  const seconds = (err as { seconds?: unknown }).seconds
-  if (typeof seconds === 'number' && seconds > 0) return seconds
-  const match = err.text.match(/_(\d+)$/)
-  return match ? Number(match[1]) : null
+  const seconds = (err as { seconds?: unknown }).seconds;
+  if (typeof seconds === "number" && seconds > 0) return seconds;
+  const match = err.text.match(/_(\d+)$/);
+  return match ? Number(match[1]) : null;
 }
 
 /** A flood wait during the transfer: the next run resumes the partial file */
 function rateLimited(method: string, waitSeconds: number): MediaError {
-  const { message, details, suggestion } = describeRateLimit(
-    method,
-    waitSeconds,
-  )
+  const { message, details, suggestion } = describeRateLimit(method, waitSeconds);
   return new MediaError(
     ErrorCodes.RATE_LIMITED,
     message,
     details,
     `${suggestion} to resume the download`,
-  )
+  );
 }
 
 async function sizeOf(path: string): Promise<number> {
   try {
-    return (await stat(path)).size
+    return (await stat(path)).size;
   } catch {
-    return 0
+    return 0;
   }
 }
 
@@ -414,20 +384,20 @@ async function transferError(
   rateLimits: () => RateLimitsService,
 ): Promise<unknown> {
   if (isFileReferenceError(err)) {
-    const text = tl.RpcError.is(err) ? err.text : (err as Error).message
+    const text = tl.RpcError.is(err) ? err.text : (err as Error).message;
     return new MediaError(
       ErrorCodes.TELEGRAM_ERROR,
       `Telegram rejected the file reference of a freshly fetched message: ${text}`,
       { method: GET_FILE, error: text },
-    )
+    );
   }
-  if (isRateLimitError(err)) return rateLimited(err.method, err.waitSeconds)
+  if (isRateLimitError(err)) return rateLimited(err.method, err.waitSeconds);
   if (tl.RpcError.is(err) && err.code === tl.RpcError.FLOOD) {
-    const seconds = floodWaitSeconds(err)
+    const seconds = floodWaitSeconds(err);
     if (seconds !== null) {
       // FLOOD_PREMIUM_WAIT and other waits the rate-limit wrapper can't read
-      rateLimits().setFloodWait(GET_FILE, seconds)
-      return rateLimited(GET_FILE, seconds)
+      rateLimits().setFloodWait(GET_FILE, seconds);
+      return rateLimited(GET_FILE, seconds);
     }
   }
   if (err instanceof MtTimeoutError) {
@@ -439,57 +409,52 @@ async function transferError(
         downloaded_bytes: await sizeOf(target.paths.part),
         resumable: true,
       },
-      'run the command again to resume',
-    )
+      "run the command again to resume",
+    );
   }
   if (err instanceof MtUnsupportedError && /cdn/i.test(err.message)) {
-    await rm(target.paths.part, { force: true })
+    await rm(target.paths.part, { force: true });
     return new MediaError(
       ErrorCodes.MEDIA_UNSUPPORTED,
       "This file is served from Telegram's CDN, which tg doesn't support yet",
-      { reason: 'cdn' },
-    )
+      { reason: "cdn" },
+    );
   }
   if (tl.RpcError.is(err)) {
-    return new MediaError(
-      ErrorCodes.TELEGRAM_ERROR,
-      `Telegram refused the download: ${err.text}`,
-      { method: GET_FILE, error: err.text },
-    )
+    return new MediaError(ErrorCodes.TELEGRAM_ERROR, `Telegram refused the download: ${err.text}`, {
+      method: GET_FILE,
+      error: err.text,
+    });
   }
-  const code = errorCode(err)
+  const code = errorCode(err);
   if (code !== undefined && NETWORK_ERROR_CODES.has(code)) {
     return new MediaError(
       ErrorCodes.NETWORK_ERROR,
       `The download failed: ${err instanceof Error ? err.message : String(err)}`,
       { downloaded_bytes: await sizeOf(target.paths.part), resumable: true },
-      'run the command again to resume',
-    )
+      "run the command again to resume",
+    );
   }
-  return err
+  return err;
 }
 
 async function writeAll(
   handle: Awaited<ReturnType<typeof open>>,
   chunk: Uint8Array,
 ): Promise<void> {
-  let written = 0
+  let written = 0;
   while (written < chunk.length) {
-    const { bytesWritten } = await handle.write(
-      chunk,
-      written,
-      chunk.length - written,
-    )
-    written += bytesWritten
+    const { bytesWritten } = await handle.write(chunk, written, chunk.length - written);
+    written += bytesWritten;
   }
 }
 
 interface StreamOptions {
-  client: TelegramClient
-  location: FileDownloadLocation
-  target: DownloadTarget
-  deps: DownloadDeps
-  stallTimeoutMs: number
+  client: TelegramClient;
+  location: FileDownloadLocation;
+  target: DownloadTarget;
+  deps: DownloadDeps;
+  stallTimeoutMs: number;
 }
 
 /**
@@ -505,18 +470,18 @@ async function streamToCache({
   deps,
   stallTimeoutMs,
 }: StreamOptions): Promise<number | null> {
-  const { part, file } = target.paths
-  const { expectedSize } = target
-  let have = await sizeOf(part)
-  if (expectedSize !== null && have > expectedSize) have = 0
-  const offset = have - (have % PART_BYTES)
+  const { part, file } = target.paths;
+  const { expectedSize } = target;
+  let have = await sizeOf(part);
+  if (expectedSize !== null && have > expectedSize) have = 0;
+  const offset = have - (have % PART_BYTES);
 
   // Bun has no append API: Bun.file().writer() writes from the start
-  const handle = await open(part, 'a', 0o600)
-  let size: number
+  const handle = await open(part, "a", 0o600);
+  let size: number;
   try {
-    await handle.truncate(offset)
-    const download = deps.download ?? downloadAsIterable
+    await handle.truncate(offset);
+    const download = deps.download ?? downloadAsIterable;
     const chunks = download(transferClient(client), location, {
       offset,
       partSize: PART_SIZE_KB,
@@ -525,33 +490,33 @@ async function streamToCache({
       stallTimeout: stallTimeoutMs,
       abortSignal: deps.signal,
       progressCallback: deps.progress?.(target.fileName),
-    })
+    });
     try {
       for await (const chunk of chunks) {
-        await writeAll(handle, chunk)
+        await writeAll(handle, chunk);
       }
     } catch (err) {
       // Keep what arrived for the next run
-      await handle.sync().catch(() => undefined)
-      throw err
+      await handle.sync().catch(() => undefined);
+      throw err;
     }
-    await handle.sync()
-    size = (await handle.stat()).size
+    await handle.sync();
+    size = (await handle.stat()).size;
   } finally {
-    await handle.close()
+    await handle.close();
   }
 
   if (expectedSize !== null && size !== expectedSize) {
-    await rm(part, { force: true })
+    await rm(part, { force: true });
     throw new MediaError(
       ErrorCodes.NETWORK_ERROR,
       `The download ended at ${size} of ${expectedSize} bytes`,
       { expected: expectedSize, received: size },
-      'run the command again',
-    )
+      "run the command again",
+    );
   }
-  await rename(part, file)
-  return offset > 0 ? offset : null
+  await rename(part, file);
+  return offset > 0 ? offset : null;
 }
 
 /**
@@ -564,85 +529,69 @@ async function downloadOnline(
   chat: HistoryChat,
   request: DownloadRequest,
 ): Promise<DownloadResult> {
-  const { chatId } = chat
-  const { messageId } = request
-  const now = deps.now ?? Date.now
-  const stallTimeoutMs = deps.stallTimeoutMs ?? STALL_TIMEOUT_MS
-  const rateLimits = () =>
-    deps.rateLimits ?? createRateLimitsService(deps.cacheDb)
-  const protection = createChatProtectionStore(deps.cacheDb)
-  const client = deps.getClient()
+  const { chatId } = chat;
+  const { messageId } = request;
+  const now = deps.now ?? Date.now;
+  const stallTimeoutMs = deps.stallTimeoutMs ?? STALL_TIMEOUT_MS;
+  const rateLimits = () => deps.rateLimits ?? createRateLimitsService(deps.cacheDb);
+  const protection = createChatProtectionStore(deps.cacheDb);
+  const client = deps.getClient();
 
   for (let attempt = 1; ; attempt++) {
-    const { message, chats, users } = await fetchMessageById(
-      client,
-      chat,
-      messageId,
-      deps.signal,
-    )
-    cacheFetchedMessage(deps.cacheDb, chatId, message, users)
+    const { message, chats, users } = await fetchMessageById(client, chat, messageId, deps.signal);
+    cacheFetchedMessage(deps.cacheDb, chatId, message, users);
 
-    const info = extractAttachment(message)
+    const info = extractAttachment(message);
     if (!info) {
-      throw noMedia(
-        chatId,
-        messageId,
-        resolveRawMessageType(message).messageType,
-      )
+      throw noMedia(chatId, messageId, resolveRawMessageType(message).messageType);
     }
-    const thumb = request.thumb ? pickThumb(message) : null
-    if (request.thumb && !thumb) throw noThumbnail(chatId, messageId)
+    const thumb = request.thumb ? pickThumb(message) : null;
+    if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
 
-    const verdict = await checkOnlineProtection(
-      client,
-      chat,
-      message,
-      chats,
-      deps.signal,
-    )
+    const verdict = await checkOnlineProtection(client, chat, message, chats, deps.signal);
     // A negative answer too: protection turned off clears the block
-    if (verdict.chat) protection.record(chatId, verdict.chat, now())
+    if (verdict.chat) protection.record(chatId, verdict.chat, now());
     if (verdict.message.protected) {
-      throw contentProtected(chatId, messageId, verdict.message.reason)
+      throw contentProtected(chatId, messageId, verdict.message.reason);
     }
     if (verdict.chat?.protected && verdict.chat.reason) {
-      throw contentProtected(chatId, messageId, verdict.chat.reason)
+      throw contentProtected(chatId, messageId, verdict.chat.reason);
     }
     if (!verdict.chat) {
       // Telegram sent no chat object: the protection last known holds
       const known = knownChatProtection(
         deps.history.chatsCache.getById(String(chatId)),
         protection.get(chatId),
-      )
+      );
       if (known.protected) {
-        throw contentProtected(chatId, messageId, known.reason)
+        throw contentProtected(chatId, messageId, known.reason);
       }
     }
 
-    const target = downloadTarget(deps.mediaDir, info, thumb)
-    const ref = { chatId, messageId, groupedId: info.groupedId }
+    const target = downloadTarget(deps.mediaDir, info, thumb);
+    const ref = { chatId, messageId, groupedId: info.groupedId };
     const servedFromCache = () => {
-      const file = findCachedFile(target.paths.file, target.expectedSize)
-      if (!file) return null
-      touch(file.path)
-      return toResult(target, ref, file, { cached: true, resumedFrom: null })
-    }
+      const file = findCachedFile(target.paths.file, target.expectedSize);
+      if (!file) return null;
+      touch(file.path);
+      return toResult(target, ref, file, { cached: true, resumedFrom: null });
+    };
 
-    const cached = servedFromCache()
-    if (cached) return cached
+    const cached = servedFromCache();
+    if (cached) return cached;
 
     const release = await acquireDownloadLock(target.paths.lock, {
       signal: deps.signal,
       waitMs: deps.lockWaitMs,
     }).catch((err: unknown) => {
-      throw err instanceof DownloadLockTimeoutError ? lockTimeout(err) : err
-    })
+      throw err instanceof DownloadLockTimeoutError ? lockTimeout(err) : err;
+    });
     try {
       // Another process may have finished it meanwhile
-      const finished = servedFromCache()
-      if (finished) return finished
+      const finished = servedFromCache();
+      if (finished) return finished;
 
-      let resumedFrom: number | null
+      let resumedFrom: number | null;
       try {
         resumedFrom = await streamToCache({
           client,
@@ -650,27 +599,24 @@ async function downloadOnline(
           target,
           deps,
           stallTimeoutMs,
-        })
+        });
       } catch (err) {
         if (deps.signal?.aborted) {
-          throw new DownloadInterruptedError(
-            await sizeOf(target.paths.part),
-            target.expectedSize,
-          )
+          throw new DownloadInterruptedError(await sizeOf(target.paths.part), target.expectedSize);
         }
-        if (attempt === 1 && isFileReferenceError(err)) continue
-        throw await transferError(err, target, stallTimeoutMs, rateLimits)
+        if (attempt === 1 && isFileReferenceError(err)) continue;
+        throw await transferError(err, target, stallTimeoutMs, rateLimits);
       }
 
-      const size = target.expectedSize ?? (await sizeOf(target.paths.file))
+      const size = target.expectedSize ?? (await sizeOf(target.paths.file));
       return toResult(
         target,
         ref,
         { path: target.paths.file, size },
         { cached: false, resumedFrom },
-      )
+      );
     } finally {
-      release()
+      release();
     }
   }
 }
@@ -684,22 +630,18 @@ export async function downloadMedia(
   deps: DownloadDeps,
   request: DownloadRequest,
 ): Promise<DownloadResult> {
-  const chat = await resolveHistoryChat(
-    deps.history.client,
-    request.chat,
-    deps.history,
-  )
+  const chat = await resolveHistoryChat(deps.history.client, request.chat, deps.history);
   if (!request.fresh) {
-    const cached = readFromCache(deps, chat, request)
-    if (cached) return cached
+    const cached = readFromCache(deps, chat, request);
+    if (cached) return cached;
   }
   try {
-    return await downloadOnline(deps, chat, request)
+    return await downloadOnline(deps, chat, request);
   } catch (err) {
     // Stopped before the transfer: fetching the message or waiting for the lock
     if (deps.signal?.aborted && !(err instanceof DownloadInterruptedError)) {
-      throw new DownloadInterruptedError(null, null)
+      throw new DownloadInterruptedError(null, null);
     }
-    throw err
+    throw err;
   }
 }

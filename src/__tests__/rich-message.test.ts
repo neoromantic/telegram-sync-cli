@@ -2,11 +2,11 @@
  * The text of a rich message in rich Markdown (src/utils/rich-message.ts).
  * Made-up content only.
  */
-import { describe, expect, it } from 'bun:test'
-import { Long, type tl } from '@mtcute/bun'
+import { describe, expect, it } from "bun:test";
+import { Long, type tl } from "@mtcute/bun";
 
-import { toRawJson } from '../utils/raw-json'
-import { richMessageText } from '../utils/rich-message'
+import { toRawJson } from "../utils/raw-json";
+import { richMessageText } from "../utils/rich-message";
 import {
   cell,
   concat,
@@ -16,383 +16,374 @@ import {
   REPORT_BLOCKS,
   REPORT_TEXT,
   richTlMessage,
-} from './helpers/rich-message'
+} from "./helpers/rich-message";
 
-const peerId = { _: 'peerUser' as const, userId: 1001 }
+const peerId = { _: "peerUser" as const, userId: 1001 };
 
 /**
  * The text of a message with these blocks, read back from raw_json as the
  * cache stores it; the object form mtcute hands over must read the same
  */
-function render(
-  blocks: tl.TypePageBlock[],
-  extra: Partial<tl.RawRichMessage> = {},
-): string | null {
-  const message = richTlMessage(peerId, 7, blocks, extra)
-  const cached = richMessageText(toRawJson(message))
-  expect(richMessageText(message)).toBe(cached)
-  return cached
+function render(blocks: tl.TypePageBlock[], extra: Partial<tl.RawRichMessage> = {}): string | null {
+  const message = richTlMessage(peerId, 7, blocks, extra);
+  const cached = richMessageText(toRawJson(message));
+  expect(richMessageText(message)).toBe(cached);
+  return cached;
 }
 
-const inline = (text: tl.TypeRichText) => render([paragraph(text)])
+const inline = (text: tl.TypeRichText) => render([paragraph(text)]);
 
 const url = (text: string, href: string): tl.RawTextUrl => ({
-  _: 'textUrl',
+  _: "textUrl",
   text: plain(text),
   url: href,
   webpageId: Long.ZERO,
-})
+});
 
-const caption = (text: string, credit = ''): tl.RawPageCaption => ({
-  _: 'pageCaption',
-  text: text ? plain(text) : { _: 'textEmpty' },
-  credit: credit ? plain(credit) : { _: 'textEmpty' },
-})
+const caption = (text: string, credit = ""): tl.RawPageCaption => ({
+  _: "pageCaption",
+  text: text ? plain(text) : { _: "textEmpty" },
+  credit: credit ? plain(credit) : { _: "textEmpty" },
+});
 
-describe('richMessageText: inline text', () => {
-  it('writes each style in its rich Markdown syntax', () => {
+describe("richMessageText: inline text", () => {
+  it("writes each style in its rich Markdown syntax", () => {
     const styled = (
       kind:
-        | 'textBold'
-        | 'textItalic'
-        | 'textStrike'
-        | 'textFixed'
-        | 'textMarked'
-        | 'textSpoiler'
-        | 'textUnderline'
-        | 'textSubscript'
-        | 'textSuperscript',
-    ) => inline({ _: kind, text: plain('word') })
+        | "textBold"
+        | "textItalic"
+        | "textStrike"
+        | "textFixed"
+        | "textMarked"
+        | "textSpoiler"
+        | "textUnderline"
+        | "textSubscript"
+        | "textSuperscript",
+    ) => inline({ _: kind, text: plain("word") });
 
-    expect(styled('textBold')).toBe('**word**')
-    expect(styled('textItalic')).toBe('*word*')
-    expect(styled('textStrike')).toBe('~~word~~')
-    expect(styled('textFixed')).toBe('`word`')
-    expect(styled('textMarked')).toBe('==word==')
-    expect(styled('textSpoiler')).toBe('||word||')
-    expect(styled('textUnderline')).toBe('<u>word</u>')
-    expect(styled('textSubscript')).toBe('<sub>word</sub>')
-    expect(styled('textSuperscript')).toBe('<sup>word</sup>')
-  })
+    expect(styled("textBold")).toBe("**word**");
+    expect(styled("textItalic")).toBe("*word*");
+    expect(styled("textStrike")).toBe("~~word~~");
+    expect(styled("textFixed")).toBe("`word`");
+    expect(styled("textMarked")).toBe("==word==");
+    expect(styled("textSpoiler")).toBe("||word||");
+    expect(styled("textUnderline")).toBe("<u>word</u>");
+    expect(styled("textSubscript")).toBe("<sub>word</sub>");
+    expect(styled("textSuperscript")).toBe("<sup>word</sup>");
+  });
 
-  it('nests styles and joins concatenations', () => {
+  it("nests styles and joins concatenations", () => {
     expect(
       inline(
         concat(
-          plain('Very '),
+          plain("Very "),
           {
-            _: 'textBold',
-            text: concat(plain('bold '), {
-              _: 'textItalic',
-              text: plain('and italic'),
+            _: "textBold",
+            text: concat(plain("bold "), {
+              _: "textItalic",
+              text: plain("and italic"),
             }),
           },
-          { _: 'textEmpty' },
+          { _: "textEmpty" },
         ),
       ),
-    ).toBe('Very **bold *and italic***')
-  })
+    ).toBe("Very **bold *and italic***");
+  });
 
-  it('writes links, e-mail, phone and user mentions as Markdown links', () => {
-    expect(inline(url('the site', 'https://example.com/'))).toBe(
-      '[the site](https://example.com/)',
-    )
+  it("writes links, e-mail, phone and user mentions as Markdown links", () => {
+    expect(inline(url("the site", "https://example.com/"))).toBe(
+      "[the site](https://example.com/)",
+    );
     expect(
       inline({
-        _: 'textEmail',
-        text: plain('write us'),
-        email: 'team@example.com',
+        _: "textEmail",
+        text: plain("write us"),
+        email: "team@example.com",
       }),
-    ).toBe('[write us](mailto:team@example.com)')
-    expect(
-      inline({ _: 'textPhone', text: plain('call'), phone: '+15550000000' }),
-    ).toBe('[call](tel:+15550000000)')
-    expect(
-      inline({ _: 'textMentionName', text: plain('Ada'), userId: 1002 }),
-    ).toBe('[Ada](tg://user?id=1002)')
-  })
+    ).toBe("[write us](mailto:team@example.com)");
+    expect(inline({ _: "textPhone", text: plain("call"), phone: "+15550000000" })).toBe(
+      "[call](tel:+15550000000)",
+    );
+    expect(inline({ _: "textMentionName", text: plain("Ada"), userId: 1002 })).toBe(
+      "[Ada](tg://user?id=1002)",
+    );
+  });
 
-  it('keeps only the text of in-document links and anchors', () => {
-    expect(inline(url('see above', '#intro'))).toBe('see above')
-    expect(
-      inline({ _: 'textAnchor', text: plain('Intro'), name: 'intro' }),
-    ).toBe('Intro')
-  })
+  it("keeps only the text of in-document links and anchors", () => {
+    expect(inline(url("see above", "#intro"))).toBe("see above");
+    expect(inline({ _: "textAnchor", text: plain("Intro"), name: "intro" })).toBe("Intro");
+  });
 
-  it('writes formulas, custom emoji, images and dates', () => {
-    expect(inline({ _: 'textMath', source: 'a^2 + b^2' })).toBe('$a^2 + b^2$')
+  it("writes formulas, custom emoji, images and dates", () => {
+    expect(inline({ _: "textMath", source: "a^2 + b^2" })).toBe("$a^2 + b^2$");
     expect(
       inline({
-        _: 'textCustomEmoji',
-        documentId: Long.fromString('5000000000000000002'),
-        alt: '👍',
+        _: "textCustomEmoji",
+        documentId: Long.fromString("5000000000000000002"),
+        alt: "👍",
       }),
-    ).toBe('👍')
+    ).toBe("👍");
     expect(
       inline({
-        _: 'textImage',
-        documentId: Long.fromString('5000000000000000003'),
+        _: "textImage",
+        documentId: Long.fromString("5000000000000000003"),
         w: 16,
         h: 16,
       }),
-    ).toBe('[image]')
+    ).toBe("[image]");
     expect(
       inline({
-        _: 'textDate',
+        _: "textDate",
         dayOfWeek: true,
         shortTime: true,
-        text: plain('Mon 09:00'),
+        text: plain("Mon 09:00"),
         date: 1_760_000_000,
       }),
-    ).toBe('![Mon 09:00](tg://time?unix=1760000000&format=wt)')
-  })
+    ).toBe("![Mon 09:00](tg://time?unix=1760000000&format=wt)");
+  });
 
-  it('shows the text of auto-detected entities and of a diff', () => {
+  it("shows the text of auto-detected entities and of a diff", () => {
     const kinds = [
-      'textMention',
-      'textHashtag',
-      'textBotCommand',
-      'textCashtag',
-      'textAutoUrl',
-      'textAutoEmail',
-      'textAutoPhone',
-      'textBankCard',
-      'textTonAddress',
-    ] as const
+      "textMention",
+      "textHashtag",
+      "textBotCommand",
+      "textCashtag",
+      "textAutoUrl",
+      "textAutoEmail",
+      "textAutoPhone",
+      "textBankCard",
+      "textTonAddress",
+    ] as const;
     for (const kind of kinds) {
-      expect(inline({ _: kind, text: plain('#value') })).toBe('#value')
+      expect(inline({ _: kind, text: plain("#value") })).toBe("#value");
     }
-    expect(
-      inline({ _: 'textDiff', text: plain('new'), oldText: plain('old') }),
-    ).toBe('new')
-  })
+    expect(inline({ _: "textDiff", text: plain("new"), oldText: plain("old") })).toBe("new");
+  });
 
-  it('writes an inline button as a placeholder with its label and link', () => {
+  it("writes an inline button as a placeholder with its label and link", () => {
     expect(
       inline({
-        _: 'textButton',
-        text: plain('Open'),
-        type: { _: 'inlineButtonTypeUrl', url: 'https://example.com/' },
+        _: "textButton",
+        text: plain("Open"),
+        type: { _: "inlineButtonTypeUrl", url: "https://example.com/" },
       }),
-    ).toBe('[button: Open (https://example.com/)]')
-  })
+    ).toBe("[button: Open (https://example.com/)]");
+  });
 
-  it('reads a text type it does not know by its nested text, else names it', () => {
-    const future = { _: 'textSparkle', text: plain('shiny') }
-    const bare = { _: 'textHologram', id: 1 }
-    expect(inline(future as unknown as tl.TypeRichText)).toBe('shiny')
-    expect(inline(bare as unknown as tl.TypeRichText)).toBe('[textHologram]')
-  })
-})
+  it("reads a text type it does not know by its nested text, else names it", () => {
+    const future = { _: "textSparkle", text: plain("shiny") };
+    const bare = { _: "textHologram", id: 1 };
+    expect(inline(future as unknown as tl.TypeRichText)).toBe("shiny");
+    expect(inline(bare as unknown as tl.TypeRichText)).toBe("[textHologram]");
+  });
+});
 
-describe('richMessageText: blocks', () => {
-  it('writes headings, a paragraph and a table', () => {
-    expect(render(REPORT_BLOCKS)).toBe(REPORT_TEXT)
-    const headings = ([1, 2, 3, 4, 5, 6] as const).map(
-      (level): tl.TypePageBlock => ({
-        _: `pageBlockHeading${level}`,
-        text: plain(`Level ${level}`),
-      }),
-    )
+describe("richMessageText: blocks", () => {
+  it("writes headings, a paragraph and a table", () => {
+    expect(render(REPORT_BLOCKS)).toBe(REPORT_TEXT);
+    const headings = ([1, 2, 3, 4, 5, 6] as const).map((level): tl.TypePageBlock => ({
+      _: `pageBlockHeading${level}`,
+      text: plain(`Level ${level}`),
+    }));
     expect(render(headings)).toBe(
-      '# Level 1\n\n## Level 2\n\n### Level 3\n\n#### Level 4\n\n##### Level 5\n\n###### Level 6',
-    )
-  })
+      "# Level 1\n\n## Level 2\n\n### Level 3\n\n#### Level 4\n\n##### Level 5\n\n###### Level 6",
+    );
+  });
 
-  it('writes the article blocks of older pages as headings and lines', () => {
+  it("writes the article blocks of older pages as headings and lines", () => {
     expect(
       render([
-        { _: 'pageBlockTitle', text: plain('Title') },
-        { _: 'pageBlockSubtitle', text: plain('Subtitle') },
-        { _: 'pageBlockHeader', text: plain('Header') },
-        { _: 'pageBlockSubheader', text: plain('Subheader') },
-        { _: 'pageBlockKicker', text: plain('Kicker') },
+        { _: "pageBlockTitle", text: plain("Title") },
+        { _: "pageBlockSubtitle", text: plain("Subtitle") },
+        { _: "pageBlockHeader", text: plain("Header") },
+        { _: "pageBlockSubheader", text: plain("Subheader") },
+        { _: "pageBlockKicker", text: plain("Kicker") },
         {
-          _: 'pageBlockAuthorDate',
-          author: plain('Sam Example'),
+          _: "pageBlockAuthorDate",
+          author: plain("Sam Example"),
           publishedDate: 1_760_000_000,
         },
-        { _: 'pageBlockAnchor', name: 'top' },
+        { _: "pageBlockAnchor", name: "top" },
       ]),
     ).toBe(
-      '# Title\n\n## Subtitle\n\n## Header\n\n### Subheader\n\nKicker\n\nSam Example, 2025-10-09',
-    )
-  })
+      "# Title\n\n## Subtitle\n\n## Header\n\n### Subheader\n\nKicker\n\nSam Example, 2025-10-09",
+    );
+  });
 
-  it('writes code with its language, a divider and formulas', () => {
+  it("writes code with its language, a divider and formulas", () => {
     expect(
       render([
         {
-          _: 'pageBlockPreformatted',
+          _: "pageBlockPreformatted",
           text: plain('print("hi")'),
-          language: 'python',
+          language: "python",
         },
-        { _: 'pageBlockDivider' },
-        { _: 'pageBlockMath', source: '\\frac{1}{2}' },
+        { _: "pageBlockDivider" },
+        { _: "pageBlockMath", source: "\\frac{1}{2}" },
       ]),
-    ).toBe('```python\nprint("hi")\n```\n\n---\n\n$$\\frac{1}{2}$$')
+    ).toBe('```python\nprint("hi")\n```\n\n---\n\n$$\\frac{1}{2}$$');
     // A fence longer than any run of backticks in the code
     expect(
       render([
         {
-          _: 'pageBlockPreformatted',
-          text: plain('```\nnested\n```'),
-          language: '',
+          _: "pageBlockPreformatted",
+          text: plain("```\nnested\n```"),
+          language: "",
         },
       ]),
-    ).toBe('````\n```\nnested\n```\n````')
-  })
+    ).toBe("````\n```\nnested\n```\n````");
+  });
 
-  it('writes lists, ordered lists and task lists', () => {
+  it("writes lists, ordered lists and task lists", () => {
     expect(
       render([
         {
-          _: 'pageBlockList',
+          _: "pageBlockList",
           items: [
-            { _: 'pageListItemText', text: plain('milk') },
+            { _: "pageListItemText", text: plain("milk") },
             {
-              _: 'pageListItemText',
+              _: "pageListItemText",
               checkbox: true,
               checked: true,
-              text: plain('eggs'),
+              text: plain("eggs"),
             },
-            { _: 'pageListItemText', checkbox: true, text: plain('bread') },
+            { _: "pageListItemText", checkbox: true, text: plain("bread") },
           ],
         },
         {
-          _: 'pageBlockOrderedList',
+          _: "pageBlockOrderedList",
           items: [
-            { _: 'pageListOrderedItemText', num: '1', text: plain('first') },
-            { _: 'pageListOrderedItemText', num: '2', text: plain('second') },
+            { _: "pageListOrderedItemText", num: "1", text: plain("first") },
+            { _: "pageListOrderedItemText", num: "2", text: plain("second") },
           ],
         },
         {
-          _: 'pageBlockOrderedList',
+          _: "pageBlockOrderedList",
           start: 4,
           items: [
-            { _: 'pageListOrderedItemText', text: plain('fourth') },
+            { _: "pageListOrderedItemText", text: plain("fourth") },
             {
-              _: 'pageListOrderedItemBlocks',
-              blocks: [paragraph('fifth'), paragraph('more of it')],
+              _: "pageListOrderedItemBlocks",
+              blocks: [paragraph("fifth"), paragraph("more of it")],
             },
           ],
         },
       ]),
     ).toBe(
       [
-        '- milk',
-        '- [x] eggs',
-        '- [ ] bread',
-        '',
-        '1. first',
-        '2. second',
-        '',
-        '4. fourth',
-        '5. fifth',
-        '',
-        '   more of it',
-      ].join('\n'),
-    )
-  })
+        "- milk",
+        "- [x] eggs",
+        "- [ ] bread",
+        "",
+        "1. first",
+        "2. second",
+        "",
+        "4. fourth",
+        "5. fifth",
+        "",
+        "   more of it",
+      ].join("\n"),
+    );
+  });
 
-  it('writes quotations with their caption, and a pull quote as <aside>', () => {
+  it("writes quotations with their caption, and a pull quote as <aside>", () => {
     expect(
       render([
         {
-          _: 'pageBlockBlockquote',
-          text: plain('Line one\nLine two'),
-          caption: plain('A. Writer'),
+          _: "pageBlockBlockquote",
+          text: plain("Line one\nLine two"),
+          caption: plain("A. Writer"),
         },
         {
-          _: 'pageBlockBlockquoteBlocks',
-          blocks: [paragraph('First'), paragraph('Second')],
-          caption: { _: 'textEmpty' },
+          _: "pageBlockBlockquoteBlocks",
+          blocks: [paragraph("First"), paragraph("Second")],
+          caption: { _: "textEmpty" },
         },
         {
-          _: 'pageBlockPullquote',
-          text: plain('Big words'),
-          caption: plain('B. Speaker'),
+          _: "pageBlockPullquote",
+          text: plain("Big words"),
+          caption: plain("B. Speaker"),
         },
       ]),
     ).toBe(
       [
-        '> Line one',
-        '> Line two',
-        '> <cite>A. Writer</cite>',
-        '',
-        '> First',
-        '>',
-        '> Second',
-        '',
-        '<aside>Big words<cite>B. Speaker</cite></aside>',
-      ].join('\n'),
-    )
-  })
+        "> Line one",
+        "> Line two",
+        "> <cite>A. Writer</cite>",
+        "",
+        "> First",
+        ">",
+        "> Second",
+        "",
+        "<aside>Big words<cite>B. Speaker</cite></aside>",
+      ].join("\n"),
+    );
+  });
 
-  it('writes a table with alignment, styled cells, spans, a title and pipes escaped', () => {
+  it("writes a table with alignment, styled cells, spans, a title and pipes escaped", () => {
     expect(
       render([
         {
-          _: 'pageBlockTable',
-          title: plain('Prices'),
+          _: "pageBlockTable",
+          title: plain("Prices"),
           rows: [
             {
-              _: 'pageTableRow',
+              _: "pageTableRow",
               cells: [
-                cell('Item', { header: true }),
-                cell('Note', { header: true, alignCenter: true }),
-                cell('Cost', { header: true, alignRight: true }),
+                cell("Item", { header: true }),
+                cell("Note", { header: true, alignCenter: true }),
+                cell("Cost", { header: true, alignRight: true }),
               ],
             },
             {
-              _: 'pageTableRow',
+              _: "pageTableRow",
               cells: [
-                cell({ _: 'textBold', text: plain('Tea') }),
-                cell('green | loose', { alignCenter: true }),
-                cell('3', { alignRight: true }),
+                cell({ _: "textBold", text: plain("Tea") }),
+                cell("green | loose", { alignCenter: true }),
+                cell("3", { alignRight: true }),
               ],
             },
             {
-              _: 'pageTableRow',
-              cells: [cell('Total', { colspan: 2 }), cell('3')],
+              _: "pageTableRow",
+              cells: [cell("Total", { colspan: 2 }), cell("3")],
             },
           ],
         },
       ]),
     ).toBe(
       [
-        'Prices',
-        '',
-        '| Item | Note | Cost |',
-        '|---|:---:|---:|',
-        '| **Tea** | green \\| loose | 3 |',
-        '| Total |  | 3 |',
-      ].join('\n'),
-    )
-  })
+        "Prices",
+        "",
+        "| Item | Note | Cost |",
+        "|---|:---:|---:|",
+        "| **Tea** | green \\| loose | 3 |",
+        "| Total |  | 3 |",
+      ].join("\n"),
+    );
+  });
 
-  it('writes details as <details> with Markdown inside, a list in it too', () => {
+  it("writes details as <details> with Markdown inside, a list in it too", () => {
     expect(
       render([
         {
-          _: 'pageBlockDetails',
+          _: "pageBlockDetails",
           open: true,
-          title: concat(plain('More '), {
-            _: 'textBold',
-            text: plain('here'),
+          title: concat(plain("More "), {
+            _: "textBold",
+            text: plain("here"),
           }),
           blocks: [
-            paragraph('Inside'),
+            paragraph("Inside"),
             {
-              _: 'pageBlockList',
+              _: "pageBlockList",
               items: [
                 {
-                  _: 'pageListItemBlocks',
+                  _: "pageListItemBlocks",
                   blocks: [
-                    paragraph('outer'),
+                    paragraph("outer"),
                     {
-                      _: 'pageBlockList',
-                      items: [{ _: 'pageListItemText', text: plain('inner') }],
+                      _: "pageBlockList",
+                      items: [{ _: "pageListItemText", text: plain("inner") }],
                     },
                   ],
                 },
@@ -401,100 +392,100 @@ describe('richMessageText: blocks', () => {
           ],
         },
         {
-          _: 'pageBlockDetails',
-          title: plain('Closed'),
-          blocks: [paragraph('Hidden')],
+          _: "pageBlockDetails",
+          title: plain("Closed"),
+          blocks: [paragraph("Hidden")],
         },
       ]),
     ).toBe(
       [
-        '<details open><summary>More **here**</summary>',
-        '',
-        'Inside',
-        '',
-        '- outer',
-        '',
-        '  - inner',
-        '',
-        '</details>',
-        '',
-        '<details><summary>Closed</summary>',
-        '',
-        'Hidden',
-        '',
-        '</details>',
-      ].join('\n'),
-    )
-  })
+        "<details open><summary>More **here**</summary>",
+        "",
+        "Inside",
+        "",
+        "- outer",
+        "",
+        "  - inner",
+        "",
+        "</details>",
+        "",
+        "<details><summary>Closed</summary>",
+        "",
+        "Hidden",
+        "",
+        "</details>",
+      ].join("\n"),
+    );
+  });
 
-  it('writes footnotes as Telegram returns them: [^id] and [^id]: text', () => {
+  it("writes footnotes as Telegram returns them: [^id] and [^id]: text", () => {
     expect(
       render([
         paragraph(
-          concat(plain('A claim'), {
-            _: 'textSuperscript',
+          concat(plain("A claim"), {
+            _: "textSuperscript",
             text: concat(
-              { _: 'textAnchor', text: { _: 'textEmpty' }, name: 'fnref-n-1' },
-              url('1', '#fn-n'),
+              { _: "textAnchor", text: { _: "textEmpty" }, name: "fnref-n-1" },
+              url("1", "#fn-n"),
             ),
           }),
         ),
         {
-          _: 'pageBlockFooter',
+          _: "pageBlockFooter",
           text: concat(
-            plain('1. '),
-            { _: 'textAnchor', text: plain('The source.'), name: 'fn-n' },
-            plain(' '),
-            url('↩', '#fnref-n-1'),
+            plain("1. "),
+            { _: "textAnchor", text: plain("The source."), name: "fn-n" },
+            plain(" "),
+            url("↩", "#fnref-n-1"),
           ),
         },
-        { _: 'pageBlockFooter', text: plain('Plain footer') },
+        { _: "pageBlockFooter", text: plain("Plain footer") },
       ]),
-    ).toBe('A claim[^n]\n\n[^n]: The source.\n\nPlain footer')
-  })
+    ).toBe("A claim[^n]\n\n[^n]: The source.\n\nPlain footer");
+  });
 
-  it('writes media, maps, embeds and channels as placeholders with captions', () => {
+  it("writes media, maps, embeds and channels as placeholders with captions", () => {
     const docs = [
-      namedDocument('5000000000000000010', 'plan.pdf'),
+      namedDocument("5000000000000000010", "plan.pdf"),
       {
-        ...namedDocument('5000000000000000011', 'song.mp3'),
+        ...namedDocument("5000000000000000011", "song.mp3"),
         attributes: [
           {
-            _: 'documentAttributeAudio' as const,
+            _: "documentAttributeAudio" as const,
             duration: 60,
-            title: 'Tune',
-            performer: 'Band',
+            title: "Tune",
+            performer: "Band",
           },
         ],
       },
-    ]
+    ];
     expect(
       render(
         [
           {
-            _: 'pageBlockPhoto',
-            photoId: Long.fromString('5000000000000000020'),
-            caption: caption('Lake', 'Photo: Sam'),
+            _: "pageBlockPhoto",
+            photoId: Long.fromString("5000000000000000020"),
+            caption: caption("Lake", "Photo: Sam"),
           },
           {
-            _: 'pageBlockVideo',
-            videoId: Long.fromString('5000000000000000021'),
-            caption: caption(''),
+            _: "pageBlockVideo",
+            videoId: Long.fromString("5000000000000000021"),
+            caption: caption(""),
           },
           {
-            _: 'pageBlockDocument',
-            documentId: Long.fromString('5000000000000000010'),
-            caption: caption('The plan'),
+            _: "pageBlockDocument",
+            documentId: Long.fromString("5000000000000000010"),
+            caption: caption("The plan"),
           },
           {
-            _: 'pageBlockAudio',
-            audioId: Long.fromString('5000000000000000011'),
-            caption: caption(''),
+            _: "pageBlockAudio",
+            audioId: Long.fromString("5000000000000000011"),
+            caption: caption(""),
           },
           {
-            _: 'pageBlockMap',
+            _: "pageBlockMap",
             geo: {
-              _: 'geoPoint',
+              _: "geoPoint",
               lat: 41.9,
               long: 12.5,
               accessHash: Long.ZERO,
@@ -502,172 +493,170 @@ describe('richMessageText: blocks', () => {
             zoom: 14,
             w: 300,
             h: 200,
-            caption: caption('Meeting point'),
+            caption: caption("Meeting point"),
           },
           {
-            _: 'pageBlockEmbed',
-            url: 'https://example.com/widget',
-            caption: caption(''),
+            _: "pageBlockEmbed",
+            url: "https://example.com/widget",
+            caption: caption(""),
           },
           {
-            _: 'pageBlockEmbedPost',
-            url: 'https://example.com/post',
+            _: "pageBlockEmbedPost",
+            url: "https://example.com/post",
             webpageId: Long.ZERO,
             authorPhotoId: Long.ZERO,
-            author: 'Sam',
+            author: "Sam",
             date: 1_760_000_000,
-            blocks: [paragraph('Quoted post')],
-            caption: caption(''),
+            blocks: [paragraph("Quoted post")],
+            caption: caption(""),
           },
           {
-            _: 'pageBlockChannel',
+            _: "pageBlockChannel",
             channel: {
-              _: 'channel',
+              _: "channel",
               id: 1_555_000_001,
-              title: 'Example News',
-              username: 'examplenews',
-              photo: { _: 'chatPhotoEmpty' },
+              title: "Example News",
+              username: "examplenews",
+              photo: { _: "chatPhotoEmpty" },
               date: 1_760_000_000,
             },
           },
           {
-            _: 'pageBlockCover',
+            _: "pageBlockCover",
             cover: {
-              _: 'pageBlockPhoto',
-              photoId: Long.fromString('5000000000000000022'),
-              caption: caption(''),
+              _: "pageBlockPhoto",
+              photoId: Long.fromString("5000000000000000022"),
+              caption: caption(""),
             },
           },
-          { _: 'pageBlockUnsupported' },
+          { _: "pageBlockUnsupported" },
         ],
         { documents: docs },
       ),
     ).toBe(
       [
-        '[photo: Lake — Photo: Sam]',
-        '[video]',
-        '[document plan.pdf: The plan]',
-        '[audio Band — Tune]',
-        '[map 41.9, 12.5: Meeting point]',
-        '[embed https://example.com/widget]',
-        '[post Sam https://example.com/post]\n> Quoted post',
-        '[channel: Example News @examplenews]',
-        '[photo]',
-        '[unsupported block]',
-      ].join('\n\n'),
-    )
-  })
+        "[photo: Lake — Photo: Sam]",
+        "[video]",
+        "[document plan.pdf: The plan]",
+        "[audio Band — Tune]",
+        "[map 41.9, 12.5: Meeting point]",
+        "[embed https://example.com/widget]",
+        "[post Sam https://example.com/post]\n> Quoted post",
+        "[channel: Example News @examplenews]",
+        "[photo]",
+        "[unsupported block]",
+      ].join("\n\n"),
+    );
+  });
 
-  it('writes collages and slideshows in their tags, with the caption', () => {
+  it("writes collages and slideshows in their tags, with the caption", () => {
     const photo = (n: number): tl.RawPageBlockPhoto => ({
-      _: 'pageBlockPhoto',
+      _: "pageBlockPhoto",
       photoId: Long.fromNumber(n),
-      caption: caption(''),
-    })
+      caption: caption(""),
+    });
     expect(
       render([
         {
-          _: 'pageBlockCollage',
+          _: "pageBlockCollage",
           items: [photo(1), photo(2)],
-          caption: caption('Trip'),
+          caption: caption("Trip"),
         },
         {
-          _: 'pageBlockSlideshow',
+          _: "pageBlockSlideshow",
           items: [photo(3)],
-          caption: caption(''),
+          caption: caption(""),
         },
       ]),
     ).toBe(
       [
-        '<tg-collage>',
-        '',
-        '[photo]',
-        '[photo]',
-        '<figcaption>Trip</figcaption>',
-        '',
-        '</tg-collage>',
-        '',
-        '<tg-slideshow>',
-        '',
-        '[photo]',
-        '',
-        '</tg-slideshow>',
-      ].join('\n'),
-    )
-  })
+        "<tg-collage>",
+        "",
+        "[photo]",
+        "[photo]",
+        "<figcaption>Trip</figcaption>",
+        "",
+        "</tg-collage>",
+        "",
+        "<tg-slideshow>",
+        "",
+        "[photo]",
+        "",
+        "</tg-slideshow>",
+      ].join("\n"),
+    );
+  });
 
-  it('writes buttons, related articles and a thinking block', () => {
+  it("writes buttons, related articles and a thinking block", () => {
     expect(
       render([
         {
-          _: 'pageBlockButtonRow',
+          _: "pageBlockButtonRow",
           buttons: [
             {
-              _: 'pageButton',
-              text: plain('Site'),
-              type: { _: 'inlineButtonTypeUrl', url: 'https://example.com/' },
+              _: "pageButton",
+              text: plain("Site"),
+              type: { _: "inlineButtonTypeUrl", url: "https://example.com/" },
             },
             {
-              _: 'pageButton',
-              text: plain('Copy'),
-              type: { _: 'inlineButtonTypeCopy', copyText: 'code-123' },
+              _: "pageButton",
+              text: plain("Copy"),
+              type: { _: "inlineButtonTypeCopy", copyText: "code-123" },
             },
           ],
         },
         {
-          _: 'pageBlockRelatedArticles',
-          title: plain('Related'),
+          _: "pageBlockRelatedArticles",
+          title: plain("Related"),
           articles: [
             {
-              _: 'pageRelatedArticle',
-              url: 'https://example.com/a',
+              _: "pageRelatedArticle",
+              url: "https://example.com/a",
               webpageId: Long.ZERO,
-              title: 'Article A',
+              title: "Article A",
             },
           ],
         },
-        { _: 'pageBlockThinking', text: plain('Working on it') },
+        { _: "pageBlockThinking", text: plain("Working on it") },
       ]),
     ).toBe(
       [
-        '[button: Site (https://example.com/)] [button: Copy]',
-        'Related\n- [Article A](https://example.com/a)',
-        '<tg-thinking>Working on it</tg-thinking>',
-      ].join('\n\n'),
-    )
-  })
+        "[button: Site (https://example.com/)] [button: Copy]",
+        "Related\n- [Article A](https://example.com/a)",
+        "<tg-thinking>Working on it</tg-thinking>",
+      ].join("\n\n"),
+    );
+  });
 
-  it('reads a block type it does not know by its text or blocks, else names it', () => {
+  it("reads a block type it does not know by its text or blocks, else names it", () => {
     const blocks = [
-      { _: 'pageBlockBanner', text: plain('Sale today') },
+      { _: "pageBlockBanner", text: plain("Sale today") },
       {
-        _: 'pageBlockColumns',
-        blocks: [paragraph('Left'), paragraph('Right')],
+        _: "pageBlockColumns",
+        blocks: [paragraph("Left"), paragraph("Right")],
       },
-      { _: 'pageBlockHologram', id: 3 },
-    ] as unknown as tl.TypePageBlock[]
-    expect(render(blocks)).toBe(
-      'Sale today\n\nLeft\n\nRight\n\n[pageBlockHologram]',
-    )
-  })
-})
+      { _: "pageBlockHologram", id: 3 },
+    ] as unknown as tl.TypePageBlock[];
+    expect(render(blocks)).toBe("Sale today\n\nLeft\n\nRight\n\n[pageBlockHologram]");
+  });
+});
 
-describe('richMessageText: input', () => {
-  it('is null for a message without rich content and for anything else', () => {
+describe("richMessageText: input", () => {
+  it("is null for a message without rich content and for anything else", () => {
     const plainMessage = {
-      _: 'message',
+      _: "message",
       id: 1,
       peerId,
       date: 1,
-      message: 'hi',
-    }
-    expect(richMessageText(plainMessage)).toBeNull()
-    expect(richMessageText(toRawJson(plainMessage))).toBeNull()
-    expect(richMessageText('{}')).toBeNull()
-    expect(richMessageText('not json "richMessage"')).toBeNull()
-    expect(richMessageText(null)).toBeNull()
-    expect(richMessageText({ richMessage: { _: 'somethingElse' } })).toBeNull()
+      message: "hi",
+    };
+    expect(richMessageText(plainMessage)).toBeNull();
+    expect(richMessageText(toRawJson(plainMessage))).toBeNull();
+    expect(richMessageText("{}")).toBeNull();
+    expect(richMessageText('not json "richMessage"')).toBeNull();
+    expect(richMessageText(null)).toBeNull();
+    expect(richMessageText({ richMessage: { _: "somethingElse" } })).toBeNull();
     // Nothing to show: the message keeps its own (empty) text
-    expect(render([])).toBeNull()
-  })
-})
+    expect(render([])).toBeNull();
+  });
+});
