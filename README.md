@@ -76,6 +76,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
   every message item shows its attachment (kind, name, MIME type, size)
 - Service messages say what happened: calls (video, duration, why they ended), pins and group
   changes in each item's `action`
+- Rich messages (headings, tables, lists, task lists, code, formulas) read as rich Markdown in
+  `text`, and search finds them by any word
 - Contacts, chats and users (`tg contacts`, `tg chats`, `tg me`, `tg user`)
 - Read-only SQL over the cache (`tg sql`) with an annotated schema
 - Rate-limit tracking, config and status tooling (`tg config`, `tg status`)

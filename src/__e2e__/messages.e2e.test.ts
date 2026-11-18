@@ -20,6 +20,13 @@ import { LEGACY } from '../__tests__/helpers/legacy-cache'
 import { videoMessage } from '../__tests__/helpers/media-messages'
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
 import { photoMessage } from '../__tests__/helpers/photo-message'
+import {
+  cell,
+  plain,
+  REPORT_BLOCKS,
+  REPORT_TEXT,
+  richTlMessage,
+} from '../__tests__/helpers/rich-message'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
@@ -30,6 +37,7 @@ import { PEER_ID_USER_VERSION } from '../db/peer-id-migration'
 import { createUsersCache } from '../db/users-cache'
 import type { MessageSearchItem } from '../types'
 import { extractAttachment } from '../utils/attachment'
+import { toRawJson } from '../utils/raw-json'
 import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import { NO_CREDENTIALS, runCli, runCliSuccess } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
@@ -1158,6 +1166,121 @@ describe('E2E: Service message actions', () => {
     expect(results.map((item) => [item.messageId, item.action])).toEqual([
       [1, null],
     ])
+  })
+})
+
+/** A supergroup where reports are sent as rich messages */
+const GARDEN_RAW_ID = 1_555_000_003
+const GARDEN_ID = -1_001_555_000_003
+
+describe('E2E: Rich messages', () => {
+  const peer = { _: 'peerChannel' as const, channelId: GARDEN_RAW_ID }
+  // As tg 0.13.1 cached it: the rich content only in raw_json, no text
+  const olderReport = richTlMessage(peer, 3, [
+    {
+      _: 'pageBlockTable',
+      title: { _: 'textEmpty' },
+      rows: [
+        { _: 'pageTableRow', cells: [cell('Crop', { header: true })] },
+        { _: 'pageTableRow', cells: [cell('Pumpkin')] },
+      ],
+    },
+    { _: 'pageBlockParagraph', text: plain('Older report') },
+  ])
+  let env: TestEnvironment
+
+  beforeAll(() => {
+    env = createTestEnvironment('messages-rich')
+    env.initDatabase()
+    env.seedAccounts([
+      { phone: '+15550000000', user_id: SELF_ID, is_active: true },
+    ])
+    const db = env.openCacheDb(1)
+    createChatsCache(db).upsertMany([
+      dialogToCacheInput(
+        fakeDialog({
+          kind: 'supergroup',
+          id: GARDEN_RAW_ID,
+          title: 'Garden Club',
+          username: 'gardenclub',
+        }),
+      ),
+    ])
+    const plainMessage = {
+      _: 'message' as const,
+      id: 1,
+      peerId: peer,
+      date: 1_760_000_001,
+      message: 'report coming',
+    }
+    createMessagesCache(db).upsertBatch(
+      [plainMessage, richTlMessage(peer, 2, REPORT_BLOCKS)].map(
+        (raw) => parseRawMessage(raw, GARDEN_ID)!,
+      ),
+    )
+    db.query(
+      `INSERT INTO messages_cache (chat_id, message_id, text, message_type, date, fetched_at, raw_json)
+       VALUES (?, 3, NULL, 'text', ?, 0, ?)`,
+    ).run(GARDEN_ID, olderReport.date, toRawJson(olderReport))
+    createHistoryRanges(db).add(GARDEN_ID, { low: 1, high: 3 })
+  })
+
+  afterAll(() => {
+    env.cleanup()
+  })
+
+  const options = () => ({
+    env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+  })
+
+  it('lists a rich message with its text, and one cached before tg read them', async () => {
+    const result = await runCliSuccess(
+      ['messages', 'list', '--chat', '@gardenclub'],
+      options(),
+    )
+    const { items } = (result.json as { data: ListData }).data
+
+    expect(
+      items.map((item) => [item.messageId, item.messageType, item.text]),
+    ).toEqual([
+      [3, 'text', '| Crop |\n|---|\n| Pumpkin |\n\nOlder report'],
+      [2, 'text', REPORT_TEXT],
+      [1, 'text', 'report coming'],
+    ])
+  })
+
+  it('gets a rich message with its text', async () => {
+    const result = await runCliSuccess(
+      ['messages', 'get', '--chat', '@gardenclub', '--id', '2'],
+      options(),
+    )
+    const data = (result.json as { data: GetData }).data
+
+    expect(data.message).toMatchObject({
+      messageId: 2,
+      text: REPORT_TEXT,
+      hasMedia: false,
+      attachment: null,
+      action: null,
+    })
+  })
+
+  it('finds a rich message by a word only in a table cell', async () => {
+    const result = await runCliSuccess(
+      ['messages', 'search', '--query', 'zucchini', '--snippet'],
+      options(),
+    )
+    const { results } = (
+      result.json as {
+        data: { results: Array<MessageSearchItem & { snippet: string }> }
+      }
+    ).data
+
+    expect(results.map((item) => [item.chatId, item.messageId])).toEqual([
+      [GARDEN_ID, 2],
+    ])
+    expect(results[0]?.text).toBe(REPORT_TEXT)
+    expect(results[0]?.snippet).toContain('Zucchini')
   })
 })
 

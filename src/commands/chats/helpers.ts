@@ -7,20 +7,7 @@ import {
   toPeerIdFromRawChat,
   toPeerIdFromRawPeer,
 } from '../../utils/telegram-peer-ids'
-
-export interface ChatItem {
-  /** Marked peer ID, as messages_cache and `tg messages search` use it */
-  id: number
-  type: ChatType
-  title: string
-  username: string | null
-  memberCount: number | null
-  lastMessageAt: number | null
-  isCreator: boolean
-  isAdmin: boolean
-  /** Unread incoming messages; null until a dialog list has the chat */
-  unreadCount: number | null
-}
+import type { ChatItem } from './list-output'
 
 export const CHAT_TYPE_VALUES = [
   'private',

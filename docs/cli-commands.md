@@ -81,14 +81,31 @@ tg chats sync @examplenews        # sync this chat in the background
 community, a collection of linked chats). `--type community` lists the communities the
 account joined once a daemon start or `tg chats list --fresh` has cached them.
 
-Each item of `tg chats list` has `syncEnabled` (whether the daemon syncs the chat) and
-`syncReason`, why: `dm`, `bot`, `deleted_account`, `small_group`, `medium_group` (the default
-policy), `large_group`, `unknown_size`, `channel`, `community` (off by the policy), or
-`on_by_hand` / `off_by_hand` (set with `tg chats sync`). It is `null` for a chat without sync
-state: an archived chat that hasn't synced yet, or one no daemon start has seen.
+The `data` of `tg chats list`:
 
-Each item also has `unreadCount`, the chat's unread incoming messages as Telegram counts them,
-or `null` before a dialog list has the chat (a daemon start or `tg chats list --fresh`).
+<!-- output: chats list -->
+| Field | Type | Description |
+|---|---|---|
+| `items` | array | The page of chats, newest message first |
+| `items[].id` | integer | Marked peer ID: the user ID, `-N` for a basic group, `-100…` for a supergroup, channel or community |
+| `items[].type` | `private`, `group`, `supergroup`, `channel` or `community` | Chat type |
+| `items[].title` | string | Chat title or the user's name; empty when Telegram gave none |
+| `items[].username` | string or `null` | Public username, without `@` |
+| `items[].memberCount` | integer or `null` | Members of a group or channel; `null` when unknown |
+| `items[].lastMessageAt` | integer or `null` | Time of the newest message, Unix milliseconds |
+| `items[].isCreator` | boolean | The account created the chat |
+| `items[].isAdmin` | boolean | The account is an admin of the chat |
+| `items[].unreadCount` | integer or `null` | Unread incoming messages as Telegram counts them; `null` before a dialog list has the chat (a daemon start or `--fresh`) |
+| `items[].syncEnabled` | boolean | Whether the daemon syncs the chat's messages |
+| `items[].syncReason` | `dm`, `bot`, `deleted_account`, `small_group`, `medium_group`, `large_group`, `unknown_size`, `channel`, `community`, `on_by_hand`, `off_by_hand` or `null` | Why: the policy's reason (`medium_group` is the default; `large_group`, `unknown_size`, `channel` and `community` are off), or `on_by_hand` / `off_by_hand` from `tg chats sync`; `null` for a chat without sync state: an archived chat that hasn't synced yet, or one no daemon start has seen |
+| `total` | integer | Chats that match the filters |
+| `offset` | integer | `--offset` |
+| `limit` | integer | `--limit` |
+| `hasMore` | boolean | More chats follow this page |
+| `source` | `cache` or `api` | `cache`, or `api` with `--fresh` or when the cache has no matching chat |
+| `stale` | boolean | A matching cached chat is older than `cache.staleness.dialogs`; always `false` from the API |
+<!-- /output -->
+
 `--unread` lists only chats with unread messages, in the same order; it answers from the cache
 once a dialog list has given the chats their counts, and otherwise reads the dialog list from
 Telegram, as `--fresh` does. How fresh the count is: [real-time.md](real-time.md#unread-counts).
@@ -276,6 +293,37 @@ says what happened. It is read from `raw_json` too, and `type` is always set:
 Any other action has only `type`, its Telegram name in snake case without `messageAction`
 (`chat_edit_photo`, `screenshot_taken`, `history_clear`…), so nothing is dropped. Search doesn't
 index actions: `tg messages search` finds a service message only by its text, which is empty.
+
+A rich message (a heading, a table, lists, a report: page blocks instead of a text) has
+`messageType: "text"` like any other text message, and its `text` is the blocks written in
+Telegram's rich Markdown, the syntax a rich message is sent with
+([Bot API](https://core.telegram.org/bots/api#rich-messages)):
+
+```markdown
+# Garden report
+
+Harvest is **on track**
+
+| Crop | Kg |
+|---|---:|
+| Zucchini | 12 |
+```
+
+Headings are `#`, styles `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `==marked==`,
+`||spoiler||` and `[links](https://example.com)`; code blocks are fenced with their language;
+lists are `-`, `1.`, `- [ ]` and `- [x]`; quotations `>`; dividers `---`; tables are pipe
+tables with an alignment row; formulas `$…$` and `$$…$$`; footnotes `[^id]` and `[^id]: text`.
+Where Markdown has no syntax it uses Telegram's HTML tags: `<u>`, `<sub>`, `<sup>`,
+`<details><summary>…</summary>…</details>`, `<aside>` for a pull quote, `<cite>` for a
+quotation's author, `<tg-collage>` and `<tg-slideshow>` around their media. Media, maps, embeds
+and buttons can't be text, so each is a placeholder with its caption or label: `[photo: The
+lake]`, `[video]`, `[document plan.pdf: The plan]`, `[map 41.9, 12.5: Meeting point]`,
+`[embed https://example.com/widget]`, `[button: Open (https://example.com)]`. A block Telegram
+adds later shows its text, or `[pageBlockName]` when it has none. Search matches every word of
+the rendered text, a table cell's too. Messages cached by 0.13.1 and older have it as well:
+list, get, search, unread, wait and watch render it from `raw_json`, and the background
+migration `messages_rich_text` stores it so search finds them
+([tg db migrate](#tg-db-migrate)).
 
 `tg messages search` reads only the cache. A plain query matches messages that contain every
 word, in any order; a query with FTS5 syntax (`"phrase"`, `OR`, `NOT`, `sender:alice`,
@@ -758,7 +806,8 @@ them on its own, a little each second ([daemon.md](daemon.md#background-migratio
 `tg db migrate` runs the pending ones of one account's cache (`--account`, else the active
 account, else the only one) in the foreground until they are done, and needs no Telegram
 credentials. `messages_refetch_empty_raw_json` only queues sync jobs for messages cached with
-an empty `raw_json`; the daemon fetches them again (#130). Then it re-indexes the messages of
+an empty `raw_json`; the daemon fetches them again (#130). `messages_rich_text` gives rich
+messages cached by 0.13.1 and older their text, so search finds them. Then it re-indexes the messages of
 senders and chats whose names changed ([search.md](search.md#names-after-a-rename)), so a
 search by a new name finds older messages without the daemon; `rows` counts those messages
 too. Last it merges the search index, which a cache written by 0.11.1 or older needs once
