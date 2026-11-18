@@ -170,21 +170,25 @@ migrates.
 
 Snapshot tests lock down formatted output to catch regressions.
 
-- Helpers live in `src/__tests__/helpers/snapshots.ts`
+- Example: the `snapshots` block in `src/__tests__/output.test.ts`
 - Snapshots use Bun's `toMatchSnapshot` / `toMatchInlineSnapshot`
 - Update snapshots with `bun test -u`
 
 ```typescript
-import { snapshotLines } from './helpers/snapshots'
+const logSpy = spyOn(console, 'log').mockImplementation(() => {})
 
 setOutputFormat('json')
-success({ message: 'Snapshot test', count: 2 })
-expect(snapshotLines(logs)).toMatchInlineSnapshot(`
+success({ message: 'Snapshot test', count: 2, items: ['alpha', 'beta'] })
+expect(logSpy.mock.calls[0]?.[0]).toMatchInlineSnapshot(`
 "{
   "success": true,
   "data": {
     "message": "Snapshot test",
-    "count": 2
+    "count": 2,
+    "items": [
+      "alpha",
+      "beta"
+    ]
   }
 }"
 `)
