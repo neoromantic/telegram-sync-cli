@@ -6,18 +6,17 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { defineCommand } from 'citty'
 
+// Embedded in the compiled binary, so `tg skill install` writes the file the
+// repo ships, never a copy that can drift
+import skillMarkdown from '../../skills/telegram-sync-cli/SKILL.md' with {
+  type: 'text',
+}
 import { ErrorCodes } from '../types'
 import { error, success } from '../utils/output'
-import { VERSION } from '../version'
 
-export interface SkillManifest {
-  name: string
-  description: string
-  install_command: string
-  entrypoint: string
-  version: string
-  output: 'json'
-}
+export const SKILL_NAME = 'telegram-sync-cli'
+
+export const SKILL_MARKDOWN: string = skillMarkdown
 
 export interface SkillEnvStatus {
   telegram_api_id: {
@@ -38,10 +37,25 @@ export interface SkillDataDirStatus {
   error?: string
 }
 
+export interface SkillAccountStatus {
+  id: number
+  username: string | null
+  label: string | null
+}
+
+export interface SkillDaemonStatus {
+  status: 'running' | 'stopped'
+  pid: number | null
+}
+
 export interface SkillValidationResult {
   valid: boolean
   env: SkillEnvStatus
   data_dir: SkillDataDirStatus
+  /** The account commands use without --account, or null */
+  account: SkillAccountStatus | null
+  accounts_total: number
+  daemon: SkillDaemonStatus
   issues: string[]
 }
 
@@ -49,7 +63,6 @@ export interface SkillInstallResult {
   path: string
   bytes: number
   overwritten: boolean
-  manifest: SkillManifest
 }
 
 function resolveDataDir(): string {
@@ -65,21 +78,6 @@ export function getErrorMessage(err: unknown): string {
     return err.message
   }
   return String(err)
-}
-
-export function buildSkillManifest(): SkillManifest {
-  return {
-    name: '@goodit/telegram-sync-cli',
-    description: 'Agent-friendly Telegram Sync CLI',
-    install_command: 'bun install -g @goodit/telegram-sync-cli',
-    entrypoint: 'tg',
-    version: VERSION,
-    output: 'json',
-  }
-}
-
-export function getSkillManifestPath(): string {
-  return join(resolveDataDir(), 'skill.json')
 }
 
 function buildEnvStatus(): SkillEnvStatus {
@@ -171,9 +169,59 @@ export async function checkDataDirAccess(
   }
 }
 
+interface AccountAndDaemon {
+  account: SkillAccountStatus | null
+  accountsTotal: number
+  daemon: SkillDaemonStatus
+  issues: string[]
+}
+
+/**
+ * The account a command picks without --account (the active one, else the
+ * only one) and whether the daemon runs. Opening data.db creates the data
+ * directory, so this runs only after it proved writable.
+ */
+async function readAccountAndDaemon(
+  dataDir: string,
+): Promise<AccountAndDaemon> {
+  const [{ accountsDb }, { createPidFile }] = await Promise.all([
+    import('../db'),
+    import('../daemon/pid-file'),
+  ])
+  const pid = createPidFile(join(dataDir, 'daemon.pid')).read()
+  const daemon: SkillDaemonStatus = {
+    status: pid === null ? 'stopped' : 'running',
+    pid,
+  }
+  const accounts = accountsDb.getAll()
+  const selected =
+    accountsDb.getActive() ?? (accounts.length === 1 ? accounts[0] : null)
+  const issues: string[] = []
+  if (accounts.length === 0) {
+    issues.push('No account: log in with tg auth login')
+  } else if (!selected) {
+    issues.push(
+      `${accounts.length} accounts and none is active: pass --account or run tg accounts switch --id <id>`,
+    )
+  }
+  return {
+    account: selected
+      ? {
+          id: selected.id,
+          username: selected.username ?? null,
+          label: selected.label ?? null,
+        }
+      : null,
+    accountsTotal: accounts.length,
+    daemon,
+    issues,
+  }
+}
+
 export async function validateSkillEnvironment(): Promise<SkillValidationResult> {
   const envStatus = buildEnvStatus()
-  const dataDirStatus = await checkDataDirAccess(resolveDataDir())
+  const dataDir = resolveDataDir()
+  const dataDirStatus = await checkDataDirAccess(dataDir)
 
   const issues: string[] = []
   if (!envStatus.telegram_api_id.valid) {
@@ -189,63 +237,64 @@ export async function validateSkillEnvironment(): Promise<SkillValidationResult>
     issues.push('Data directory path is not a directory')
   }
 
+  const state: AccountAndDaemon = dataDirStatus.writable
+    ? await readAccountAndDaemon(dataDir)
+    : {
+        account: null,
+        accountsTotal: 0,
+        daemon: { status: 'stopped', pid: null },
+        issues: [],
+      }
+  issues.push(...state.issues)
+
   return {
     valid: issues.length === 0,
     env: envStatus,
     data_dir: dataDirStatus,
+    account: state.account,
+    accounts_total: state.accountsTotal,
+    daemon: state.daemon,
     issues,
   }
 }
 
-export async function installSkillManifest(
-  targetPath = getSkillManifestPath(),
-): Promise<SkillInstallResult> {
-  const manifest = buildSkillManifest()
-  const payload = `${JSON.stringify(manifest, null, 2)}\n`
-  const existed = await Bun.file(targetPath).exists()
-
-  await Bun.write(targetPath, payload, { createPath: true })
-
-  return {
-    path: targetPath,
-    bytes: payload.length,
-    overwritten: existed,
-    manifest,
-  }
+/** Writes SKILL.md to `<dir>/telegram-sync-cli/SKILL.md` */
+export async function installSkill(dir: string): Promise<SkillInstallResult> {
+  const path = join(dir, SKILL_NAME, 'SKILL.md')
+  const existed = await Bun.file(path).exists()
+  const bytes = await Bun.write(path, SKILL_MARKDOWN, { createPath: true })
+  return { path, bytes, overwritten: existed }
 }
-
-export const skillManifestCommand = defineCommand({
-  meta: {
-    name: 'manifest',
-    description: 'Print the skill manifest JSON',
-  },
-  async run() {
-    success(buildSkillManifest())
-  },
-})
 
 export const skillValidateCommand = defineCommand({
   meta: {
     name: 'validate',
-    description: 'Validate environment and data directory access',
+    description:
+      'Check the credentials, the data directory, the active account and whether the daemon runs',
   },
   async run() {
-    const result = await validateSkillEnvironment()
-    success(result)
+    success(await validateSkillEnvironment())
   },
 })
 
 export const skillInstallCommand = defineCommand({
   meta: {
     name: 'install',
-    description: 'Write the skill manifest to the default location',
+    description:
+      "Write the agent skill to <dir>/telegram-sync-cli/SKILL.md, such as an agent's skills directory",
   },
-  async run() {
+  args: {
+    dir: {
+      type: 'string',
+      description: 'Skills directory, such as ~/.claude/skills',
+      required: true,
+    },
+  },
+  async run({ args }) {
     try {
-      const result = await installSkillManifest()
-      success(result)
+      success(await installSkill(args.dir))
     } catch (err) {
-      error(ErrorCodes.GENERAL_ERROR, 'Failed to write skill manifest', {
+      error(ErrorCodes.GENERAL_ERROR, 'Failed to write the skill', {
         reason: getErrorMessage(err),
       })
     }
@@ -255,10 +304,9 @@ export const skillInstallCommand = defineCommand({
 export const skillCommand = defineCommand({
   meta: {
     name: 'skill',
-    description: 'AI skill helpers (manifest, validate, install)',
+    description: 'The agent skill: install it, check the setup it needs',
   },
   subCommands: {
-    manifest: skillManifestCommand,
     validate: skillValidateCommand,
     install: skillInstallCommand,
   },

@@ -163,7 +163,7 @@ describe('E2E: Config Commands', () => {
     writeFileSync(join(env.dataDir, 'config.json'), '{"activeAccount":"one"}')
 
     const result = await runCliSuccess(
-      ['-f', 'json', 'skill', 'manifest'],
+      ['-f', 'json', 'skill', 'validate'],
       env.getCliOptions(),
     )
 

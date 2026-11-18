@@ -155,47 +155,51 @@ tg status
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg sql print-schema --table=users_cache
 
-# Skill integration
-tg skill manifest
+# Agent skill
+tg skill install --dir ~/.claude/skills
 tg skill validate
-tg skill install
 ```
 
-### Skill Manifest
+### Agent skill
 
-`tg skill manifest` returns the manifest used for agent integration. `tg skill install`
-writes the manifest to `<dataDir>/skill.json` (default `~/.telegram-sync-cli/skill.json`,
-override with `TELEGRAM_SYNC_CLI_DATA_DIR`).
+[`skills/telegram-sync-cli/SKILL.md`](../skills/telegram-sync-cli/SKILL.md) tells a coding
+agent how to use `tg`: when to reach for it, the read paths (`tg messages search`, `tg sql`), confirming before `tg send`, the error schema and the exit
+codes. Install it with the skills CLI:
 
-Fields:
-- `name`
-- `description`
-- `install_command`
-- `entrypoint`
-- `version` (CLI version)
-- `output` (always `json`)
+```bash
+bunx skills add neoromantic/telegram-sync-cli
+```
 
-Example output:
+or with `tg skill install --dir <skills dir>`, which writes the same file, embedded in `tg`, to
+`<dir>/telegram-sync-cli/SKILL.md` and prints `{ path, bytes, overwritten }`. `--dir` is
+required: it is the agent's skills directory, such as `~/.claude/skills`. Every command in the
+skill's code blocks runs in `src/__e2e__/skill-examples.e2e.test.ts`, so an example can't go
+stale.
+
+`tg skill validate` checks what the skill needs, locally, without a network call or
+credentials: the API credentials in the environment, that the data directory is writable, the
+account a command uses without `--account` (the active one, else the only one) and whether the
+daemon runs.
 
 ```json
 {
-  "success": true,
-  "data": {
-    "name": "@goodit/telegram-sync-cli",
-    "description": "Agent-friendly Telegram Sync CLI",
-    "install_command": "bun install -g @goodit/telegram-sync-cli",
-    "entrypoint": "tg",
-    "version": "<cli-version>",
-    "output": "json"
-  }
+  "valid": true,
+  "env": {
+    "telegram_api_id": { "present": true, "valid": true },
+    "telegram_api_hash": { "present": true, "valid": true }
+  },
+  "data_dir": { "path": "/home/user/.telegram-sync-cli", "exists": true, "is_directory": true, "writable": true },
+  "account": { "id": 1, "username": "example", "label": null },
+  "accounts_total": 1,
+  "daemon": { "status": "running", "pid": 4242 },
+  "issues": []
 }
 ```
 
-`tg skill validate` performs local checks only (environment variables and data
-directory access). It does not make network calls.
-
-`tg skill install` writes the manifest to the default location and returns
-metadata about the write.
+`issues` lists what keeps `tg` from working: missing credentials, a data directory it can't
+write, no account (`tg auth login`), or several accounts and none active. `account` is `null`
+in the last two cases. A stopped daemon isn't an issue, since cache reads work without it, but
+the cache then holds only what earlier commands fetched.
 
 ### Cache Behavior
 

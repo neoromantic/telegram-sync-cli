@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- An agent skill, `skills/telegram-sync-cli/SKILL.md`: when to use `tg`, finding chats and
+  messages, counting and reading whole chats with one `tg sql` query, confirming before
+  `tg send`, the error schema and the exit codes. Install it with
+  `bunx skills add neoromantic/telegram-sync-cli` or `tg skill install --dir <skills dir>`,
+  which writes the same file from `tg` itself. A test runs every command in its examples
+  against made-up data.
+- `tg skill validate` reports the account a command uses without `--account` (`account`,
+  `accounts_total`) and whether the daemon runs (`daemon: { status, pid }`). No account, or
+  several and none active, is an issue.
+
+### Removed
+
+- `tg skill manifest` and the `skill.json` that `tg skill install` wrote into the data
+  directory. No agent read that file; `tg skill install --dir <dir>` now writes `SKILL.md`.
+
 ## [0.13.1] - 2026-11-18
 
 ### Fixed

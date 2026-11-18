@@ -5,7 +5,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { chmodSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import packageJson from '../../package.json' with { type: 'json' }
 
 let skillModule: typeof import('../commands/skill')
 let dataDir: string
@@ -56,28 +55,18 @@ afterAll(() => {
 })
 
 describe('Skill Command Helpers', () => {
-  it('builds a stable manifest', () => {
-    const manifest = skillModule.buildSkillManifest()
-
-    expect(manifest).toMatchObject({
-      name: '@goodit/telegram-sync-cli',
-      description: 'Agent-friendly Telegram Sync CLI',
-      install_command: 'bun install -g @goodit/telegram-sync-cli',
-      entrypoint: 'tg',
-      version: packageJson.version,
-      output: 'json',
-    })
-  })
-
   it('validates environment and data directory', async () => {
     const result = await skillModule.validateSkillEnvironment()
 
-    expect(result.valid).toBe(true)
     expect(result.env.telegram_api_id.valid).toBe(true)
     expect(result.env.telegram_api_hash.valid).toBe(true)
     expect(result.data_dir.path).toBe(dataDir)
     expect(result.data_dir.writable).toBe(true)
-    expect(result.issues).toHaveLength(0)
+    // No account is logged in to this data dir
+    expect(result.valid).toBe(false)
+    expect(result.account).toBeNull()
+    expect(result.daemon).toEqual({ status: 'stopped', pid: null })
+    expect(result.issues).toEqual(['No account: log in with tg auth login'])
   })
 
   it('reports missing environment variables', async () => {
@@ -126,30 +115,24 @@ describe('Skill Command Helpers', () => {
       .catch(() => {})
   })
 
-  it('installs the manifest and reports overwrites', async () => {
-    const targetPath = join(dataDir, 'skill-test.json')
+  it('installs SKILL.md under <dir>/telegram-sync-cli and reports overwrites', async () => {
+    const dir = join(dataDir, 'skills')
 
     try {
-      const first = await skillModule.installSkillManifest(targetPath)
+      const first = await skillModule.installSkill(dir)
+      const path = join(dir, 'telegram-sync-cli', 'SKILL.md')
 
-      expect(first.path).toBe(targetPath)
-      expect(first.overwritten).toBe(false)
-      expect(first.bytes).toBeGreaterThan(0)
-      expect(first.manifest.name).toBe('@goodit/telegram-sync-cli')
+      expect(first).toEqual({
+        path,
+        bytes: Buffer.byteLength(skillModule.SKILL_MARKDOWN),
+        overwritten: false,
+      })
+      expect(await Bun.file(path).text()).toBe(skillModule.SKILL_MARKDOWN)
 
-      const second = await skillModule.installSkillManifest(targetPath)
-
+      const second = await skillModule.installSkill(dir)
       expect(second.overwritten).toBe(true)
-
-      const manifestText = await Bun.file(targetPath).text()
-      const manifest = JSON.parse(manifestText)
-
-      expect(manifest.name).toBe('@goodit/telegram-sync-cli')
-      expect(manifest.entrypoint).toBe('tg')
     } finally {
-      await Bun.file(targetPath)
-        .delete()
-        .catch(() => {})
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })
@@ -308,12 +291,7 @@ describe('skillInstallCommand error path', () => {
       // Make directory read-only
       chmodSync(readOnlyDir, 0o444)
 
-      const targetPath = join(readOnlyDir, 'skill.json')
-
-      // installSkillManifest should throw when it can't write
-      await expect(
-        skillModule.installSkillManifest(targetPath),
-      ).rejects.toThrow()
+      await expect(skillModule.installSkill(readOnlyDir)).rejects.toThrow()
     } finally {
       // Restore permissions before cleanup
       chmodSync(readOnlyDir, 0o755)
@@ -321,17 +299,15 @@ describe('skillInstallCommand error path', () => {
     }
   })
 
-  it('installSkillManifest throws on ENOTDIR path', async () => {
+  it('installSkill throws on ENOTDIR path', async () => {
     // Create a file that blocks the path
     const blockingFile = join(dataDir, 'blocking-install-file.txt')
     await Bun.write(blockingFile, 'block')
 
     // Try to write to a path through the file
-    const invalidPath = join(blockingFile, 'subdir', 'skill.json')
-
     try {
       await expect(
-        skillModule.installSkillManifest(invalidPath),
+        skillModule.installSkill(join(blockingFile, 'subdir')),
       ).rejects.toThrow()
     } finally {
       await Bun.file(blockingFile)
@@ -346,33 +322,20 @@ describe('skillInstallCommand error path', () => {
       return
     }
 
-    // Make the data dir read-only so skillInstallCommand.run() will fail
-    // when it tries to write to the default skill.json path
-    const prevDataDir = process.env.TELEGRAM_SYNC_CLI_DATA_DIR
-    const readOnlyDataDir = join(dataDir, 'readonly-data')
-    mkdirSync(readOnlyDataDir, { recursive: true })
+    const readOnlyDir = join(dataDir, 'readonly-skills')
+    mkdirSync(readOnlyDir, { recursive: true })
 
     try {
-      // Make directory read-only
-      chmodSync(readOnlyDataDir, 0o444)
-      process.env.TELEGRAM_SYNC_CLI_DATA_DIR = readOnlyDataDir
+      chmodSync(readOnlyDir, 0o444)
 
-      // Re-import the module to pick up the new env
-      const freshModule = await import('../commands/skill')
-
-      // The command should throw (via error()) when it can't write
       await expect(
-        freshModule.skillInstallCommand.run?.({} as never),
-      ).rejects.toThrow('Failed to write skill manifest')
+        skillModule.skillInstallCommand.run?.({
+          args: { dir: readOnlyDir },
+        } as never),
+      ).rejects.toThrow('Failed to write the skill')
     } finally {
-      // Restore permissions and env before cleanup
-      chmodSync(readOnlyDataDir, 0o755)
-      rmSync(readOnlyDataDir, { recursive: true, force: true })
-      if (prevDataDir === undefined) {
-        delete process.env.TELEGRAM_SYNC_CLI_DATA_DIR
-      } else {
-        process.env.TELEGRAM_SYNC_CLI_DATA_DIR = prevDataDir
-      }
+      chmodSync(readOnlyDir, 0o755)
+      rmSync(readOnlyDir, { recursive: true, force: true })
     }
   })
 })

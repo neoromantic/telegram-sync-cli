@@ -88,7 +88,6 @@ export const COMMAND_ACCESS: Record<string, CommandAccess> = {
   me: LOCAL,
   user: LOCAL,
   status: LOCAL,
-  'skill manifest': LOCAL,
   'skill validate': LOCAL,
   'skill install': LOCAL,
   sql: { unscopable: true },

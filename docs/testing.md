@@ -238,6 +238,11 @@ is for tests only.
   as runCli's `entry`), which keeps the process alive even after it is closed, as a connected
   mtcute client might: with and without `--raw` and on a failed call, the command prints its
   output, closes the client and exits the process itself
+- `skill.e2e.test.ts` — `tg skill install --dir` writes the repo's `SKILL.md`; `tg skill
+  validate` reports the active account and whether the daemon runs
+- `skill-examples.e2e.test.ts` — every command in the code blocks of
+  `skills/telegram-sync-cli/SKILL.md` runs against a seeded cache (`tg api` with the fake
+  client); an example that fails or answers an empty list fails the test
 - `status.e2e.test.ts` — `tg status` counts and lists running, pending, retrying and failed
   sync jobs from a seeded cache, in JSON and pretty output, without credentials; the retry
   commands it prints delete the failed jobs and keep each chat's mode; it shows the daemon's

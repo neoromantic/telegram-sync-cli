@@ -8,6 +8,7 @@
   },
   "files": [
     "bin/tg.js",
+    "skills/telegram-sync-cli/SKILL.md",
     "src/**/*.ts",
     "!src/__tests__/**",
     "!src/__e2e__/**",
