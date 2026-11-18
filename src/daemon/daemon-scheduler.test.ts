@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test";
 import type { TelegramClient, tl } from "@mtcute/bun";
 import type { DaemonContext } from "./daemon-context";
 import { requestShutdown, totalMessagesSynced } from "./daemon-context";
@@ -111,15 +111,15 @@ function jobOf(jobType: SyncJobType, overrides: Partial<SyncJobRow> = {}) {
 }
 
 function useClock(start = 1_760_000_000_000) {
-  const originalNow = Date.now;
   let now = start;
-  Date.now = () => now;
+  setSystemTime(now);
   return {
     advance(ms: number) {
       now += ms;
+      setSystemTime(now);
     },
     restore() {
-      Date.now = originalNow;
+      setSystemTime();
     },
   };
 }

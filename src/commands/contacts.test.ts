@@ -23,7 +23,7 @@ describe("contacts list --fresh", () => {
 
   beforeEach(() => {
     testCacheDb = createAccountCacheDb();
-    logSpy = spyOn(console, "log").mockImplementation(() => {});
+    logSpy = spyOn(console, "log");
   });
 
   afterEach(() => {

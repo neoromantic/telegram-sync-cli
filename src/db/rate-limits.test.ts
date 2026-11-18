@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import { createRateLimitsService, type RateLimitsService } from "./rate-limits";
 import { trackApiCall } from "../utils/telegram-rate-limits";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
@@ -7,22 +7,19 @@ import { createAccountCacheDb } from "../test/cache-db.test-utils";
 describe("RateLimitsService", () => {
   let db: Database;
   let service: RateLimitsService;
-  let originalDateNow: typeof Date.now;
 
   beforeEach(() => {
     db = createAccountCacheDb();
     service = createRateLimitsService(db);
-
-    originalDateNow = Date.now;
   });
 
   afterEach(() => {
-    Date.now = originalDateNow;
+    setSystemTime();
     db.close();
   });
 
   function mockTime(timestampMs: number) {
-    Date.now = () => timestampMs;
+    setSystemTime(timestampMs);
   }
 
   function nowSeconds() {

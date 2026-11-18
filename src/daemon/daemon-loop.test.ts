@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it, mock, setSystemTime } from "bun:test";
 import type { TelegramClient } from "@mtcute/bun";
 import type { DaemonContext } from "./daemon-context";
 import { requestShutdown } from "./daemon-context";
@@ -72,27 +72,23 @@ function createContext() {
   return result;
 }
 
-async function runWithImmediateTimeouts(
-  run: () => Promise<void>,
-  onTimeout: () => void = () => {},
-) {
-  const originalSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = ((callback: (...args: unknown[]) => void) => {
-    onTimeout();
-    callback();
-    return 0 as unknown as NodeJS.Timeout;
-  }) as typeof setTimeout;
-
-  try {
-    await run();
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-  }
+function immediateTicks(onTick: () => void = () => {}) {
+  return {
+    now: () => Date.now(),
+    sleep: async (_ms: number, signal: AbortSignal) => {
+      if (!signal.aborted) onTick();
+    },
+  };
 }
 
-function stopAfterTicks(ctx: DaemonContext, ticks: number) {
+function stopAfterTicks(
+  ctx: DaemonContext,
+  ticks: number,
+  overrides: Partial<DaemonStatusService> = {},
+) {
   let count = 0;
   return createMockStatusService({
+    ...overrides,
     writeTick: () => {
       count += 1;
       if (count >= ticks) ctx.state.shutdownRequested = true;
@@ -149,7 +145,7 @@ describe("mainLoop", () => {
       }),
     });
 
-    await runWithImmediateTimeouts(() => mainLoop(ctx));
+    await mainLoop(ctx, immediateTicks());
 
     expect(ctx.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining("[Account 1] Failed to update daemon status"),
@@ -202,7 +198,7 @@ describe("mainLoop", () => {
       };
     }
 
-    await runWithImmediateTimeouts(() => mainLoop(ctx));
+    await mainLoop(ctx, immediateTicks());
 
     expect(ticks).toHaveLength(2);
     expect(first.statusService.getDaemonInfo()).toMatchObject({
@@ -244,13 +240,12 @@ describe("mainLoop", () => {
 
     ctx.state.accounts.set(1, accountState);
 
-    const originalNow = Date.now;
-    Date.now = () => 120000;
+    setSystemTime(120000);
 
     try {
-      await runWithImmediateTimeouts(() => mainLoop(ctx));
+      await mainLoop(ctx, immediateTicks());
     } finally {
-      Date.now = originalNow;
+      setSystemTime();
     }
 
     expect(ctx.state.accounts.get(1)?.status).toBe("error");
@@ -272,8 +267,9 @@ describe("mainLoop", () => {
     chatSyncState.markHistoryComplete(1002);
     chatSyncState.raiseTopMessageId(1002, 1000);
     const jobsService = createSyncJobsService(db);
+    const { promise: catchUpRecorded, resolve: recordCatchUp } = Promise.withResolvers<void>();
     addAccountRuntime(ctx, 1, db, {
-      statusService: stopAfterTicks(ctx, 72),
+      statusService: stopAfterTicks(ctx, 72, { recordCatchUp: () => recordCatchUp() }),
       scheduler: createSyncScheduler({
         db,
         jobsService,
@@ -287,6 +283,7 @@ describe("mainLoop", () => {
     const client = Object.assign(fake.client, {
       getMe: async () => {
         clock += 9 * 3_600_000;
+        setSystemTime(clock);
         return {};
       },
     }) as unknown as TelegramClient;
@@ -295,20 +292,18 @@ describe("mainLoop", () => {
       watch: { online: true },
     });
 
-    const originalNow = Date.now;
-    Date.now = () => clock;
+    setSystemTime(clock);
     try {
-      await runWithImmediateTimeouts(
-        () => mainLoop(ctx),
-        () => {
+      await mainLoop(
+        ctx,
+        immediateTicks(() => {
           clock += 1_000;
-        },
+          setSystemTime(clock);
+        }),
       );
+      await catchUpRecorded;
     } finally {
-      Date.now = originalNow;
-    }
-    for (let i = 0; i < 50 && ctx.runtime.dialogPassesInFlight.size > 0; i++) {
-      await Bun.sleep(1);
+      setSystemTime();
     }
 
     expect(fake.calls).toHaveLength(1);
@@ -344,7 +339,7 @@ describe("mainLoop", () => {
       }),
     });
 
-    await runWithImmediateTimeouts(() => mainLoop(ctx));
+    await mainLoop(ctx, immediateTicks());
 
     expect(refreshed).toEqual([2]);
     expect(ctx.logger.warn).toHaveBeenCalledWith(
@@ -407,17 +402,16 @@ describe("mainLoop", () => {
       lastActivity: 0,
     });
 
-    const originalNow = Date.now;
-    Date.now = () => 120000;
+    setSystemTime(120000);
     try {
-      await runWithImmediateTimeouts(
-        () => mainLoop(ctx),
-        () => {
+      await mainLoop(
+        ctx,
+        immediateTicks(() => {
           timeouts += 1;
-        },
+        }),
       );
     } finally {
-      Date.now = originalNow;
+      setSystemTime();
     }
 
     expect(worker.processJobReal).toHaveBeenCalledTimes(1);
@@ -455,7 +449,7 @@ describe("mainLoop", () => {
       client,
     });
 
-    await runWithImmediateTimeouts(() => mainLoop(ctx));
+    await mainLoop(ctx, immediateTicks());
     expect(requests).toEqual(["contacts.getContacts", "contacts.getContacts"]);
   });
 
@@ -481,7 +475,7 @@ describe("mainLoop", () => {
       client,
     });
 
-    await runWithImmediateTimeouts(() => mainLoop(ctx));
+    await mainLoop(ctx, immediateTicks());
     expect(requests).toEqual(["contacts.getContacts"]);
   });
 
@@ -505,7 +499,7 @@ describe("mainLoop", () => {
       client: { withParams: () => ({ call }) } as unknown as TelegramClient,
     });
 
-    await runWithImmediateTimeouts(() => mainLoop(ctx));
+    await mainLoop(ctx, immediateTicks());
     expect(call).not.toHaveBeenCalled();
   });
 
@@ -520,7 +514,7 @@ describe("mainLoop", () => {
       scheduler: createMockScheduler(),
     });
 
-    await runWithImmediateTimeouts(() => mainLoop(ctx));
+    await mainLoop(ctx, immediateTicks());
 
     expect(ctx.logger.debug).toHaveBeenCalledWith(
       "[Account 1] Pruned 1 API activity rows, 0 rate limit windows, 0 completed and 0 failed jobs",
@@ -574,19 +568,19 @@ describe("mainLoop", () => {
       ctx.state.accounts.set(accountId, connectedState(accountId));
     }
 
-    const originalNow = Date.now;
-    Date.now = () => now;
+    setSystemTime(now);
     try {
-      await runWithImmediateTimeouts(
-        () => mainLoop(ctx),
-        () => {
+      await mainLoop(
+        ctx,
+        immediateTicks(() => {
           now += 1000;
+          setSystemTime(now);
           tick += 1;
-        },
+        }),
       );
       await waitForJobsInFlight(ctx);
     } finally {
-      Date.now = originalNow;
+      setSystemTime();
     }
 
     expect(firstWorker.processJobReal).toHaveBeenCalledTimes(1);
@@ -635,17 +629,14 @@ describe("mainLoop", () => {
     }
     const second = ctx.state.accounts.get(2) as AccountConnectionState;
 
-    const originalNow = Date.now;
-    Date.now = () => 120000;
+    setSystemTime(120000);
     try {
-      await runWithImmediateTimeouts(async () => {
-        startDueJobs(ctx);
-        second.status = "error";
-        second.nextReconnectAt = 1;
-        await mainLoop(ctx);
-      });
+      startDueJobs(ctx);
+      second.status = "error";
+      second.nextReconnectAt = 1;
+      await mainLoop(ctx, immediateTicks());
     } finally {
-      Date.now = originalNow;
+      setSystemTime();
     }
 
     expect(getMe).toHaveBeenCalledTimes(1);
@@ -704,16 +695,15 @@ describe("waitForNextTick (#133)", () => {
 
   it("wakes inside the tick when an account's next job is due, then sleeps the rest", async () => {
     const ctx = createContext();
-    const time = fakeClock(10_000);
+    const time = fakeClock(10_000, () => setSystemTime(time.now));
     const { starts } = historyAccount(ctx, 10_000 - 1029);
-    const originalNow = Date.now;
-    Date.now = () => time.now;
+    setSystemTime(time.now);
 
     try {
       await waitForNextTick(ctx, 1000, time.clock);
       await waitForJobsInFlight(ctx);
     } finally {
-      Date.now = originalNow;
+      setSystemTime();
     }
 
     expect(starts).toEqual([10_400]);

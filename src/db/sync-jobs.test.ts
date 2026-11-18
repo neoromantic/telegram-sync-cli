@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import { createChatSyncStateService } from "./chat-sync-state";
 import { createSyncJobsService, type SyncJobsService } from "./sync-jobs";
 import { SyncJobStatus, SyncJobType, SyncPriority } from "./sync-schema";
@@ -14,9 +14,8 @@ describe("SyncJobsService", () => {
     service = createSyncJobsService(db);
   });
 
-  const realNow = Date.now;
   afterEach(() => {
-    Date.now = realNow;
+    setSystemTime();
   });
 
   function waitUntil(id: number, runAt: number) {
@@ -173,17 +172,17 @@ describe("SyncJobsService", () => {
     }
 
     it("are skipped by getNextPending until they are due", () => {
-      Date.now = () => now;
+      setSystemTime(now);
       const { waiting, due } = queueWaiting();
 
       expect(service.getNextPending()?.id).toBe(due.id);
 
-      Date.now = () => now + 60_000;
+      setSystemTime(now + 60_000);
       expect(service.getNextPending()?.id).toBe(waiting.id);
     });
 
     it("are skipped by getNextPendingOfTypes until they are due", () => {
-      Date.now = () => now;
+      setSystemTime(now);
       const { waiting, due } = queueWaiting();
       const lane = [SyncJobType.BackwardHistory, SyncJobType.FullSync];
 
@@ -191,12 +190,12 @@ describe("SyncJobsService", () => {
       db.run("DELETE FROM sync_jobs WHERE id = ?", [due.id]);
       expect(service.getNextPendingOfTypes(lane)).toBeNull();
 
-      Date.now = () => now + 60_001;
+      setSystemTime(now + 60_001);
       expect(service.getNextPendingOfTypes(lane)?.id).toBe(waiting.id);
     });
 
     it("still count as pending", () => {
-      Date.now = () => now;
+      setSystemTime(now);
       queueWaiting();
 
       expect(service.getPendingJobs()).toHaveLength(2);
@@ -350,7 +349,7 @@ describe("SyncJobsService", () => {
     }
 
     it("makes the job pending again and counts the attempt", () => {
-      Date.now = () => now;
+      setSystemTime(now);
       enableChat(100);
       const job = runningJob();
 
@@ -606,7 +605,7 @@ describe("SyncJobsService", () => {
     }
 
     it("deletes every failed job, even one that failed just now", () => {
-      Date.now = () => 1_700_000_000_000;
+      setSystemTime(1_700_000_000_000);
       failedJob(100);
       failedJob(200);
       const pending = service.create({
@@ -634,7 +633,7 @@ describe("SyncJobsService", () => {
     it("returns the newest failed jobs first", () => {
       const ids: number[] = [];
       for (const [i, chatId] of [100, 200, 300].entries()) {
-        Date.now = () => 1_700_000_000_000 + i * 1000;
+        setSystemTime(1_700_000_000_000 + i * 1000);
         const job = service.create({
           chat_id: chatId,
           job_type: SyncJobType.ForwardCatchup,

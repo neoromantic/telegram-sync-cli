@@ -33,8 +33,8 @@ describe("SQL Commands", () => {
   beforeEach(() => {
     const db = createAccountCacheDb();
     testCacheDb = db;
-    logSpy = spyOn(console, "log").mockImplementation(() => {});
-    errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    logSpy = spyOn(console, "log");
+    errorSpy = spyOn(console, "error");
     setOutputFormat("json");
 
     const usersCache = createUsersCache(testCacheDb);

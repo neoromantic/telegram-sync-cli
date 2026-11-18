@@ -1179,7 +1179,7 @@ describe("parseIntegerArg", () => {
   let errorSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    errorSpy = spyOn(console, "error");
   });
 
   afterEach(() => {
@@ -1214,7 +1214,7 @@ describe("reportHistoryError", () => {
   let errorSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    errorSpy = spyOn(console, "error");
   });
 
   afterEach(() => {

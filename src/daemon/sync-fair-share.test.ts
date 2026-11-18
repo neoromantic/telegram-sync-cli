@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import type { TelegramClient } from "@mtcute/bun";
 import type { DaemonContext } from "./daemon-context";
 import { processJobs } from "./daemon-scheduler";
@@ -258,9 +258,7 @@ describe("job budget with 500 chats", () => {
       attempts: 0,
     });
 
-    const realNow = Date.now;
-    const later = realNow() + 31_000;
-    Date.now = () => later;
+    setSystemTime(Date.now() + 31_000);
     try {
       scheduler.refreshQueues();
       for (let i = 0; i < 1200 && scheduler.getNextJob(); i++) {
@@ -269,7 +267,7 @@ describe("job budget with 500 chats", () => {
         await processJobs(ctx);
       }
     } finally {
-      Date.now = realNow;
+      setSystemTime();
     }
 
     expect(scheduler.getNextJob()).toBeNull();

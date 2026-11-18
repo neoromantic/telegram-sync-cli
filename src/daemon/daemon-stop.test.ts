@@ -85,9 +85,9 @@ const output = () => log.mock.calls.map((call: unknown[]) => String(call[0])).jo
 beforeEach(() => {
   mkdirSync(tempDir, { recursive: true });
   caches.set(1, createAccountCacheDb());
-  log = spyOn(console, "log").mockImplementation(() => {});
-  warn = spyOn(console, "warn").mockImplementation(() => {});
-  error = spyOn(console, "error").mockImplementation(() => {});
+  log = spyOn(console, "log");
+  warn = spyOn(console, "warn");
+  error = spyOn(console, "error");
 });
 
 afterEach(() => {

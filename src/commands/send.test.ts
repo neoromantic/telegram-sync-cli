@@ -25,12 +25,17 @@ import { cell, richTlMessage } from "../test/rich-message.test-utils";
 
 let commandCacheDb: Database;
 let secondCacheDb: Database;
-const commandCall = mock<(request: unknown) => Promise<unknown>>(async (_request) => {
-  throw new Error("Unexpected API call");
-});
-const secondCall = mock<(request: unknown) => Promise<unknown>>(async (_request) => {
-  throw new Error("Unexpected API call");
-});
+type Reply = () => Promise<unknown>;
+const commandReplies: Reply[] = [];
+const secondReplies: Reply[] = [];
+const scriptedCall = (replies: Reply[]) =>
+  mock(async (_request: unknown) => {
+    const reply = replies.shift();
+    if (!reply) throw new Error("Unexpected API call");
+    return reply();
+  });
+const commandCall = scriptedCall(commandReplies);
+const secondCall = scriptedCall(secondReplies);
 let commandClient = { call: commandCall };
 let secondClient = { call: secondCall };
 const getClientForAccount = mock((accountId: number) =>
@@ -1337,14 +1342,10 @@ describe("send command", () => {
   beforeEach(() => {
     commandCacheDb = createAccountCacheDb();
     secondCacheDb = createAccountCacheDb();
-    commandCall.mockReset();
-    commandCall.mockImplementation(async () => {
-      throw new Error("Unexpected API call");
-    });
-    secondCall.mockReset();
-    secondCall.mockImplementation(async () => {
-      throw new Error("Unexpected API call");
-    });
+    commandCall.mockClear();
+    commandReplies.length = 0;
+    secondCall.mockClear();
+    secondReplies.length = 0;
     getClientForAccount.mockClear();
     commandClient = { call: commandCall };
     secondClient = { call: secondCall };
@@ -1364,10 +1365,10 @@ describe("send command", () => {
   it("sends from the account --account selects, with that account's access hash", async () => {
     createUsersCache(commandCacheDb).upsert(createTestUser({ access_hash: "111" }));
     createUsersCache(secondCacheDb).upsert(createTestUser({ access_hash: "222" }));
-    secondCall.mockImplementationOnce(sentUpdates);
+    secondReplies.push(sentUpdates);
     const { sendCommand } = await import("./send");
     const run = sendCommand.run as (input: { args: Record<string, unknown> }) => Promise<void>;
-    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = spyOn(console, "log");
 
     try {
       await run({
@@ -1401,10 +1402,10 @@ describe("send command", () => {
   it("sends from the active account without --account", async () => {
     createUsersCache(commandCacheDb).upsert(createTestUser({ access_hash: "111" }));
     createUsersCache(secondCacheDb).upsert(createTestUser({ access_hash: "222" }));
-    commandCall.mockImplementationOnce(sentUpdates);
+    commandReplies.push(sentUpdates);
     const { sendCommand } = await import("./send");
     const run = sendCommand.run as (input: { args: Record<string, unknown> }) => Promise<void>;
-    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = spyOn(console, "log");
 
     try {
       await run({ args: { to: "123456", message: "hi", silent: false, _: [] } });
@@ -1431,7 +1432,7 @@ describe("send command", () => {
     );
     const { sendCommand } = await import("./send");
     const run = sendCommand.run as (input: { args: Record<string, unknown> }) => Promise<void>;
-    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    const errorSpy = spyOn(console, "error");
 
     try {
       await expect(
@@ -1447,7 +1448,7 @@ describe("send command", () => {
   });
 
   it("sends to user 4242, not basic group 4242, when the cache does not know the ID", async () => {
-    commandCall.mockImplementationOnce(async () => ({
+    commandReplies.push(async () => ({
       _: "updates",
       updates: [],
       users: [],
@@ -1457,7 +1458,7 @@ describe("send command", () => {
     }));
     const { sendCommand } = await import("./send");
     const run = sendCommand.run as (input: { args: Record<string, unknown> }) => Promise<void>;
-    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = spyOn(console, "log");
 
     try {
       await run({ args: { to: "4242", message: "hi", silent: false, _: [] } });
@@ -1486,9 +1487,10 @@ describe("send command", () => {
     format?: "markdown" | "html",
     reply?: tl.TypeUpdates,
   ) => {
-    commandCall.mockResolvedValueOnce(reply ?? (await sentUpdates()));
+    const sent = reply ?? (await sentUpdates());
+    commandReplies.push(async () => sent);
     const { sendCommand } = await import("./send");
-    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = spyOn(console, "log");
     let printed: string;
     try {
       await runCommand(sendCommand, {
@@ -1552,7 +1554,7 @@ describe("send command", () => {
 
   it("keeps a local recipient error even when the address contains an RPC name", async () => {
     const { sendCommand } = await import("./send");
-    const stderr = spyOn(console, "error").mockImplementation(() => {});
+    const stderr = spyOn(console, "error");
     try {
       await expect(
         runCommand(sendCommand, {
@@ -1570,15 +1572,16 @@ describe("send command", () => {
     ["RICH_MESSAGE_TABLE_COLS_TOO_MANY", "20 table columns"],
     ["RICH_MESSAGE_EMPTY", "visible content"],
   ])("explains %s from Telegram", async (name, hint) => {
-    commandCall.mockRejectedValueOnce(
-      tl.RpcError.fromTl({
-        _: "rpc_error",
-        errorCode: 400,
-        errorMessage: name,
-      }),
-    );
+    const rpcError = tl.RpcError.fromTl({
+      _: "rpc_error",
+      errorCode: 400,
+      errorMessage: name,
+    });
+    commandReplies.push(async () => {
+      throw rpcError;
+    });
     const { sendCommand } = await import("./send");
-    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    const errorSpy = spyOn(console, "error");
     try {
       await expect(
         (sendCommand.run as SendRun)({

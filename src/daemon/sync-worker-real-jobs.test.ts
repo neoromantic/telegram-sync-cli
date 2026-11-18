@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test";
 import { type RpcCallOptions, type TelegramClient, tl } from "@mtcute/bun";
 import { DaemonStopError } from "./daemon-utils";
 import { createRealSyncWorker } from "./sync-worker-real";
@@ -355,10 +355,9 @@ describe("sync-worker real jobs", () => {
   describe("job outcomes", () => {
     const NOW = 1_700_000_000_000;
     const CHAT = 300;
-    const realNow = Date.now;
 
     beforeEach(() => {
-      Date.now = () => NOW;
+      setSystemTime(NOW);
       ctx.chatSyncState.upsert({
         chat_id: CHAT,
         chat_type: "private",
@@ -370,7 +369,7 @@ describe("sync-worker real jobs", () => {
     });
 
     afterEach(() => {
-      Date.now = realNow;
+      setSystemTime();
     });
 
     function queue(jobType = SyncJobType.BackwardHistory, chatId = CHAT) {
@@ -512,7 +511,7 @@ describe("sync-worker real jobs", () => {
         expect(failedRows()).toEqual([]);
         expect(ctx.jobsService.getNextPending()).toBeNull();
 
-        Date.now = () => NOW + 600_000;
+        setSystemTime(NOW + 600_000);
         ctx.client = {
           call: mock(async () => ({ messages: [rawMessage(99)] })),
         } as unknown as TelegramClient;

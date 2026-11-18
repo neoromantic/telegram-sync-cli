@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import * as mtcute from "@mtcute/bun";
 import {
   type DeleteMessageUpdate,
@@ -116,8 +116,10 @@ class MockTelegramClient {
   startUpdatesLoop = mock(async () => {
     if (updatesLoopError) throw updatesLoopError;
   });
+  whileDestroying: (() => Promise<void>) | null = null;
   destroy = mock(async () => {
     lifecycle.push(`destroy:${this.index}`);
+    await this.whileDestroying?.();
   });
 
   constructor(options: Record<string, unknown>) {
@@ -130,6 +132,21 @@ class MockTelegramClient {
 const createClient = () => new MockTelegramClient({}) as unknown as TelegramClient;
 
 const asMessage = (input: MessageLike) => input as Message;
+
+async function afterHandling(
+  accountState: AccountConnectionState,
+  method: "handleNewMessage" | "handleDeleteMessages" | "handleDeleteMessagesWithoutChat",
+  emit: () => void,
+) {
+  const handled = spyOn(accountState.updateHandlers!, method);
+  try {
+    emit();
+    expect(handled).toHaveBeenCalledTimes(1);
+    await handled.mock.results[0]?.value;
+  } finally {
+    handled.mockRestore();
+  }
+}
 const asDeleteUpdate = (input: DeleteMessageUpdateLike) => input as DeleteMessageUpdate;
 
 mock.module("@mtcute/bun", () => ({
@@ -588,8 +605,9 @@ describe("daemon-accounts: connection + event wiring", () => {
       messageIds: [1, 2],
     } satisfies DeleteMessageUpdateLike;
 
-    accountState.eventHandlers?.onDeleteMessage(asDeleteUpdate(deleteUpdate));
-    await Bun.sleep(0);
+    await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
+      accountState.eventHandlers?.onDeleteMessage(asDeleteUpdate(deleteUpdate)),
+    );
 
     expect(messagesCache.get(100, 1)?.is_deleted).toBe(1);
     expect(messagesCache.get(200, 2)?.is_deleted).toBe(1);
@@ -629,10 +647,11 @@ describe("daemon-accounts: connection + event wiring", () => {
     it("marks a private chat's message deleted when a channel in the same account has the ID", async () => {
       const { ctx, accountState, messagesCache } = await wireWithMessages([4242, -1001234567890]);
 
-      accountState.eventHandlers?.onDeleteMessage(
-        asDeleteUpdate({ channelId: null, messageIds: [7] }),
+      await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
+        accountState.eventHandlers?.onDeleteMessage(
+          asDeleteUpdate({ channelId: null, messageIds: [7] }),
+        ),
       );
-      await Bun.sleep(0);
 
       expect(messagesCache.get(4242, 7)?.is_deleted).toBe(1);
       expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(0);
@@ -642,10 +661,11 @@ describe("daemon-accounts: connection + event wiring", () => {
     it("leaves a channel post when no private chat or basic group caches the ID", async () => {
       const { ctx, accountState, messagesCache } = await wireWithMessages([-1001234567890]);
 
-      accountState.eventHandlers?.onDeleteMessage(
-        asDeleteUpdate({ channelId: null, messageIds: [7] }),
+      await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
+        accountState.eventHandlers?.onDeleteMessage(
+          asDeleteUpdate({ channelId: null, messageIds: [7] }),
+        ),
       );
-      await Bun.sleep(0);
 
       expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(0);
       expect(ctx.logger.warn).not.toHaveBeenCalled();
@@ -654,10 +674,11 @@ describe("daemon-accounts: connection + event wiring", () => {
     it("marks only the channel message on a channel delete", async () => {
       const { accountState, messagesCache } = await wireWithMessages([4242, -1001234567890]);
 
-      accountState.eventHandlers?.onDeleteMessage(
-        asDeleteUpdate({ channelId: -1001234567890, messageIds: [7] }),
+      await afterHandling(accountState, "handleDeleteMessages", () =>
+        accountState.eventHandlers?.onDeleteMessage(
+          asDeleteUpdate({ channelId: -1001234567890, messageIds: [7] }),
+        ),
       );
-      await Bun.sleep(0);
 
       expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(1);
       expect(messagesCache.get(4242, 7)?.is_deleted).toBe(0);
@@ -666,10 +687,11 @@ describe("daemon-accounts: connection + event wiring", () => {
     it("keeps both messages and warns when two private chats of the account have the ID", async () => {
       const { ctx, accountState, messagesCache } = await wireWithMessages([4242, -5151]);
 
-      accountState.eventHandlers?.onDeleteMessage(
-        asDeleteUpdate({ channelId: null, messageIds: [7] }),
+      await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
+        accountState.eventHandlers?.onDeleteMessage(
+          asDeleteUpdate({ channelId: null, messageIds: [7] }),
+        ),
       );
-      await Bun.sleep(0);
 
       expect(messagesCache.get(4242, 7)?.is_deleted).toBe(0);
       expect(messagesCache.get(-5151, 7)?.is_deleted).toBe(0);
@@ -691,10 +713,11 @@ describe("daemon-accounts: connection + event wiring", () => {
         raw_json: "{}",
       });
 
-      accountState.eventHandlers?.onDeleteMessage(
-        asDeleteUpdate({ channelId: null, messageIds: [7, 8] }),
+      await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
+        accountState.eventHandlers?.onDeleteMessage(
+          asDeleteUpdate({ channelId: null, messageIds: [7, 8] }),
+        ),
       );
-      await Bun.sleep(0);
 
       expect(messagesCache.get(4242, 8)?.is_deleted).toBe(1);
       expect(messagesCache.get(4242, 7)?.is_deleted).toBe(0);
@@ -712,10 +735,11 @@ describe("daemon-accounts: connection + event wiring", () => {
         [1, 2, 3, 4, 5, 6],
       );
 
-      accountState.eventHandlers?.onDeleteMessage(
-        asDeleteUpdate({ channelId: null, messageIds: [1, 2, 3, 4, 5, 6] }),
+      await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
+        accountState.eventHandlers?.onDeleteMessage(
+          asDeleteUpdate({ channelId: null, messageIds: [1, 2, 3, 4, 5, 6] }),
+        ),
       );
-      await Bun.sleep(0);
 
       expect(messagesCache.get(4242, 6)?.is_deleted).toBe(0);
       const warn = ctx.logger.warn as ReturnType<typeof mock>;
@@ -965,7 +989,7 @@ describe("daemon-accounts: connection + event wiring", () => {
 
     const client = createdClients[0]!;
     let handlersDuringDestroy = -1;
-    client.destroy.mockImplementation(async () => {
+    client.whileDestroying = async () => {
       handlersDuringDestroy = client.onNewMessage.handlers.length;
       client.onNewMessage.emit(
         asMessage({
@@ -977,7 +1001,7 @@ describe("daemon-accounts: connection + event wiring", () => {
           isOutgoing: false,
         }),
       );
-    });
+    };
 
     await disconnectAllAccounts(ctx);
 
@@ -1005,9 +1029,9 @@ describe("daemon-accounts: connection + event wiring", () => {
     nextGetMe = { id: 5550002, firstName: "Sam", lastName: "Example" };
     expect(await connectAccount(ctx, 2, "+15550000002", null)).toBe(true);
 
-    createdClients[0]!.destroy.mockImplementation(async () => {
+    createdClients[0]!.whileDestroying = async () => {
       throw new Error("Database has closed");
-    });
+    };
 
     await disconnectAllAccounts(ctx);
 
@@ -1225,17 +1249,18 @@ describe("daemon-accounts: connection + event wiring", () => {
     it("caches a live message only in the receiving account's cache", async () => {
       const { ctx, second } = await wireBoth();
 
-      second.eventHandlers?.onNewMessage(
-        asMessage({
-          id: 7,
-          chat: { id: 4242, type: "user" },
-          sender: { id: 4242 },
-          text: "lunch at one",
-          date: new Date("2026-01-02T12:00:00Z"),
-          isOutgoing: false,
-        }),
+      await afterHandling(second, "handleNewMessage", () =>
+        second.eventHandlers?.onNewMessage(
+          asMessage({
+            id: 7,
+            chat: { id: 4242, type: "user" },
+            sender: { id: 4242 },
+            text: "lunch at one",
+            date: new Date("2026-01-02T12:00:00Z"),
+            isOutgoing: false,
+          }),
+        ),
       );
-      await Bun.sleep(0);
 
       expect(createMessagesCache(otherDb).get(4242, 7)?.text).toBe("lunch at one");
       expect(createMessagesCache(testCacheDb).get(4242, 7)).toBeNull();
@@ -1259,8 +1284,9 @@ describe("daemon-accounts: connection + event wiring", () => {
         });
       }
 
-      first.eventHandlers?.onDeleteMessage(asDeleteUpdate({ channelId: null, messageIds: [7] }));
-      await Bun.sleep(0);
+      await afterHandling(first, "handleDeleteMessagesWithoutChat", () =>
+        first.eventHandlers?.onDeleteMessage(asDeleteUpdate({ channelId: null, messageIds: [7] })),
+      );
 
       expect(createMessagesCache(testCacheDb).get(4242, 7)?.is_deleted).toBe(1);
       expect(createMessagesCache(otherDb).get(4242, 7)?.is_deleted).toBe(0);

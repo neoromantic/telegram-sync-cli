@@ -67,19 +67,19 @@ function sleepUnlessStopped(ms: number, signal: AbortSignal) {
   });
 }
 
+type TickClock = {
+  now: () => number;
+  sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+};
+
+const realClock: TickClock = { now: () => Date.now(), sleep: sleepUnlessStopped };
+
 /**
  * Wait out the rest of a tick, starting each account's job when its pace
  * makes it due, not at the next tick (#133). A stop ends the wait at once.
  * Exported for tests, which pass a clock and a sleep of their own.
  */
-export async function waitForNextTick(
-  ctx: DaemonContext,
-  tickMs: number,
-  clock: {
-    now: () => number;
-    sleep: (ms: number, signal: AbortSignal) => Promise<void>;
-  } = { now: () => Date.now(), sleep: sleepUnlessStopped },
-) {
+export async function waitForNextTick(ctx: DaemonContext, tickMs: number, clock = realClock) {
   const signal = ctx.runtime.shutdown.signal;
   let now = clock.now();
   const end = now + tickMs;
@@ -130,7 +130,7 @@ async function runHealthChecks(ctx: DaemonContext, now: number) {
   }
 }
 
-export async function mainLoop(ctx: DaemonContext) {
+export async function mainLoop(ctx: DaemonContext, clock = realClock) {
   ctx.logger.debug("Starting main event loop...");
 
   let loopIteration = 0;
@@ -175,7 +175,7 @@ export async function mainLoop(ctx: DaemonContext) {
 
     await runMigrationsTick(ctx);
 
-    await waitForNextTick(ctx, 1000);
+    await waitForNextTick(ctx, 1000, clock);
   }
 
   ctx.logger.debug("Main loop exiting...");

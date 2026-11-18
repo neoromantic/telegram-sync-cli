@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import { applySyncMode } from "../commands/chats/sync";
 import { createSyncScheduler, type SyncScheduler } from "./scheduler";
 import { pruneCache } from "../db/cache-maintenance";
@@ -20,9 +20,8 @@ describe("SyncScheduler", () => {
   let chatSyncState: ReturnType<typeof createChatSyncStateService>;
   let messagesCache: ReturnType<typeof createMessagesCache>;
 
-  const realNow = Date.now;
   afterEach(() => {
-    Date.now = realNow;
+    setSystemTime();
   });
 
   function failJob(id: number, error = "CHANNEL_PRIVATE") {
@@ -621,7 +620,7 @@ describe("SyncScheduler", () => {
 
     it("queues no job of a type whose job failed, until the failed row is gone", () => {
       const t0 = 1_700_000_000_000;
-      Date.now = () => t0;
+      setSystemTime(t0);
       seed(1, { cursor: 1000, top: 1150 });
       seed(2, { historyComplete: false });
       seed(3, { cursor: 1000, top: 1000, historyComplete: false });
@@ -648,7 +647,7 @@ describe("SyncScheduler", () => {
       expect(jobsOf(1, SyncJobType.ForwardCatchup).map((job) => job.status)).toEqual(["pending"]);
       expect(jobsOf(2, SyncJobType.InitialLoad)).toHaveLength(1);
 
-      Date.now = () => t0 + DAY_MS + 1;
+      setSystemTime(t0 + DAY_MS + 1);
       pruneCache(db, { ...getDefaultRetentionConfig(), failedJobs: DAY_MS }, { now: Date.now() });
       scheduler.refreshQueues();
       for (const [chatId, jobType] of cases) {
@@ -760,7 +759,7 @@ describe("SyncScheduler", () => {
 
     it("give the slot of a lane whose jobs all wait for a retry to the next lane", () => {
       const now = 1_700_000_000_000;
-      Date.now = () => now;
+      setSystemTime(now);
       const history = jobsService.create({
         chat_id: 2000,
         job_type: SyncJobType.BackwardHistory,
@@ -772,7 +771,7 @@ describe("SyncScheduler", () => {
       for (let i = 0; i < 3; i++) scheduler.recordJobRun(history);
       expect(scheduler.getNextJob()?.job_type).toBe(SyncJobType.InitialLoad);
 
-      Date.now = () => now + 60_000;
+      setSystemTime(now + 60_000);
       expect(scheduler.getNextJob()?.id).toBe(history.id);
     });
 
@@ -789,9 +788,8 @@ describe("SyncScheduler", () => {
     });
 
     it("run jobs inside a lane by priority, then age, then id", () => {
-      const realNow = Date.now;
       try {
-        Date.now = () => 1_700_000_000_000;
+        setSystemTime(1_700_000_000_000);
         const medium = jobsService.create({
           chat_id: 1,
           job_type: SyncJobType.BackwardHistory,
@@ -807,7 +805,7 @@ describe("SyncScheduler", () => {
           job_type: SyncJobType.FullSync,
           priority: SyncPriority.High,
         });
-        Date.now = () => 1_699_999_999_000;
+        setSystemTime(1_699_999_999_000);
         const older = jobsService.create({
           chat_id: 4,
           job_type: SyncJobType.BackwardHistory,
@@ -825,7 +823,7 @@ describe("SyncScheduler", () => {
         }
         expect(order).toEqual([older.id, high1.id, high2.id, medium.id]);
       } finally {
-        Date.now = realNow;
+        setSystemTime();
       }
     });
   });
@@ -1002,7 +1000,7 @@ describe("SyncScheduler", () => {
   describe("initializeForStartup with failed jobs", () => {
     it("deletes every failed job and queues its chat again", async () => {
       const t0 = 1_700_000_000_000;
-      Date.now = () => t0;
+      setSystemTime(t0);
       chatSyncState.upsert({
         chat_id: 1,
         chat_type: "private",

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { tl } from "@mtcute/bun";
 import { dialogToCacheInput } from "../commands/chats/helpers";
 import { createUpdateHandlers, type UpdateContext, type UpdateHandlers } from "./handlers";
@@ -743,6 +743,26 @@ describe("UpdateHandlers error handling", () => {
     };
   });
 
+  function seedMessages(chatId: number, messageIds: number[]) {
+    for (const messageId of messageIds) {
+      messagesCache.upsert({
+        chat_id: chatId,
+        message_id: messageId,
+        text: `made-up message ${messageId}`,
+        message_type: "text",
+        date: 1_760_000_000,
+        raw_json: "{}",
+      });
+    }
+  }
+
+  function failMessageWrites(statement: "INSERT" | "UPDATE", message: string) {
+    db.run(
+      `CREATE TRIGGER fail_messages_${statement.toLowerCase()} BEFORE ${statement} ON messages_cache
+       BEGIN SELECT RAISE(ABORT, '${message}'); END`,
+    );
+  }
+
   describe("handleNewMessage", () => {
     it("logs error and continues when database operation fails", async () => {
       const handlers = createUpdateHandlers({
@@ -752,9 +772,7 @@ describe("UpdateHandlers error handling", () => {
         logger: mockLogger,
       });
 
-      const upsertSpy = spyOn(messagesCache, "upsert").mockImplementation(() => {
-        throw new Error("Database write failed");
-      });
+      failMessageWrites("INSERT", "Database write failed");
 
       const ctx: UpdateContext = {
         accountId: 1,
@@ -775,8 +793,6 @@ describe("UpdateHandlers error handling", () => {
       expect(errorLogs[0]).toContain("chatId=100");
       expect(errorLogs[0]).toContain("messageId=1");
       expect(errorLogs[0]).toContain("Database write failed");
-
-      upsertSpy.mockRestore();
     });
   });
 
@@ -789,9 +805,8 @@ describe("UpdateHandlers error handling", () => {
         logger: mockLogger,
       });
 
-      const updateTextSpy = spyOn(messagesCache, "updateText").mockImplementation(() => {
-        throw new Error("Update failed");
-      });
+      seedMessages(200, [5]);
+      failMessageWrites("UPDATE", "Update failed");
 
       const ctx: UpdateContext = {
         accountId: 1,
@@ -810,8 +825,6 @@ describe("UpdateHandlers error handling", () => {
       expect(errorLogs[0]).toContain("chatId=200");
       expect(errorLogs[0]).toContain("messageId=5");
       expect(errorLogs[0]).toContain("Update failed");
-
-      updateTextSpy.mockRestore();
     });
   });
 
@@ -824,9 +837,8 @@ describe("UpdateHandlers error handling", () => {
         logger: mockLogger,
       });
 
-      const markDeletedSpy = spyOn(messagesCache, "markDeleted").mockImplementation(() => {
-        throw new Error("Delete failed");
-      });
+      seedMessages(300, [10, 11, 12]);
+      failMessageWrites("UPDATE", "Delete failed");
 
       const ctx: UpdateContext = {
         accountId: 1,
@@ -843,8 +855,6 @@ describe("UpdateHandlers error handling", () => {
       expect(errorLogs[0]).toContain("chatId=300");
       expect(errorLogs[0]).toContain("messageIds=[10,11,12]");
       expect(errorLogs[0]).toContain("Delete failed");
-
-      markDeletedSpy.mockRestore();
     });
   });
 
@@ -857,9 +867,8 @@ describe("UpdateHandlers error handling", () => {
         logger: mockLogger,
       });
 
-      const deleteSpy = spyOn(messagesCache, "markDeleted").mockImplementation(() => {
-        throw new Error("Delete failed");
-      });
+      seedMessages(300, [1, 2]);
+      failMessageWrites("UPDATE", "Delete failed");
 
       const ctx: UpdateContext = {
         accountId: 1,
@@ -874,7 +883,6 @@ describe("UpdateHandlers error handling", () => {
       expect(errorLogs.length).toBe(1);
       expect(errorLogs[0]).toContain("Failed to handle delete messages");
       expect(errorLogs[0]).toContain("chatId=300");
-      deleteSpy.mockRestore();
     });
   });
 });

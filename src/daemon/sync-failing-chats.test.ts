@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it, type mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, type mock, setSystemTime } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
 import { dialogToCacheInput } from "../commands/chats/helpers";
 import type { DaemonContext } from "./daemon-context";
@@ -43,14 +43,13 @@ describe("chats whose sync pages keep failing", () => {
   let scheduler: SyncScheduler;
   let ctx: DaemonContext;
   let now: number;
-  const realNow = Date.now;
 
   const failures = new Map<number, () => unknown>();
   let calls: Map<number, number[]>;
 
   beforeEach(() => {
     now = T0;
-    Date.now = () => now;
+    setSystemTime(now);
     failures.clear();
     calls = new Map();
 
@@ -117,7 +116,7 @@ describe("chats whose sync pages keep failing", () => {
   });
 
   afterEach(() => {
-    Date.now = realNow;
+    setSystemTime();
     db.close();
   });
 
@@ -125,6 +124,7 @@ describe("chats whose sync pages keep failing", () => {
     const end = now + ms;
     while (now < end) {
       now += 1000;
+      setSystemTime(now);
       if ((now - T0) % 30_000 === 0) scheduler.refreshQueues();
       await processJobs(ctx);
     }
@@ -133,6 +133,7 @@ describe("chats whose sync pages keep failing", () => {
   async function refreshCycles(count = 100) {
     for (let i = 0; i < count; i++) {
       now += 30_000;
+      setSystemTime(now);
       scheduler.refreshQueues();
       await processJobs(ctx);
     }
@@ -237,6 +238,7 @@ describe("chats whose sync pages keep failing", () => {
     expectNoDuplicateRows();
 
     now = T0 + DAY + MINUTE;
+    setSystemTime(now);
     pruneCache(db, { ...getDefaultRetentionConfig(), failedJobs: DAY }, { now });
     await refreshCycles();
     expect(callsFor(PRIVATE_CHANNEL)).toHaveLength(2);
@@ -272,18 +274,17 @@ describe("chats whose sync pages keep failing", () => {
 });
 
 describe("a chat that fails in one account", () => {
-  const realNow = Date.now;
   let now: number;
   let dbs: Database[];
 
   beforeEach(() => {
     now = T0;
-    Date.now = () => now;
+    setSystemTime(now);
     dbs = [];
   });
 
   afterEach(() => {
-    Date.now = realNow;
+    setSystemTime();
     for (const db of dbs) db.close();
   });
 
@@ -352,6 +353,7 @@ describe("a chat that fails in one account", () => {
       const end = now + ms;
       while (now < end) {
         now += 1000;
+        setSystemTime(now);
         if ((now - T0) % 30_000 === 0) {
           for (const account of accounts) account.scheduler.refreshQueues();
         }

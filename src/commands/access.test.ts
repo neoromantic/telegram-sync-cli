@@ -26,7 +26,7 @@ async function refusal(path: string, args: Record<string, unknown> = {}) {
 let errorSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
-  errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  errorSpy = spyOn(console, "error");
 });
 
 afterEach(() => {

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import type { TelegramClient } from "@mtcute/bun";
 import type { AccountRuntime, DaemonContext } from "./daemon-context";
 import { processJobs } from "./daemon-scheduler";
@@ -203,14 +203,12 @@ describe("daemon restart with messages missed while stopped", () => {
     expect(chatSyncState.get(CHAT_ID)?.forward_cursor).toBe(1100);
     expect(missingIds(1001, 1100)).toEqual([]);
 
-    const realNow = Date.now;
-    const later = realNow() + 31_000;
-    Date.now = () => later;
+    setSystemTime(Date.now() + 31_000);
     try {
       scheduler.refreshQueues();
       await drainJobs();
     } finally {
-      Date.now = realNow;
+      setSystemTime();
     }
 
     expect(missingIds(1001, 1151)).toEqual([]);

@@ -1509,7 +1509,7 @@ describe("userCommand with two accounts", () => {
     secondClient = { call };
     const { userCommand } = await import("./user/lookup");
     const run = userCommand.run as (input: { args: Record<string, unknown> }) => Promise<void>;
-    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = spyOn(console, "log");
 
     try {
       await run({

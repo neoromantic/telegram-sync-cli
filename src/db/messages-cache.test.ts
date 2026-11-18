@@ -18,6 +18,10 @@ describe("MessagesCache", () => {
     cache = createMessagesCache(db);
   });
 
+  afterEach(() => {
+    setSystemTime();
+  });
+
   describe("upsert", () => {
     it("inserts a new message", () => {
       const message: MessageInput = {
@@ -72,7 +76,7 @@ describe("MessagesCache", () => {
 
       expect(originalCreatedAt).toBeDefined();
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      setSystemTime(Date.now() + 10);
 
       cache.upsert({ ...message, text: "Updated", is_edited: true });
       const updated = cache.get(100, 1);
@@ -96,13 +100,13 @@ describe("MessagesCache", () => {
       const original = cache.get(100, 1);
       const originalCreatedAt = original?.created_at;
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      setSystemTime(Date.now() + 10);
       cache.upsert({ ...message, text: "Version 2" });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      setSystemTime(Date.now() + 10);
       cache.upsert({ ...message, text: "Version 3" });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      setSystemTime(Date.now() + 10);
       cache.upsert({ ...message, text: "Version 4" });
 
       const final = cache.get(100, 1);

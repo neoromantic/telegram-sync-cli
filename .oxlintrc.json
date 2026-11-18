@@ -1,4 +1,10 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "extends": ["./.oxlintrc.devkit.jsonc"]
+  "extends": ["./.oxlintrc.devkit.jsonc"],
+  "rules": {
+    "landmines-testing/no-fixed-sleep": [
+      "error",
+      { "allow": { "src/test/messages-wait.e2e.test.ts": 1 } }
+    ]
+  }
 }

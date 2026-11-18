@@ -341,8 +341,8 @@ describe("Authentication Commands", () => {
     let errorSpy: Mock<typeof console.error>;
 
     beforeEach(() => {
-      logSpy = spyOn(console, "log").mockImplementation(() => {});
-      errorSpy = spyOn(console, "error").mockImplementation(() => {});
+      logSpy = spyOn(console, "log");
+      errorSpy = spyOn(console, "error");
     });
 
     afterEach(() => {
@@ -522,7 +522,7 @@ describe("Authentication Commands", () => {
           const text = JSON.stringify({ activeAccount: 1 });
           writeConfig(text);
           chmodSync(configPath(), 0o444);
-          const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+          const errorSpy = spyOn(console, "error");
 
           let printed: string | undefined;
           const failure = await login(deps)

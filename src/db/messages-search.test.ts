@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import { createChatsCache } from "./chats-cache";
 import { createMessagesCache } from "./messages-cache";
 import { createMessagesSearch, isFts5QueryError, toFts5Query } from "./messages-search";
@@ -342,12 +342,11 @@ describe("toFts5Query", () => {
 
 describe("MessagesSearch on a contentless and a regular index", () => {
   function buildCache(contentlessSearch: boolean) {
-    const realNow = Date.now;
-    Date.now = () => 1_760_000_000_000;
+    setSystemTime(1_760_000_000_000);
     try {
       return seedCache(contentlessSearch);
     } finally {
-      Date.now = realNow;
+      setSystemTime();
     }
   }
 

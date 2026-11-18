@@ -18,8 +18,8 @@ describe("Output Utilities", () => {
   let errorSpy: Mock<typeof console.error>;
 
   beforeEach(() => {
-    logSpy = spyOn(console, "log").mockImplementation(() => {});
-    errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    logSpy = spyOn(console, "log");
+    errorSpy = spyOn(console, "error");
     setOutputFormat("json");
   });
 

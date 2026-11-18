@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -216,14 +216,20 @@ describe("acquireDownloadLock", () => {
     const lock = writeLock("u1", 4242);
     let alive = true;
     let acquired = false;
+    let checks = 0;
+    const { promise: checkedThrice, resolve: thirdCheck } = Promise.withResolvers<void>();
     const pending = acquireDownloadLock(lock, {
-      isAlive: () => alive,
+      isAlive: () => {
+        checks += 1;
+        if (checks === 3) thirdCheck();
+        return alive;
+      },
       pollMs: 5,
     }).then((release) => {
       acquired = true;
       return release;
     });
-    await Bun.sleep(20);
+    await checkedThrice;
     expect(acquired).toBe(false);
 
     alive = false;
@@ -258,12 +264,17 @@ describe("acquireDownloadLock", () => {
 
   it("refreshes the lock while it holds it", async () => {
     const lock = join(mediaDir, "u1", ".lock");
-    const release = await acquireDownloadLock(lock, { refreshMs: 5 });
-    const old = new Date(Date.now() - LOCK_STALE_MS);
-    utimesSync(lock, old, old);
-    await Bun.sleep(30);
-    expect(Date.now() - statSync(lock).mtimeMs).toBeLessThan(LOCK_STALE_MS / 2);
-    release();
+    vi.useFakeTimers();
+    try {
+      const release = await acquireDownloadLock(lock, { refreshMs: 5 });
+      const old = new Date(Date.now() - LOCK_STALE_MS);
+      utimesSync(lock, old, old);
+      vi.advanceTimersByTime(30);
+      expect(Date.now() - statSync(lock).mtimeMs).toBeLessThan(LOCK_STALE_MS / 2);
+      release();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("gives up waiting after waitMs with the lock and its holder", async () => {

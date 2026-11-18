@@ -91,18 +91,23 @@ describe("E2E: messages wait and watch", () => {
       env: { ...options().env, VERBOSE: "1" },
     });
     const output = { stdout: "", stderr: "" };
+    const waiting: Array<() => void> = [];
     const collect = async (stream: ReadableStream<Uint8Array>, key: keyof typeof output) => {
       const decoder = new TextDecoder();
-      for await (const chunk of stream) output[key] += decoder.decode(chunk);
+      for await (const chunk of stream) {
+        output[key] += decoder.decode(chunk);
+        for (const wake of waiting.splice(0)) wake();
+      }
     };
     const drained = Promise.all([collect(proc.stdout, "stdout"), collect(proc.stderr, "stderr")]);
+    const ended = drained.then(() => "ended" as const);
     const until = async (done: () => boolean) => {
-      const deadline = Date.now() + 10_000;
       while (!done()) {
-        if (Date.now() > deadline) {
-          throw new Error(`Timed out: ${JSON.stringify(output)}`);
+        const { promise: chunk, resolve } = Promise.withResolvers<void>();
+        waiting.push(resolve);
+        if ((await Promise.race([chunk, ended])) === "ended" && !done()) {
+          throw new Error(`Exited first: ${JSON.stringify(output)}`);
         }
-        await Bun.sleep(10);
       }
     };
     return {

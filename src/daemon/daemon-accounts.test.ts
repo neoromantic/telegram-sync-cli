@@ -266,42 +266,39 @@ describe("resolveSyncChatType", () => {
 });
 
 describe("signal/cleanup helpers", () => {
+  function addedSignalListeners(install: () => void) {
+    const before = {
+      SIGTERM: process.listeners("SIGTERM"),
+      SIGINT: process.listeners("SIGINT"),
+    };
+    install();
+    const added = {
+      SIGTERM: process.listeners("SIGTERM").filter((l) => !before.SIGTERM.includes(l)),
+      SIGINT: process.listeners("SIGINT").filter((l) => !before.SIGINT.includes(l)),
+    };
+    for (const signal of ["SIGTERM", "SIGINT"] as const) {
+      for (const listener of added[signal]) process.off(signal, listener);
+    }
+    return added;
+  }
+
   it("setupSignalHandlers marks runtime and installs handlers once", () => {
     const ctx = testDaemonContext();
-    const calls: string[] = [];
-    const originalOn = process.on;
 
-    process.on = ((signal: string, handler: (...args: unknown[]) => void) => {
-      calls.push(signal);
-      return Reflect.apply(originalOn, process, [signal, handler]);
-    }) as typeof process.on;
-
-    try {
+    const added = addedSignalListeners(() => {
       setupSignalHandlers(ctx);
       setupSignalHandlers(ctx);
-    } finally {
-      process.on = originalOn;
-    }
+    });
 
     expect(ctx.runtime.signalHandlersSetup).toBe(true);
-    expect(calls.filter((signal) => signal === "SIGTERM").length).toBe(1);
+    expect(added.SIGTERM).toHaveLength(1);
   });
 
   it("SIGTERM sets the stop flag and aborts the stop signal", () => {
     const ctx = testDaemonContext();
-    const handlers = new Map<string, () => void>();
-    const originalOn = process.on;
-    process.on = ((signal: string, handler: () => void) => {
-      handlers.set(signal, handler);
-      return process;
-    }) as typeof process.on;
+    const added = addedSignalListeners(() => setupSignalHandlers(ctx));
 
-    try {
-      setupSignalHandlers(ctx);
-    } finally {
-      process.on = originalOn;
-    }
-    handlers.get("SIGTERM")?.();
+    added.SIGTERM[0]?.("SIGTERM");
 
     expect(ctx.logger.info).toHaveBeenCalledWith(
       "Received SIGTERM, initiating graceful shutdown...",
