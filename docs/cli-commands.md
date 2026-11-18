@@ -219,6 +219,7 @@ tg messages unread --chat @username --limit 50     # of one chat
 tg messages unread --fresh                         # counts and missing messages from Telegram
 tg messages read --chat @username                  # mark the whole chat read
 tg messages read --chat @username --max-id 1200    # only up to message 1200
+tg messages forward --from @alice --to me --id 1200 --id 1201   # copy two messages into Saved Messages
 ```
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
@@ -421,6 +422,53 @@ the chat's dialog (`messages.getPeerDialogs`) and writes its new unread state to
 
 `maxId` is the `--max-id` passed, `null` for everything. Like `tg send`, it is a Telegram
 mutation, so it needs credentials and a connection; the daemon never marks anything read.
+
+`tg messages forward --from <peer> --to <peer> --id <id> [--id <id> ...]` forwards messages of
+one chat into another as you, in one `messages.forwardMessages` call. Both chats take the forms
+of `--chat`, and `me` is Saved Messages. The copies are new messages, sent as you: this
+command can't take them back. Repeat `--id` for up to 100 messages; a repeated ID is forwarded
+once, and more than 100, or an ID that isn't a positive integer, is `INVALID_ARGS` (exit 3)
+before tg connects. Telegram posts the copies in ascending order of their source IDs, whatever
+order the IDs are given in.
+
+The command prints each source ID with the ID of its copy in the target chat and the copy as
+`tg messages get` prints it, in the order the IDs were given, and writes the copies to the
+cache at once, as `tg send` does for a sent message. So `tg messages get --chat <to>` and
+`tg messages search` show them without a daemon. Two messages of `@alice` forwarded to `@bob`
+(`--id 13 --id 12`; message items shortened):
+
+```json
+{ "fromChatId": 10, "toChatId": 20,
+  "forwarded": [
+    { "messageId": 13, "newMessageId": 32,
+      "message": { "chatId": 20, "messageId": 32, "text": "Forwarded message 13",
+                   "isOutgoing": true, "forwardFromId": 10, … } },
+    { "messageId": 12, "newMessageId": 31,
+      "message": { "chatId": 20, "messageId": 31, "text": "Forwarded message 12",
+                   "isOutgoing": true, "forwardFromId": 10, … } } ] }
+```
+
+`newMessageId` is `null` when Telegram's response doesn't say which copy a message became, and
+`message` is `null` when the copy could not be stored in the cache; the forward is done either
+way. When Telegram refuses the forward, the error is `TELEGRAM_ERROR` (exit 5) with Telegram's
+error name in `details.telegramError`, beside `fromChatId`, `toChatId` and `messageIds`, and
+nothing is cached:
+
+| `details.telegramError` | Meaning |
+|-------------------------|---------|
+| `CHAT_FORWARDS_RESTRICTED` | the source chat protects its content |
+| `MESSAGE_ID_INVALID`, `MSG_ID_INVALID`, `MESSAGE_IDS_EMPTY` | the source chat has no message with one or all of these IDs |
+| `CHAT_WRITE_FORBIDDEN`, `CHAT_ADMIN_REQUIRED`, `CHAT_RESTRICTED`, `CHAT_GUEST_SEND_FORBIDDEN`, `USER_BANNED_IN_CHANNEL` | no permission to post in the target chat |
+| `CHAT_SEND_<KIND>_FORBIDDEN` | the target chat doesn't allow this kind of message (photos, polls, …) |
+| `CHANNEL_PRIVATE` | you aren't a member of one of the chats |
+| `USER_IS_BLOCKED`, `YOU_BLOCKED_USER` | the recipient blocked you, or you blocked them |
+| `PEER_ID_INVALID` | Telegram doesn't know one of the chats: run `tg chats list --fresh` or pass the @username |
+| `SLOWMODE_MULTI_MSGS_DISABLED` | slow mode in the target chat allows one message at a time |
+
+Any other failure is `Failed to forward the messages: <Telegram's error>`. Forwarding without
+the author or captions, silently, on a schedule or into a forum topic isn't supported yet;
+editing, deleting and pinning still go through `tg api`
+([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)).
 
 ### Media
 
@@ -860,7 +908,7 @@ TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg chats list   # only @teamchat
 TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg messages list --chat @alice   # CHAT_NOT_ALLOWED
 ```
 
-`readOnly` refuses `tg send`, `tg messages read`, `tg api` methods that aren't `get…`,
+`readOnly` refuses `tg send`, `tg messages read`, `tg messages forward`, `tg api` methods that aren't `get…`,
 `search…`, `resolve…` or `check…`, and `tg auth login`, `login-qr` and `logout` with
 `READ_ONLY`. `allowedChats` makes commands that name a chat refuse others with
 `CHAT_NOT_ALLOWED`, makes `tg chats list`, `tg chats search`, `tg messages search`, `wait`,

@@ -79,6 +79,8 @@ export const COMMAND_ACCESS: Record<string, CommandAccess> = {
   'messages unread': { chatArgs: ['chat'], crossChat: true },
   // Marks the chat read on Telegram
   'messages read': { write: true, chatArgs: ['chat'] },
+  // Posts copies in --to: both chats must be allowed
+  'messages forward': { write: true, chatArgs: ['from', 'to'] },
   'media download': CHAT,
   'media clean': LOCAL,
   api: {

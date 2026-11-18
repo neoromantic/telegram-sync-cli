@@ -1,5 +1,6 @@
 import { defineCommand } from 'citty'
 
+import { forwardMessagesCommand } from './messages/forward'
 import { getMessageCommand } from './messages/get'
 import { listMessagesCommand } from './messages/list'
 import { readMessagesCommand } from './messages/read'
@@ -14,7 +15,7 @@ export const messagesCommand = defineCommand({
   meta: {
     name: 'messages',
     description:
-      'Read chat history, search cached messages, wait for new ones, list unread ones and mark them read',
+      'Read chat history, search cached messages, wait for new ones, list unread ones, mark them read and forward them',
   },
   subCommands: {
     list: listMessagesCommand,
@@ -24,10 +25,12 @@ export const messagesCommand = defineCommand({
     watch: watchMessagesCommand,
     unread: unreadMessagesCommand,
     read: readMessagesCommand,
+    forward: forwardMessagesCommand,
   },
 })
 
 export {
+  forwardMessagesCommand,
   getMessageCommand,
   listMessagesCommand,
   readMessagesCommand,

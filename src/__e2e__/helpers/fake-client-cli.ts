@@ -12,7 +12,15 @@
  * channels.readHistory mark the chat read and print FAKE_CLIENT_CALL with
  * the method and max_id to stderr; messages.getPeerDialogs then returns a
  * dialog read up to that max_id, or to FAKE_TOP_MESSAGE for 0 (everything),
- * with the messages above it unread. FAKE_FLOOD_METHOD fails with a
+ * with the messages above it unread. messages.forwardMessages prints
+ * FAKE_CLIENT_CALL with the IDs and how many distinct random IDs came with
+ * them, and returns, in ascending source ID order, an updateMessageID and
+ * an updateNewMessage (updateNewChannelMessage into a channel) per message:
+ * a copy sent by FAKE_SELF_ID at FAKE_MESSAGE_DATE with a fwdFrom header,
+ * numbered from FAKE_TOP_MESSAGE + 1. It refuses a source above
+ * FAKE_TOP_MESSAGE with MESSAGE_ID_INVALID and the channel
+ * FAKE_PROTECTED_CHANNEL with CHAT_FORWARDS_RESTRICTED. FAKE_FLOOD_METHOD
+ * fails with a
  * FLOOD_WAIT of FAKE_FLOOD_SECONDS, a method of FAKE_INTERNAL_ERRORS with
  * its Telegram-side failure, and messages.sendMessage with
  * PEER_ID_INVALID. Any other method fails the way Telegram rejects an
@@ -28,6 +36,14 @@ export const FAKE_CLIENT_CALL = 'fake client: call'
 
 /** The newest message of every chat the fake client reads */
 export const FAKE_TOP_MESSAGE = 30
+
+/** The account the fake client is signed in as */
+export const FAKE_SELF_ID = 999
+
+export const FAKE_MESSAGE_DATE = 1_760_000_000
+
+/** A channel that protects its content: messages.forwardMessages refuses it */
+export const FAKE_PROTECTED_CHANNEL = 5555555555
 
 /** The method Telegram answers with FLOOD_WAIT_<FAKE_FLOOD_SECONDS> */
 export const FAKE_FLOOD_METHOD = 'help.getNearestDc'
@@ -51,6 +67,71 @@ export const FAKE_CONFIG = {
   chatSizeMax: 200,
 }
 
+interface FakeInputPeer {
+  _: string
+  userId?: number
+  chatId?: number
+  channelId?: number
+}
+
+/** The peer a message of this input peer carries */
+function fakePeer(peer: FakeInputPeer | undefined) {
+  if (peer?._ === 'inputPeerChannel') {
+    return { _: 'peerChannel', channelId: peer.channelId }
+  }
+  if (peer?._ === 'inputPeerChat') {
+    return { _: 'peerChat', chatId: peer.chatId }
+  }
+  return { _: 'peerUser', userId: peer?.userId ?? FAKE_SELF_ID }
+}
+
+interface FakeForwardRequest {
+  fromPeer: FakeInputPeer
+  toPeer: FakeInputPeer
+  id: number[]
+  randomId: { toString(): string }[]
+}
+
+/** What Telegram answers a forward with: the copies, oldest source first */
+function fakeForward(request: FakeForwardRequest) {
+  const channel = request.toPeer._ === 'inputPeerChannel'
+  const sources = request.id
+    .map((id, i) => ({ id, randomId: request.randomId[i] }))
+    .sort((a, b) => a.id - b.id)
+  return {
+    _: 'updates',
+    updates: sources.flatMap((source, i) => {
+      const id = FAKE_TOP_MESSAGE + 1 + i
+      return [
+        { _: 'updateMessageID', id, randomId: source.randomId },
+        {
+          _: channel ? 'updateNewChannelMessage' : 'updateNewMessage',
+          message: {
+            _: 'message',
+            id,
+            out: true,
+            peerId: fakePeer(request.toPeer),
+            fromId: { _: 'peerUser', userId: FAKE_SELF_ID },
+            fwdFrom: {
+              _: 'messageFwdHeader',
+              fromId: fakePeer(request.fromPeer),
+              date: FAKE_MESSAGE_DATE - 60,
+            },
+            date: FAKE_MESSAGE_DATE,
+            message: `Forwarded message ${source.id}`,
+          },
+          pts: id,
+          ptsCount: 1,
+        },
+      ]
+    }),
+    users: [],
+    chats: [],
+    date: FAKE_MESSAGE_DATE,
+    seq: 0,
+  }
+}
+
 if (import.meta.main) {
   // mock.module works in a plain `bun run` script too, not only in bun test
   const { mock } = await import('bun:test')
@@ -61,8 +142,26 @@ if (import.meta.main) {
   setInterval(() => {}, 60_000)
   let readMaxId = 0
   const client = {
-    async call(request: { _: string; maxId?: number }) {
+    async call(
+      request: { _: string; maxId?: number } & Partial<FakeForwardRequest>,
+    ) {
       if (request._ === 'help.getConfig') return FAKE_CONFIG
+      if (request._ === 'messages.forwardMessages') {
+        const forward = request as FakeForwardRequest
+        const randomIds = new Set(forward.randomId.map(String)).size
+        console.error(
+          `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: forward.id, randomIds })}`,
+        )
+        const refuse = (errorCode: number, errorMessage: string) =>
+          tl.RpcError.fromTl({ _: 'rpc_error', errorCode, errorMessage })
+        if (forward.fromPeer.channelId === FAKE_PROTECTED_CHANNEL) {
+          throw refuse(406, 'CHAT_FORWARDS_RESTRICTED')
+        }
+        if (forward.id.some((id) => id > FAKE_TOP_MESSAGE)) {
+          throw refuse(400, 'MESSAGE_ID_INVALID')
+        }
+        return fakeForward(forward)
+      }
       if (
         request._ === 'messages.readHistory' ||
         request._ === 'channels.readHistory'

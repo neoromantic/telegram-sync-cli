@@ -57,7 +57,8 @@ function fromShortSentMessage(
   return { ...parsed, raw_json: toRawJson(result) }
 }
 
-function fromUpdates(updates: tl.TypeUpdate[]): MessageInput[] {
+/** messages_cache rows for the new messages among updates, under each one's own chat */
+export function newMessageInputs(updates: tl.TypeUpdate[]): MessageInput[] {
   const inputs: MessageInput[] = []
   for (const update of updates) {
     if (
@@ -90,7 +91,7 @@ export function buildSentMessageInputs(
     return input ? [input] : []
   }
   if ('updates' in result) {
-    return fromUpdates(result.updates)
+    return newMessageInputs(result.updates)
   }
   return []
 }
