@@ -10,6 +10,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createChatsCache } from '../db/chats-cache'
@@ -86,6 +87,7 @@ describe('E2E: messages wait and watch', () => {
   })
 
   function store(messages: ReturnType<typeof message>[]): void {
+    takePartIn(env.openCacheDb(1), TEAM_CHAT_ID, -4242)
     createMessagesCache(env.openCacheDb(1)).upsertBatch(messages)
   }
 

@@ -10,9 +10,9 @@ import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { SyncJobType, SyncPriority } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
@@ -24,8 +24,7 @@ describe('assertPeerIdInvariants', () => {
   let db: Database
 
   beforeEach(() => {
-    db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
   })
 
   function syncState(chatId: number) {

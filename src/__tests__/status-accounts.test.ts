@@ -10,7 +10,7 @@ import { join } from 'node:path'
 
 import type { createPidFile } from '../daemon'
 import { createMessagesCache } from '../db/messages-cache'
-import { createAccountCacheDb } from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeAccountsDb,
   mockDbModule,

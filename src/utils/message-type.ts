@@ -152,8 +152,7 @@ export function rawMediaType(media: unknown): string | null {
 
 /**
  * The message_type and has_media of a raw TL message, as a live update of
- * the same message stores them. A message object without `_` (the abstract
- * sync worker's) is read as a message; its media must be raw TL.
+ * the same message stores them
  */
 export function resolveRawMessageType(message: unknown): {
   messageType: string

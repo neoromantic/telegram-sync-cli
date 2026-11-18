@@ -4,7 +4,7 @@
  */
 import type { tl } from '@mtcute/bun'
 import { type ArgsDef, defineCommand } from 'citty'
-import { ConfigError, getResolvedCacheConfig } from '../config'
+import { getResolvedCacheConfig } from '../config'
 import { applyContactsSnapshot } from '../db/contacts-sync'
 import { isCacheStale } from '../db/types'
 import { createUsersCache } from '../db/users-cache'
@@ -12,7 +12,11 @@ import { getClientForAccount } from '../services/telegram'
 import { type Contact, ErrorCodes, type PaginatedResult } from '../types'
 import { openAccountCache } from '../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../utils/account-selector'
-import { buildCachePaginatedResponse } from '../utils/cache-pagination'
+import {
+  buildCachePaginatedResponse,
+  paginate,
+} from '../utils/cache-pagination'
+import { isUsernameIdentifier } from '../utils/identifiers'
 import { toLong } from '../utils/long'
 import { error, success, verbose } from '../utils/output'
 import {
@@ -21,21 +25,11 @@ import {
   cachedUserToContact,
 } from '../utils/telegram-mappers'
 import {
-  isRateLimitError,
-  reportRateLimit,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
 import { nextCommand } from './next'
-
-function isRawUser(user: tl.TypeUser): user is tl.RawUser {
-  return user._ === 'user'
-}
-
-type RawUserWithAbout = tl.RawUser & { about?: string }
-
-function hasAbout(user: tl.RawUser): user is RawUserWithAbout {
-  return 'about' in user
-}
+import { cachedUserToUserInfo, isRawUser } from './user/helpers'
 
 /**
  * List contacts
@@ -94,10 +88,7 @@ export const listContactsCommand = defineCommand({
             },
           )
 
-          success(
-            response as PaginatedResult<Contact>,
-            nextContactsPage(args, response),
-          )
+          success(response, nextContactsPage(args, response))
           return
         }
       }
@@ -140,28 +131,15 @@ export const listContactsCommand = defineCommand({
       // Map to our Contact type
       const allContacts: Contact[] = apiUsers.map(apiUserToContact)
 
-      // Apply pagination
-      const paginatedContacts = allContacts.slice(offset, offset + limit)
-
-      const response: PaginatedResult<Contact> & {
-        source: string
-        stale: boolean
-      } = {
-        items: paginatedContacts,
-        total: allContacts.length,
-        offset,
-        limit,
-        hasMore: offset + limit < allContacts.length,
+      const response = {
+        ...paginate(allContacts, offset, limit),
         source: 'api',
         stale: false,
       }
 
       success(response, nextContactsPage(args, response))
     } catch (err) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) reportRateLimit(err)
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Failed to fetch contacts: ${message}`)
     }
@@ -274,10 +252,7 @@ export const searchContactsCommand = defineCommand({
         stale: false,
       })
     } catch (err) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) reportRateLimit(err)
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Search failed: ${message}`)
     }
@@ -317,9 +292,7 @@ export const getContactCommand = defineCommand({
       const usersCache = createUsersCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
-      // Determine if ID or username
-      const isUsername =
-        identifier.startsWith('@') || Number.isNaN(Number(identifier))
+      const isUsername = isUsernameIdentifier(identifier)
 
       // Check cache first (unless --fresh)
       if (!fresh) {
@@ -333,18 +306,7 @@ export const getContactCommand = defineCommand({
             cacheConfig.staleness.peers,
           )
 
-          success({
-            id: Number(cached.user_id),
-            firstName: cached.first_name ?? '',
-            lastName: cached.last_name ?? null,
-            username: cached.username ?? null,
-            phone: cached.phone ?? null,
-            isBot: cached.is_bot === 1,
-            isPremium: cached.is_premium === 1,
-            isContact: cached.is_contact === 1,
-            source: 'cache',
-            stale,
-          })
+          success({ ...cachedUserToUserInfo(cached), source: 'cache', stale })
           return
         }
       }
@@ -400,8 +362,7 @@ export const getContactCommand = defineCommand({
         lastName: user.lastName ?? null,
         username: user.username ?? null,
         phone: user.phone ?? null,
-        bio:
-          hasAbout(user) && typeof user.about === 'string' ? user.about : null,
+        bio: null,
         isBot: user.bot ?? false,
         isVerified: user.verified ?? false,
         isPremium: user.premium ?? false,
@@ -410,10 +371,7 @@ export const getContactCommand = defineCommand({
         stale: false,
       })
     } catch (err) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) reportRateLimit(err)
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Failed to get user: ${message}`)
     }

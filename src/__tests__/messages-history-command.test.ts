@@ -1,7 +1,7 @@
 /**
  * Tests for the core of `tg messages list` (src/commands/messages/history.ts)
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import {
   afterEach,
   beforeEach,
@@ -50,9 +50,7 @@ import type { MessageFilter } from '../db/messages-history'
 import { createMessagesSearch } from '../db/messages-search'
 import { createRateLimitsService } from '../db/rate-limits'
 import { MESSAGE_TYPES_MIGRATION } from '../db/raw-json-migrations'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
-import type { ChatType } from '../db/types'
+import { SyncPriority } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { extractAttachment } from '../utils/attachment'
 import { toLong } from '../utils/long'
@@ -60,12 +58,14 @@ import {
   RateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeHistory,
   type GetHistoryRequest,
   range,
   rawMessage,
 } from './helpers/fake-history'
+import { takePartIn } from './helpers/participation'
 import { photoMessage } from './helpers/photo-message'
 
 const SELF_ID = 999
@@ -90,34 +90,9 @@ const TEAM_CHAT: HistoryChat = {
 type CallClient = Pick<TelegramClient, 'call'>
 
 function createCacheDb(): Database {
-  const db = new Database(':memory:')
-  initCacheSchema(db)
-  initSyncSchema(db)
+  const db = createAccountCacheDb()
+  takePartIn(db, TEAM_CHAT_ID, BOOK_CLUB_ID)
   return db
-}
-
-function cacheChat(
-  db: Database,
-  chatId: string,
-  type: ChatType,
-  title: string,
-  username: string | null,
-  accessHash: string | null,
-) {
-  createChatsCache(db).upsert({
-    chat_id: chatId,
-    type,
-    title,
-    username,
-    member_count: null,
-    access_hash: accessHash,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: Date.now(),
-    raw_json: '{}',
-  })
 }
 
 function cacheMessages(db: Database, chatId: number, ids: number[]) {
@@ -271,16 +246,19 @@ describe('resolveHistoryChat', () => {
       fetched_at: Date.now(),
       raw_json: '{}',
     })
-    cacheChat(cacheDb, '10', 'private', 'Alice Able', 'alice', '1111')
-    cacheChat(
-      cacheDb,
-      String(TEAM_CHAT_ID),
-      'supergroup',
-      'Team Chat',
-      'teamchat',
-      '2222',
-    )
-    cacheChat(cacheDb, String(BOOK_CLUB_ID), 'group', 'Book Club', null, null)
+    createChatsCache(cacheDb).upsertMany([
+      chatRow(10, 'private', {
+        title: 'Alice Able',
+        username: 'alice',
+        access_hash: '1111',
+      }),
+      chatRow(TEAM_CHAT_ID, 'supergroup', {
+        title: 'Team Chat',
+        username: 'teamchat',
+        access_hash: '2222',
+      }),
+      chatRow(BOOK_CLUB_ID, 'group', { title: 'Book Club' }),
+    ])
     // A private chat the daemon cached with no users_cache or chats_cache row
     const newDm = [NEW_USER_ID, LONG_NEW_USER_ID]
     for (const chatId of [
@@ -573,7 +551,7 @@ describe('cacheHistoryResponse', () => {
       fromId: { _: 'peerUser', userId: ALICE_ID },
     }
 
-    const ids = cacheHistoryResponse(
+    const rows = cacheHistoryResponse(
       cacheDb,
       TEAM_CHAT_ID,
       [message, { _: 'messageEmpty', id: 8 }],
@@ -581,7 +559,7 @@ describe('cacheHistoryResponse', () => {
       {},
     )
 
-    expect(ids).toEqual([7])
+    expect(rows.map((row) => row.message_id)).toEqual([7])
     expect(storedRanges(cacheDb)).toEqual([{ low: 7, high: 8 }])
     const usersCache = createUsersCache(cacheDb)
     expect(usersCache.getById(String(ALICE_ID))).toMatchObject({

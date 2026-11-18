@@ -197,33 +197,10 @@ export class UsersCache {
   }
 
   /**
-   * Get stale users
-   */
-  getStale(ttlMs: number): CachedUser[] {
-    const threshold = Date.now() - ttlMs
-    return this.statements.getStale.all({ $threshold: threshold })
-  }
-
-  /**
-   * Delete user from cache
-   */
-  delete(userId: string): boolean {
-    return this.statements.delete.run({ $user_id: userId }).changes > 0
-  }
-
-  /**
    * Count total cached users
    */
   count(): number {
     return (this.statements.count.get() as { count: number } | null)?.count ?? 0
-  }
-
-  /**
-   * Prune old entries
-   */
-  prune(maxAgeMs: number): number {
-    const threshold = Date.now() - maxAgeMs
-    return this.statements.prune.run({ $threshold: threshold }).changes
   }
 }
 
@@ -300,19 +277,7 @@ function createStatements(db: Database) {
       `)
       .as(UserCacheRow),
 
-    getStale: db
-      .query(`
-        SELECT * FROM users_cache
-        WHERE fetched_at < $threshold
-        ORDER BY fetched_at ASC
-      `)
-      .as(UserCacheRow),
-
-    delete: db.query('DELETE FROM users_cache WHERE user_id = $user_id'),
-
     count: db.query('SELECT COUNT(*) as count FROM users_cache'),
-
-    prune: db.query('DELETE FROM users_cache WHERE fetched_at < $threshold'),
   }
 }
 

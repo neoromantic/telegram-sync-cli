@@ -17,6 +17,7 @@ import { initSyncSchema } from '../../db/sync-schema'
 import { createUsersCache } from '../../db/users-cache'
 import { toPeerIdFromRawPeer } from '../../utils/telegram-peer-ids'
 import { type FakeDialogInput, fakeDialog } from './fake-dialogs'
+import { takePartIn } from './participation'
 
 export const LEGACY = {
   alice: { id: 10, title: 'Alice Able', username: 'alice' },
@@ -143,6 +144,7 @@ export function seedLegacyCache(db: Database): void {
   const channel = { _: 'peerChannel', channelId: news.id } as const
   const fromAlice = { _: 'peerUser', userId: alice.id } as const
 
+  takePartIn(db, teamChat.marked, bookClub.marked, news.marked)
   createMessagesCache(db).upsertBatch([
     legacyMessageRow(rawMessage(dm, 1, 'hello from the DM', fromAlice)),
     legacyMessageRow(rawMessage(team, 1, 'hello team', fromAlice)),

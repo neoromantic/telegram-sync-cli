@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import { CacheUnavailableError } from '../db/cache-layout'
 import { checkCacheOwner, readCacheMeta } from '../db/cache-meta'
-import { createTestCacheDatabase } from '../db/schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 const PATH = 'accounts/1/cache.db'
 
@@ -14,7 +14,7 @@ describe('checkCacheOwner', () => {
   let db: Database
 
   beforeEach(() => {
-    db = createTestCacheDatabase().db
+    db = createAccountCacheDb()
   })
 
   afterEach(() => {
@@ -130,7 +130,7 @@ describe('checkCacheOwner', () => {
     })
 
     it('never goes anywhere without the stamped user', () => {
-      const other = createTestCacheDatabase().db
+      const other = createAccountCacheDb()
       try {
         checkCacheOwner(other, { id: 1, user_id: null }, PATH)
 

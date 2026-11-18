@@ -12,7 +12,7 @@ import type { TelegramClient } from '@mtcute/bun'
 import type { DaemonContext } from '../daemon/daemon-context'
 import { CacheUnavailableError } from '../db/cache-layout'
 import { createDaemonStatusService } from '../db/daemon-status'
-import { createAccountCacheDb } from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeAccountsDb,
   mockDbModule,

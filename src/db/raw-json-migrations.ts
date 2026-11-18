@@ -24,8 +24,8 @@ import { searchNamesMigration } from './search-reindex'
  * The message_type a history page stores for this raw message: `text` for
  * a link preview still pending, an expired photo or unsupported media, as
  * the write path gives it. Null to keep the stored one, for raw_json that
- * isn't a TL message (`{}`, the abstract sync worker's). Older versions
- * stored videos, voices, stickers, audio and GIFs as `document`.
+ * isn't a TL message, such as `{}`. Older versions stored videos, voices,
+ * stickers, audio and GIFs as `document`.
  */
 function rawMessageType(raw: unknown): string | null {
   const kind = (raw as { _?: unknown } | null)?._

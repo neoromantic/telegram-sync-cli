@@ -6,11 +6,7 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import type { TelegramClient, tl } from '@mtcute/bun'
 import type { AccountRuntime, DaemonContext } from '../daemon/daemon-context'
-import {
-  createDaemonRuntime,
-  requestShutdown,
-  totalMessagesSynced,
-} from '../daemon/daemon-context'
+import { requestShutdown, totalMessagesSynced } from '../daemon/daemon-context'
 import {
   cleanupOldJobs,
   cleanupScheduler,
@@ -21,31 +17,19 @@ import {
   waitForJobsInFlight,
 } from '../daemon/daemon-scheduler'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
-import type { RealSyncWorker } from '../daemon/sync-worker'
+import type { RealSyncWorker } from '../daemon/sync-worker-real'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
-import { createTestDatabase } from '../db/index.ts'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
-import {
-  addAccountRuntime,
-  createAccountCacheDb,
-} from './helpers/daemon-runtime'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import { fakeDialogClient } from './helpers/fake-dialogs'
 import { createFakeHistory, range } from './helpers/fake-history'
 import { waitLikeFloodWait } from './helpers/flood-wait'
-
-function createLogger() {
-  return {
-    info: mock(() => {}),
-    debug: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-  }
-}
 
 const asTelegramClient = (client: Partial<TelegramClient>): TelegramClient =>
   client as TelegramClient
@@ -62,19 +46,10 @@ const createSchedulerStub = (
     getNextJob: () => null,
     hasHistoryDue: () => false,
     recordJobRun: mock(() => {}),
-    claimNextJob: () => null,
-    startJob: () => true,
-    completeJob: () => true,
-    failJob: () => true,
-    updateProgress: () => {},
     getStatus: () => ({
       pendingJobs: 0,
       runningJobs: 0,
-      jobsByType: {},
-      jobsByPriority: {},
     }),
-    cleanup: () => 0,
-    cancelJobsForChat: () => 0,
     recoverCrashedJobs: () => 0,
     ...overrides,
   } satisfies SyncScheduler
@@ -91,59 +66,11 @@ const createWorkerStub = (
       success: true,
       messagesFetched: 0,
     })),
-    processForwardCatchupReal: mock(async () => ({
-      success: true,
-      messagesFetched: 0,
-    })),
-    processBackwardHistoryReal: mock(async () => ({
-      success: true,
-      messagesFetched: 0,
-    })),
-    processInitialLoadReal: mock(async () => ({
-      success: true,
-      messagesFetched: 0,
-    })),
-    runOnceReal: mock(async () => null),
     canMakeApiCall: () => true,
-    getWaitTime: () => 0,
-    buildInputPeer: mock((_chatId: number) => null),
-    parseRawMessage: mock((_msg: unknown, _chatId: number) => null),
     ...overrides,
   } satisfies RealSyncWorker
 
   return worker
-}
-
-function createContext(): DaemonContext {
-  const { accountsDb } = createTestDatabase()
-  return {
-    dataDir: '/tmp/tgcli',
-    pidPath: '/tmp/tgcli/daemon.pid',
-    verbosity: 'normal',
-    reconnectConfig: {
-      initialDelayMs: 1000,
-      maxDelayMs: 4000,
-      maxAttempts: 3,
-      backoffMultiplier: 2,
-    },
-    shutdownTimeoutMs: 1_000_000,
-    logger: createLogger(),
-    pidFile: {
-      acquire: () => {},
-      release: () => {},
-      read: () => null,
-      isRunning: () => false,
-      sendSignal: () => false,
-      getPath: () => '/tmp/tgcli/daemon.pid',
-    },
-    state: {
-      running: true,
-      accounts: new Map(),
-      shutdownRequested: false,
-    },
-    accountsDb,
-    runtime: createDaemonRuntime(),
-  }
 }
 
 /** Mark the account connected with a client */
@@ -211,7 +138,7 @@ function useClock(start = 1_760_000_000_000) {
 
 describe('initializeScheduler', () => {
   it('creates a scheduler and a worker for each connected account', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     connect(ctx, 1, asTelegramClient({ call: async () => ({}) }))
     const first = addAccountRuntime(ctx, 1)
     ctx.state.accounts.set(2, {
@@ -233,7 +160,7 @@ describe('initializeScheduler', () => {
 
 describe('rebuildSyncWorker', () => {
   it('replaces the account worker while the scheduler runs', () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const oldWorker = createWorkerStub()
     const rt = runAccount(ctx, 1, { worker: oldWorker })
 
@@ -245,7 +172,7 @@ describe('rebuildSyncWorker', () => {
   })
 
   it("leaves the other accounts' workers alone", () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     runAccount(ctx, 1)
     const otherWorker = createWorkerStub()
     const other = runAccount(ctx, 2, { worker: otherWorker })
@@ -256,7 +183,7 @@ describe('rebuildSyncWorker', () => {
   })
 
   it('does nothing without a scheduler', () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const rt = addAccountRuntime(ctx, 1)
     const fake = fakeDialogClient([])
 
@@ -304,7 +231,7 @@ describe('rebuildSyncWorker dialog pass', () => {
   })
 
   function createRunningContext() {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSyncScheduler({
         db: cacheDb,
@@ -453,7 +380,7 @@ describe('rebuildSyncWorker dialog pass', () => {
 
   it('logs a pass that throws and lets the next reconnect run one', async () => {
     // Nothing awaits the pass in the daemon, so a throw must not escape
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSchedulerStub({
         refreshQueues: mock(() => {
@@ -474,7 +401,7 @@ describe('rebuildSyncWorker dialog pass', () => {
   })
 
   it('a reconnect pass stopped by a shutdown marks no unvisited chats and refreshes no queues', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const refreshQueues = mock(() => {})
     addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSchedulerStub({ refreshQueues }),
@@ -509,7 +436,7 @@ describe('rebuildSyncWorker dialog pass', () => {
   })
 
   it('a stop during a FLOOD_WAIT in a reconnect pass ends the wait at once', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const refreshQueues = mock(() => {})
     addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSchedulerStub({ refreshQueues }),
@@ -541,7 +468,7 @@ describe('rebuildSyncWorker dialog pass', () => {
   })
 
   it('a reconnect pass whose page fails during a stop logs at debug and marks nothing', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const refreshQueues = mock(() => {})
     addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSchedulerStub({ refreshQueues }),
@@ -579,7 +506,7 @@ describe('rebuildSyncWorker dialog pass', () => {
   })
 
   it('a reconnect pass whose cache closes during a stop logs at debug', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const refreshQueues = mock(() => {})
     addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSchedulerStub({ refreshQueues }),
@@ -647,7 +574,7 @@ describe('rebuildSyncWorker dialog pass', () => {
 
 describe('processJobs', () => {
   it('queues follow-up jobs on success with hasMore', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const job = jobOf(SyncJobType.BackwardHistory, { id: 1, chat_id: 10 })
     const scheduler = createSchedulerStub({
       getNextJob: () => job,
@@ -672,7 +599,7 @@ describe('processJobs', () => {
   })
 
   it('counts the pace from the start of a job that was rate limited', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const job = jobOf(SyncJobType.ForwardCatchup, { id: 2, chat_id: 44 })
     const scheduler = createSchedulerStub({
       getNextJob: () => job,
@@ -705,7 +632,7 @@ describe('processJobs', () => {
     const job = jobOf(SyncJobType.ForwardCatchup)
 
     // No worker: the job doesn't run and keeps its slot
-    const idle = createContext()
+    const idle = testDaemonContext()
     const idleScheduler = createSchedulerStub({ getNextJob: () => job })
     connect(idle, 1)
     addAccountRuntime(idle, 1, createAccountCacheDb(), {
@@ -715,7 +642,7 @@ describe('processJobs', () => {
     expect(idleScheduler.recordJobRun).not.toHaveBeenCalled()
 
     // A worker that is rate limited doesn't run it either
-    const blocked = createContext()
+    const blocked = testDaemonContext()
     const blockedScheduler = createSchedulerStub({ getNextJob: () => job })
     runAccount(blocked, 1, {
       scheduler: blockedScheduler,
@@ -725,7 +652,7 @@ describe('processJobs', () => {
     expect(blockedScheduler.recordJobRun).not.toHaveBeenCalled()
 
     // A job that ran uses the slot, even if it threw
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const scheduler = createSchedulerStub({ getNextJob: () => job })
     runAccount(ctx, 1, {
       scheduler,
@@ -741,7 +668,7 @@ describe('processJobs', () => {
   })
 
   it('queues history right after a first page with history left', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const scheduler = createSchedulerStub({
       getNextJob: () => jobOf(SyncJobType.InitialLoad),
     })
@@ -763,7 +690,7 @@ describe('processJobs', () => {
   })
 
   it('queues no history after a first page that reached the start', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const scheduler = createSchedulerStub({
       getNextJob: () => jobOf(SyncJobType.InitialLoad),
     })
@@ -788,7 +715,7 @@ describe('processJobs', () => {
     async function run(
       result: Awaited<ReturnType<RealSyncWorker['processJobReal']>>,
     ) {
-      const ctx = createContext()
+      const ctx = testDaemonContext()
       runAccount(ctx, 1, {
         scheduler: createSchedulerStub({
           getNextJob: () => jobOf(SyncJobType.BackwardHistory),
@@ -883,7 +810,7 @@ describe('processJobs', () => {
   })
 
   it("skips an account whose pace doesn't let a job start yet", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const clock = useClock()
     const getNextJob = mock(() => null)
     const rt = runAccount(ctx, 1, {
@@ -901,7 +828,7 @@ describe('processJobs', () => {
   })
 
   it("runs each account's jobs on its own 3 s calm pace", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const ran: Array<[number, number]> = []
     let tick = 0
     for (const accountId of [1, 2]) {
@@ -938,7 +865,7 @@ describe('processJobs', () => {
   })
 
   it("runs account 2's jobs while account 1's cache fails to pick one", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const failingGetNextJob = mock((): SyncJobRow | null => {
       throw new Error('database disk image is malformed')
     })
@@ -978,7 +905,7 @@ describe('processJobs', () => {
   })
 
   it("runs account 2's jobs while account 1's rate limits fail to read", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     runAccount(ctx, 1, {
       worker: createWorkerStub({
         canMakeApiCall: () => {
@@ -1033,7 +960,7 @@ describe('history pacing (#133)', () => {
   }
 
   it('runs history at 0.7 calls/s, counted from each start, whatever the tick', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const clock = useClock(0)
     const { starts } = pacedAccount(ctx, {
       historyDue: () => true,
@@ -1057,7 +984,7 @@ describe('history pacing (#133)', () => {
   })
 
   it('starts the next job as soon as a job that outlasted its interval ends', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const clock = useClock(0)
     // The first job sleeps a FLOOD_WAIT of 5 s inside its call
     const { starts } = pacedAccount(ctx, {
@@ -1077,7 +1004,7 @@ describe('history pacing (#133)', () => {
   })
 
   it('goes back to the calm 3 s once no history is due', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const clock = useClock(0)
     let historyDue = true
     const { rt, starts } = pacedAccount(ctx, {
@@ -1101,7 +1028,7 @@ describe('history pacing (#133)', () => {
   })
 
   it('starts no job until a FLOOD_WAIT and one interval at the halved pace are over', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const clock = useClock(0)
     const { rt, starts } = pacedAccount(ctx, { historyDue: () => true, clock })
 
@@ -1158,20 +1085,12 @@ describe('processJobs with two accounts', () => {
     const db = createAccountCacheDb()
     dbs.push(db)
     if (options.withChat) {
-      createChatsCache(db).upsert({
-        chat_id: String(ALICE),
-        type: 'private',
-        title: 'Alice Able',
-        username: null,
-        member_count: null,
-        access_hash: `${accountId}${accountId}${accountId}`,
-        is_creator: 0,
-        is_admin: 0,
-        last_message_id: null,
-        last_message_at: null,
-        fetched_at: Date.now(),
-        raw_json: '{}',
-      })
+      createChatsCache(db).upsert(
+        chatRow(ALICE, 'private', {
+          title: 'Alice Able',
+          access_hash: `${accountId}${accountId}${accountId}`,
+        }),
+      )
       createChatSyncStateService(db).upsert({
         chat_id: ALICE,
         chat_type: 'private',
@@ -1189,7 +1108,7 @@ describe('processJobs with two accounts', () => {
     createSyncJobsService(db).getPendingJobs()
 
   it("runs a job from account 2's cache on account 2's client", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const first = seedAccount(ctx, 1, { withChat: false })
     const second = seedAccount(ctx, 2, { withChat: true })
     await initializeScheduler(ctx)
@@ -1210,7 +1129,7 @@ describe('processJobs with two accounts', () => {
   })
 
   it("keeps a disconnected account's jobs pending", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const first = seedAccount(ctx, 1, { withChat: true })
     const second = seedAccount(ctx, 2, { withChat: true })
     await initializeScheduler(ctx)
@@ -1241,7 +1160,7 @@ describe('processJobs with two accounts', () => {
   })
 
   it("runs account 2's jobs after account 1's startup pass fails", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const first = seedAccount(ctx, 1, { withChat: true })
     const second = seedAccount(ctx, 2, { withChat: true })
     // Every write fails, as with a cache that stays locked past busy_timeout
@@ -1266,7 +1185,7 @@ describe('processJobs with two accounts', () => {
   })
 
   it('leaves out an account whose scheduler cannot be created', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const first = seedAccount(ctx, 1, { withChat: false })
     const second = seedAccount(ctx, 2, { withChat: true })
     first.db.close()
@@ -1286,7 +1205,7 @@ describe('processJobs with two accounts', () => {
   })
 
   it("runs account 2's jobs while account 1 waits out a FLOOD_WAIT", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const first = seedAccount(ctx, 1, { withChat: true })
     const second = seedAccount(ctx, 2, { withChat: true })
     await initializeScheduler(ctx)
@@ -1303,7 +1222,7 @@ describe('processJobs with two accounts', () => {
   })
 
   it("finishes account 2's jobs while account 1's job sleeps in a FLOOD_WAIT (#60)", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     // Account 1: one DM due, whose request waits like mtcute's flood waiter
     const first = seedAccount(ctx, 1, { withChat: true })
     const call = mock(
@@ -1385,7 +1304,7 @@ describe('a daemon stop during a sync job', () => {
   })
 
   it('leaves the job pending as it was, and the next start runs it', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const call = mock(
       (_request: unknown, params?: { abortSignal?: AbortSignal }) =>
         waitLikeFloodWait(params, { onWait: () => requestShutdown(ctx) }),
@@ -1417,7 +1336,7 @@ describe('a daemon stop during a sync job', () => {
     )
 
     // The next start, on the same cache
-    const restarted = createContext()
+    const restarted = testDaemonContext()
     const history = createFakeHistory(range(1, 5))
     connect(restarted, 1, history.client)
     addAccountRuntime(restarted, 1, db)
@@ -1435,7 +1354,7 @@ describe('a daemon stop during a sync job', () => {
   })
 
   it('ends the wait on the worker a reconnect rebuilt', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     connect(ctx, 1)
     addAccountRuntime(ctx, 1, db)
     await initializeScheduler(ctx)
@@ -1483,7 +1402,7 @@ const activityRows = (db: Database) =>
 
 describe('cleanupOldJobs', () => {
   it("prunes every account, with a scheduler or not, by the daemon's configured retention", () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     // One day: the 7-day default would keep the 2-day-old rows
     ctx.retention = {
       ...getDefaultRetentionConfig(),
@@ -1506,7 +1425,7 @@ describe('cleanupOldJobs', () => {
   })
 
   it("warns about an account whose cache fails and still prunes the next one's", () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const broken = createAccountCacheDb()
     broken.run('DROP TABLE api_activity')
     addAccountRuntime(ctx, 1, broken)
@@ -1525,7 +1444,7 @@ describe('cleanupOldJobs', () => {
 
 describe('cleanupScheduler', () => {
   it("prunes every account's cache and drops its scheduler and worker", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const runtimes = [1, 2].map((accountId) => runAccount(ctx, accountId))
     for (const rt of runtimes) addOldActivity(rt.db)
 
@@ -1539,7 +1458,7 @@ describe('cleanupScheduler', () => {
   })
 
   it("waits for every account's job in flight before it drops the schedulers", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     let finish = () => {}
     const blocked = new Promise<void>((resolve) => {
       finish = resolve

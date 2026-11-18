@@ -13,6 +13,8 @@ import {
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema, isContentlessSearch } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
+import { takePartIn } from './helpers/participation'
 
 describe('MessagesSearch', () => {
   let db: Database
@@ -21,9 +23,8 @@ describe('MessagesSearch', () => {
   let chatsCache: ReturnType<typeof createChatsCache>
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
+    takePartIn(db, -200, -1001234567890)
     messagesCache = createMessagesCache(db)
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
@@ -50,35 +51,23 @@ describe('MessagesSearch', () => {
       raw_json: '{}',
     })
 
-    chatsCache.upsert({
-      chat_id: '-1001234567890',
-      type: 'supergroup',
-      title: 'Team Chat',
-      username: 'teamchat',
-      member_count: 3,
-      access_hash: null,
-      is_creator: 0,
-      is_admin: 0,
-      last_message_id: null,
-      last_message_at: null,
-      fetched_at: now,
-      raw_json: '{}',
-    })
+    chatsCache.upsert(
+      chatRow('-1001234567890', 'supergroup', {
+        title: 'Team Chat',
+        username: 'teamchat',
+        member_count: 3,
+        fetched_at: now,
+      }),
+    )
 
-    chatsCache.upsert({
-      chat_id: '-200',
-      type: 'group',
-      title: 'Random',
-      username: 'randomchat',
-      member_count: 2,
-      access_hash: null,
-      is_creator: 0,
-      is_admin: 0,
-      last_message_id: null,
-      last_message_at: null,
-      fetched_at: now,
-      raw_json: '{}',
-    })
+    chatsCache.upsert(
+      chatRow('-200', 'group', {
+        title: 'Random',
+        username: 'randomchat',
+        member_count: 2,
+        fetched_at: now,
+      }),
+    )
 
     messagesCache.upsert({
       chat_id: -1001234567890,
@@ -284,20 +273,14 @@ describe('MessagesSearch', () => {
       raw_json: '{}',
     })
 
-    chatsCache.upsert({
-      chat_id: '-1001234567890',
-      type: 'supergroup',
-      title: 'Test Chat',
-      username: 'testchat',
-      member_count: 2,
-      access_hash: null,
-      is_creator: 0,
-      is_admin: 0,
-      last_message_id: null,
-      last_message_at: null,
-      fetched_at: now,
-      raw_json: '{}',
-    })
+    chatsCache.upsert(
+      chatRow('-1001234567890', 'supergroup', {
+        title: 'Test Chat',
+        username: 'testchat',
+        member_count: 2,
+        fetched_at: now,
+      }),
+    )
 
     // Message with hyphen (Russian "che-nit" slang)
     messagesCache.upsert({
@@ -422,6 +405,7 @@ describe('MessagesSearch on a contentless and a regular index', () => {
     const db = new Database(':memory:')
     initCacheSchema(db)
     initSyncSchema(db, { contentlessSearch })
+    takePartIn(db, -300, -1001234567890)
     const now = 1_760_000_000_000
     const users = createUsersCache(db)
     const chats = createChatsCache(db)
@@ -446,20 +430,14 @@ describe('MessagesSearch on a contentless and a regular index', () => {
       ['-1001234567890', 'Team Chat', 'teamchat'],
       ['-300', 'Команда', null],
     ] as const) {
-      chats.upsert({
-        chat_id: chatId,
-        type: 'supergroup',
-        title,
-        username,
-        member_count: 3,
-        access_hash: null,
-        is_creator: 0,
-        is_admin: 0,
-        last_message_id: null,
-        last_message_at: null,
-        fetched_at: now,
-        raw_json: '{}',
-      })
+      chats.upsert(
+        chatRow(chatId, 'supergroup', {
+          title,
+          username,
+          member_count: 3,
+          fetched_at: now,
+        }),
+      )
     }
     messages.upsertBatch(
       [
