@@ -219,6 +219,8 @@ tg messages unread --chat @username --limit 50     # of one chat
 tg messages unread --fresh                         # counts and missing messages from Telegram
 tg messages read --chat @username                  # mark the whole chat read
 tg messages read --chat @username --max-id 1200    # only up to message 1200
+tg messages pin --chat @teamchat --id 1200 --silent   # pin without notifying the members
+tg messages unpin --chat @teamchat --id 1200       # unpin it
 ```
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
@@ -421,6 +423,36 @@ the chat's dialog (`messages.getPeerDialogs`) and writes its new unread state to
 
 `maxId` is the `--max-id` passed, `null` for everything. Like `tg send`, it is a Telegram
 mutation, so it needs credentials and a connection; the daemon never marks anything read.
+
+`tg messages pin --chat <peer> --id <id> [--silent]` pins a message and
+`tg messages unpin --chat <peer> --id <id>` unpins it, through `messages.updatePinnedMessage`.
+A pin is visible to everyone in the chat. Without `--silent`, Telegram notifies the chat's
+members of a pin, as its apps do by default; an unpin never notifies, so `unpin` has no
+`--silent`. Once Telegram confirms, the command sets the cached message's pinned flag and
+stores the service message ("pinned a message") Telegram returns, as `tg send` stores a sent
+message. It prints the message as `tg messages get` prints it, read back from the cache:
+
+```json
+{ "chatId": -1001234567890, "messageId": 25, "pinned": true,
+  "message": { "chatId": -1001234567890, "messageId": 25, "text": "Release notes are in the wiki.",
+               "isPinned": true, "date": 1760000000, … } }
+```
+
+`pinned` is the message's state after the command. Pinning a message that is already pinned, or
+unpinning one that isn't, succeeds and changes nothing. `message` is `null` when the cache does not
+hold the message: it is not fetched, and the pin is done either way. When Telegram refuses, the
+error is `TELEGRAM_ERROR` (exit 5) with Telegram's error name in `details.telegramError`, beside
+`chatId` and `messageId`, and the cache stays as it was:
+
+| `details.telegramError` | Meaning |
+|-------------------------|---------|
+| `MESSAGE_ID_INVALID` | the chat has no message with this ID that can be pinned or unpinned |
+| `PIN_RESTRICTED`, `CHAT_ADMIN_REQUIRED`, `CHAT_WRITE_FORBIDDEN`, `USER_BANNED_IN_CHANNEL` | no permission to pin messages in this chat |
+
+Any other failure is `Failed to pin the message: <Telegram's error>` (or `unpin`). Pinning a
+message only for yourself in a private chat, unpinning every message of a chat and forum topics
+still go through `tg api`; so do editing, deleting and forwarding
+([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)).
 
 ### Media
 
@@ -860,7 +892,7 @@ TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg chats list   # only @teamchat
 TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg messages list --chat @alice   # CHAT_NOT_ALLOWED
 ```
 
-`readOnly` refuses `tg send`, `tg messages read`, `tg api` methods that aren't `get…`,
+`readOnly` refuses `tg send`, `tg messages read`, `pin` and `unpin`, `tg api` methods that aren't `get…`,
 `search…`, `resolve…` or `check…`, and `tg auth login`, `login-qr` and `logout` with
 `READ_ONLY`. `allowedChats` makes commands that name a chat refuse others with
 `CHAT_NOT_ALLOWED`, makes `tg chats list`, `tg chats search`, `tg messages search`, `wait`,

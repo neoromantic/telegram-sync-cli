@@ -12,7 +12,11 @@
  * channels.readHistory mark the chat read and print FAKE_CLIENT_CALL with
  * the method and max_id to stderr; messages.getPeerDialogs then returns a
  * dialog read up to that max_id, or to FAKE_TOP_MESSAGE for 0 (everything),
- * with the messages above it unread. FAKE_FLOOD_METHOD fails with a
+ * with the messages above it unread. messages.updatePinnedMessage prints
+ * FAKE_CLIENT_CALL with the ID and its flags and returns the pin update of
+ * the chat, plus the "pinned a message" service message FAKE_PIN_SERVICE_ID
+ * when it pins in a group or supergroup; it refuses FAKE_UNPINNABLE_MESSAGE
+ * with CHAT_ADMIN_REQUIRED. FAKE_FLOOD_METHOD fails with a
  * FLOOD_WAIT of FAKE_FLOOD_SECONDS, a method of FAKE_INTERNAL_ERRORS with
  * its Telegram-side failure, and messages.sendMessage with
  * PEER_ID_INVALID. Any other method fails the way Telegram rejects an
@@ -28,6 +32,17 @@ export const FAKE_CLIENT_CALL = 'fake client: call'
 
 /** The newest message of every chat the fake client reads */
 export const FAKE_TOP_MESSAGE = 30
+
+/** The account the fake client is signed in as */
+export const FAKE_SELF_ID = 999
+
+/** A message messages.updatePinnedMessage refuses with CHAT_ADMIN_REQUIRED */
+export const FAKE_UNPINNABLE_MESSAGE = 14
+
+/** The ID of the service message a pin in a group or supergroup returns */
+export const FAKE_PIN_SERVICE_ID = 100
+
+export const FAKE_PIN_DATE = 1_760_003_600
 
 /** The method Telegram answers with FLOOD_WAIT_<FAKE_FLOOD_SECONDS> */
 export const FAKE_FLOOD_METHOD = 'help.getNearestDc'
@@ -51,6 +66,81 @@ export const FAKE_CONFIG = {
   chatSizeMax: 200,
 }
 
+interface FakeInputPeer {
+  _: string
+  userId?: number
+  chatId?: number
+  channelId?: number
+}
+
+/** The peer a message of this input peer carries */
+function fakePeer(peer: FakeInputPeer | undefined) {
+  if (peer?._ === 'inputPeerChannel') {
+    return { _: 'peerChannel', channelId: peer.channelId }
+  }
+  if (peer?._ === 'inputPeerChat') {
+    return { _: 'peerChat', chatId: peer.chatId }
+  }
+  return { _: 'peerUser', userId: peer?.userId ?? FAKE_SELF_ID }
+}
+
+interface FakePinRequest {
+  id: number
+  peer: FakeInputPeer
+  silent?: boolean
+  unpin?: boolean
+}
+
+/** What Telegram answers to messages.updatePinnedMessage */
+function fakePinResponse({ id, peer, unpin }: FakePinRequest) {
+  const channel = peer._ === 'inputPeerChannel'
+  const pinned = !unpin
+  const updates: unknown[] = [
+    channel
+      ? {
+          _: 'updatePinnedChannelMessages',
+          pinned,
+          channelId: peer.channelId,
+          messages: [id],
+          pts: 1,
+          ptsCount: 1,
+        }
+      : {
+          _: 'updatePinnedMessages',
+          pinned,
+          peer: fakePeer(peer),
+          messages: [id],
+          pts: 1,
+          ptsCount: 1,
+        },
+  ]
+  if (pinned && (channel || peer._ === 'inputPeerChat')) {
+    updates.push({
+      _: channel ? 'updateNewChannelMessage' : 'updateNewMessage',
+      message: {
+        _: 'messageService',
+        id: FAKE_PIN_SERVICE_ID,
+        out: true,
+        peerId: fakePeer(peer),
+        fromId: { _: 'peerUser', userId: FAKE_SELF_ID },
+        replyTo: { _: 'messageReplyHeader', replyToMsgId: id },
+        date: FAKE_PIN_DATE,
+        action: { _: 'messageActionPinMessage' },
+      },
+      pts: 2,
+      ptsCount: 1,
+    })
+  }
+  return {
+    _: 'updates',
+    updates,
+    users: [],
+    chats: [],
+    date: FAKE_PIN_DATE,
+    seq: 0,
+  }
+}
+
 if (import.meta.main) {
   // mock.module works in a plain `bun run` script too, not only in bun test
   const { mock } = await import('bun:test')
@@ -61,8 +151,24 @@ if (import.meta.main) {
   setInterval(() => {}, 60_000)
   let readMaxId = 0
   const client = {
-    async call(request: { _: string; maxId?: number }) {
+    async call(
+      request: { _: string; maxId?: number } & Partial<FakePinRequest>,
+    ) {
       if (request._ === 'help.getConfig') return FAKE_CONFIG
+      if (request._ === 'messages.updatePinnedMessage') {
+        const pin = request as FakePinRequest & { _: string }
+        console.error(
+          `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: pin._, id: pin.id, silent: pin.silent, unpin: pin.unpin })}`,
+        )
+        if (pin.id === FAKE_UNPINNABLE_MESSAGE) {
+          throw tl.RpcError.fromTl({
+            _: 'rpc_error',
+            errorCode: 400,
+            errorMessage: 'CHAT_ADMIN_REQUIRED',
+          })
+        }
+        return fakePinResponse(pin)
+      }
       if (
         request._ === 'messages.readHistory' ||
         request._ === 'channels.readHistory'

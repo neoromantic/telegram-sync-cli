@@ -262,6 +262,101 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
   )
 
   it(
+    'messages pin and unpin change the pinned state on Telegram and in the cache',
+    async () => {
+      const messageId = await sendToSavedMessages(
+        `tg smoke test ${uniqueMarker()}`,
+      )
+
+      const pinnedOnTelegram = async () => {
+        const raw = await runCliSuccess(
+          [
+            'api',
+            'messages.getMessages',
+            '--json',
+            JSON.stringify({ id: [{ _: 'inputMessageID', id: messageId }] }),
+          ],
+          cli(),
+        )
+        const message = (
+          raw.json as Envelope<{
+            result: { messages: Array<{ id: number; pinned?: boolean }> }
+          }>
+        ).data.result.messages.find((m) => m.id === messageId)
+        expect(message).toBeDefined()
+        return message?.pinned === true
+      }
+      const pinnedInCache = async () => {
+        const result = await runCliSuccess(
+          ['messages', 'get', '--chat', 'me', '--id', String(messageId)],
+          cli(),
+        )
+        return (result.json as Envelope<{ message: { isPinned: boolean } }>)
+          .data.message.isPinned
+      }
+
+      try {
+        const pin = await runCliSuccess(
+          [
+            'messages',
+            'pin',
+            '--chat',
+            'me',
+            '--id',
+            String(messageId),
+            '--silent',
+          ],
+          cli(),
+        )
+        expect(pin.json).toMatchObject({
+          success: true,
+          data: { messageId, pinned: true, message: { isPinned: true } },
+        })
+        expect(await pinnedOnTelegram()).toBe(true)
+        expect(await pinnedInCache()).toBe(true)
+
+        const unpin = await runCliSuccess(
+          ['messages', 'unpin', '--chat', 'me', '--id', String(messageId)],
+          cli(),
+        )
+        expect(unpin.json).toMatchObject({
+          success: true,
+          data: { messageId, pinned: false, message: { isPinned: false } },
+        })
+        expect(await pinnedOnTelegram()).toBe(false)
+        expect(await pinnedInCache()).toBe(false)
+      } finally {
+        // A pin may add a "pinned a message" service message: delete it too
+        const history = await runCli(
+          ['api', 'messages.getHistory', '--peer', 'me', '--limit', '10'],
+          cli(),
+        )
+        const messages =
+          (
+            history.json as Envelope<{
+              result: {
+                messages: Array<{
+                  id: number
+                  action?: { _: string }
+                  replyTo?: { replyToMsgId?: number }
+                }>
+              }
+            }> | null
+          )?.data?.result?.messages ?? []
+        for (const m of messages) {
+          if (
+            m.action?._ === 'messageActionPinMessage' &&
+            m.replyTo?.replyToMsgId === messageId
+          ) {
+            sentMessageIds.push(m.id)
+          }
+        }
+      }
+    },
+    API_TIMEOUT_MS * 6,
+  )
+
+  it(
     'messages list and get read Saved Messages from Telegram, then from the cache',
     async () => {
       type Item = {
