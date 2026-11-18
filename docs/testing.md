@@ -54,10 +54,11 @@ test and no CLI a test spawns sends usage stats; `src/test/telemetry.e2e.test.ts
 `TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT` pointing at a local server (a source checkout only), to
 check that the background copy sends the events and the command doesn't wait for it.
 
-The test scripts pass `--isolate`, so each file gets a fresh module registry. `mock.module()`
-replaces a module for the whole process and `mock.restore()` doesn't undo it, so without
-isolation a module mock would leak into every file that runs after it, and the file order
-differs between macOS and Linux.
+The test scripts pass `--parallel`: files run in worker processes, one per CPU core, and each
+file gets a fresh module registry (`--parallel` implies `--isolate`). `mock.module()` replaces a
+module for the whole process and `mock.restore()` doesn't undo it, so without isolation a module
+mock would leak into every file that runs after it. Files share no state: a test that needs a
+directory, a database or a server makes its own (`mkdtemp`, `:memory:`, port 0).
 
 ### Test Patterns
 

@@ -85,8 +85,9 @@ bun run src/index.ts <command>   # run the CLI from source
 bun run check                    # format:check (oxfmt) + lint (oxlint) + typecheck + check:knip
 bun run format                   # format the repo with oxfmt
 bun run check:knip               # Knip: unused files and dependencies, unlisted or unresolved imports
-bun run test                     # unit tests, offline
-bun run test:e2e                 # CLI e2e tests, offline
+bun run test                     # unit tests, offline, in parallel workers
+bun run test:e2e                 # CLI e2e tests, offline, in parallel workers
+bun test --changed=main          # quick pass: test files that import a file changed since main
 bun run build                    # compile dist/tg for this platform
 bun run build:all                # cross-compile every target
 bun run test:integration         # real Telegram API, opt-in (see Testing)
@@ -235,6 +236,9 @@ longer exists since mtcute 0.29.
   new `tg-test-data-*` dir in the system temp dir for each test file, removed after the file,
   even if the shell or `.env` sets it, and sets `TELEGRAM_SYNC_CLI_TELEMETRY=0` (usage stats
   off).
+- Both suites run their files in parallel worker processes (`--parallel`, one per CPU core). A
+  test file owns its state: `mkdtemp` dirs, its own databases, port 0. Run the full scripts
+  before a PR.
 - Unit tests mock the mtcute client and use `createTestDatabase()` for in-memory databases.
 - E2E tests spawn the CLI with `bun --no-env-file` and an isolated
   `TELEGRAM_SYNC_CLI_DATA_DIR`:
