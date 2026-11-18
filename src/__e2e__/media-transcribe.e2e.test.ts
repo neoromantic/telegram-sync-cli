@@ -6,9 +6,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -25,7 +27,7 @@ import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { extractAttachment } from '../utils/attachment'
 import { mediaPaths } from '../utils/media-cache'
-import { NO_CREDENTIALS, runCli } from './helpers/cli'
+import { NO_CREDENTIALS, runCli, spawnCli } from './helpers/cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
 const SELF_ID = 5_550_001
@@ -620,5 +622,132 @@ describe('E2E: media transcribe', () => {
     expect(
       env.openCacheDb(1).query('SELECT 1 FROM message_transcripts').get(),
     ).toBeNull()
+  })
+
+  describe('regressions found in review', () => {
+    it("transcribes again when the message's attachment changed", async () => {
+      install('ffmpeg', FAKE_FFMPEG)
+      install('whisper', FAKE_OPENAI_RUNNER)
+      note(1, 'Old words.', { fileId: '6000000000000000201' })
+      await transcribe('--id', '1')
+
+      note(1, 'New words.', { fileId: '6000000000000000202' })
+      const result = await transcribe('--id', '1')
+
+      expect(result.exitCode).toBe(0)
+      expect((result.json as { data: Result }).data).toMatchObject({
+        text: 'New words.',
+        cached: false,
+      })
+      expect(runnerCalls()).toHaveLength(2)
+    })
+
+    it('removes the converted audio and stops the program on SIGTERM, exit 130', async () => {
+      install('ffmpeg', FAKE_FFMPEG)
+      const pidFile = join(env.dataDir, 'runner.pid')
+      install('whisper', `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 30\n`)
+      symlinkSync(Bun.which('sleep')!, join(toolsDir, 'sleep'))
+      note(1, 'Hello.')
+      const tmp = join(env.dataDir, 'tmp')
+      mkdirSync(tmp)
+
+      const proc = spawnCli(
+        ['media', 'transcribe', '--chat', 'me', '--id', '1'],
+        {
+          env: {
+            ...env.getCliOptions().env,
+            ...NO_CREDENTIALS,
+            PATH: `${binDir}:${toolsDir}`,
+            XDG_CACHE_HOME: cacheHome,
+            FAKE_LOG: logPath,
+            TMPDIR: tmp,
+          },
+        },
+      )
+      const deadline = Date.now() + 8000
+      while (!existsSync(pidFile) || readFileSync(pidFile, 'utf-8') === '') {
+        if (Date.now() > deadline) throw new Error('the runner never started')
+        await Bun.sleep(25)
+      }
+      const runnerPid = Number(readFileSync(pidFile, 'utf-8').trim())
+      expect(readdirSync(tmp)).not.toEqual([])
+
+      proc.kill('SIGTERM')
+      const exitCode = await proc.exited
+
+      expect(exitCode).toBe(130)
+      expect(readdirSync(tmp)).toEqual([])
+      expect(() => process.kill(runnerPid, 0)).toThrow()
+      expect(
+        env.openCacheDb(1).query('SELECT 1 FROM message_transcripts').get(),
+      ).toBeNull()
+    }, 15_000)
+
+    it('prints the ready results of a batch when the program is missing for the rest', async () => {
+      install('ffmpeg', FAKE_FFMPEG)
+      install('whisper', FAKE_OPENAI_RUNNER)
+      note(1, 'Already done.')
+      await transcribe('--id', '1')
+      rmSync(join(binDir, 'whisper'))
+      note(2, 'Still waiting.')
+
+      const result = await transcribe('--id', '1', '--id', '2')
+
+      expect(result.exitCode).toBe(1)
+      expect(lines(result.stdout)).toEqual([
+        {
+          success: true,
+          data: expect.objectContaining({
+            messageId: 1,
+            text: 'Already done.',
+            cached: true,
+          }),
+        },
+        {
+          success: false,
+          error: expect.objectContaining({
+            code: 'TRANSCRIBER_NOT_FOUND',
+            details: expect.objectContaining({ chatId: SELF_ID, messageId: 2 }),
+          }),
+        },
+      ])
+    })
+
+    it('refuses a stored transcript once the message is content-protected', async () => {
+      install('ffmpeg', FAKE_FFMPEG)
+      install('whisper', FAKE_OPENAI_RUNNER)
+      note(1, 'Was public.', { fileId: '6000000000000000301' })
+      await transcribe('--id', '1')
+      note(1, 'Was public.', {
+        fileId: '6000000000000000301',
+        extra: { noforwards: true },
+      })
+      note(2, 'Was public.', {
+        fileId: '6000000000000000301',
+        extra: { noforwards: true },
+      })
+
+      const byMessage = await transcribe('--id', '1')
+      const byFile = await transcribe('--id', '2')
+      const download = await tg([
+        'media',
+        'download',
+        '--chat',
+        'me',
+        '--id',
+        '1',
+      ])
+
+      expect(byMessage.exitCode).toBe(1)
+      expect(byMessage.json).toEqual(download.json)
+      expect(byFile.json).toMatchObject({
+        success: false,
+        error: {
+          code: 'CONTENT_PROTECTED',
+          details: { chatId: SELF_ID, messageId: 2, reason: 'message' },
+        },
+      })
+      expect(runnerCalls()).toHaveLength(1)
+    })
   })
 })
