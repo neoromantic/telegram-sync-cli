@@ -9,23 +9,10 @@
  */
 
 export { createDaemon, type Daemon } from './daemon'
-export {
-  type BatchFetcher,
-  type BatchResult,
-  createJobExecutor,
-  type JobExecutionResult,
-  JobExecutor,
-  type JobExecutorConfig,
-} from './job-executor'
 export { createPidFile, type PidFile, PidFileError } from './pid-file'
 export {
   createSyncScheduler,
   type SchedulerStatus,
   type SyncScheduler,
 } from './scheduler'
-export {
-  type DaemonConfig,
-  DaemonExitCode,
-  type DaemonState,
-  DEFAULT_SYNC_DELAYS,
-} from './types'
+export { type DaemonConfig, DaemonExitCode, type DaemonState } from './types'

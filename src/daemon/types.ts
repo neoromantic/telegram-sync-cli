@@ -87,10 +87,6 @@ export interface DaemonConfig {
   pidPath: string
   /** Reconnection configuration */
   reconnectConfig?: ReconnectConfig
-  /** Delay between pagination calls within a single job (ms) */
-  interBatchDelayMs: number
-  /** Delay between different sync jobs (ms) */
-  interJobDelayMs: number
   /** Shutdown timeout in milliseconds - force exit if cleanup takes longer */
   shutdownTimeoutMs?: number
   /** How long the caches keep their bookkeeping rows; defaults if absent */
@@ -98,16 +94,6 @@ export interface DaemonConfig {
   /** How fast each account's sync jobs start; defaults if absent */
   pacing?: SyncPacingConfig
 }
-
-/**
- * Default sync delay configuration
- */
-export const DEFAULT_SYNC_DELAYS = {
-  /** Default inter-batch delay: 1 second */
-  interBatchDelayMs: 1000,
-  /** Default inter-job delay: 3 seconds */
-  interJobDelayMs: 3000,
-} as const
 
 /**
  * Default shutdown timeout in milliseconds (30 seconds)

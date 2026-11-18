@@ -475,7 +475,7 @@ CREATE INDEX idx_chat_sync_state_incomplete
 CREATE TABLE sync_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   chat_id INTEGER NOT NULL,
-  job_type TEXT NOT NULL,         -- forward_catchup, initial_load, backward_history, full_sync, refetch_messages, fetch_senders
+  job_type TEXT NOT NULL,         -- forward_catchup, initial_load, backward_history, full_sync, refetch_messages, fetch_senders, check_group_participation
   priority INTEGER NOT NULL DEFAULT 3,
   status TEXT NOT NULL DEFAULT 'pending',
   cursor_start INTEGER,
@@ -541,6 +541,43 @@ day, and a `fetch_senders` job asks for up to 100 of a chat's messages by ID; a 
 sender is cached. `asked_at` is `NULL` while the sender waits, else when Telegram was asked and
 didn't return them; such a sender is listed again, with their newest message then, 30 days
 later ([daemon.md](daemon.md#missing-senders)).
+
+### Table: group_participation
+
+```sql
+CREATE TABLE group_participation (
+  chat_id        INTEGER PRIMARY KEY,
+  last_own_date  INTEGER,
+  initialized_at INTEGER
+);
+```
+
+Newest own ordinary message per group (basic group or supergroup), for
+[group participation](sync-strategy.md#group-participation). Both columns are Unix seconds.
+
+- `last_own_date`: the date of the newest own message: outgoing, from the account's user, not a
+  service message. It comes from every own message the cache writes and from the
+  `check_group_participation` search after each dialog pass, and is never lowered.
+- `initialized_at`: when the first check answered, or a fresh own message was seen. `NULL` with
+  no fresh own message means the state is unknown, and the group takes no new messages.
+
+### Table: group_capture_gaps
+
+```sql
+CREATE TABLE group_capture_gaps (
+  chat_id    INTEGER NOT NULL,
+  start_date INTEGER NOT NULL,
+  end_date   INTEGER NOT NULL,
+  PRIMARY KEY (chat_id, start_date),
+  CHECK (end_date > start_date)
+);
+```
+
+Closed pauses `[start_date, end_date)` of a group, in Unix seconds (see
+[group participation](sync-strategy.md#group-participation)). A row is written when an own
+message ends the pause; while a group is off, the pause is open and only `group_participation`
+says so. A message dated inside a pause is never added to `messages_cache`. Rows are never
+deleted.
 
 ### Table: daemon_status
 
@@ -678,6 +715,12 @@ the process that waited finds the index built. Opens of a cache that has them on
 `message_attachments` (with its index) and `chat_content_protection` are created on the first
 open of a cache that lacks them. They start empty, so the step rewrites nothing and takes no
 time; opens that find them only read.
+
+`group_participation` and `group_capture_gaps` are created on the first open of a cache that
+lacks them, in one `BEGIN IMMEDIATE` transaction that waits up to 60 seconds for the lock.
+`group_participation` starts with the date of the newest own ordinary message each group has in
+`messages_cache` (one pass over the table's columns, not its text), with `initialized_at` left
+`NULL`. Opens that find the tables only read.
 
 The search update trigger `messages_cache_au` of 0.5.0 and older re-indexed a message on every
 update, and `idx_messages_cache_fetched` (`messages_cache(fetched_at)`) served no query. The

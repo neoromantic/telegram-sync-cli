@@ -6,6 +6,7 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import type { PinMessageResult } from '../commands/messages/pin-message'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
@@ -82,6 +83,7 @@ function seed(db: Database): void {
       fakeDialog({ kind: 'group', id: 4242, title: 'Book Club' }),
     ].map(dialogToCacheInput),
   )
+  takePartIn(db, TEAM_ID, BOOK_CLUB_ID)
   createMessagesCache(db).upsertBatch([
     message(ALICE_PEER, 12, 'See you at nine.'),
     message(ALICE_PEER, 13, 'The address is on the card.', true),

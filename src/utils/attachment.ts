@@ -163,14 +163,6 @@ function toMessage(input: unknown): RawObject | null {
   if (message._ === 'message' || message._ === 'updateShortSentMessage') {
     return message
   }
-  // The abstract sync worker's message: no `_`, read as a message
-  if (
-    message._ === undefined &&
-    typeof message.id === 'number' &&
-    typeof message.date === 'number'
-  ) {
-    return message
-  }
   return null
 }
 

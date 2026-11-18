@@ -4,22 +4,20 @@
 import { describe, expect, it, mock } from 'bun:test'
 import type { TelegramClient } from '@mtcute/bun'
 import type { DaemonContext } from '../daemon/daemon-context'
-import { createDaemonRuntime, requestShutdown } from '../daemon/daemon-context'
+import { requestShutdown } from '../daemon/daemon-context'
 import { mainLoop, waitForNextTick } from '../daemon/daemon-loop'
 import { startDueJobs, waitForJobsInFlight } from '../daemon/daemon-scheduler'
 import type { SyncScheduler } from '../daemon/scheduler'
 import { createSyncScheduler } from '../daemon/scheduler'
-import type { RealSyncWorker } from '../daemon/sync-worker'
+import type { RealSyncWorker } from '../daemon/sync-worker-real'
 import type { AccountConnectionState } from '../daemon/types'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import type { DaemonStatusService, DaemonTick } from '../db/daemon-status'
 import { createMessagesCache } from '../db/messages-cache'
 import { createSyncJobsService } from '../db/sync-jobs'
 import { type SyncJobRow, SyncJobType, SyncPriority } from '../db/sync-schema'
-import {
-  addAccountRuntime,
-  createAccountCacheDb,
-} from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import { fakeDialogClient } from './helpers/fake-dialogs'
 
 function createMockStatusService(
@@ -30,12 +28,8 @@ function createMockStatusService(
     set: () => {},
     delete: () => {},
     getAll: () => ({}),
-    clear: () => {},
     setDaemonRunning: () => {},
     setDaemonStopped: () => {},
-    isDaemonRunning: () => false,
-    updateLastUpdate: () => {},
-    setMessagesSynced: () => {},
     writeTick: () => {},
     recordCatchUp: () => {},
     getDaemonInfo: () => ({
@@ -68,78 +62,20 @@ function createMockScheduler(
     getNextJob: () => null,
     hasHistoryDue: () => false,
     recordJobRun: () => {},
-    claimNextJob: () => null,
-    startJob: () => false,
-    completeJob: () => false,
-    failJob: () => false,
-    updateProgress: () => {},
     getStatus: () => ({
       pendingJobs: 0,
       runningJobs: 0,
-      jobsByType: {},
-      jobsByPriority: {},
     }),
-    cleanup: () => 0,
-    cancelJobsForChat: () => 0,
     recoverCrashedJobs: () => 0,
   }
   return { ...base, ...overrides }
 }
 
-function createLogger() {
-  return {
-    info: mock(() => {}),
-    debug: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-  }
-}
-
 function createContext(): DaemonContext {
-  return {
-    dataDir: '/tmp/tgcli',
-    pidPath: '/tmp/tgcli/daemon.pid',
+  return testDaemonContext({
     verbosity: 'quiet',
-    reconnectConfig: {
-      initialDelayMs: 1000,
-      maxDelayMs: 4000,
-      maxAttempts: 2,
-      backoffMultiplier: 2,
-    },
-    shutdownTimeoutMs: 1_000_000,
-    logger: createLogger(),
-    pidFile: {
-      acquire: () => {},
-      release: () => {},
-      read: () => null,
-      isRunning: () => false,
-      sendSignal: () => false,
-      getPath: () => '/tmp/tgcli/daemon.pid',
-    },
-    state: {
-      running: false,
-      accounts: new Map(),
-      shutdownRequested: false,
-    },
-    accountsDb: {
-      getAll: () => [],
-      getById: () => null,
-      getByPhone: () => null,
-      getByUserId: () => null,
-      getByUsername: () => null,
-      getAllByLabel: () => [],
-      getActive: () => null,
-      create: () => {
-        throw new Error('not used')
-      },
-      update: () => null,
-      updateSession: () => {},
-      setActive: () => {},
-      delete: () => false,
-      count: () => 0,
-    },
-    runtime: createDaemonRuntime(),
-  }
+    state: { running: false, accounts: new Map(), shutdownRequested: false },
+  })
 }
 
 async function runWithImmediateTimeouts(
@@ -229,32 +165,29 @@ describe('mainLoop', () => {
 
   it("writes each account's tick to its own cache", async () => {
     const ctx = createContext()
-    // Account 1 has no scheduler: its queue is counted from its own cache
-    const firstDb = createAccountCacheDb()
-    for (const [chatId, status] of [
-      [101, 'pending'],
-      [102, 'running'],
-      [103, 'failed'],
-      [104, 'completed'],
-    ] as const) {
-      firstDb.run(
-        'INSERT INTO sync_jobs (chat_id, job_type, priority, status) VALUES (?, ?, ?, ?)',
-        [chatId, SyncJobType.BackwardHistory, SyncPriority.Low, status],
-      )
+    // Each account's queue is counted from its own cache, with or without a
+    // scheduler
+    const seedJobs = (
+      db: ReturnType<typeof createAccountCacheDb>,
+      statuses: string[],
+    ) => {
+      for (const [i, status] of statuses.entries()) {
+        db.run(
+          'INSERT INTO sync_jobs (chat_id, job_type, priority, status) VALUES (?, ?, ?, ?)',
+          [101 + i, SyncJobType.BackwardHistory, SyncPriority.Low, status],
+        )
+      }
     }
+    const firstDb = createAccountCacheDb()
+    seedJobs(firstDb, ['pending', 'running', 'failed', 'completed'])
     const first = addAccountRuntime(ctx, 1, firstDb, {
       messagesSynced: 40,
     })
-    const second = addAccountRuntime(ctx, 2, createAccountCacheDb(), {
+    const secondDb = createAccountCacheDb()
+    seedJobs(secondDb, ['pending', 'pending', 'pending', 'running'])
+    const second = addAccountRuntime(ctx, 2, secondDb, {
       messagesSynced: 2,
-      scheduler: createMockScheduler({
-        getStatus: () => ({
-          pendingJobs: 3,
-          runningJobs: 1,
-          jobsByType: {},
-          jobsByPriority: {},
-        }),
-      }),
+      scheduler: createMockScheduler(),
     })
     ctx.state.accounts.set(1, {
       accountId: 1,

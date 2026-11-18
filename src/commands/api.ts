@@ -12,7 +12,6 @@ import {
 import { randomLong, toInputChannel, toInputUser } from '@mtcute/bun/utils.js'
 import { defineCommand } from 'citty'
 
-import { ConfigError } from '../config'
 import { createChatsCache } from '../db/chats-cache'
 import { createUsersCache } from '../db/users-cache'
 import { getClientForAccount } from '../services/telegram'
@@ -23,8 +22,7 @@ import { mergeArgs, spacedFlagValues } from '../utils/args'
 import { toLong } from '../utils/long'
 import { error, raw, success } from '../utils/output'
 import {
-  isRateLimitError,
-  reportRateLimit,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../utils/telegram-rate-limits'
 import {
@@ -162,9 +160,7 @@ export const apiCommand = defineCommand({
       }
     } catch (err) {
       await closeClient(client)
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
+      reportConfigOrRateLimitError(err)
       if (
         err instanceof InvalidPeerError ||
         err instanceof AmbiguousPeerError ||
@@ -172,7 +168,6 @@ export const apiCommand = defineCommand({
       ) {
         error(ErrorCodes.INVALID_ARGS, err.message, { method })
       }
-      if (isRateLimitError(err)) reportRateLimit(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
 
       // Try to extract Telegram error code

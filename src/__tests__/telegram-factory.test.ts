@@ -98,3 +98,15 @@ describe('createDefaultClientFactory', () => {
     expect(lastClientOptions?.transport).toBe(transport)
   })
 })
+
+describe('getClientForAccount', () => {
+  it('keeps one client per account', async () => {
+    const { getClientForAccount } = await import('../services/telegram')
+
+    const first = getClientForAccount(1)
+
+    expect(getClientForAccount(1)).toBe(first)
+    expect(getClientForAccount(2)).not.toBe(first)
+    expect(first).toBeInstanceOf(MockTelegramClient)
+  })
+})

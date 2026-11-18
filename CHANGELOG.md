@@ -17,6 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the cache does not hold it). Telegram's refusals (no such message, no permission) are
   `TELEGRAM_ERROR` with the reason in `details.telegramError`. Both are writes: read-only mode
   refuses them and `allowedChats` applies.
+- `tg send --markdown` and `--html` send rich messages such as headings and tables on
+  supported accounts. The result includes `format`. File captions stay plain text.
+
+### Changed
+
+- A group (basic group or supergroup) adds new messages to the cache only while you take part
+  in it: you sent an ordinary message there in the last 90 days. Reading a group doesn't count.
+  The rule holds in every `tg chats sync` mode and in `tg messages list`/`get`, `--fresh`
+  included (which still return Telegram's page). Messages already cached stay; private chats
+  and channels are unchanged. After each dialog pass the daemon asks Telegram once per group
+  for your newest message of the last 90 days, at the lowest priority. Your next message in a
+  group, from any device or with `tg send`, turns it back on; the messages of the pause aren't
+  fetched later. `tg chats list` and `tg chats sync` show such a group with `syncEnabled: false`,
+  the reason `group_participation_required` or `group_participation_unknown` and
+  `lastOwnMessageAt`, and `tg status` leaves it out of the chats with sync on and of the history
+  progress. See [docs/sync-strategy.md](docs/sync-strategy.md#group-participation).
 
 ## [0.14.0] - 2026-11-18
 

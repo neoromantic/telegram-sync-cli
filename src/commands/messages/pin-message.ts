@@ -90,8 +90,8 @@ function cachePinChange(
       messagesCache.setPinned(chatId, [messageId], pinned)
       messagesCache.upsertBatch(serviceMessages)
     })()
-    const rows = createMessagesHistory(cacheDb).getMany(chatId, [messageId])
-    return messageRowsToItems(cacheDb, rows)[0] ?? null
+    const row = createMessagesHistory(cacheDb).get(chatId, messageId)
+    return messageRowsToItems(cacheDb, row ? [row] : [])[0] ?? null
   } catch (err) {
     verbose(`Could not cache the pin: ${getErrorMessage(err)}`)
     return null
