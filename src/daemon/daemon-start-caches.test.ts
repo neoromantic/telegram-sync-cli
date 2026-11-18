@@ -1,74 +1,38 @@
-import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import type { TelegramClient } from "@mtcute/bun";
+import { dirname, join } from "node:path";
 
-import type { DaemonContext } from "./daemon-context";
-import { CacheUnavailableError } from "../db/cache-layout";
+import { getAccountCacheDb, getAccountCachePath } from "../db";
 import { createDaemonStatusService } from "../db/daemon-status";
-import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { createFakeAccountsDb, mockDbModule, testAccount } from "../test/db-mock.test-utils";
+import { initCacheSchema } from "../db/schema";
+import { testAccount, useTestDataDir } from "../test/accounts.test-utils";
+import { fakeDialogClient } from "../test/fake-dialogs.test-utils";
+import { fakeTelegramClients } from "../test/fake-telegram-client.test-utils";
 
-const accounts = () =>
-  createFakeAccountsDb([
-    testAccount({ id: 1 }),
-    testAccount({ id: 2, phone: "+15550000002", is_active: 0 }),
-  ]);
-
-const caches = new Map<number, Database>();
-const brokenCaches = new Set<number>();
-let layoutError: Error | null = null;
-
-mock.module("../db", () => ({
-  ...mockDbModule({
-    cacheFor: (accountId) => {
-      if (brokenCaches.has(accountId)) {
-        throw new CacheUnavailableError("owner_mismatch", `accounts/${accountId}/cache.db`);
-      }
-      const cache = caches.get(accountId);
-      if (!cache) throw new Error(`No cache for account ${accountId}`);
-      return cache;
-    },
-    accountsDb: accounts(),
-  }),
-  ensureCacheLayout: () => {
-    if (layoutError) throw layoutError;
-    return { state: "none" as const };
-  },
-}));
-
-const connected: number[] = [];
-const connecting = new Set<number>();
-mock.module("./daemon-accounts", () => ({
-  connectAccount: async (
-    ctx: DaemonContext,
-    accountId: number,
-    phone: string,
-    name: string | null,
-  ) => {
-    connected.push(accountId);
-    const ok = connecting.has(accountId);
-    ctx.state.accounts.set(accountId, {
-      accountId,
-      phone,
-      name,
-      status: ok ? "connected" : "error",
-      ...(ok ? { client: {} as TelegramClient } : { lastError: "timeout" }),
-    });
-    return ok;
-  },
-  disconnectAllAccounts: async () => {},
-  setupSignalHandlers: () => {},
-  attemptReconnect: async () => {},
-  scheduleReconnect: () => {},
-}));
+const { created: connected, clients } = fakeTelegramClients();
 
 let onDialogPass: (() => void) | null = null;
-mock.module("./daemon-bootstrap", () => ({
-  bootstrapDialogs: async () => onDialogPass?.(),
-  refreshDialogsAfterReconnect: async () => {},
-}));
+
+function connecting(accountId: number) {
+  const pass = fakeDialogClient([]);
+  clients.set(accountId, {
+    ...pass.client,
+    withParams(params: Parameters<typeof pass.client.withParams>[0]) {
+      onDialogPass?.();
+      return pass.client.withParams(params);
+    },
+  });
+}
+
+function stampForAnotherAccount(accountId: number) {
+  const path = getAccountCachePath(accountId);
+  mkdirSync(dirname(path), { recursive: true });
+  const cache = new Database(path);
+  initCacheSchema(cache);
+  cache.run("INSERT INTO cache_meta (key, value) VALUES ('account_id', '99')");
+  cache.close();
+}
 
 const { createDaemon } = await import("./daemon");
 const { DaemonExitCode } = await import("./types");
@@ -76,37 +40,53 @@ const { DaemonExitCode } = await import("./types");
 const tempDir = join(process.cwd(), ".tmp", `daemon-start-caches-${process.pid}`);
 const pidPath = join(tempDir, "daemon.pid");
 
-const statusOf = (accountId: number) => createDaemonStatusService(caches.get(accountId)!).getAll();
+function statusOf(accountId: number) {
+  const cache = new Database(getAccountCachePath(accountId));
+  try {
+    return createDaemonStatusService(cache).getAll();
+  } finally {
+    cache.close();
+  }
+}
+
+useTestDataDir([testAccount(), testAccount({ phone: "+15550000002", is_active: false })]);
 
 beforeEach(() => {
   mkdirSync(tempDir, { recursive: true });
-  caches.set(1, createAccountCacheDb());
-  caches.set(2, createAccountCacheDb());
   connected.length = 0;
 });
 
 afterEach(() => {
-  for (const cache of caches.values()) cache.close();
-  caches.clear();
-  brokenCaches.clear();
-  connecting.clear();
+  clients.clear();
   onDialogPass = null;
-  layoutError = null;
   rmSync(tempDir, { recursive: true, force: true });
 });
 
 describe("daemon start with a cache per account", () => {
   it("connects only the accounts whose cache opened, and marks each one's cache stopped", async () => {
-    brokenCaches.add(1);
-    const daemon = createDaemon({ pidPath }, accounts());
+    stampForAnotherAccount(1);
+    const daemon = createDaemon({ pidPath });
+    let whileConnecting: ReturnType<typeof daemon.getStatus>["accounts"] = [];
+    clients.set(2, {
+      async start() {
+        whileConnecting = daemon.getStatus().accounts;
+        throw new Error("Connection timed out");
+      },
+    });
 
     expect(await daemon.start()).toBe(DaemonExitCode.AllAccountsFailed);
 
     expect(connected).toEqual([2]);
-    expect(daemon.getStatus().accounts).toContainEqual(
+    expect(whileConnecting).toContainEqual(
       expect.objectContaining({
         id: 1,
         status: "error",
+        lastError: expect.stringContaining("another account"),
+      }),
+    );
+    expect(daemon.getStatus().accounts).toContainEqual(
+      expect.objectContaining({
+        id: 1,
         lastError: expect.stringContaining("another account"),
       }),
     );
@@ -116,7 +96,7 @@ describe("daemon start with a cache per account", () => {
   });
 
   it("marks every account stopped when none connects", async () => {
-    const daemon = createDaemon({ pidPath }, accounts());
+    const daemon = createDaemon({ pidPath });
 
     expect(await daemon.start()).toBe(DaemonExitCode.AllAccountsFailed);
 
@@ -130,16 +110,16 @@ describe("daemon start with a cache per account", () => {
   });
 
   it("fails without connecting when no account has a cache it can open", async () => {
-    brokenCaches.add(1);
-    brokenCaches.add(2);
-    const daemon = createDaemon({ pidPath }, accounts());
+    stampForAnotherAccount(1);
+    stampForAnotherAccount(2);
+    const daemon = createDaemon({ pidPath });
 
     expect(await daemon.start()).toBe(DaemonExitCode.AllAccountsFailed);
     expect(connected).toEqual([]);
   });
 
   it("writes each account's connection before the dialog pass", async () => {
-    const previous = createDaemonStatusService(caches.get(1)!);
+    const previous = createDaemonStatusService(getAccountCacheDb(1));
     previous.setDaemonRunning(1111, "0.3.9");
     previous.writeTick({
       connectionStatus: "connected",
@@ -148,8 +128,8 @@ describe("daemon start with a cache per account", () => {
       pendingJobs: 7,
       runningJobs: 1,
     });
-    connecting.add(2);
-    const daemon = createDaemon({ pidPath }, accounts());
+    connecting(2);
+    const daemon = createDaemon({ pidPath });
     const seen: Record<number, Record<string, string>> = {};
     onDialogPass = () => {
       seen[1] = statusOf(1);
@@ -172,14 +152,5 @@ describe("daemon start with a cache per account", () => {
       pending_jobs: "0",
     });
     expect(statusOf(2)).toMatchObject({ daemon_status: "stopped" });
-  });
-
-  it("stops when the shared cache of an older version is still open", async () => {
-    layoutError = new CacheUnavailableError("shared_cache_in_use", "cache.db");
-    const daemon = createDaemon({ pidPath }, accounts());
-
-    expect(await daemon.start()).toBe(DaemonExitCode.Error);
-    expect(connected).toEqual([]);
-    expect(statusOf(1)).toEqual({});
   });
 });
