@@ -226,6 +226,17 @@ is for tests only.
   credentials; chat titles and IDs in search results, and the first run on a 0.2.0 cache
 - `messages-search-query.e2e.test.ts` — the query rules of `tg messages search` (plain words,
   FTS5 syntax, `--phrase`, query errors), `--since`/`--until`, `--sort` and `--count`
+- `messages-wait.e2e.test.ts` — `tg messages wait` and `watch` next to a simulated running
+  daemon: a message written from another process comes back within a second, the timeout
+  result, `--after`, `--settle`, `DAEMON_NOT_RUNNING`, and `watch` printing NDJSON and exiting 0
+  on SIGTERM
+- `unread.e2e.test.ts` — `tg chats list --unread`, `tg messages unread` and `tg messages read`
+  with the fake Telegram client, which prints each read call so the test checks the method and
+  `max_id` for every peer type
+- `access.e2e.test.ts` — read-only mode and `allowedChats`: every write command of the command
+  tree refused with `READ_ONLY`, every chat-scoped one with `CHAT_NOT_ALLOWED` for an outside
+  chat, cross-chat lists and `wait` without `--chat` limited to the allowed chats, `tg sql` and
+  `tg api` off with a list, and the env vars replacing `config.json`
 - `chats-sync.e2e.test.ts` — `tg chats sync` against a seeded cache, without credentials
 - `media.e2e.test.ts` — `tg media download` cache hits without credentials (`--out` to a
   directory, a file and stdout, `FILE_EXISTS` and `--overwrite`, `--thumb`), a file the cache

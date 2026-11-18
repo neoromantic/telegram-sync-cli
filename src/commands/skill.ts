@@ -11,6 +11,7 @@ import { defineCommand } from 'citty'
 import skillMarkdown from '../../skills/telegram-sync-cli/SKILL.md' with {
   type: 'text',
 }
+import { getErrorMessage } from '../daemon/daemon-utils'
 import { ErrorCodes } from '../types'
 import { error, success } from '../utils/output'
 
@@ -70,14 +71,6 @@ function resolveDataDir(): string {
     process.env.TELEGRAM_SYNC_CLI_DATA_DIR ??
     join(homedir(), '.telegram-sync-cli')
   )
-}
-
-/** @internal exported for testing */
-export function getErrorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    return err.message
-  }
-  return String(err)
 }
 
 function buildEnvStatus(): SkillEnvStatus {

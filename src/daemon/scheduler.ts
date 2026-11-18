@@ -10,6 +10,7 @@ import type { MessagesCache } from '../db/messages-cache'
 import { createSenderLookups } from '../db/sender-lookups'
 import type { SyncJobsService } from '../db/sync-jobs'
 import {
+  CHAT_INDEPENDENT_JOB_TYPES,
   type ChatSyncStateRow,
   isHistoryAllowed,
   type SyncJobRow,
@@ -25,10 +26,6 @@ export interface SchedulerStatus {
   pendingJobs: number
   /** Number of running jobs */
   runningJobs: number
-  /** Jobs by type */
-  jobsByType: Record<string, number>
-  /** Jobs by priority */
-  jobsByPriority: Record<number, number>
 }
 
 /**
@@ -47,8 +44,7 @@ export interface SyncScheduler {
   refreshQueues(): void
   /**
    * Next job to process, taking lane turns into account. Only looks: call
-   * recordJobRun after running it (non-atomic, use claimNextJob for
-   * concurrent safety)
+   * recordJobRun after running it
    */
   getNextJob(): SyncJobRow | null
   /**
@@ -58,22 +54,8 @@ export interface SyncScheduler {
   hasHistoryDue(): boolean
   /** Move to the next lane slot after a job ran */
   recordJobRun(job: SyncJobRow): void
-  /** Atomically claim and start the next pending job (prevents race conditions) */
-  claimNextJob(): SyncJobRow | null
-  /** Mark job as running */
-  startJob(jobId: number): boolean
-  /** Mark job as completed */
-  completeJob(jobId: number): boolean
-  /** Mark job as failed */
-  failJob(jobId: number, errorMessage: string): boolean
-  /** Update job progress */
-  updateProgress(jobId: number, messagesFetched: number, cursor?: number): void
   /** Get scheduler status */
   getStatus(): SchedulerStatus
-  /** Delete completed and failed jobs older than maxAgeMs (default 24 h) */
-  cleanup(maxAgeMs?: number): number
-  /** Cancel all pending jobs for a chat */
-  cancelJobsForChat(chatId: number): number
   /** Recover jobs that were running when daemon crashed */
   recoverCrashedJobs(): number
 }
@@ -93,7 +75,9 @@ export interface SyncSchedulerOptions {
  * example catch-up after a restart) can't starve the others.
  */
 export const SYNC_LANES = {
-  catchup: [SyncJobType.ForwardCatchup],
+  // A participation check is one search per group, at the lowest priority,
+  // so the chats' own catch-up goes first
+  catchup: [SyncJobType.ForwardCatchup, SyncJobType.CheckGroupParticipation],
   // A refetch (#130) is one small request per chat, at the lowest priority
   firstPage: [SyncJobType.InitialLoad, SyncJobType.RefetchMessages],
   history: [SyncJobType.BackwardHistory, SyncJobType.FullSync],
@@ -135,9 +119,11 @@ class SyncSchedulerImpl implements SyncScheduler {
   /** When it last looked for missing senders; in memory, so a start looks */
   private sendersScannedAt: number | null = null
   private readonly senderLookups
+  private readonly participation
 
   constructor(private readonly options: SyncSchedulerOptions) {
     this.senderLookups = createSenderLookups(options.db)
+    this.participation = options.messagesCache.participation
   }
 
   private get jobsService() {
@@ -148,10 +134,32 @@ class SyncSchedulerImpl implements SyncScheduler {
     return this.options.chatSyncState
   }
 
-  /** The chat's sync state, if it exists and sync is on */
+  /**
+   * The chat's sync state, if it exists, sync is on and the chat takes new
+   * messages: a group only while the account takes part in it
+   */
   private enabledState(chatId: number): ChatSyncStateRow | null {
     const state = this.chatSyncState.get(chatId)
-    return state?.sync_enabled ? state : null
+    if (!state?.sync_enabled) return null
+    return this.participation.captures(chatId) ? state : null
+  }
+
+  /**
+   * Delete the pending catch-up, first page and history jobs, retries
+   * included, of the groups the account no longer takes part in
+   */
+  private dropJobsOfPausedGroups(): void {
+    const chats = new Set(
+      this.jobsService
+        .getPendingJobs()
+        .filter((job) => !CHAT_INDEPENDENT_JOB_TYPES.includes(job.job_type))
+        .map((job) => job.chat_id),
+    )
+    for (const chatId of chats) {
+      if (!this.participation.captures(chatId)) {
+        this.jobsService.cancelPendingForChat(chatId)
+      }
+    }
   }
 
   /**
@@ -251,6 +259,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     // account, which gets no older history (#131): its pending history jobs
     // go, its cached messages stay.
     this.jobsService.deletePendingHistoryOfFirstPageOnlyChats()
+    this.dropJobsOfPausedGroups()
 
     // Catch-up only for chats whose newest message is above the cursor or
     // unknown. Live updates don't move the cursor or the top, so a chat
@@ -335,62 +344,11 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.slot = (this.slot + 1) % SYNC_SLOT_CYCLE.length
   }
 
-  claimNextJob(): SyncJobRow | null {
-    return this.jobsService.claimNextJob()
-  }
-
-  startJob(jobId: number): boolean {
-    return this.jobsService.markRunning(jobId)
-  }
-
-  completeJob(jobId: number): boolean {
-    return this.jobsService.markCompleted(jobId)
-  }
-
-  failJob(jobId: number, errorMessage: string): boolean {
-    return this.jobsService.markFailed(jobId, errorMessage)
-  }
-
-  updateProgress(
-    jobId: number,
-    messagesFetched: number,
-    cursor?: number,
-  ): void {
-    this.jobsService.updateProgress(jobId, {
-      messages_fetched: messagesFetched,
-      cursor_end: cursor,
-    })
-  }
-
   getStatus(): SchedulerStatus {
-    const runningJobs = this.jobsService.getRunningJobs()
-    const pendingJobs = this.jobsService.getPendingJobs()
-
-    const jobsByType: Record<string, number> = {}
-    const jobsByPriority: Record<number, number> = {}
-
-    for (const job of pendingJobs) {
-      jobsByType[job.job_type] = (jobsByType[job.job_type] ?? 0) + 1
-      jobsByPriority[job.priority] = (jobsByPriority[job.priority] ?? 0) + 1
-    }
-
     return {
-      pendingJobs: pendingJobs.length,
-      runningJobs: runningJobs.length,
-      jobsByType,
-      jobsByPriority,
+      pendingJobs: this.jobsService.getPendingJobs().length,
+      runningJobs: this.jobsService.getRunningJobs().length,
     }
-  }
-
-  cleanup(maxAgeMs = 24 * 60 * 60 * 1000): number {
-    return (
-      this.jobsService.cleanupCompleted(maxAgeMs) +
-      this.jobsService.cleanupFailed(maxAgeMs)
-    )
-  }
-
-  cancelJobsForChat(chatId: number): number {
-    return this.jobsService.cancelPendingForChat(chatId)
   }
 
   recoverCrashedJobs(): number {

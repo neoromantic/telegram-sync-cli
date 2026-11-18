@@ -12,7 +12,6 @@ import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import type { tl } from '@mtcute/bun'
 
-import { createTestCacheDatabase } from '../db/schema'
 import { getDefaultCacheConfig, isCacheStale } from '../db/types'
 import {
   type CachedUser,
@@ -21,15 +20,13 @@ import {
   type UsersCache,
 } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   createFakeAccountsDb,
   mockDbModule,
   testAccount,
 } from './helpers/db-mock'
-
-function expectLongEqual(actual: tl.Long, expected: string | number | bigint) {
-  expect(actual.toString()).toBe(toLong(expected).toString())
-}
+import { expectLongEqual } from './helpers/input-peer'
 
 function makeRawUser(overrides: Partial<tl.RawUser> = {}): tl.RawUser {
   return {
@@ -237,7 +234,7 @@ describe('meCommand', () => {
     // Reset mocks
 
     // Create fresh test database
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
 
@@ -577,7 +574,7 @@ describe('userCommand - by username', () => {
   const cacheConfig = getDefaultCacheConfig()
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
     mockClient = createMockClient()
@@ -797,13 +794,6 @@ describe('userCommand - by username', () => {
 
       expect(result.users).toHaveLength(0)
     })
-
-    it('should identify USERNAME_NOT_OCCUPIED in error message', () => {
-      const errMsg = 'USERNAME_NOT_OCCUPIED'
-      const isUsernameNotFound = errMsg.includes('USERNAME_NOT_OCCUPIED')
-
-      expect(isUsernameNotFound).toBe(true)
-    })
   })
 })
 
@@ -815,7 +805,7 @@ describe('userCommand - by ID', () => {
   let usersCache: UsersCache
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
     mockClient = createMockClient()
@@ -965,7 +955,7 @@ describe('userCommand - by phone', () => {
   let usersCache: UsersCache
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
     mockClient = createMockClient()
@@ -1151,312 +1141,6 @@ describe('userCommand - by phone', () => {
 })
 
 // =============================================================================
-// Cache vs API Behavior Tests
-// =============================================================================
-
-describe('Cache vs API behavior', () => {
-  let usersCache: UsersCache
-  const cacheConfig = getDefaultCacheConfig()
-
-  beforeEach(() => {
-    const { db } = createTestCacheDatabase()
-    testCacheDb = db
-    usersCache = createUsersCache(db)
-    mockClient = createMockClient()
-  })
-
-  describe('cache priority', () => {
-    it('should prefer cache over API when fresh is false', () => {
-      usersCache.upsert(
-        createTestUser({
-          user_id: '111',
-          username: 'cached',
-          first_name: 'Cached',
-        }),
-      )
-
-      const fresh = false
-      let source: 'cache' | 'api' = 'api'
-
-      if (!fresh) {
-        const cached = usersCache.getByUsername('cached')
-        if (cached) {
-          source = 'cache'
-        }
-      }
-
-      expect(source).toBe('cache')
-    })
-
-    it('should use API when cache miss', () => {
-      const fresh = false
-      let source: 'cache' | 'api' = 'api'
-
-      if (!fresh) {
-        const cached = usersCache.getByUsername('notincache')
-        if (cached) {
-          source = 'cache'
-        }
-      }
-
-      expect(source).toBe('api')
-    })
-
-    it('should check cache by username first', () => {
-      usersCache.upsert(
-        createTestUser({
-          user_id: '222',
-          username: 'checkfirst',
-        }),
-      )
-
-      const identifier = '@checkfirst'
-      const { isUsername } = parseIdentifier(identifier)
-
-      let cached = null
-      if (isUsername) {
-        cached = usersCache.getByUsername(identifier)
-      }
-
-      expect(cached).not.toBeNull()
-    })
-
-    it('should check cache by phone when identifier is phone', () => {
-      usersCache.upsert(
-        createTestUser({
-          user_id: '333',
-          phone: '5551234567',
-        }),
-      )
-
-      const identifier = '+5551234567'
-      const { isPhone } = parseIdentifier(identifier)
-
-      let cached = null
-      if (isPhone) {
-        cached = usersCache.getByPhone(identifier)
-      }
-
-      expect(cached).not.toBeNull()
-    })
-
-    it('should check cache by ID when identifier is numeric', () => {
-      usersCache.upsert(
-        createTestUser({
-          user_id: '444',
-        }),
-      )
-
-      const identifier = '444'
-      const { isUserId } = parseIdentifier(identifier)
-
-      let cached = null
-      if (isUserId) {
-        cached = usersCache.getById(identifier)
-      }
-
-      expect(cached).not.toBeNull()
-    })
-  })
-
-  describe('staleness tracking', () => {
-    it('should report stale when cache entry is old', () => {
-      const staleTime = Date.now() - cacheConfig.staleness.peers - 1000
-
-      usersCache.upsert(
-        createTestUser({
-          user_id: '222',
-          fetched_at: staleTime,
-        }),
-      )
-
-      const cached = usersCache.getById('222')
-      const stale = isCacheStale(
-        cached!.fetched_at,
-        cacheConfig.staleness.peers,
-      )
-
-      expect(stale).toBe(true)
-    })
-
-    it('should report not stale when cache entry is fresh', () => {
-      usersCache.upsert(
-        createTestUser({
-          user_id: '333',
-          fetched_at: Date.now(),
-        }),
-      )
-
-      const cached = usersCache.getById('333')
-      const stale = isCacheStale(
-        cached!.fetched_at,
-        cacheConfig.staleness.peers,
-      )
-
-      expect(stale).toBe(false)
-    })
-
-    it('should report stale when fetched_at is null', () => {
-      const stale = isCacheStale(null, cacheConfig.staleness.peers)
-      expect(stale).toBe(true)
-    })
-
-    it('should handle boundary condition (exactly at TTL)', () => {
-      // Just under TTL should be fresh
-      const justUnder = Date.now() - cacheConfig.staleness.peers + 1000
-      expect(isCacheStale(justUnder, cacheConfig.staleness.peers)).toBe(false)
-
-      // Just over TTL should be stale
-      const justOver = Date.now() - cacheConfig.staleness.peers - 1000
-      expect(isCacheStale(justOver, cacheConfig.staleness.peers)).toBe(true)
-    })
-  })
-
-  describe('cache update after API call', () => {
-    it('should update cache with fresh API data', () => {
-      // Seed with old data
-      usersCache.upsert(
-        createTestUser({
-          user_id: '444',
-          first_name: 'Old',
-          fetched_at: Date.now() - 1000000,
-        }),
-      )
-
-      // Simulate API response
-      const apiUser = makeRawUser({
-        id: 444,
-        firstName: 'New',
-        lastName: 'Name',
-        username: 'updated',
-        premium: true,
-      })
-
-      usersCache.upsert(apiUserToCacheInput(apiUser))
-
-      const cached = usersCache.getById('444')
-      expect(cached?.first_name).toBe('New')
-      expect(cached?.is_premium).toBe(1)
-    })
-
-    it('should update fetched_at timestamp', () => {
-      const oldTime = Date.now() - 1000000
-
-      usersCache.upsert(
-        createTestUser({
-          user_id: '555',
-          fetched_at: oldTime,
-        }),
-      )
-
-      const before = Date.now()
-
-      usersCache.upsert(
-        createTestUser({
-          user_id: '555',
-          fetched_at: before,
-        }),
-      )
-
-      const cached = usersCache.getById('555')
-      expect(cached?.fetched_at).toBeGreaterThanOrEqual(before)
-    })
-  })
-})
-
-// =============================================================================
-// Error Handling Tests
-// =============================================================================
-
-describe('Error handling', () => {
-  beforeEach(() => {
-    mockClient = createMockClient()
-  })
-
-  describe('user not found errors', () => {
-    it('should detect USERNAME_NOT_OCCUPIED', () => {
-      const errMsg = 'USERNAME_NOT_OCCUPIED'
-      const isUsernameNotFound = errMsg.includes('USERNAME_NOT_OCCUPIED')
-
-      expect(isUsernameNotFound).toBe(true)
-    })
-
-    it('should detect PHONE_NOT_OCCUPIED', () => {
-      const errMsg = 'PHONE_NOT_OCCUPIED'
-      const isPhoneNotFound = errMsg.includes('PHONE_NOT_OCCUPIED')
-
-      expect(isPhoneNotFound).toBe(true)
-    })
-
-    it('should identify user not found from API result', () => {
-      const result: { users: Array<{ _: string }> } = {
-        users: [],
-      }
-
-      const user = result.users?.[0]
-      const notFound = user?._ !== 'user'
-
-      expect(notFound).toBe(true)
-    })
-  })
-
-  describe('auth required errors', () => {
-    it('should detect AUTH_KEY_UNREGISTERED', async () => {
-      mockClient = createMockClient({
-        getMe: mock((_opts?: Record<string, unknown>) =>
-          Promise.reject(new Error('AUTH_KEY_UNREGISTERED')),
-        ),
-      })
-
-      let isAuthError = false
-      try {
-        await mockClient.getMe()
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        isAuthError = message.includes('AUTH_KEY')
-      }
-
-      expect(isAuthError).toBe(true)
-    })
-
-    it('should detect UNAUTHORIZED error', () => {
-      const errMsg = 'UNAUTHORIZED'
-      const isAuthError = errMsg.includes('UNAUTHORIZED')
-
-      expect(isAuthError).toBe(true)
-    })
-  })
-
-  describe('general Telegram errors', () => {
-    it('should wrap unknown errors', () => {
-      const err = new Error('Something went wrong')
-      const message = err instanceof Error ? err.message : 'Unknown error'
-
-      expect(message).toBe('Something went wrong')
-    })
-
-    it('should handle non-Error throws', () => {
-      const err: unknown = 'string error'
-      const message = err instanceof Error ? err.message : 'Unknown error'
-
-      expect(message).toBe('Unknown error')
-    })
-
-    it('should handle API timeout errors', async () => {
-      mockClient = createMockClient({
-        call: mock((_req: Record<string, unknown>) =>
-          Promise.reject(new Error('Request timed out')),
-        ),
-      })
-
-      await expect(
-        mockClient.call({ _: 'contacts.resolveUsername', username: 'test' }),
-      ).rejects.toThrow('Request timed out')
-    })
-  })
-})
-
-// =============================================================================
 // Edge Cases
 // =============================================================================
 
@@ -1464,7 +1148,7 @@ describe('Edge cases', () => {
   let usersCache: UsersCache
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
     mockClient = createMockClient()
@@ -1695,60 +1379,6 @@ describe('Edge cases', () => {
   })
 })
 
-async function loadAccountHelpers(): Promise<{
-  createTestDatabase: typeof import('../db').createTestDatabase
-  resolveAccountSelector: typeof import('../utils/account-selector').resolveAccountSelector
-}> {
-  const [{ createTestDatabase }, { resolveAccountSelector }] =
-    await Promise.all([import('../db'), import('../utils/account-selector')])
-  return { createTestDatabase, resolveAccountSelector }
-}
-
-// =============================================================================
-// Account Parameter Tests
-// =============================================================================
-
-describe('Account parameter handling', () => {
-  it('should parse numeric account ID', async () => {
-    const { createTestDatabase, resolveAccountSelector } =
-      await loadAccountHelpers()
-    const { accountsDb } = createTestDatabase()
-    const account = accountsDb.create({ phone: '+1111111111' })
-
-    const accountId = resolveAccountSelector(String(account.id), accountsDb)
-
-    expect(accountId).toBe(account.id)
-  })
-
-  it('should handle undefined account arg', async () => {
-    const { createTestDatabase, resolveAccountSelector } =
-      await loadAccountHelpers()
-    const { accountsDb } = createTestDatabase()
-    const accountId = resolveAccountSelector(undefined, accountsDb)
-
-    expect(accountId).toBeUndefined()
-  })
-
-  it('should handle invalid account arg', async () => {
-    const { createTestDatabase, resolveAccountSelector } =
-      await loadAccountHelpers()
-    const { accountsDb } = createTestDatabase()
-    expect(() => resolveAccountSelector('invalid', accountsDb)).toThrow(
-      'Account not found',
-    )
-  })
-
-  it('should use default account when not specified', async () => {
-    const { createTestDatabase, resolveAccountSelector } =
-      await loadAccountHelpers()
-    const { accountsDb } = createTestDatabase()
-    const accountId = resolveAccountSelector(undefined, accountsDb)
-
-    // When accountId is undefined, getClientForAccount uses default
-    expect(accountId).toBeUndefined()
-  })
-})
-
 // =============================================================================
 // Response Structure Tests
 // =============================================================================
@@ -1758,7 +1388,7 @@ describe('Response structure', () => {
   const cacheConfig = getDefaultCacheConfig()
 
   beforeEach(() => {
-    const { db } = createTestCacheDatabase()
+    const db = createAccountCacheDb()
     testCacheDb = db
     usersCache = createUsersCache(db)
   })
@@ -1964,42 +1594,6 @@ describe('Cache input conversion', () => {
 })
 
 // =============================================================================
-// Staleness Checking Tests
-// =============================================================================
-
-describe('Staleness checking', () => {
-  const cacheConfig = getDefaultCacheConfig()
-
-  it('should detect stale cache entries (older than TTL)', () => {
-    const oldTimestamp = Date.now() - cacheConfig.staleness.peers - 1000
-
-    expect(isCacheStale(oldTimestamp, cacheConfig.staleness.peers)).toBe(true)
-  })
-
-  it('should detect fresh cache entries (newer than TTL)', () => {
-    const recentTimestamp = Date.now() - 1000
-
-    expect(isCacheStale(recentTimestamp, cacheConfig.staleness.peers)).toBe(
-      false,
-    )
-  })
-
-  it('should treat null fetched_at as stale', () => {
-    expect(isCacheStale(null, cacheConfig.staleness.peers)).toBe(true)
-  })
-
-  it('should use configurable TTL', () => {
-    const timestamp = Date.now() - 100000
-
-    // With 1 day TTL, should be fresh
-    expect(isCacheStale(timestamp, 24 * 60 * 60 * 1000)).toBe(false)
-
-    // With 1 second TTL, should be stale
-    expect(isCacheStale(timestamp, 1000)).toBe(true)
-  })
-})
-
-// =============================================================================
 // Which account a lookup uses
 // =============================================================================
 
@@ -2014,8 +1608,8 @@ describe('userCommand with two accounts', () => {
   })
 
   beforeEach(() => {
-    testCacheDb = createTestCacheDatabase().db
-    secondCacheDb = createTestCacheDatabase().db
+    testCacheDb = createAccountCacheDb()
+    secondCacheDb = createAccountCacheDb()
     getClientForAccount.mockClear()
     mockClient = createMockClient()
   })

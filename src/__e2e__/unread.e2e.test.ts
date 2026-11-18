@@ -7,6 +7,7 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import type { UnreadResult } from '../commands/messages/read-state'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
@@ -109,6 +110,7 @@ function seed(db: Database): void {
       }),
     ].map(dialogToCacheInput),
   )
+  takePartIn(db, BOOK_CLUB_ID, TEAM_ID)
   createMessagesCache(db).upsertBatch([
     message(ALICE_PEER, 10),
     message(ALICE_PEER, 11),

@@ -8,6 +8,7 @@ import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { main } from '../cli'
 import { COMMAND_ACCESS, runnableCommands } from '../commands/access'
 import { dialogToCacheInput } from '../commands/chats/helpers'
@@ -129,6 +130,7 @@ describe('E2E: read-only mode and allowedChats', () => {
         }),
       ].map(dialogToCacheInput),
     )
+    takePartIn(db, TEAM_ID, CLUB_ID)
     createMessagesCache(db).upsertBatch([
       message(TEAM_PEER, 1, 'hello team'),
       message(CLUB_PEER, 2, 'hello club'),
@@ -344,6 +346,7 @@ describe('E2E: read-only mode and allowedChats', () => {
           if (done) throw new Error(`wait exited: ${stderr}`)
           stderr += new TextDecoder().decode(value)
         }
+        takePartIn(env.openCacheDb(1), TEAM_ID, CLUB_ID)
         createMessagesCache(env.openCacheDb(1)).upsertBatch([
           message(CLUB_PEER, 20, 'club news'),
           message(TEAM_PEER, 21, 'team news'),

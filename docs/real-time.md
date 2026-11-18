@@ -20,8 +20,12 @@ Handlers live in:
 
 1. **Event received** from mtcute
 2. **Normalize** message metadata (chat type, media type, forward attribution)
-3. **Persist** into `messages_cache`
-4. **Update counters** in `chat_sync_state` (`synced_messages`, `last_forward_sync`). The
+3. **Persist** into `messages_cache`, unless the chat is a group the account
+   [doesn't take part in](sync-strategy.md#group-participation). An own message counts before it
+   is written, so it turns such a group back on and is cached itself; a service message
+   doesn't count.
+4. **Update counters** in `chat_sync_state` (`synced_messages`, `last_forward_sync`) by the
+   messages actually added. The
    forward cursor and `top_message_id` stay where they are: forward catch-up moves the cursor
    after fetching the messages below (see [sync-strategy.md](sync-strategy.md)).
 
@@ -35,8 +39,8 @@ it.
 
 ### Channels
 
-The handlers cache every message mtcute delivers, in a chat with sync off too, and never move
-its cursor. What mtcute delivers for a channel depends on Telegram and on mtcute's update
+The handlers cache every message mtcute delivers, in a chat with sync off too (a group only
+while the account takes part in it), and never move its cursor. What mtcute delivers for a channel depends on Telegram and on mtcute's update
 state:
 
 - Telegram "will usually send passive updates" for the channels and supergroups you are in,
@@ -52,7 +56,7 @@ state:
 
 So a channel with sync off may get none of its posts live. Each dialog pass (on start, after a
 reconnect and after a wake) caches the newest message of every chat with sync off, from the
-dialog list it reads anyway. Older posts of such a channel come only with `tg chats sync`.
+dialog list it reads anyway (in a group, only while the account takes part in it). Older posts of such a channel come only with `tg chats sync`.
 
 ### Unread counts
 
@@ -131,7 +135,9 @@ and reconnect asks for a hash check at the next look (see
 and check it every 200 ms, so a message comes back within about a second of being stored
 ([cli-commands.md](cli-commands.md#waiting-for-new-messages)). The daemon stores a message as
 soon as mtcute delivers it: every new message of a private chat or group, in a chat with sync
-off too, and the channel posts Telegram pushes (see [Channels](#channels): some channels get
+off too (a group only while the account takes part in it, see
+[group participation](sync-strategy.md#group-participation): in another group they see nothing
+until your next message there), and the channel posts Telegram pushes (see [Channels](#channels): some channels get
 none live, and their newest post arrives with the next dialog pass). Messages sent while the
 daemon was stopped or reconnecting arrive with catch-up after the start or reconnect, in the
 chats that get it ([sync-strategy.md](sync-strategy.md)). An edit or a delete changes a stored message and is not a new one.
@@ -149,5 +155,4 @@ realtime gaps.
 - `src/daemon/daemon-accounts.ts`
 - `src/daemon/handlers.ts`
 - `src/daemon/daemon-contacts.ts` (contact updates)
-- `src/utils/message-parser.ts`
 - `src/db/messages-cache.ts`

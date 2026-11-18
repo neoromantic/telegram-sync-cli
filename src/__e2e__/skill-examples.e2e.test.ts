@@ -9,6 +9,7 @@ import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
 import { voiceMessage } from '../__tests__/helpers/media-messages'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createChatsCache } from '../db/chats-cache'
@@ -78,6 +79,7 @@ function seed(db: Database): void {
         : 'see you at the wall at 7'
     return { _: 'message', id, peerId: CLUB, fromId: MEMBER, date, message }
   })
+  takePartIn(db, CLUB_ID)
   createMessagesCache(db).upsertBatch(
     raws.map((raw) => parseRawMessage(raw, CLUB_ID)!),
   )

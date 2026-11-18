@@ -4,7 +4,6 @@
  * same order as sorting every match by date, then rowid. The cache is too
  * small to walk at the default threshold, so most checks pass a lower one.
  */
-import { Database } from 'bun:sqlite'
 import { beforeAll, describe, expect, it } from 'bun:test'
 import {
   createMessagesSearch,
@@ -13,12 +12,11 @@ import {
   searchNewestFirst,
   toFts5Query,
 } from '../db/messages-search'
-import { initCacheSchema } from '../db/schema'
 import {
   buildChatSearchExpr,
   buildSenderSearchExpr,
 } from '../db/search-reindex'
-import { initSyncSchema } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 /** A seeded PRNG, so a failure repeats */
 function mulberry32(seed: number): () => number {
@@ -71,11 +69,9 @@ function oldMessageText(page: number): string {
 }
 
 describe('search newest first (#118)', () => {
-  const db = new Database(':memory:')
+  const db = createAccountCacheDb()
 
   beforeAll(() => {
-    initCacheSchema(db)
-    initSyncSchema(db)
     for (const [i, chatId] of CHATS.entries()) {
       db.query(
         `INSERT INTO chats_cache (chat_id, type, title, username, fetched_at, raw_json)

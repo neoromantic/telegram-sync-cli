@@ -10,7 +10,9 @@
  * - api_activity: API call audit log
  * - cache_meta: which account the file belongs to
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
+
+import type { ChatType } from './types'
 
 /**
  * The most a WAL keeps on disk after a checkpoint, 64 MB. Without a limit a
@@ -197,15 +199,6 @@ export function initCacheSchema(db: Database): void {
   `)
 }
 
-/**
- * Create an in-memory database with cache schema for testing
- */
-export function createTestCacheDatabase(): { db: Database } {
-  const db = new Database(':memory:')
-  initCacheSchema(db)
-  return { db }
-}
-
 // Row class types for typed queries
 
 /** User cache row class */
@@ -229,7 +222,7 @@ export class UserCacheRow {
 /** Chat cache row class */
 export class ChatCacheRow {
   chat_id!: string
-  type!: string
+  type!: ChatType
   title!: string | null
   username!: string | null
   member_count!: number | null
@@ -246,17 +239,6 @@ export class ChatCacheRow {
   read_inbox_max_id!: number | null
 }
 
-/** Sync state row class */
-export class SyncStateRow {
-  entity_type!: string
-  forward_cursor!: string | null
-  backward_cursor!: string | null
-  is_complete!: number
-  last_sync_at!: number | null
-  created_at!: number
-  updated_at!: number
-}
-
 /** Rate limit row class */
 export class RateLimitRow {
   method!: string
@@ -264,15 +246,4 @@ export class RateLimitRow {
   call_count!: number
   last_call_at!: number | null
   flood_wait_until!: number | null
-}
-
-/** API activity row class */
-export class ApiActivityRow {
-  id!: number
-  timestamp!: number
-  method!: string
-  success!: number
-  error_code!: string | null
-  response_ms!: number | null
-  context!: string | null
 }

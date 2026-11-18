@@ -222,15 +222,14 @@ function isCorruptError(err: unknown): boolean {
   )
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 /** What a failed open or fold means for the file */
 function foldFailure(err: unknown): FoldResult {
   if (isBusyError(err)) return { state: 'in_use' }
   if (isCorruptError(err)) return { state: 'unreadable' }
-  return { state: 'error', error: errorMessage(err) }
+  return {
+    state: 'error',
+    error: err instanceof Error ? err.message : String(err),
+  }
 }
 
 function hasRows(db: Database, table: string): boolean {
@@ -315,7 +314,10 @@ export function foldSharedCache(
   try {
     if (removeFoldSidecars(path) === 'in_use') return { state: 'in_use' }
   } catch (err) {
-    return { state: 'error', error: errorMessage(err) }
+    return {
+      state: 'error',
+      error: err instanceof Error ? err.message : String(err),
+    }
   }
 
   return hasData === undefined

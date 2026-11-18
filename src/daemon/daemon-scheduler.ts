@@ -24,7 +24,7 @@ import {
   createRealSyncWorker,
   type RealJobResult,
   type RealSyncWorker,
-} from './sync-worker'
+} from './sync-worker-real'
 
 /**
  * A sync worker on the account's own cache, rate limits and client. The
