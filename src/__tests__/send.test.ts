@@ -533,8 +533,8 @@ describe("Peer Resolution - By Phone Number", () => {
         }),
       });
 
-      await expect(resolvePeer(mockClient, "+19999999999", usersCache, chatsCache)).rejects.toThrow(
-        "Could not resolve phone number +19999999999",
+      await expect(resolvePeer(mockClient, "+15559999999", usersCache, chatsCache)).rejects.toThrow(
+        "Could not resolve phone number +15559999999",
       );
     });
 
@@ -556,8 +556,8 @@ describe("Peer Resolution - By Phone Number", () => {
         }),
       });
 
-      await expect(resolvePeer(mockClient, "+18888888888", usersCache, chatsCache)).rejects.toThrow(
-        "Could not resolve phone number +18888888888",
+      await expect(resolvePeer(mockClient, "+15558888888", usersCache, chatsCache)).rejects.toThrow(
+        "Could not resolve phone number +15558888888",
       );
     });
   });

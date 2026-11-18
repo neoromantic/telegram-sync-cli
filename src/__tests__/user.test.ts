@@ -978,7 +978,7 @@ describe("userCommand - by phone", () => {
                 id: 999,
                 firstName: "Phone",
                 lastName: "Resolved",
-                phone: "5551112222",
+                phone: "15551112222",
                 accessHash: toLong("111222"),
               },
             ],
@@ -986,7 +986,7 @@ describe("userCommand - by phone", () => {
         ),
       });
 
-      const phone = "+5551112222".replace(/[\s+\-()]/g, "");
+      const phone = "+15551112222".replace(/[\s+\-()]/g, "");
       const result = (await mockClient.call({
         _: "contacts.resolvePhone",
         phone,
@@ -998,7 +998,7 @@ describe("userCommand - by phone", () => {
       if (!user) {
         throw new Error("Expected RawUser in resolvePhone response");
       }
-      expect(user.phone).toBe("5551112222");
+      expect(user.phone).toBe("15551112222");
     });
 
     it("should build correct resolvePhone request", () => {

@@ -105,7 +105,7 @@ describe("reconnect scheduling", () => {
     const ctx = testDaemonContext();
     const accountState: AccountConnectionState = {
       accountId: 2,
-      phone: "+12223334444",
+      phone: "+15552223344",
       name: null,
       status: "error",
       reconnectAttempts: 0,
@@ -121,7 +121,7 @@ describe("reconnect scheduling", () => {
     const ctx = testDaemonContext();
     const accountState: AccountConnectionState = {
       accountId: 3,
-      phone: "+19990000000",
+      phone: "+15559990000",
       name: null,
       status: "error",
       reconnectAttempts: ctx.reconnectConfig.maxAttempts,

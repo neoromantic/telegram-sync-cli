@@ -330,7 +330,7 @@ describe("Authentication Commands", () => {
 
       deps.createClient = mock(() => client);
 
-      await loginWithPhone("+19998887777", deps);
+      await loginWithPhone("+15559998877", deps);
 
       expect(client.destroy).toHaveBeenCalled();
     });
@@ -399,7 +399,7 @@ describe("Authentication Commands", () => {
 
     it("merges duplicate user_id accounts and keeps existing", async () => {
       const existing = accountsDb.create({
-        phone: "+19990000000",
+        phone: "+15559990000",
         user_id: 456,
         name: "Existing",
       });
@@ -409,7 +409,7 @@ describe("Authentication Commands", () => {
       expect(result.success).toBe(true);
       expect(result.account?.id).toBe(existing.id);
       expect(accountsDb.count()).toBe(1);
-      expect(accountsDb.getById(existing.id)?.phone).toBe("+19990000000");
+      expect(accountsDb.getById(existing.id)?.phone).toBe("+15559990000");
     });
   });
 
