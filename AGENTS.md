@@ -2,6 +2,7 @@
 
 <!-- devkit:agents v1 -->
 <!-- managed by devkit v1: edit in https://github.com/neoromantic/devkit/blob/main/agents/AGENTS.shared.md -->
+
 ## Shared rules (devkit)
 
 These rules apply to people and coding agents in every repo that uses
@@ -20,6 +21,7 @@ Where they conflict, the project section wins.
 Use the project section's native commands for checks, offline tests and builds:
 
 - Bun: `bun run <script>` (`check`, or `lint` and `typecheck`; `test`, `test:e2e`, `build`).
+  `bun run format` formats; `check` fails on unformatted code and on lint errors.
 - Python: the documented `uv run` / `uvx` commands, such as pytest, unittest and ruff.
 - Go: the documented `go` commands from `go.mod`. Do not add Bun wrappers for Python or Go.
 - Use Bun, uv or Go modules for installs. Use npm only for `npm publish` and `npm view`.
@@ -30,6 +32,9 @@ Use the project section's native commands for checks, offline tests and builds:
 - README, docs and affected demos change with the behaviour they describe; follow the
   [product content standard](https://github.com/neoromantic/devkit/blob/main/docs/standards/product-content.md).
 - No new warnings, no commented-out code, no stray debug output.
+- JS and TS follow the [lint and format standard](https://github.com/neoromantic/devkit/blob/main/docs/standards/lint-format.md):
+  no prose comments (rationale goes in the PR), tests beside their code, no mocks of the code
+  under test, no fixed sleeps or retries. Fix the code; exceptions go in `.oxlintrc.json`.
 
 ### Commits and releases
 
@@ -46,8 +51,10 @@ Use the project section's native commands for checks, offline tests and builds:
 - Don't add agent hooks that rewrite tracked files.
 - `AGENTS.md` is the canonical instruction file. `CLAUDE.md` contains only `@AGENTS.md`.
 - Files marked "managed by devkit" (this block, `SECURITY.md`, `CONTRIBUTING.md`, the PR
-  template, `.gitleaks.toml`, `.github/zizmor.yml`, `renovate.json`, `lefthook.yml` and the
-  CI stub) are synced from devkit. Change them there, not here.
+  template, `.gitleaks.toml`, `.github/zizmor.yml`, `renovate.json`, `lefthook.yml`, the
+  CI stub, `.oxfmtrc.jsonc` and `.oxlintrc.devkit.jsonc`) are synced from devkit. Change them
+  there, not here.
+
 <!-- /devkit:agents -->
 
 ## Project
@@ -60,14 +67,14 @@ and raw access to any MTProto method. It runs on Bun and is built on
 
 ```bash
 bun run src/index.ts <command>   # run the CLI from source
-bun run check                    # lint (Biome) + typecheck + check:knip
+bun run check                    # format:check (oxfmt) + lint (oxlint) + typecheck + check:knip
+bun run format                   # format the repo with oxfmt
 bun run check:knip               # Knip: unused files and dependencies, unlisted or unresolved imports
 bun run test                     # unit tests, offline
 bun run test:e2e                 # CLI e2e tests, offline
 bun run build                    # compile dist/tg for this platform
 bun run build:all                # cross-compile every target
 bun run test:integration         # real Telegram API, opt-in (see Testing)
-bun run lint:fix                 # Biome autofix (also the pre-commit hook)
 bun run bench:storage            # storage benchmark on made-up data, opt-in (docs/storage.md)
 bun run docs:outputs             # regenerate output tables in docs/cli-commands.md
 ```
@@ -81,8 +88,12 @@ bun run docs:outputs             # regenerate output tables in docs/cli-commands
 - The compiled binary (70–100 MB, embedded Bun + SQLite) is never shipped in the npm tarball.
   The release workflow attaches one per target to the GitHub Release, and the Homebrew formula
   `neoromantic/tap/tg` installs it. Targets: darwin arm64/x64, linux x64/arm64, windows x64.
-- Git hooks: `lefthook.yml` runs `lint:fix` and `typecheck` on commit, plus devkit's gitleaks
-  and privacy scan (needs `gitleaks` on `PATH`).
+- Lint and format: oxfmt and oxlint with the landmines rules, devkit's shared standard
+  (`.oxfmtrc.jsonc`, `.oxlintrc.devkit.jsonc`). This repo's exceptions go in `.oxlintrc.json`,
+  paths oxfmt must leave alone in `.prettierignore`. The landmines rules need Node >= 22.18 on
+  `PATH`.
+- Git hooks: `lefthook.yml` runs `typecheck` on commit, plus devkit's shared hooks: gitleaks, the
+  privacy scan and the oxfmt/oxlint check of staged files (needs `gitleaks` on `PATH`).
 - CI: `.github/workflows/ci.yml` calls devkit's `ci-bun` (check, build, pack, test, test:e2e)
   and `hygiene` workflows. `ci-bun`'s pack step installs the npm tarball in a clean project and
   runs `tg --help` and `tg --version` with no Telegram credentials; the `binary` job compiles
@@ -181,7 +192,9 @@ src/services/        Telegram client manager (lazy credentials)
 src/db/              schema, caches, sync jobs, per-chat sync state, rate limits
 src/daemon/          daemon entry, loop, scheduler, update handlers, sync workers
 src/utils/           output, args, formatting, mappers, peer resolution
-src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integration__/  live API
+*.test.ts            unit tests, beside the module they test
+*.e2e.test.ts        CLI e2e (mostly src/test/)   *.integration.test.ts  live API (src/test/)
+src/test/            CLI-level e2e and integration tests, shared *.test-utils.ts helpers
 ~/.telegram-sync-cli/  user data: config.json, daemon.pid, data.db (accounts),
                        session_<id>.db (mtcute), accounts/<id>/cache.db (the
                        account's cache, sync state, jobs, rate limits)
@@ -211,20 +224,20 @@ longer exists since mtcute 0.29.
   `TELEGRAM_SYNC_CLI_DATA_DIR`:
 
   ```ts
-  const env = createTestEnvironment('my-test')
-  env.initDatabase()
-  env.seedAccounts([{ phone: '+15550000000', is_active: true }])
-  createChatsCache(env.openCacheDb(1)).upsertMany(chats) // env.cachePath(1)
-  const result = await runCliSuccess(['chats', 'list'], env.getCliOptions())
-  expect(result.json?.success).toBe(true)
-  env.cleanup()
+  const env = createTestEnvironment("my-test");
+  env.initDatabase();
+  env.seedAccounts([{ phone: "+15550000000", is_active: true }]);
+  createChatsCache(env.openCacheDb(1)).upsertMany(chats); // env.cachePath(1)
+  const result = await runCliSuccess(["chats", "list"], env.getCliOptions());
+  expect(result.json?.success).toBe(true);
+  env.cleanup();
   ```
 
   A test that writes `<dataDir>/cache.db` (the shared cache of 0.3 and older) seeds it from a
   child process with `seedInChild`: a file the test process wrote stays open after `close()`,
   and tg moves the file only when no other process has it open.
 
-- Integration tests (`src/__integration__/`) are a live smoke suite against the real API and
+- Integration tests (`src/test/telegram.integration.test.ts`) are a live smoke suite against the real API and
   are never part of `test`. They need `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` (or the
   `TELEGRAM_TEST_` variants), `TELEGRAM_TEST_ACCOUNT` and `TELEGRAM_TEST_SESSION_PATH` (or
   `TELEGRAM_TEST_SESSION`), pointing at a session logged in only for tests. Each test copies the

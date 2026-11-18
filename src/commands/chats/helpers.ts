@@ -1,121 +1,115 @@
-import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
+import type { Dialog, TelegramClient, tl } from "@mtcute/bun";
 
-import type { CachedChat, CachedChatInput } from '../../db/chats-cache'
-import type { ChatType } from '../../db/types'
-import { toRawJson } from '../../utils/raw-json'
-import {
-  toPeerIdFromRawChat,
-  toPeerIdFromRawPeer,
-} from '../../utils/telegram-peer-ids'
-import type { ChatItem } from './list-output'
+import type { CachedChat, CachedChatInput } from "../../db/chats-cache";
+import type { ChatType } from "../../db/types";
+import { toRawJson } from "../../utils/raw-json";
+import { toPeerIdFromRawChat, toPeerIdFromRawPeer } from "../../utils/telegram-peer-ids";
 
 export const CHAT_TYPE_VALUES = [
-  'private',
-  'group',
-  'supergroup',
-  'channel',
-  'community',
-] as const satisfies ChatType[]
+  "private",
+  "group",
+  "supergroup",
+  "channel",
+  "community",
+] as const satisfies ChatType[];
 
 export function isValidChatType(value: string | undefined): value is ChatType {
-  return value !== undefined && CHAT_TYPE_VALUES.includes(value as ChatType)
+  return value !== undefined && CHAT_TYPE_VALUES.includes(value as ChatType);
 }
 
-type ChatRow = CachedChat | CachedChatInput
+type ChatRow = CachedChat | CachedChatInput;
 
-export function chatRowToItem(chat: ChatRow): ChatItem {
+export function chatRowToItem(chat: ChatRow) {
   return {
     id: Number(chat.chat_id),
     type: chat.type,
-    title: chat.title ?? '',
+    title: chat.title ?? "",
     username: chat.username,
     memberCount: chat.member_count,
     lastMessageAt: chat.last_message_at,
     isCreator: chat.is_creator === 1,
     isAdmin: chat.is_admin === 1,
     unreadCount: chat.unread_count ?? null,
-  }
+  };
 }
 
-export function filterChatsByType(
-  chats: CachedChatInput[],
-  typeFilter?: ChatType,
-): CachedChatInput[] {
-  if (!typeFilter) return chats
-  return chats.filter((chat) => chat.type === typeFilter)
+export function filterChatsByType(chats: CachedChatInput[], typeFilter?: ChatType) {
+  if (!typeFilter) return chats;
+  return chats.filter((chat) => chat.type === typeFilter);
 }
 
-export function getChatType(dialog: Dialog): ChatType {
-  const peer = dialog.peer
-  if (peer.type === 'user') return 'private'
-  if (peer.chatType === 'community') return 'community'
-  if (peer.chatType === 'supergroup' || peer.chatType === 'gigagroup') {
-    return 'supergroup'
+export function getChatType(dialog: Dialog) {
+  const peer = dialog.peer;
+  if (peer.type === "user") return "private";
+  if (peer.chatType === "community") return "community";
+  if (peer.chatType === "supergroup" || peer.chatType === "gigagroup") {
+    return "supergroup";
   }
-  if (peer.chatType === 'channel' || peer.chatType === 'monoforum') {
-    return 'channel'
+  if (peer.chatType === "channel" || peer.chatType === "monoforum") {
+    return "channel";
   }
-  return 'group'
+  return "group";
 }
 
 /**
  * A chats_cache row for a dialog, under its marked peer ID: the user ID for
  * a private chat, -N for basic group N and -100…N for channel or community N.
  */
-export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
-  const rawPeer = dialog.raw.peer
-  const peer = dialog.peer
-  const type = getChatType(dialog)
-  const lastMessageAt = dialog.lastMessage?.date ?? null
+export function dialogToCacheInput(dialog: Dialog) {
+  const rawPeer = dialog.raw.peer;
+  const peer = dialog.peer;
+  const type = getChatType(dialog);
+  const lastMessageAt = dialog.lastMessage?.date ?? null;
 
-  let title: string | null = null
-  let username: string | null = null
-  let memberCount: number | null = null
-  let accessHash: string | null = null
+  let title: string | null = null;
+  let username: string | null = null;
+  let memberCount: number | null = null;
+  let accessHash: string | null = null;
 
-  if (rawPeer._ === 'peerUser' && peer.type === 'user') {
-    title = peer.displayName || null
-    username = peer.username ?? null
-    const rawUser = peer.raw
-    if (rawUser && (rawUser._ === 'user' || rawUser._ === 'userEmpty')) {
-      accessHash = rawUser.accessHash ? String(rawUser.accessHash) : null
+  if (rawPeer._ === "peerUser" && peer.type === "user") {
+    title = peer.displayName || null;
+    username = peer.username ?? null;
+    const rawUser = peer.raw;
+    if (rawUser && (rawUser._ === "user" || rawUser._ === "userEmpty")) {
+      accessHash = rawUser.accessHash ? String(rawUser.accessHash) : null;
     }
-  } else if (rawPeer._ === 'peerChat' && peer.type === 'chat') {
-    title = peer.title ?? null
-    memberCount = peer.membersCount ?? null
-  } else if (rawPeer._ === 'peerChannel' && peer.type === 'chat') {
-    title = peer.title ?? null
-    username = peer.username ?? null
-    memberCount = peer.membersCount ?? null
-    const rawChat = peer.raw
+  } else if (rawPeer._ === "peerChat" && peer.type === "chat") {
+    title = peer.title ?? null;
+    memberCount = peer.membersCount ?? null;
+  } else if (rawPeer._ === "peerChannel" && peer.type === "chat") {
+    title = peer.title ?? null;
+    username = peer.username ?? null;
+    memberCount = peer.membersCount ?? null;
+    const rawChat = peer.raw;
     if (hasChannelId(rawChat)) {
-      accessHash = rawChat.accessHash ? String(rawChat.accessHash) : null
+      accessHash = rawChat.accessHash ? String(rawChat.accessHash) : null;
     }
   }
 
-  return {
+  const result: CachedChatInput = {
     chat_id: String(toPeerIdFromRawPeer(rawPeer)),
     type,
     title,
     username,
     member_count: memberCount,
     access_hash: accessHash,
-    is_creator: peer.type === 'chat' && peer.isCreator ? 1 : 0,
-    is_admin: peer.type === 'chat' && peer.isAdmin ? 1 : 0,
+    is_creator: peer.type === "chat" && peer.isCreator ? 1 : 0,
+    is_admin: peer.type === "chat" && peer.isAdmin ? 1 : 0,
     last_message_id: dialog.raw.topMessage ?? null,
     last_message_at: lastMessageAt ? lastMessageAt.getTime() : null,
     fetched_at: Date.now(),
     raw_json: toRawJson(dialog.raw),
     unread_count: dialog.raw.unreadCount,
     read_inbox_max_id: dialog.raw.readInboxMaxId,
-  }
+  };
+  return result;
 }
 
-export function userToPrivateChatCacheInput(user: tl.RawUser): CachedChatInput {
-  return {
+export function userToPrivateChatCacheInput(user: tl.RawUser) {
+  const result: CachedChatInput = {
     chat_id: String(user.id),
-    type: 'private',
-    title: [user.firstName, user.lastName].filter(Boolean).join(' '),
+    type: "private",
+    title: [user.firstName, user.lastName].filter(Boolean).join(" "),
     username: user.username ?? null,
     member_count: null,
     access_hash: user.accessHash ? String(user.accessHash) : null,
@@ -125,61 +119,53 @@ export function userToPrivateChatCacheInput(user: tl.RawUser): CachedChatInput {
     last_message_at: null,
     fetched_at: Date.now(),
     raw_json: toRawJson(user),
-  }
+  };
+  return result;
 }
 
 /** A chat that a resolved username or an update can carry */
-export type ResolvedChat = Exclude<tl.TypeChat, tl.RawChatEmpty>
+export type ResolvedChat = Exclude<tl.TypeChat, tl.RawChatEmpty>;
 
-/**
- * A chat with a channel ID (-100…), reached with its access hash: a channel
- * or a community
- */
 function hasChannelId(
   chat: tl.TypeChat,
-): chat is
-  | tl.RawChannel
-  | tl.RawChannelForbidden
-  | tl.RawCommunity
-  | tl.RawCommunityForbidden {
+): chat is tl.RawChannel | tl.RawChannelForbidden | tl.RawCommunity | tl.RawCommunityForbidden {
   return (
-    chat._ === 'channel' ||
-    chat._ === 'channelForbidden' ||
-    chat._ === 'community' ||
-    chat._ === 'communityForbidden'
-  )
+    chat._ === "channel" ||
+    chat._ === "channelForbidden" ||
+    chat._ === "community" ||
+    chat._ === "communityForbidden"
+  );
 }
 
-function rawChatType(peer: ResolvedChat): ChatType {
-  if (peer._ === 'community' || peer._ === 'communityForbidden') {
-    return 'community'
+function rawChatType(peer: ResolvedChat) {
+  if (peer._ === "community" || peer._ === "communityForbidden") {
+    return "community";
   }
-  if (peer._ === 'channel' || peer._ === 'channelForbidden') {
-    const isMega = 'megagroup' in peer && Boolean(peer.megagroup)
-    const isGiga = 'gigagroup' in peer && Boolean(peer.gigagroup)
-    return isMega || isGiga ? 'supergroup' : 'channel'
+  if (peer._ === "channel" || peer._ === "channelForbidden") {
+    const isMega = "megagroup" in peer && Boolean(peer.megagroup);
+    const isGiga = "gigagroup" in peer && Boolean(peer.gigagroup);
+    return isMega || isGiga ? "supergroup" : "channel";
   }
-  return 'group'
+  return "group";
 }
 
 /** A chats_cache row for a raw chat, under its marked peer ID */
-export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
-  return {
+export function rawChatToCacheInput(chat: ResolvedChat) {
+  const result: CachedChatInput = {
     chat_id: String(toPeerIdFromRawChat(chat)),
     type: rawChatType(chat),
-    title: 'title' in chat ? (chat.title ?? null) : null,
-    username: 'username' in chat ? (chat.username ?? null) : null,
-    member_count:
-      'participantsCount' in chat ? (chat.participantsCount ?? null) : null,
-    access_hash:
-      hasChannelId(chat) && chat.accessHash ? String(chat.accessHash) : null,
-    is_creator: 'creator' in chat && chat.creator ? 1 : 0,
-    is_admin: 'adminRights' in chat && chat.adminRights ? 1 : 0,
+    title: "title" in chat ? (chat.title ?? null) : null,
+    username: "username" in chat ? (chat.username ?? null) : null,
+    member_count: "participantsCount" in chat ? (chat.participantsCount ?? null) : null,
+    access_hash: hasChannelId(chat) && chat.accessHash ? String(chat.accessHash) : null,
+    is_creator: "creator" in chat && chat.creator ? 1 : 0,
+    is_admin: "adminRights" in chat && chat.adminRights ? 1 : 0,
     last_message_id: null,
     last_message_at: null,
     fetched_at: Date.now(),
     raw_json: toRawJson(chat),
-  }
+  };
+  return result;
 }
 
 /**
@@ -188,16 +174,11 @@ export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
  * dialogs, and mtcute's dialog list drops it (#58). One request; errors are
  * left to the caller.
  */
-export async function fetchJoinedCommunities(
-  client: Pick<TelegramClient, 'getJoinedCommunities'>,
-): Promise<CachedChatInput[]> {
-  const chats = await client.getJoinedCommunities()
-  return (
-    chats
-      // A min community's access hash works only in the update that carried it
-      .filter((chat) => !(chat.raw._ === 'community' && chat.raw.min))
-      .map((chat) => rawChatToCacheInput(chat.raw))
-  )
+export async function fetchJoinedCommunities(client: Pick<TelegramClient, "getJoinedCommunities">) {
+  const chats = await client.getJoinedCommunities();
+  return chats
+    .filter((chat) => !(chat.raw._ === "community" && chat.raw.min))
+    .map((chat) => rawChatToCacheInput(chat.raw));
 }
 
 /**
@@ -206,18 +187,24 @@ export async function fetchJoinedCommunities(
  * give one: an empty peer, or a "min" user, channel or community, whose
  * access hash works only in the update that carried it.
  */
-export function rawPeerToCacheInput(
-  peer: tl.TypeUser | tl.TypeChat,
-): CachedChatInput | null {
+export function rawPeerToCacheInput(peer: tl.TypeUser | tl.TypeChat) {
   switch (peer._) {
-    case 'user':
-      return peer.min ? null : userToPrivateChatCacheInput(peer)
-    case 'chat':
-      return rawChatToCacheInput(peer)
-    case 'channel':
-    case 'community':
-      return peer.min ? null : rawChatToCacheInput(peer)
-    default:
-      return null
+    case "user": {
+      const result: CachedChatInput | null = peer.min ? null : userToPrivateChatCacheInput(peer);
+      return result;
+    }
+    case "chat": {
+      const result: CachedChatInput | null = rawChatToCacheInput(peer);
+      return result;
+    }
+    case "channel":
+    case "community": {
+      const result: CachedChatInput | null = peer.min ? null : rawChatToCacheInput(peer);
+      return result;
+    }
+    default: {
+      const result: CachedChatInput | null = null;
+      return result;
+    }
   }
 }

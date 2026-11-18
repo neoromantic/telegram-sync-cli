@@ -1,210 +1,168 @@
-import { SYNC_RETRY_CONFIG } from '../../daemon/sync-retry'
-import { getAccountCachePath } from '../../db'
-import { UPGRADE_DOCS_URL } from '../../db/cache-layout'
-import { checkVacuumDisk } from '../../db/cache-maintenance'
-import { SyncJobStatus, type SyncMode } from '../../db/sync-schema'
-import { formatBytes, formatRelativeTime } from '../../utils/formatting'
-import { formatDuration } from '../../utils/time'
-import type { collectStatus } from '../status'
-import { c, icons, jobStatusIcon, printHeader, printRow } from './formatters'
+import { SYNC_RETRY_CONFIG } from "../../daemon/sync-retry";
+import { getAccountCachePath } from "../../db";
+import { UPGRADE_DOCS_URL } from "../../db/cache-layout";
+import { checkVacuumDisk } from "../../db/cache-maintenance";
+import { SyncJobStatus, type SyncMode } from "../../db/sync-schema";
+import { formatBytes, formatRelativeTime } from "../../utils/formatting";
+import { formatDuration } from "../../utils/time";
+import type { collectStatus } from "../status";
+import { c, icons, jobStatusIcon, printHeader, printRow } from "./formatters";
 
-export type StatusSnapshot = Awaited<ReturnType<typeof collectStatus>>
-type StatusJob = StatusSnapshot['sync']['jobs'][number]
+export type StatusSnapshot = Awaited<ReturnType<typeof collectStatus>>;
+type StatusJob = StatusSnapshot["sync"]["jobs"][number];
 
-/**
- * With several accounts each listed item says whose cache it is in; with
- * one the output stays as it was
- */
-function hasSeveralAccounts(status: StatusSnapshot): boolean {
-  return status.accounts.total > 1
+function hasSeveralAccounts(status: StatusSnapshot) {
+  return status.accounts.total > 1;
 }
 
-function accountTag(status: StatusSnapshot, accountId: number): string {
-  return hasSeveralAccounts(status) ? ` ${c.dim(`acct:${accountId}`)}` : ''
+function accountTag(status: StatusSnapshot, accountId: number) {
+  return hasSeveralAccounts(status) ? ` ${c.dim(`acct:${accountId}`)}` : "";
 }
 
-function printDaemonSection(status: StatusSnapshot): void {
-  printHeader('Daemon')
+function printDaemonSection(status: StatusSnapshot) {
+  printHeader("Daemon");
 
-  const daemonIcon =
-    status.daemon.status === 'running' ? icons.running : icons.stopped
-  const daemonColor = status.daemon.status === 'running' ? c.success : c.error
-  printRow(
-    'Status',
-    daemonColor(`${daemonIcon} ${status.daemon.status.toUpperCase()}`),
-  )
+  const daemonIcon = status.daemon.status === "running" ? icons.running : icons.stopped;
+  const daemonColor = status.daemon.status === "running" ? c.success : c.error;
+  printRow("Status", daemonColor(`${daemonIcon} ${status.daemon.status.toUpperCase()}`));
 
   if (status.daemon.pid) {
-    printRow('PID', c.number(status.daemon.pid))
+    printRow("PID", c.number(status.daemon.pid));
   }
 
-  const { version, version_mismatch } = status.daemon
+  const { version, version_mismatch } = status.daemon;
   if (version !== null || version_mismatch) {
     printRow(
-      'Version',
+      "Version",
       version === null
-        ? c.warning('not recorded')
+        ? c.warning("not recorded")
         : version_mismatch
           ? c.warning(version)
           : c.value(version),
-    )
+    );
   }
 
   if (status.daemon.uptime_seconds !== null) {
-    printRow(
-      'Uptime',
-      c.value(formatDuration(status.daemon.uptime_seconds * 1000)),
-    )
+    printRow("Uptime", c.value(formatDuration(status.daemon.uptime_seconds * 1000)));
   }
 
   if (status.daemon.memory_bytes !== null) {
-    printRow('Memory', c.value(formatBytes(status.daemon.memory_bytes)))
+    printRow("Memory", c.value(formatBytes(status.daemon.memory_bytes)));
   }
 
-  if (
-    status.daemon.connected_accounts > 0 ||
-    status.daemon.total_accounts > 0
-  ) {
+  if (status.daemon.connected_accounts > 0 || status.daemon.total_accounts > 0) {
     printRow(
-      'Connections',
-      `${c.number(status.daemon.connected_accounts)} ${c.dim('/')} ${c.number(status.daemon.total_accounts)} accounts`,
-    )
+      "Connections",
+      `${c.number(status.daemon.connected_accounts)} ${c.dim("/")} ${c.number(status.daemon.total_accounts)} accounts`,
+    );
   }
 
   if (status.daemon.messages_synced > 0) {
-    printRow(
-      'Messages Synced',
-      c.number(status.daemon.messages_synced.toLocaleString()),
-    )
+    printRow("Messages Synced", c.number(status.daemon.messages_synced.toLocaleString()));
   }
 
   if (status.daemon.last_update) {
-    const lastUpdate = new Date(status.daemon.last_update).getTime()
-    printRow('Last Update', c.dim(formatRelativeTime(lastUpdate)))
+    const lastUpdate = new Date(status.daemon.last_update).getTime();
+    printRow("Last Update", c.dim(formatRelativeTime(lastUpdate)));
   }
 
-  if (version_mismatch) printDaemonVersionHint(version, status.cli_version)
+  if (version_mismatch) printDaemonVersionHint(version, status.cli_version);
 }
 
-/** Whether a version is newer than another; an invalid one counts as older */
-function isNewerVersion(version: string, than: string): boolean {
+function isNewerVersion(version: string, than: string) {
   try {
-    return Bun.semver.order(version, than) > 0
+    return Bun.semver.order(version, than) > 0;
   } catch {
-    return false
+    return false;
   }
 }
 
-/**
- * Say what to do about a running daemon of another version. Restarting a
- * newer daemon with this tg would downgrade it, so then use the newer tg.
- */
-function printDaemonVersionHint(
-  version: string | null,
-  cliVersion: string,
-): void {
-  console.log()
+function printDaemonVersionHint(version: string | null, cliVersion: string) {
+  console.log();
   if (version !== null && isNewerVersion(version, cliVersion)) {
     console.log(
       c.warning(
         `  ${icons.warning} The daemon runs ${version}, newer than this tg (${cliVersion}). Use the newer tg; restarting the daemon with this one would downgrade it.`,
       ),
-    )
-    return
+    );
+    return;
   }
 
   const runs =
     version === null
-      ? 'The daemon was started by an older tg.'
-      : `The daemon runs ${version}, this tg is ${cliVersion}.`
-  console.log(
-    c.warning(
-      `  ${icons.warning} ${runs} Restart the daemon to run ${cliVersion}:`,
-    ),
-  )
-  console.log(`    ${c.value('tg daemon stop')}`)
-  console.log(`    ${c.value('tg daemon start')}`)
+      ? "The daemon was started by an older tg."
+      : `The daemon runs ${version}, this tg is ${cliVersion}.`;
+  console.log(c.warning(`  ${icons.warning} ${runs} Restart the daemon to run ${cliVersion}:`));
+  console.log(`    ${c.value("tg daemon stop")}`);
+  console.log(`    ${c.value("tg daemon start")}`);
 }
 
-/** What a failed job or one waiting to run again is waiting for */
-function jobRetryDetail(job: StatusJob): string {
-  const error = job.error ? `: ${job.error}` : ''
+function jobRetryDetail(job: StatusJob) {
+  const error = job.error ? `: ${job.error}` : "";
 
   if (job.status === SyncJobStatus.Failed) {
     const tries =
-      job.attempts > 0
-        ? ` after ${job.attempts} attempt${job.attempts === 1 ? '' : 's'}`
-        : ''
-    return c.red(` failed${tries}${error}`)
+      job.attempts > 0 ? ` after ${job.attempts} attempt${job.attempts === 1 ? "" : "s"}` : "";
+    return c.red(` failed${tries}${error}`);
   }
-  if (job.status !== SyncJobStatus.Pending) return ''
+  if (job.status !== SyncJobStatus.Pending) return "";
 
   const next = job.next_run_at
     ? `next in ${formatDuration(Math.max(0, Date.parse(job.next_run_at) - Date.now()))}`
-    : null
+    : null;
   if (job.attempts > 0) {
-    const attempt = `attempt ${job.attempts} of ${SYNC_RETRY_CONFIG.maxAttempts}`
-    return c.yellow(` ${[attempt, next].filter(Boolean).join(', ')}${error}`)
+    const attempt = `attempt ${job.attempts} of ${SYNC_RETRY_CONFIG.maxAttempts}`;
+    return c.yellow(` ${[attempt, next].filter(Boolean).join(", ")}${error}`);
   }
-  return next ? c.dim(` ${next}`) : ''
+  return next ? c.dim(` ${next}`) : "";
 }
 
-/**
- * The tg chats sync command that deletes a chat's failed jobs and keeps its
- * mode: without a flag the command turns the chat on. With several accounts
- * it names the account whose cache holds the job.
- */
-function retrySyncCommand(
-  chatId: number,
-  mode: SyncMode | null,
-  accountId: number | null,
-): string {
-  const flag = mode === 'on' ? '' : mode === 'off' ? ' --off' : ' --auto'
-  const account = accountId === null ? '' : ` --account ${accountId}`
-  return `tg chats sync ${chatId}${flag}${account}`
+function retrySyncCommand(chatId: number, mode: SyncMode | null, accountId: number | null) {
+  const flag = mode === "on" ? "" : mode === "off" ? " --off" : " --auto";
+  const account = accountId === null ? "" : ` --account ${accountId}`;
+  return `tg chats sync ${chatId}${flag}${account}`;
 }
 
-function printSyncJobsSection(status: StatusSnapshot): void {
-  printHeader('Sync Jobs')
+function printSyncJobsSection(status: StatusSnapshot) {
+  printHeader("Sync Jobs");
 
-  const { pending_jobs, running_jobs, failed_jobs, retrying_jobs } = status.sync
+  const { pending_jobs, running_jobs, failed_jobs, retrying_jobs } = status.sync;
   if (pending_jobs + running_jobs + failed_jobs === 0) {
-    printRow('Queue', c.dim('Empty'))
-    return
+    printRow("Queue", c.dim("Empty"));
+    return;
   }
 
   if (running_jobs > 0) {
-    printRow('Running', c.success(`${running_jobs} jobs`))
+    printRow("Running", c.success(`${running_jobs} jobs`));
   }
   if (pending_jobs > 0) {
-    printRow('Pending', c.warning(`${pending_jobs} jobs`))
+    printRow("Pending", c.warning(`${pending_jobs} jobs`));
   }
   if (retrying_jobs > 0) {
-    printRow('Retrying', c.yellow(`${retrying_jobs} jobs`))
+    printRow("Retrying", c.yellow(`${retrying_jobs} jobs`));
   }
   if (failed_jobs > 0) {
-    printRow('Failed', c.red(`${failed_jobs} jobs`))
+    printRow("Failed", c.red(`${failed_jobs} jobs`));
   }
 
   if (status.sync.jobs.length > 0) {
-    console.log()
+    console.log();
     for (const job of status.sync.jobs) {
-      const statusIcon = jobStatusIcon(job.status as SyncJobStatus)
-      const fetched =
-        job.messages_fetched > 0 ? c.dim(` (${job.messages_fetched} msgs)`) : ''
+      const statusIcon = jobStatusIcon(job.status as SyncJobStatus);
+      const fetched = job.messages_fetched > 0 ? c.dim(` (${job.messages_fetched} msgs)`) : "";
       console.log(
         `    ${statusIcon} ${c.cyan(`#${job.id}`)} ${c.value(job.type)} ${c.dim(`chat:${job.chat_id}`)}${accountTag(status, job.account_id)}${fetched}${jobRetryDetail(job)}`,
-      )
+      );
     }
   }
 
   if (failed_jobs > 0) {
-    console.log()
+    console.log();
     console.log(
       c.dim(
-        '  Failed jobs are retried after cache.retention.failedJobs (24 h by default) or a daemon restart.',
+        "  Failed jobs are retried after cache.retention.failedJobs (24 h by default) or a daemon restart.",
       ),
-    )
+    );
     const commands = new Set(
       status.sync.jobs
         .filter((job) => job.status === SyncJobStatus.Failed)
@@ -215,444 +173,371 @@ function printSyncJobsSection(status: StatusSnapshot): void {
             hasSeveralAccounts(status) ? job.account_id : null,
           ),
         ),
-    )
+    );
     if (commands.size > 0) {
-      console.log(
-        c.dim(
-          "  To retry at the daemon's next refresh, keeping the chat's mode:",
-        ),
-      )
-      for (const command of commands) console.log(`    ${c.value(command)}`)
+      console.log(c.dim("  To retry at the daemon's next refresh, keeping the chat's mode:"));
+      for (const command of commands) console.log(`    ${c.value(command)}`);
     }
   }
 }
 
-function printSyncProgressSection(status: StatusSnapshot): void {
-  printHeader('Sync Progress')
+function printSyncProgressSection(status: StatusSnapshot) {
+  printHeader("Sync Progress");
 
-  printRow('Chats Tracked', c.number(status.progress.chats_total))
-  printRow('Chats Enabled', c.number(status.progress.chats_enabled))
+  printRow("Chats Tracked", c.number(status.progress.chats_total));
+  printRow("Chats Enabled", c.number(status.progress.chats_enabled));
 
   if (status.progress.chats_enabled > 0) {
     printRow(
-      'History Complete',
-      `${c.number(status.progress.chats_history_complete)} ${c.dim('/')} ${c.number(status.progress.chats_enabled)}`,
-    )
+      "History Complete",
+      `${c.number(status.progress.chats_history_complete)} ${c.dim("/")} ${c.number(status.progress.chats_enabled)}`,
+    );
   } else {
-    printRow('History Complete', c.dim('0'))
+    printRow("History Complete", c.dim("0"));
   }
 
-  printRow(
-    'Messages Tracked',
-    c.number(status.progress.messages_tracked.toLocaleString()),
-  )
-  printRow(
-    'Messages Cached',
-    c.number(status.progress.messages_cached.toLocaleString()),
-  )
+  printRow("Messages Tracked", c.number(status.progress.messages_tracked.toLocaleString()));
+  printRow("Messages Cached", c.number(status.progress.messages_cached.toLocaleString()));
 
   if (status.progress.chats_cached > 0) {
-    printRow('Chats Cached', c.number(status.progress.chats_cached))
+    printRow("Chats Cached", c.number(status.progress.chats_cached));
   }
 
-  printHistoryProgress(status)
+  printHistoryProgress(status);
 
-  const senders = status.progress.senders
+  const senders = status.progress.senders;
   if (senders.missing > 0) {
     const notFound =
       senders.not_found > 0
         ? ` ${c.dim(`(${senders.not_found.toLocaleString()} not found, asked again in 30 days)`)}`
-        : ''
-    printRow(
-      'Senders Missing',
-      `${c.number(senders.missing.toLocaleString())}${notFound}`,
-    )
+        : "";
+    printRow("Senders Missing", `${c.number(senders.missing.toLocaleString())}${notFound}`);
   }
 
   if (status.progress.sample_chats.length > 0) {
-    console.log()
-    console.log(c.label('  Sample Chats:'))
+    console.log();
+    console.log(c.label("  Sample Chats:"));
     for (const chat of status.progress.sample_chats) {
-      const state = chat.history_complete
-        ? c.success('complete')
-        : c.warning('backfill')
-      const synced = c.number(chat.synced_messages.toLocaleString())
+      const state = chat.history_complete ? c.success("complete") : c.warning("backfill");
+      const synced = c.number(chat.synced_messages.toLocaleString());
       console.log(
         `    ${c.dim(icons.bullet)} ${c.value(chat.chat_type)} ${c.dim(`chat:${chat.chat_id}`)}${accountTag(status, chat.account_id)} ${c.dim(icons.arrow)} ${synced} msgs ${c.dim(icons.arrow)} ${state}`,
-      )
+      );
     }
   }
 }
 
-/** Messages cached of the counts Telegram gave, and what is left (#126) */
-function printHistoryProgress(status: StatusSnapshot): void {
-  const history = status.progress.history
+function printHistoryProgress(status: StatusSnapshot) {
+  const history = status.progress.history;
   if (history.messages_known > 0) {
-    const share = Math.floor(
-      (history.messages_cached / history.messages_known) * 100,
-    )
+    const share = Math.floor((history.messages_cached / history.messages_known) * 100);
     printRow(
-      'History Cached',
-      `${c.number(history.messages_cached.toLocaleString())} ${c.dim('/')} ${c.number(history.messages_known.toLocaleString())} msgs ${c.dim(`(${share}%)`)}`,
-    )
+      "History Cached",
+      `${c.number(history.messages_cached.toLocaleString())} ${c.dim("/")} ${c.number(history.messages_known.toLocaleString())} msgs ${c.dim(`(${share}%)`)}`,
+    );
   }
   if (history.messages_left > 0) {
     const pace =
       history.eta_seconds !== null && history.messages_per_minute !== null
         ? ` ${c.dim(icons.arrow)} ~${formatDuration(history.eta_seconds * 1000)} at ${history.messages_per_minute.toLocaleString()} msgs/min`
-        : ''
+        : "";
     printRow(
-      'History Left',
+      "History Left",
       `${c.number(history.messages_left.toLocaleString())} msgs in ${c.number(history.chats_pending)} chats${pace}`,
-    )
+    );
   }
-  const pacing = history.pacing
+  const pacing = history.pacing;
   if (history.calls_per_second !== null || pacing) {
     const measured =
       history.calls_per_second === null
-        ? c.dim('no recent calls')
-        : `${c.number(history.calls_per_second.toFixed(2))} calls/s`
+        ? c.dim("no recent calls")
+        : `${c.number(history.calls_per_second.toFixed(2))} calls/s`;
     const target = pacing
-      ? ` ${c.dim(icons.arrow)} target ${c.number(pacing.target_calls_per_second.toFixed(2))} ${c.dim(`(${pacing.mode})`)}${pacing.flood_waits > 0 ? `, ${c.warning(`${pacing.flood_waits} FLOOD_WAIT${pacing.flood_waits === 1 ? '' : 's'}`)}` : ''}`
-      : ''
-    printRow('History Pace', `${measured}${target}`)
+      ? ` ${c.dim(icons.arrow)} target ${c.number(pacing.target_calls_per_second.toFixed(2))} ${c.dim(`(${pacing.mode})`)}${pacing.flood_waits > 0 ? `, ${c.warning(`${pacing.flood_waits} FLOOD_WAIT${pacing.flood_waits === 1 ? "" : "s"}`)}` : ""}`
+      : "";
+    printRow("History Pace", `${measured}${target}`);
   }
   if (history.chats_without_count > 0) {
     printRow(
-      'Not Counted Yet',
-      `${c.number(history.chats_without_count)} chats ${c.dim('(pending, no history page yet)')}`,
-    )
+      "Not Counted Yet",
+      `${c.number(history.chats_without_count)} chats ${c.dim("(pending, no history page yet)")}`,
+    );
   }
 
   if (history.largest_pending.length > 0) {
-    console.log()
-    console.log(c.label('  Most History Left:'))
+    console.log();
+    console.log(c.label("  Most History Left:"));
     for (const chat of history.largest_pending) {
       console.log(
-        `    ${c.dim(icons.bullet)} ${c.value(chat.chat_type)} ${c.dim(`chat:${chat.chat_id}`)}${accountTag(status, chat.account_id)} ${c.dim(icons.arrow)} ${c.number(chat.messages_cached.toLocaleString())} ${c.dim('/')} ${c.number(chat.messages_known.toLocaleString())} msgs`,
-      )
+        `    ${c.dim(icons.bullet)} ${c.value(chat.chat_type)} ${c.dim(`chat:${chat.chat_id}`)}${accountTag(status, chat.account_id)} ${c.dim(icons.arrow)} ${c.number(chat.messages_cached.toLocaleString())} ${c.dim("/")} ${c.number(chat.messages_known.toLocaleString())} msgs`,
+      );
     }
   }
 }
 
-function printRateLimitsSection(status: StatusSnapshot): void {
-  printHeader('Rate Limits')
-  printRow('API Calls (1m)', c.number(status.rate_limits.api_calls_last_minute))
+function printRateLimitsSection(status: StatusSnapshot) {
+  printHeader("Rate Limits");
+  printRow("API Calls (1m)", c.number(status.rate_limits.api_calls_last_minute));
 
   const methodEntries = Object.entries(status.rate_limits.calls_by_method)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
+    .slice(0, 5);
 
   if (methodEntries.length > 0) {
-    console.log()
-    console.log(c.label('  Top Methods:'))
+    console.log();
+    console.log(c.label("  Top Methods:"));
     for (const [method, count] of methodEntries) {
-      const shortMethod = method.split('.').pop() ?? method
-      console.log(
-        `    ${c.dim(icons.bullet)} ${c.value(shortMethod)} ${c.number(count)}`,
-      )
+      const shortMethod = method.split(".").pop() ?? method;
+      console.log(`    ${c.dim(icons.bullet)} ${c.value(shortMethod)} ${c.number(count)}`);
     }
   }
 
   if (status.rate_limits.active_flood_waits.length > 0) {
-    console.log()
-    console.log(c.error(`  ${icons.warning} Active Flood Waits:`))
+    console.log();
+    console.log(c.error(`  ${icons.warning} Active Flood Waits:`));
     for (const fw of status.rate_limits.active_flood_waits) {
-      const remaining = fw.remaining_seconds
-      const remainingStr =
-        remaining > 0 ? `${remaining}s remaining` : 'expiring soon'
+      const remaining = fw.remaining_seconds;
+      const remainingStr = remaining > 0 ? `${remaining}s remaining` : "expiring soon";
       console.log(
         `    ${c.red(icons.bullet)} ${c.value(fw.method)}${accountTag(status, fw.account_id)} ${c.dim(icons.arrow)} ${c.warning(remainingStr)}`,
-      )
+      );
     }
   } else {
-    printRow('Flood Waits', c.success('None'))
+    printRow("Flood Waits", c.success("None"));
   }
 }
 
-function printAccountsSection(status: StatusSnapshot): void {
-  printHeader('Accounts')
-  printRow('Total', c.number(status.accounts.total))
+function printAccountsSection(status: StatusSnapshot) {
+  printHeader("Accounts");
+  printRow("Total", c.number(status.accounts.total));
 
   if (status.accounts.active_phone) {
-    const activeName = status.accounts.active_name
-      ? ` (${status.accounts.active_name})`
-      : ''
+    const activeName = status.accounts.active_name ? ` (${status.accounts.active_name})` : "";
     const activeUsername = status.accounts.active_username
       ? ` @${status.accounts.active_username}`
-      : ''
-    const activeLabel = status.accounts.active_label
-      ? ` [${status.accounts.active_label}]`
-      : ''
+      : "";
+    const activeLabel = status.accounts.active_label ? ` [${status.accounts.active_label}]` : "";
     printRow(
-      'Active',
+      "Active",
       `${c.success(status.accounts.active_phone)}${c.dim(activeName)}${c.dim(activeUsername)}${c.dim(activeLabel)}`,
-    )
+    );
   } else {
-    printRow('Active', c.warning('None'))
+    printRow("Active", c.warning("None"));
   }
 
-  // With --account the list holds that account only; its line still shows
   if (status.accounts.total <= 1) {
-    return
+    return;
   }
 
-  console.log()
+  console.log();
   for (const acc of status.accounts.accounts) {
-    const activeMarker = acc.is_active ? c.success(icons.success) : c.dim(' ')
-    const name = acc.name ? c.dim(` ${acc.name}`) : ''
-    const username = acc.username ? c.dim(` @${acc.username}`) : ''
-    const label = acc.label ? c.dim(` [${acc.label}]`) : ''
+    const activeMarker = acc.is_active ? c.success(icons.success) : c.dim(" ");
+    const name = acc.name ? c.dim(` ${acc.name}`) : "";
+    const username = acc.username ? c.dim(` @${acc.username}`) : "";
+    const label = acc.label ? c.dim(` [${acc.label}]`) : "";
     console.log(
       `    ${activeMarker} ${c.cyan(`#${acc.id}`)} ${c.value(acc.phone)}${name}${username}${label}`,
-    )
-    console.log(`      ${accountSummary(acc)}`)
+    );
+    console.log(`      ${accountSummary(acc)}`);
   }
 }
 
-type StatusAccount = StatusSnapshot['accounts']['accounts'][number]
+type StatusAccount = StatusSnapshot["accounts"]["accounts"][number];
 
-/** One account's own figures, on the line under it */
-function accountSummary(acc: StatusAccount): string {
-  if (acc.cache.status === 'error') {
-    return c.red(`cache error: ${acc.cache.error ?? 'unknown'}`)
+function accountSummary(acc: StatusAccount) {
+  if (acc.cache.status === "error") {
+    return c.red(`cache error: ${acc.cache.error ?? "unknown"}`);
   }
-  if (acc.cache.status === 'missing') return c.dim('no cache yet')
+  if (acc.cache.status === "missing") return c.dim("no cache yet");
 
-  const parts: string[] = []
+  const parts: string[] = [];
   if (acc.connection) {
-    const color = acc.connection.status === 'connected' ? c.success : c.warning
-    parts.push(color(acc.connection.status))
+    const color = acc.connection.status === "connected" ? c.success : c.warning;
+    parts.push(color(acc.connection.status));
   }
-  const { pending_jobs, running_jobs, failed_jobs } = acc.sync
+  const { pending_jobs, running_jobs, failed_jobs } = acc.sync;
   parts.push(
     `${c.number(pending_jobs + running_jobs)} queued`,
     ...(failed_jobs > 0 ? [c.red(`${failed_jobs} failed`)] : []),
-    `history ${c.number(acc.progress.chats_history_complete)}${c.dim('/')}${c.number(acc.progress.chats_enabled)}`,
+    `history ${c.number(acc.progress.chats_history_complete)}${c.dim("/")}${c.number(acc.progress.chats_enabled)}`,
     `${c.number(acc.progress.messages_cached.toLocaleString())} msgs`,
     ...(acc.progress.history.messages_left > 0
-      ? [
-          `${c.number(acc.progress.history.messages_left.toLocaleString())} left`,
-        ]
+      ? [`${c.number(acc.progress.history.messages_left.toLocaleString())} left`]
       : []),
     ...(acc.progress.senders.missing > 0
-      ? [
-          `${c.number(acc.progress.senders.missing.toLocaleString())} senders missing`,
-        ]
+      ? [`${c.number(acc.progress.senders.missing.toLocaleString())} senders missing`]
       : []),
     `${c.number(acc.rate_limits.api_calls_last_minute)} calls/min`,
-  )
+  );
   if (acc.rate_limits.active_flood_waits > 0) {
-    parts.push(c.warning(`${acc.rate_limits.active_flood_waits} flood waits`))
+    parts.push(c.warning(`${acc.rate_limits.active_flood_waits} flood waits`));
   }
-  return parts.join(c.dim(' · '))
+  return parts.join(c.dim(" · "));
 }
 
-/** Free pages above this share of the file earn a `tg db vacuum` hint */
-const VACUUM_HINT_FREE_SHARE = 0.1
-/** After a background migration rewrote rows, a smaller share does */
-const VACUUM_HINT_MIGRATED_FREE_SHARE = 0.01
+const VACUUM_HINT_FREE_SHARE = 0.1;
+const VACUUM_HINT_MIGRATED_FREE_SHARE = 0.01;
 
-/** Whether a finished background migration rewrote rows of the cache */
-function migrationRewroteRows(acc: StatusAccount): boolean {
-  return acc.migrations.some(
-    (migration) => migration.state === 'done' && migration.done > 0,
-  )
+function migrationRewroteRows(acc: StatusAccount) {
+  return acc.migrations.some((migration) => migration.state === "done" && migration.done > 0);
 }
 
-/**
- * Each account's cache size: the file, its WAL and the free pages inside
- * it, and with --sizes its three largest tables
- */
-function printCacheSizeSection(status: StatusSnapshot): void {
-  const sized = status.accounts.accounts.filter((acc) => acc.cache.size)
-  if (sized.length === 0) return
+function printCacheSizeSection(status: StatusSnapshot) {
+  const sized = status.accounts.accounts.filter((acc) => acc.cache.size);
+  if (sized.length === 0) return;
 
-  printHeader('Cache Size')
-  const daemonRunning = status.daemon.status === 'running'
-  const vacuumHints: string[] = []
+  printHeader("Cache Size");
+  const daemonRunning = status.daemon.status === "running";
+  const vacuumHints: string[] = [];
   for (const acc of sized) {
-    const size = acc.cache.size!
+    const size = acc.cache.size!;
     const parts = [
       c.value(formatBytes(size.file_bytes + size.wal_bytes)),
       c.dim(`WAL ${formatBytes(size.wal_bytes)}`),
       c.dim(`free ${formatBytes(size.free_bytes)}`),
-    ]
+    ];
     if (size.tables) {
       const top = Object.entries(size.tables)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
-        .map(([table, bytes]) => `${table} ${formatBytes(bytes)}`)
-      if (top.length > 0) parts.push(c.dim(top.join(', ')))
+        .map(([table, bytes]) => `${table} ${formatBytes(bytes)}`);
+      if (top.length > 0) parts.push(c.dim(top.join(", ")));
     }
-    printRow(`Account #${acc.id}`, parts.join(c.dim(' · ')))
+    printRow(`Account #${acc.id}`, parts.join(c.dim(" · ")));
 
     const freeShare = migrationRewroteRows(acc)
       ? VACUUM_HINT_MIGRATED_FREE_SHARE
-      : VACUUM_HINT_FREE_SHARE
+      : VACUUM_HINT_FREE_SHARE;
     if (size.file_bytes > 0 && size.free_bytes > size.file_bytes * freeShare) {
-      const vacuum = `tg db vacuum --account ${acc.id}`
-      // A cache without auto_vacuum needs a full vacuum, with the daemon stopped
-      const stopFirst = daemonRunning && size.auto_vacuum === 'none'
-      let hint = c.value(
-        stopFirst ? `tg daemon stop && ${vacuum} && tg daemon start` : vacuum,
-      )
+      const vacuum = `tg db vacuum --account ${acc.id}`;
+      const stopFirst = daemonRunning && size.auto_vacuum === "none";
+      let hint = c.value(stopFirst ? `tg daemon stop && ${vacuum} && tg daemon start` : vacuum);
       if (stopFirst || !daemonRunning) {
-        const disk = checkVacuumDisk(getAccountCachePath(acc.id))
+        const disk = checkVacuumDisk(getAccountCachePath(acc.id));
         if (!disk.enough) {
-          hint += `  ${c.warning(`needs ${formatBytes(disk.needed_bytes)} of free disk, ${formatBytes(disk.free_bytes)} free`)}`
+          hint += `  ${c.warning(`needs ${formatBytes(disk.needed_bytes)} of free disk, ${formatBytes(disk.free_bytes)} free`)}`;
         }
       }
-      vacuumHints.push(hint)
+      vacuumHints.push(hint);
     }
   }
   if (vacuumHints.length > 0) {
-    console.log()
+    console.log();
     console.log(
       c.dim(
-        '  The cache has free pages (over 10%, or left by a background migration); to give them back to the disk:',
+        "  The cache has free pages (over 10%, or left by a background migration); to give them back to the disk:",
       ),
-    )
-    for (const hint of vacuumHints) console.log(`    ${hint}`)
+    );
+    for (const hint of vacuumHints) console.log(`    ${hint}`);
   }
 }
 
-/**
- * Background migrations not finished yet (#89), with their progress; shown
- * only when there is one
- */
-function printMigrationsSection(status: StatusSnapshot): void {
-  if (status.migrations.length === 0) return
+function printMigrationsSection(status: StatusSnapshot) {
+  if (status.migrations.length === 0) return;
 
-  printHeader('Migrations')
+  printHeader("Migrations");
   for (const migration of status.migrations) {
-    const total = migration.total
+    const total = migration.total;
     const progress =
       total === null
-        ? c.dim('not started')
-        : `${c.number(total > 0 ? `${Math.floor((Math.min(migration.done, total) / total) * 100)}%` : '100%')} ${c.dim(`${migration.done.toLocaleString()} / ${total.toLocaleString()} rows`)}`
-    printRow(
-      `Account #${migration.account_id}`,
-      `${c.value(migration.name)} ${progress}`,
-    )
+        ? c.dim("not started")
+        : `${c.number(total > 0 ? `${Math.floor((Math.min(migration.done, total) / total) * 100)}%` : "100%")} ${c.dim(`${migration.done.toLocaleString()} / ${total.toLocaleString()} rows`)}`;
+    printRow(`Account #${migration.account_id}`, `${c.value(migration.name)} ${progress}`);
     if (migration.last_error) {
-      console.log(`    ${c.red(migration.last_error)}`)
+      console.log(`    ${c.red(migration.last_error)}`);
     }
   }
-  console.log()
+  console.log();
   console.log(
     c.dim(
-      status.daemon.status === 'running'
-        ? '  The daemon runs them in the background; reads work meanwhile.'
-        : '  The daemon runs them in the background; without it, run:',
+      status.daemon.status === "running"
+        ? "  The daemon runs them in the background; reads work meanwhile."
+        : "  The daemon runs them in the background; without it, run:",
     ),
-  )
-  if (status.daemon.status !== 'running') {
-    const accounts = [...new Set(status.migrations.map((m) => m.account_id))]
+  );
+  if (status.daemon.status !== "running") {
+    const accounts = [...new Set(status.migrations.map((m) => m.account_id))];
     for (const id of accounts) {
-      console.log(`    ${c.value(`tg db migrate --account ${id}`)}`)
+      console.log(`    ${c.value(`tg db migrate --account ${id}`)}`);
     }
   }
 }
 
-/** With --sizes, each account's media cache: files and partial downloads */
-function printMediaCacheSection(status: StatusSnapshot): void {
-  const sized = status.accounts.accounts.filter((acc) => acc.media)
-  if (sized.length === 0) return
+function printMediaCacheSection(status: StatusSnapshot) {
+  const sized = status.accounts.accounts.filter((acc) => acc.media);
+  if (sized.length === 0) return;
 
-  printHeader('Media Cache')
+  printHeader("Media Cache");
   for (const acc of sized) {
-    const media = acc.media!
+    const media = acc.media!;
     const parts = [
       c.value(formatBytes(media.bytes)),
-      `${c.number(media.files.toLocaleString())} ${media.files === 1 ? 'file' : 'files'}`,
-    ]
+      `${c.number(media.files.toLocaleString())} ${media.files === 1 ? "file" : "files"}`,
+    ];
     if (media.partial_files > 0) {
-      parts.push(
-        c.dim(
-          `${media.partial_files} partial ${formatBytes(media.partial_bytes)}`,
-        ),
-      )
+      parts.push(c.dim(`${media.partial_files} partial ${formatBytes(media.partial_bytes)}`));
     }
-    printRow(`Account #${acc.id}`, parts.join(c.dim(' · ')))
+    printRow(`Account #${acc.id}`, parts.join(c.dim(" · ")));
   }
 }
 
-/**
- * Shared caches of an older version that were set aside, and a move that
- * waits; shown only when there is one
- */
-function printStorageSection(status: StatusSnapshot): void {
-  const { legacy_caches, migration } = status.storage
-  if (legacy_caches.length === 0 && !migration) return
+function printStorageSection(status: StatusSnapshot) {
+  const { legacy_caches, migration } = status.storage;
+  if (legacy_caches.length === 0 && !migration) return;
 
-  printHeader('Storage')
+  printHeader("Storage");
   if (migration) {
-    printRow('Shared cache', c.warning(`not moved yet (${migration.reason})`))
-    console.log(`    ${c.dim(migration.path)}`)
-    console.log(`    ${c.dim(migration.suggestion)}`)
+    printRow("Shared cache", c.warning(`not moved yet (${migration.reason})`));
+    console.log(`    ${c.dim(migration.path)}`);
+    console.log(`    ${c.dim(migration.suggestion)}`);
   }
   for (const file of legacy_caches) {
-    printRow(
-      'Set aside',
-      `${c.value(file.path)} ${c.dim(formatBytes(file.size_bytes))}`,
-    )
+    printRow("Set aside", `${c.value(file.path)} ${c.dim(formatBytes(file.size_bytes))}`);
   }
   if (legacy_caches.length > 0) {
     console.log(
       c.dim(
         `  A shared cache from an older version can't be split by account; see ${UPGRADE_DOCS_URL}`,
       ),
-    )
+    );
   }
 }
 
-/**
- * With --account, a line under the title says which account the figures
- * cover, so they don't read as totals over every account
- */
-function printScope(status: StatusSnapshot): void {
-  if (status.account_id === null) return
-  const account = status.accounts.accounts.find(
-    (acc) => acc.id === status.account_id,
-  )
-  const label = account?.label ? ` [${account.label}]` : ''
-  const phone = account ? ` ${account.phone}` : ''
+function printScope(status: StatusSnapshot) {
+  if (status.account_id === null) return;
+  const account = status.accounts.accounts.find((acc) => acc.id === status.account_id);
+  const label = account?.label ? ` [${account.label}]` : "";
+  const phone = account ? ` ${account.phone}` : "";
   console.log(
-    c.warning(
-      `  Only account #${status.account_id}${phone}${label}; Daemon covers every account`,
-    ),
-  )
+    c.warning(`  Only account #${status.account_id}${phone}${label}; Daemon covers every account`),
+  );
 }
 
-/** One line for read-only mode and the chat allowlist, when either is on */
-function printAccess(status: StatusSnapshot): void {
-  const { read_only, allowed_chats } = status.access
+function printAccess(status: StatusSnapshot) {
+  const { read_only, allowed_chats } = status.access;
   const parts = [
-    ...(read_only ? ['read-only'] : []),
-    ...(allowed_chats === null
-      ? []
-      : [`only chats ${allowed_chats.join(', ') || '(none)'}`]),
-  ]
-  if (parts.length > 0) console.log(c.warning(`  ${parts.join('; ')}`))
+    ...(read_only ? ["read-only"] : []),
+    ...(allowed_chats === null ? [] : [`only chats ${allowed_chats.join(", ") || "(none)"}`]),
+  ];
+  if (parts.length > 0) console.log(c.warning(`  ${parts.join("; ")}`));
 }
 
-export function printPrettyStatus(status: StatusSnapshot): void {
-  console.log()
-  console.log(c.bold('  Telegram Sync CLI Status'))
-  console.log(c.dim(`  ${status.timestamp}`))
-  printScope(status)
-  printAccess(status)
+export function printPrettyStatus(status: StatusSnapshot) {
+  console.log();
+  console.log(c.bold("  Telegram Sync CLI Status"));
+  console.log(c.dim(`  ${status.timestamp}`));
+  printScope(status);
+  printAccess(status);
 
-  printDaemonSection(status)
-  printSyncJobsSection(status)
-  printSyncProgressSection(status)
-  printRateLimitsSection(status)
-  printAccountsSection(status)
-  printMigrationsSection(status)
-  printCacheSizeSection(status)
-  printMediaCacheSection(status)
-  printStorageSection(status)
+  printDaemonSection(status);
+  printSyncJobsSection(status);
+  printSyncProgressSection(status);
+  printRateLimitsSection(status);
+  printAccountsSection(status);
+  printMigrationsSection(status);
+  printCacheSizeSection(status);
+  printMediaCacheSection(status);
+  printStorageSection(status);
 
-  console.log()
+  console.log();
 }

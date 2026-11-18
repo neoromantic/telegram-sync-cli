@@ -1,36 +1,24 @@
-/**
- * Update handlers for processing Telegram events
- * Handles new messages, edits, deletions, and other updates
- */
-import type { Database } from 'bun:sqlite'
-import type { tl } from '@mtcute/bun'
-import { rawPeerToCacheInput } from '../commands/chats/helpers'
-import type { ChatSyncStateService } from '../db/chat-sync-state'
-import type { ChatsCache } from '../db/chats-cache'
-import type {
-  DeleteWithoutChatResult,
-  MessageInput,
-  MessagesCache,
-} from '../db/messages-cache'
-import { createSyncJobsService, type SyncJobsService } from '../db/sync-jobs'
-import {
-  determineSyncPolicy,
-  rawUserPolicy,
-  type SyncChatType,
-} from '../db/sync-schema'
-import { toRawJson } from '../utils/raw-json'
-import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
-import { formatError } from './daemon-utils'
-import type { DaemonLogger } from './types'
+import type { Database } from "bun:sqlite";
+import type { tl } from "@mtcute/bun";
+import { rawPeerToCacheInput } from "../commands/chats/helpers";
+import type { ChatSyncStateService } from "../db/chat-sync-state";
+import type { ChatsCache } from "../db/chats-cache";
+import type { DeleteWithoutChatResult, MessagesCache } from "../db/messages-cache";
+import { createSyncJobsService, type SyncJobsService } from "../db/sync-jobs";
+import { determineSyncPolicy, rawUserPolicy, type SyncChatType } from "../db/sync-schema";
+import { toRawJson } from "../utils/raw-json";
+import { toPeerIdFromRawPeer } from "../utils/telegram-peer-ids";
+import { formatError } from "./daemon-utils";
+import type { DaemonLogger } from "./types";
 
 /**
  * Context for update processing
  */
 export interface UpdateContext {
   /** Account that received the update */
-  accountId: number
+  accountId: number;
   /** Timestamp when update was received */
-  receivedAt: number
+  receivedAt: number;
 }
 
 /**
@@ -38,42 +26,42 @@ export interface UpdateContext {
  */
 export interface NewMessageData {
   /** Marked peer ID of the chat, as every cache table stores it */
-  chatId: number
-  chatType?: SyncChatType
+  chatId: number;
+  chatType?: SyncChatType;
   /** Member count of a group, if the update carries it */
-  memberCount?: number | null
-  messageId: number
-  fromId?: number
-  text?: string
-  date: number
-  isOutgoing: boolean
-  replyToId?: number
-  forwardFromId?: number
-  messageType?: string
-  hasMedia?: boolean
-  isPinned?: boolean
+  memberCount?: number | null;
+  messageId: number;
+  fromId?: number;
+  text?: string;
+  date: number;
+  isOutgoing: boolean;
+  replyToId?: number;
+  forwardFromId?: number;
+  messageType?: string;
+  hasMedia?: boolean;
+  isPinned?: boolean;
   /** Raw message object from Telegram API for future-proofing */
-  rawMessage?: unknown
+  rawMessage?: unknown;
   /** Raw user or chat the message is in, as the update carries it */
-  rawChat?: tl.TypeUser | tl.TypeChat
+  rawChat?: tl.TypeUser | tl.TypeChat;
 }
 
 /**
  * Edit message update data
  */
 export interface EditMessageData {
-  chatId: number
-  messageId: number
-  newText: string
-  editDate: number
+  chatId: number;
+  messageId: number;
+  newText: string;
+  editDate: number;
 }
 
 /**
  * Delete messages update data (with known chat ID, e.g., channels)
  */
 export interface DeleteMessagesData {
-  chatId: number
-  messageIds: number[]
+  chatId: number;
+  messageIds: number[];
 }
 
 /**
@@ -83,7 +71,7 @@ export interface DeleteMessagesData {
  * among the account's private chats and basic groups.
  */
 export interface DeleteMessagesWithoutChatData {
-  messageIds: number[]
+  messageIds: number[];
 }
 
 /**
@@ -91,41 +79,39 @@ export interface DeleteMessagesWithoutChatData {
  * another device (updateReadHistoryInbox, updateReadChannelInbox)
  */
 export interface ReadInboxData {
-  chatId: number
-  maxId: number
-  stillUnreadCount: number
+  chatId: number;
+  maxId: number;
+  stillUnreadCount: number;
 }
 
 /**
  * The read state a raw update carries, or null for any other update. A read
  * within one forum topic says nothing about the whole chat, so it is null.
  */
-export function readInboxFromUpdate(
-  update: tl.TypeUpdate,
-): ReadInboxData | null {
-  if (update._ === 'updateReadHistoryInbox') {
-    if (update.topMsgId) return null
-    const chatId = toPeerIdFromRawPeer(update.peer)
-    if (chatId === null) return null
+export function readInboxFromUpdate(update: tl.TypeUpdate) {
+  if (update._ === "updateReadHistoryInbox") {
+    if (update.topMsgId) return null;
+    const chatId = toPeerIdFromRawPeer(update.peer);
+    if (chatId === null) return null;
     return {
       chatId,
       maxId: update.maxId,
       stillUnreadCount: update.stillUnreadCount,
-    }
+    };
   }
-  if (update._ === 'updateReadChannelInbox') {
+  if (update._ === "updateReadChannelInbox") {
     const chatId = toPeerIdFromRawPeer({
-      _: 'peerChannel',
+      _: "peerChannel",
       channelId: update.channelId,
-    })
-    if (chatId === null) return null
+    });
+    if (chatId === null) return null;
     return {
       chatId,
       maxId: update.maxId,
       stillUnreadCount: update.stillUnreadCount,
-    }
+    };
   }
-  return null
+  return null;
 }
 
 /**
@@ -133,91 +119,79 @@ export function readInboxFromUpdate(
  */
 export interface UpdateHandlers {
   /** Handle a new message */
-  handleNewMessage(_ctx: UpdateContext, data: NewMessageData): Promise<void>
+  handleNewMessage(_ctx: UpdateContext, data: NewMessageData): Promise<void>;
   /** Handle a message edit */
-  handleEditMessage(_ctx: UpdateContext, data: EditMessageData): Promise<void>
+  handleEditMessage(_ctx: UpdateContext, data: EditMessageData): Promise<void>;
   /** Handle message deletions (with known chat ID, e.g., channels) */
-  handleDeleteMessages(
-    _ctx: UpdateContext,
-    data: DeleteMessagesData,
-  ): Promise<void>
+  handleDeleteMessages(_ctx: UpdateContext, data: DeleteMessagesData): Promise<void>;
   /** Handle message deletions without chat ID (DMs and basic groups) */
   handleDeleteMessagesWithoutChat(
     _ctx: UpdateContext,
     data: DeleteMessagesWithoutChatData,
-  ): Promise<DeleteWithoutChatResult>
+  ): Promise<DeleteWithoutChatResult>;
   /** Handle a read of a chat's incoming messages */
-  handleReadInbox(_ctx: UpdateContext, data: ReadInboxData): Promise<void>
+  handleReadInbox(_ctx: UpdateContext, data: ReadInboxData): Promise<void>;
 }
 
 /**
  * Options for creating update handlers
  */
 export interface UpdateHandlersOptions {
-  db: Database
-  messagesCache: MessagesCache
-  chatSyncState: ChatSyncStateService
+  db: Database;
+  messagesCache: MessagesCache;
+  chatSyncState: ChatSyncStateService;
   /** Caches the chat of a message from a chat no dialog pass listed yet */
-  chatsCache?: ChatsCache
-  logger?: DaemonLogger
-  onMessagesSynced?: (count: number) => void
+  chatsCache?: ChatsCache;
+  logger?: DaemonLogger;
+  onMessagesSynced?: (count: number) => void;
 }
 
 interface HandlerDeps {
-  messagesCache: MessagesCache
-  chatSyncState: ChatSyncStateService
-  jobsService: SyncJobsService
-  chatsCache?: ChatsCache
-  logger: DaemonLogger
-  onMessagesSynced?: (count: number) => void
-  /** A message without its raw form was logged already */
-  loggedEmptyRaw: boolean
+  messagesCache: MessagesCache;
+  chatSyncState: ChatSyncStateService;
+  jobsService: SyncJobsService;
+  chatsCache?: ChatsCache;
+  logger: DaemonLogger;
+  onMessagesSynced?: (count: number) => void;
+  loggedEmptyRaw: boolean;
 }
 
-/**
- * Default no-op logger for when logging is not needed
- */
 const noopLogger: DaemonLogger = {
   info: () => {},
   debug: () => {},
   warn: () => {},
   error: () => {},
-}
+};
 
-/**
- * A live update always carries its raw message, so raw_json is never '{}'
- * (#130). If one ever comes without, the row gets '{}' and a refetch job
- * fills it in later; the first such message is logged.
- */
 function liveMessageInput(deps: HandlerDeps, data: NewMessageData) {
-  const input = toMessageInput(data)
-  if (data.rawMessage) return input
+  const input = toMessageInput(data);
+  if (data.rawMessage) return input;
 
   if (!deps.loggedEmptyRaw) {
-    deps.loggedEmptyRaw = true
+    deps.loggedEmptyRaw = true;
     deps.logger.warn(
       `A live message came without its raw form (chat ${data.chatId}); it is cached with raw_json '{}' and fetched again later`,
-    )
+    );
   }
-  deps.jobsService.queueRefetch(data.chatId)
-  return input
+  deps.jobsService.queueRefetch(data.chatId);
+  return input;
 }
 
-function toMessageInput(data: NewMessageData): MessageInput {
+function toMessageInput(data: NewMessageData) {
   return {
     chat_id: data.chatId,
     message_id: data.messageId,
     from_id: data.fromId,
     text: data.text,
-    message_type: data.messageType ?? 'text',
+    message_type: data.messageType ?? "text",
     date: data.date,
     is_outgoing: data.isOutgoing,
     reply_to_id: data.replyToId,
     forward_from_id: data.forwardFromId,
     has_media: data.hasMedia,
     is_pinned: data.isPinned,
-    raw_json: data.rawMessage ? toRawJson(data.rawMessage) : '{}',
-  }
+    raw_json: data.rawMessage ? toRawJson(data.rawMessage) : "{}",
+  };
 }
 
 function ensureSyncState(
@@ -225,16 +199,12 @@ function ensureSyncState(
   chatId: number,
   chatType?: SyncChatType,
   memberCount?: number | null,
-  rawChat?: NewMessageData['rawChat'],
-): void {
-  const existing = chatSyncState.get(chatId)
+  rawChat?: NewMessageData["rawChat"],
+) {
+  const existing = chatSyncState.get(chatId);
   if (!existing) {
-    const resolvedChatType = chatType ?? 'private'
-    const policy = determineSyncPolicy(
-      resolvedChatType,
-      memberCount,
-      rawUserPolicy(rawChat),
-    )
+    const resolvedChatType = chatType ?? "private";
+    const policy = determineSyncPolicy(resolvedChatType, memberCount, rawUserPolicy(rawChat));
     chatSyncState.upsert({
       chat_id: chatId,
       chat_type: resolvedChatType,
@@ -242,81 +212,48 @@ function ensureSyncState(
       sync_priority: policy.priority,
       sync_enabled: policy.enabled,
       sync_policy: policy.reason,
-    })
+    });
   }
 }
 
-/**
- * Only dialog passes and some CLI commands fill chats_cache, so a chat new
- * to this run (a new DM, say) has no row there. Without one the sync jobs
- * can't build an InputPeer with its access hash, and its first page would
- * fail until the next dialog pass.
- *
- * Every dialog pass lists every chat, so such a chat is most likely new:
- * its unread state starts right below this message, which then counts as
- * unread if it is incoming. The next dialog pass sets the real state.
- */
-function ensureChatCached(
-  chatsCache: ChatsCache | undefined,
-  data: NewMessageData,
-): void {
-  const { chatId, rawChat } = data
-  if (!chatsCache || !rawChat) return
-  if (chatsCache.getById(String(chatId))) return
+function ensureChatCached(chatsCache: ChatsCache | undefined, data: NewMessageData) {
+  const { chatId, rawChat } = data;
+  if (!chatsCache || !rawChat) return;
+  if (chatsCache.getById(String(chatId))) return;
 
-  const input = rawPeerToCacheInput(rawChat)
+  const input = rawPeerToCacheInput(rawChat);
   if (input) {
     chatsCache.upsert({
       ...input,
       unread_count: 0,
       read_inbox_max_id: data.messageId - 1,
-    })
+    });
   }
 }
 
 async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
-  ensureSyncState(
-    deps.chatSyncState,
-    data.chatId,
-    data.chatType,
-    data.memberCount,
-    data.rawChat,
-  )
-  ensureChatCached(deps.chatsCache, data)
+  ensureSyncState(deps.chatSyncState, data.chatId, data.chatType, data.memberCount, data.rawChat);
+  ensureChatCached(deps.chatsCache, data);
 
-  // A group the account doesn't take part in keeps its chat and sync state
-  // up to date, but not the message (src/db/group-participation.ts); an
-  // own message counts as participation before it is written
-  const { inserted } = deps.messagesCache.upsert(liveMessageInput(deps, data))
+  const { inserted } = deps.messagesCache.upsert(liveMessageInput(deps, data));
   deps.chatsCache?.noteLiveMessage(String(data.chatId), {
     id: data.messageId,
     date: data.date * 1000,
     incoming: !data.isOutgoing,
-  })
-  if (inserted === 0) return
+  });
+  if (inserted === 0) return;
 
-  // The forward cursor means "every message up to here is cached", so live
-  // updates leave it to the sync jobs: messages that arrived while the
-  // daemon was stopped may sit between the cursor and this one.
-  deps.chatSyncState.incrementSyncedMessages(data.chatId, inserted)
-  deps.chatSyncState.updateLastSync(data.chatId, 'forward')
-  deps.onMessagesSynced?.(inserted)
+  deps.chatSyncState.incrementSyncedMessages(data.chatId, inserted);
+  deps.chatSyncState.updateLastSync(data.chatId, "forward");
+  deps.onMessagesSynced?.(inserted);
 }
 
 async function handleEditMessageImpl(deps: HandlerDeps, data: EditMessageData) {
-  deps.messagesCache.updateText(
-    data.chatId,
-    data.messageId,
-    data.newText,
-    data.editDate,
-  )
+  deps.messagesCache.updateText(data.chatId, data.messageId, data.newText, data.editDate);
 }
 
-async function handleDeleteMessagesImpl(
-  deps: HandlerDeps,
-  data: DeleteMessagesData,
-) {
-  deps.messagesCache.markDeleted(data.chatId, data.messageIds)
+async function handleDeleteMessagesImpl(deps: HandlerDeps, data: DeleteMessagesData) {
+  deps.messagesCache.markDeleted(data.chatId, data.messageIds);
 }
 
 function createSafeHandler<T>(
@@ -325,23 +262,19 @@ function createSafeHandler<T>(
   handler: (data: T) => Promise<void>,
   logContext: (data: T) => string,
 ) {
-  return async (_ctx: UpdateContext, data: T): Promise<void> => {
+  return async (_ctx: UpdateContext, data: T) => {
     try {
-      await handler(data)
+      await handler(data);
     } catch (err) {
-      deps.logger.error(
-        `Failed to ${label}: ${logContext(data)}, error=${formatError(err)}`,
-      )
+      deps.logger.error(`Failed to ${label}: ${logContext(data)}, error=${formatError(err)}`);
     }
-  }
+  };
 }
 
 /**
  * Create update handlers
  */
-export function createUpdateHandlers(
-  options: UpdateHandlersOptions,
-): UpdateHandlers {
+export function createUpdateHandlers(options: UpdateHandlersOptions) {
   const deps: HandlerDeps = {
     messagesCache: options.messagesCache,
     chatSyncState: options.chatSyncState,
@@ -350,42 +283,38 @@ export function createUpdateHandlers(
     logger: options.logger ?? noopLogger,
     onMessagesSynced: options.onMessagesSynced,
     loggedEmptyRaw: false,
-  }
+  };
 
-  return {
+  const result: UpdateHandlers = {
     handleNewMessage: createSafeHandler(
       deps,
-      'handle new message',
+      "handle new message",
       (data) => handleNewMessageImpl(deps, data),
       (data) => `chatId=${data.chatId}, messageId=${data.messageId}`,
     ),
     handleEditMessage: createSafeHandler(
       deps,
-      'handle edit message',
+      "handle edit message",
       (data) => handleEditMessageImpl(deps, data),
       (data) => `chatId=${data.chatId}, messageId=${data.messageId}`,
     ),
     handleDeleteMessages: createSafeHandler(
       deps,
-      'handle delete messages',
+      "handle delete messages",
       (data) => handleDeleteMessagesImpl(deps, data),
-      (data) =>
-        `chatId=${data.chatId}, messageIds=[${data.messageIds.join(',')}]`,
+      (data) => `chatId=${data.chatId}, messageIds=[${data.messageIds.join(",")}]`,
     ),
     handleDeleteMessagesWithoutChat: async (_ctx, data) => {
-      return deps.messagesCache.markDeletedByMessageIds(data.messageIds)
+      return deps.messagesCache.markDeletedByMessageIds(data.messageIds);
     },
     handleReadInbox: createSafeHandler(
       deps,
-      'handle read inbox',
+      "handle read inbox",
       async (data) => {
-        deps.chatsCache?.setReadInbox(
-          String(data.chatId),
-          data.maxId,
-          data.stillUnreadCount,
-        )
+        deps.chatsCache?.setReadInbox(String(data.chatId), data.maxId, data.stillUnreadCount);
       },
       (data) => `chatId=${data.chatId}, maxId=${data.maxId}`,
     ),
-  }
+  };
+  return result;
 }

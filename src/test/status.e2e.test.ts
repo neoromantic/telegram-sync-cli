@@ -1,0 +1,926 @@
+import type { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { takePartIn } from "./participation.test-utils";
+import type { StatusHistoryProgress } from "../commands/status";
+import { createChatSyncStateService } from "../db/chat-sync-state";
+import { createDaemonStatusService } from "../db/daemon-status";
+import { createMessagesCache } from "../db/messages-cache";
+import { SyncJobType, type SyncMode, SyncPriority } from "../db/sync-schema";
+import { createUsersCache } from "../db/users-cache";
+import { VERSION } from "../version";
+import { runCliSuccess } from "./cli.test-utils";
+import { createTestEnvironment, type TestEnvironment } from "./e2e-setup.test-utils";
+
+const NO_CREDENTIALS = {
+  TELEGRAM_API_ID: undefined,
+  TELEGRAM_API_HASH: undefined,
+};
+
+const HOUR = 60 * 60 * 1000;
+
+interface StatusJob {
+  account_id: number;
+  id: number;
+  chat_id: number;
+  type: string;
+  status: string;
+  messages_fetched: number;
+  attempts: number;
+  error: string | null;
+  next_run_at: string | null;
+  sync_mode: SyncMode | null;
+}
+
+interface StatusResult {
+  success: boolean;
+  data: {
+    sync: {
+      pending_jobs: number;
+      running_jobs: number;
+      failed_jobs: number;
+      retrying_jobs: number;
+      jobs: StatusJob[];
+    };
+  };
+}
+
+const stripAnsi = (text: string) => Bun.stripANSI(text);
+
+describe("E2E: status", () => {
+  let env: TestEnvironment;
+  let cacheDb: Database;
+
+  beforeEach(() => {
+    env = createTestEnvironment("status");
+    env.initDatabase();
+    env.seedAccounts([{ phone: "+15550000001", is_active: true }]);
+    cacheDb = env.openCacheDb(1);
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  function options() {
+    return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } };
+  }
+
+  function seedJob(job: {
+    chat_id: number;
+    job_type: SyncJobType;
+    status: string;
+    attempts?: number;
+    next_run_at?: number;
+    error_message?: string | null;
+    completed_at?: number | null;
+  }) {
+    cacheDb.run(
+      `INSERT INTO sync_jobs
+         (chat_id, job_type, priority, status, attempts, next_run_at, error_message, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        job.chat_id,
+        job.job_type,
+        SyncPriority.High,
+        job.status,
+        job.attempts ?? 0,
+        job.next_run_at ?? 0,
+        job.error_message ?? null,
+        job.completed_at ?? null,
+      ],
+    );
+    return (cacheDb.query("SELECT last_insert_rowid() AS id").get() as { id: number }).id;
+  }
+
+  function seedChat(chatId: number, chatType: "private" | "channel", mode: SyncMode) {
+    const chatSyncState = createChatSyncStateService(cacheDb);
+    chatSyncState.upsert({
+      chat_id: chatId,
+      chat_type: chatType,
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+    });
+    chatSyncState.setSyncMode(chatId, mode);
+  }
+
+  const modeOf = (chatId: number) => createChatSyncStateService(cacheDb).get(chatId)?.sync_mode;
+
+  function seedFailed() {
+    const now = Date.now();
+    seedChat(-1001234567890, "channel", "on");
+    seedChat(1001, "private", "auto");
+    return [
+      seedJob({
+        chat_id: -1001234567890,
+        job_type: SyncJobType.InitialLoad,
+        status: "failed",
+        attempts: 1,
+        error_message: "Telegram API error 400: CHANNEL_PRIVATE",
+        completed_at: now - HOUR,
+      }),
+      seedJob({
+        chat_id: 1001,
+        job_type: SyncJobType.ForwardCatchup,
+        status: "failed",
+        attempts: 5,
+        error_message: "connection reset",
+        completed_at: now - 2 * HOUR,
+      }),
+    ];
+  }
+
+  async function status() {
+    const result = await runCliSuccess(["status"], options());
+    return result.json as StatusResult;
+  }
+
+  it("counts and lists running, pending, retrying and failed jobs", async () => {
+    const nextRunAt = Date.now() + HOUR;
+    const running = seedJob({
+      chat_id: 1002,
+      job_type: SyncJobType.BackwardHistory,
+      status: "running",
+    });
+    const due = seedJob({
+      chat_id: 1003,
+      job_type: SyncJobType.InitialLoad,
+      status: "pending",
+    });
+    const retrying = seedJob({
+      chat_id: 1004,
+      job_type: SyncJobType.BackwardHistory,
+      status: "pending",
+      attempts: 2,
+      next_run_at: nextRunAt,
+      error_message: "connection reset",
+    });
+    const [channelFailed, chatFailed] = seedFailed();
+
+    const { data } = await status();
+
+    expect(data.sync).toMatchObject({
+      pending_jobs: 2,
+      running_jobs: 1,
+      failed_jobs: 2,
+      retrying_jobs: 1,
+    });
+    const byId = new Map(data.sync.jobs.map((job) => [job.id, job]));
+    expect(byId.get(running!)).toMatchObject({
+      status: "running",
+      attempts: 0,
+      error: null,
+      next_run_at: null,
+      sync_mode: null,
+    });
+    expect(byId.get(due!)).toMatchObject({
+      status: "pending",
+      attempts: 0,
+      next_run_at: null,
+    });
+    expect(byId.get(retrying!)).toMatchObject({
+      status: "pending",
+      attempts: 2,
+      error: "connection reset",
+      next_run_at: new Date(nextRunAt).toISOString(),
+    });
+    expect(byId.get(channelFailed!)).toEqual({
+      account_id: 1,
+      id: channelFailed!,
+      chat_id: -1001234567890,
+      type: SyncJobType.InitialLoad,
+      status: "failed",
+      messages_fetched: 0,
+      attempts: 1,
+      error: "Telegram API error 400: CHANNEL_PRIVATE",
+      next_run_at: null,
+      sync_mode: "on",
+    });
+    expect(byId.get(chatFailed!)).toMatchObject({
+      status: "failed",
+      attempts: 5,
+      error: "connection reset",
+      sync_mode: "auto",
+    });
+  });
+
+  it("lists only the 5 newest failed jobs, but counts them all", async () => {
+    const now = Date.now();
+    const failed = [1, 2, 3, 4, 5, 6].map((age) =>
+      seedJob({
+        chat_id: 2000 + age,
+        job_type: SyncJobType.InitialLoad,
+        status: "failed",
+        attempts: 1,
+        error_message: "Telegram API error 400: CHANNEL_PRIVATE",
+        completed_at: now - age * HOUR,
+      }),
+    );
+
+    const { data } = await status();
+
+    expect(data.sync.failed_jobs).toBe(6);
+    expect(data.sync.jobs.map((job) => job.id)).toEqual(failed.slice(0, 5));
+  });
+
+  it("reports no next_run_at for a retry whose backoff has ended", async () => {
+    const due = seedJob({
+      chat_id: 1005,
+      job_type: SyncJobType.BackwardHistory,
+      status: "pending",
+      attempts: 1,
+      next_run_at: Date.now() - 5000,
+      error_message: "connection reset",
+    });
+
+    const { data } = await status();
+
+    expect(data.sync.retrying_jobs).toBe(1);
+    expect(data.sync.jobs).toEqual([
+      expect.objectContaining({
+        id: due,
+        status: "pending",
+        attempts: 1,
+        next_run_at: null,
+      }),
+    ]);
+  });
+
+  it("reports zero jobs for an empty queue", async () => {
+    const { data } = await status();
+
+    expect(data.sync).toEqual({
+      pending_jobs: 0,
+      running_jobs: 0,
+      failed_jobs: 0,
+      retrying_jobs: 0,
+      jobs: [],
+    });
+  });
+
+  async function prettyStatus() {
+    const result = await runCliSuccess(["status", "--format", "pretty"], options());
+    return stripAnsi(result.stdout);
+  }
+
+  const retryCommands = (output: string) =>
+    [...output.matchAll(/^\s+tg (chats sync .+)$/gm)].map((match) => match[1]!.split(" "));
+
+  it("shows failed jobs and their errors in pretty output", async () => {
+    seedFailed();
+    seedChat(1002, "private", "auto");
+    seedJob({
+      chat_id: 1002,
+      job_type: SyncJobType.BackwardHistory,
+      status: "running",
+    });
+    seedChat(1003, "private", "on");
+    seedJob({
+      chat_id: 1003,
+      job_type: SyncJobType.InitialLoad,
+      status: "pending",
+    });
+
+    const output = await prettyStatus();
+
+    expect(output).toContain("chat:1002");
+    expect(output).toContain("chat:1003");
+    expect(output).toMatch(/Failed\s+2 jobs/);
+    expect(output).toContain("failed after 1 attempt: Telegram API error 400: CHANNEL_PRIVATE");
+    expect(output).toContain("failed after 5 attempts: connection reset");
+    expect(output).toContain("retry at the daemon's next refresh");
+    expect(retryCommands(output)).toEqual([
+      ["chats", "sync", "-1001234567890"],
+      ["chats", "sync", "1001", "--auto"],
+    ]);
+    expect(output).not.toContain("Empty");
+  });
+
+  it("shows retrying and deferred jobs and when they run in pretty output", async () => {
+    const now = Date.now();
+    seedJob({
+      chat_id: 1004,
+      job_type: SyncJobType.BackwardHistory,
+      status: "pending",
+      attempts: 2,
+      next_run_at: now + 30 * 60_000,
+      error_message: "connection reset",
+    });
+    seedJob({
+      chat_id: 1006,
+      job_type: SyncJobType.InitialLoad,
+      status: "pending",
+      next_run_at: now + 10 * 60_000,
+      error_message: "Rate limited: wait 600s",
+    });
+
+    const output = await prettyStatus();
+
+    expect(output).toMatch(/Pending\s+2 jobs/);
+    expect(output).toMatch(/Retrying\s+1 jobs/);
+    expect(output).toMatch(/chat:1004 attempt 2 of 5, next in \d+m \d+s: connection reset/);
+    expect(output).toMatch(/chat:1006 next in \d+m \d+s$/m);
+    expect(output).not.toMatch(/Failed\s+\d+ jobs/);
+  });
+
+  it("prints retry commands that keep each chat's mode", async () => {
+    seedFailed();
+    const commands = retryCommands(await prettyStatus());
+    expect(commands).toHaveLength(2);
+
+    for (const command of commands) {
+      const result = await runCliSuccess(command, options());
+      expect(result.json).toMatchObject({
+        success: true,
+        data: { changed: false, clearedFailedJobs: 1 },
+      });
+    }
+
+    expect(modeOf(-1001234567890)).toBe("on");
+    expect(modeOf(1001)).toBe("auto");
+    const { data } = await status();
+    expect(data.sync.failed_jobs).toBe(0);
+  });
+
+  it("says when a stopped daemon last wrote its status", async () => {
+    const lastUpdate = Date.now() - 2 * HOUR;
+    cacheDb.run(
+      `INSERT INTO daemon_status (key, value) VALUES
+         ('daemon_status', 'stopped'),
+         ('connection_status', 'disconnected'),
+         ('messages_synced', '12'),
+         ('last_update', ?)`,
+      [String(lastUpdate)],
+    );
+
+    const result = await runCliSuccess(["status"], options());
+    const daemon = (result.json as { data: { daemon: Record<string, unknown> } }).data.daemon;
+
+    expect(daemon).toMatchObject({
+      status: "stopped",
+      pid: null,
+      last_update: new Date(lastUpdate).toISOString(),
+      connected_accounts: 0,
+      total_accounts: 0,
+      messages_synced: 0,
+    });
+    expect(await prettyStatus()).toMatch(/Last Update\s+2h ago/);
+  });
+
+  it("shows an empty queue in pretty output", async () => {
+    const result = await runCliSuccess(["status", "--format", "pretty"], options());
+
+    expect(stripAnsi(result.stdout)).toMatch(/Queue\s+Empty/);
+  });
+});
+
+interface HistoryStatusResult {
+  data: {
+    progress: { history: StatusHistoryProgress };
+    accounts: {
+      accounts: Array<{ progress: { history: Record<string, unknown> } }>;
+    };
+    rate_limits: {
+      api_calls_last_minute: number;
+      calls_by_method: Record<string, number>;
+    };
+  };
+}
+
+describe("E2E: status, history progress and API calls", () => {
+  let env: TestEnvironment;
+  let cacheDb: Database;
+
+  beforeEach(() => {
+    env = createTestEnvironment("status-history");
+    env.initDatabase();
+    env.seedAccounts([{ phone: "+15550000001", is_active: true }]);
+    cacheDb = env.openCacheDb(1);
+
+    const state = createChatSyncStateService(cacheDb);
+    state.upsert({
+      chat_id: -4242,
+      chat_type: "group",
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+    });
+    state.setTotalMessages(-4242, 1000);
+    takePartIn(cacheDb, -4242);
+    createMessagesCache(cacheDb).upsertBatch(
+      Array.from({ length: 200 }, (_, i) => ({
+        chat_id: -4242,
+        message_id: 801 + i,
+        text: `made-up note ${i}`,
+        message_type: "text",
+        date: 1_760_000_000 + i,
+        raw_json: "{}",
+      })),
+    );
+
+    const now = Date.now();
+    for (const completedAt of [now - 4 * 60_000, now - 2 * 60_000]) {
+      cacheDb.run(
+        `INSERT INTO sync_jobs (chat_id, job_type, status, messages_fetched, completed_at)
+         VALUES (-4242, 'backward_history', 'completed', 100, ?)`,
+        [completedAt],
+      );
+    }
+    for (const timestamp of [now - 30_000, now - 90_000]) {
+      cacheDb.run(
+        `INSERT INTO api_activity (timestamp, method, success, response_ms)
+         VALUES (?, 'messages.getHistory', 1, 150)`,
+        [timestamp],
+      );
+    }
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  function options() {
+    return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } };
+  }
+
+  it("reports messages cached of those known, what is left and the API calls of the last 60 s", async () => {
+    const result = await runCliSuccess(["status"], options());
+    const { data } = result.json as HistoryStatusResult;
+
+    expect(data.progress.history).toMatchObject({
+      chats_pending: 1,
+      chats_without_count: 0,
+      messages_cached: 200,
+      messages_known: 1000,
+      messages_left: 800,
+      largest_pending: [
+        {
+          account_id: 1,
+          chat_id: -4242,
+          chat_type: "group",
+          messages_cached: 200,
+          messages_known: 1000,
+          messages_left: 800,
+        },
+      ],
+    });
+    expect(data.progress.history.messages_per_minute).toBeGreaterThan(20);
+    expect(data.progress.history.eta_seconds).toBeGreaterThan(0);
+    expect(data.progress.history.calls_per_second).toBe(0.01);
+    expect(data.progress.history.pacing).toBeNull();
+    expect(data.accounts.accounts[0]?.progress.history).toMatchObject({
+      messages_left: 800,
+    });
+    expect(data.accounts.accounts[0]?.progress.history).not.toHaveProperty("largest_pending");
+    expect(data.rate_limits.api_calls_last_minute).toBe(1);
+    expect(data.rate_limits.calls_by_method).toEqual({
+      "messages.getHistory": 1,
+    });
+  });
+
+  it("shows the history progress in pretty output", async () => {
+    const result = await runCliSuccess(["status", "--format", "pretty"], options());
+    const out = stripAnsi(result.stdout);
+
+    expect(out).toMatch(/History Cached\s+200 \/ 1,000 msgs \(20%\)/);
+    expect(out).toMatch(/History Left\s+800 msgs in 1 chats → ~\d/);
+    expect(out).toMatch(/History Pace\s+0\.01 calls\/s\n/);
+    expect(out).toMatch(/group chat:-4242 → 200 \/ 1,000 msgs/);
+    expect(out).toMatch(/API Calls \(1m\)\s+1/);
+  });
+});
+
+describe("E2E: status, senders missing from the cache (#143)", () => {
+  let env: TestEnvironment;
+
+  beforeEach(() => {
+    env = createTestEnvironment("status-senders");
+    env.initDatabase();
+    env.seedAccounts([{ phone: "+15550000001", is_active: true }]);
+    const cacheDb = env.openCacheDb(1);
+
+    takePartIn(cacheDb, -4242);
+    createMessagesCache(cacheDb).upsertBatch(
+      [7001, 7002, 7003].map((fromId, i) => ({
+        chat_id: -4242,
+        message_id: i + 1,
+        from_id: fromId,
+        text: `made-up note ${i}`,
+        message_type: "text",
+        date: 1_760_000_000 + i,
+        raw_json: "{}",
+      })),
+    );
+    createUsersCache(cacheDb).upsert({
+      user_id: "7001",
+      first_name: "Ann",
+      fetched_at: 1,
+      raw_json: "{}",
+    });
+    cacheDb.run(
+      `INSERT INTO sender_lookups (sender_id, chat_id, message_id, asked_at)
+       VALUES (7002, -4242, 2, ?)`,
+      [Date.now()],
+    );
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  function options() {
+    return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } };
+  }
+
+  it("counts them in total and per account", async () => {
+    const result = await runCliSuccess(["status"], options());
+    const { data } = result.json as {
+      data: {
+        progress: { senders: unknown };
+        accounts: { accounts: Array<{ progress: { senders: unknown } }> };
+      };
+    };
+
+    expect(data.progress.senders).toEqual({ missing: 2, not_found: 1 });
+    expect(data.accounts.accounts[0]?.progress.senders).toEqual({
+      missing: 2,
+      not_found: 1,
+    });
+  });
+
+  it("shows them in pretty output", async () => {
+    const result = await runCliSuccess(["status", "--format", "pretty"], options());
+    const out = stripAnsi(result.stdout);
+
+    expect(out).toMatch(/Senders Missing\s+2 \(1 not found, asked again in 30 days\)/);
+  });
+});
+
+describe("E2E: status, daemon version", () => {
+  const OTHER = "0.0.1";
+  const NEWER = "99.0.0";
+
+  let env: TestEnvironment;
+  let cacheDb: Database;
+
+  beforeEach(() => {
+    env = createTestEnvironment("status-daemon-version");
+    env.initDatabase();
+    env.seedAccounts([{ phone: "+15550000001", is_active: true }]);
+    cacheDb = env.openCacheDb(1);
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  function options() {
+    return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } };
+  }
+
+  function writePidFile() {
+    writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));
+  }
+
+  const daemonStatus = () => createDaemonStatusService(cacheDb);
+
+  function seedUnversionedDaemon(pid: number) {
+    const service = daemonStatus();
+    service.set("daemon_pid", String(pid));
+    service.set("daemon_started_at", String(Date.now()));
+    service.set("daemon_status", "running");
+  }
+
+  interface DaemonVersionResult {
+    success: boolean;
+    data: {
+      daemon: {
+        status: string;
+        pid: number | null;
+        version: string | null;
+        version_mismatch: boolean;
+      };
+      cli_version: string;
+    };
+  }
+
+  async function status() {
+    const result = await runCliSuccess(["status"], options());
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    return result.json as DaemonVersionResult;
+  }
+
+  async function prettyStatus() {
+    const result = await runCliSuccess(["status", "--format", "pretty"], options());
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    return stripAnsi(result.stdout);
+  }
+
+  const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const RESTART_STOP = /^\s+tg daemon stop$/m;
+  const RESTART_START = /^\s+tg daemon start$/m;
+
+  it("reports an older daemon and how to restart it", async () => {
+    writePidFile();
+    daemonStatus().setDaemonRunning(process.pid, OTHER);
+
+    const { data } = await status();
+    expect(data.daemon).toMatchObject({
+      status: "running",
+      pid: process.pid,
+      version: OTHER,
+      version_mismatch: true,
+    });
+    expect(data.cli_version).toBe(VERSION);
+
+    const output = await prettyStatus();
+    expect(output).toMatch(/Version\s+0\.0\.1/);
+    expect(output).toContain(`this tg is ${VERSION}`);
+    expect(output).toMatch(RESTART_STOP);
+    expect(output).toMatch(RESTART_START);
+  });
+
+  it("shows the version and no hint for a daemon of this version", async () => {
+    writePidFile();
+    daemonStatus().setDaemonRunning(process.pid, VERSION);
+
+    const { data } = await status();
+    expect(data.daemon.version).toBe(VERSION);
+    expect(data.daemon.version_mismatch).toBe(false);
+    expect(data.cli_version).toBe(VERSION);
+
+    const output = await prettyStatus();
+    expect(output).toMatch(new RegExp(`^\\s+Version\\s+${escapeRegex(VERSION)}$`, "m"));
+    expect(output).not.toContain("⚠ The daemon");
+    expect(output).not.toContain("tg daemon stop");
+  });
+
+  it("counts a running daemon that recorded no version as older", async () => {
+    writePidFile();
+    seedUnversionedDaemon(process.pid);
+
+    const { data } = await status();
+    expect(data.daemon).toMatchObject({
+      status: "running",
+      version: null,
+      version_mismatch: true,
+    });
+
+    const output = await prettyStatus();
+    expect(output).toMatch(/Version\s+not recorded/);
+    expect(output).toContain("started by an older tg");
+    expect(output).toMatch(RESTART_STOP);
+    expect(output).toMatch(RESTART_START);
+  });
+
+  it("says to use the newer tg rather than restart a newer daemon", async () => {
+    writePidFile();
+    daemonStatus().setDaemonRunning(process.pid, NEWER);
+
+    const { data } = await status();
+    expect(data.daemon.version).toBe(NEWER);
+    expect(data.daemon.version_mismatch).toBe(true);
+
+    const output = await prettyStatus();
+    expect(output).toMatch(/Version\s+99\.0\.0/);
+    expect(output).toContain("newer than this tg");
+    expect(output).not.toContain("tg daemon stop");
+  });
+
+  async function expectNoVersionWhileStopped() {
+    const { data } = await status();
+    expect(data.daemon).toMatchObject({
+      status: "stopped",
+      version: null,
+      version_mismatch: false,
+    });
+
+    const output = await prettyStatus();
+    expect(output).not.toMatch(/^\s+Version\s/m);
+    expect(output).not.toContain("⚠ The daemon");
+  }
+
+  it("reports no version for a daemon that died without cleanup", async () => {
+    daemonStatus().setDaemonRunning(4242, OTHER);
+
+    await expectNoVersionWhileStopped();
+  });
+
+  it("reports no version for a daemon that stopped cleanly", async () => {
+    daemonStatus().setDaemonRunning(4242, OTHER);
+    daemonStatus().setDaemonStopped();
+
+    await expectNoVersionWhileStopped();
+  });
+
+  it("reports no version when no daemon has run", async () => {
+    await expectNoVersionWhileStopped();
+  });
+
+  it("compares nothing while the daemon is still starting", async () => {
+    writePidFile();
+    daemonStatus().setDaemonRunning(process.pid + 1, OTHER);
+
+    const { data } = await status();
+    expect(data.daemon).toMatchObject({
+      status: "running",
+      pid: process.pid,
+      version: null,
+      version_mismatch: false,
+    });
+
+    const output = await prettyStatus();
+    expect(output).not.toMatch(/^\s+Version\s/m);
+    expect(output).not.toContain("⚠ The daemon");
+  });
+});
+
+describe("E2E: status cache size", () => {
+  let env: TestEnvironment;
+
+  interface SizeStatus {
+    data: {
+      accounts: {
+        accounts: Array<{
+          id: number;
+          cache: {
+            status: string;
+            size: {
+              file_bytes: number;
+              wal_bytes: number;
+              free_pages: number;
+              auto_vacuum: string;
+              tables?: Record<string, number> | null;
+            } | null;
+          };
+          media: {
+            bytes: number;
+            files: number;
+            partial_bytes: number;
+            partial_files: number;
+          } | null;
+        }>;
+      };
+      storage: { cache_bytes: number; media_bytes: number | null };
+    };
+  }
+
+  beforeEach(() => {
+    env = createTestEnvironment("status-size");
+    env.initDatabase();
+    env.seedAccounts([{ phone: "+15550000001", is_active: true }, { phone: "+15550000002" }]);
+    createMessagesCache(env.openCacheDb(1)).upsertBatch([
+      {
+        chat_id: 101,
+        message_id: 1,
+        text: "made-up note",
+        message_type: "text",
+        date: 1_760_000_000,
+        raw_json: "{}",
+      },
+    ]);
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  async function sizeStatus(args: string[] = []) {
+    const result = await runCliSuccess(["status", "--json", ...args], {
+      env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+    });
+    return result.json as SizeStatus;
+  }
+
+  it("reports each account's cache size and their sum", async () => {
+    const { data } = await sizeStatus();
+    const [first, second] = data.accounts.accounts;
+
+    expect(first?.cache.size?.file_bytes).toBeGreaterThan(0);
+    expect(typeof first?.cache.size?.free_pages).toBe("number");
+    expect(typeof first?.cache.size?.auto_vacuum).toBe("string");
+    expect(first?.cache.size).not.toHaveProperty("tables");
+    expect(second?.cache).toMatchObject({ status: "missing", size: null });
+    expect(data.storage.cache_bytes).toBe(
+      first!.cache.size!.file_bytes + first!.cache.size!.wal_bytes,
+    );
+  });
+
+  it("adds each table's size with --sizes", async () => {
+    const { data } = await sizeStatus(["--sizes"]);
+
+    expect(data.accounts.accounts[0]?.cache.size?.tables?.messages_cache).toBeGreaterThan(0);
+  });
+
+  it("reports each account's media cache with --sizes", async () => {
+    const folder = join(env.dataDir, "accounts", "1", "media", "AgADexample");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "report.pdf"), Buffer.alloc(1_000, 1));
+    writeFileSync(join(folder, ".video.mp4.part"), Buffer.alloc(300, 1));
+
+    const plain = await sizeStatus();
+    expect(plain.data.accounts.accounts.map((a) => a.media)).toEqual([null, null]);
+    expect(plain.data.storage.media_bytes).toBeNull();
+
+    const { data } = await sizeStatus(["--sizes"]);
+    expect(data.accounts.accounts.map((a) => a.media)).toEqual([
+      { bytes: 1_000, files: 1, partial_bytes: 300, partial_files: 1 },
+      { bytes: 0, files: 0, partial_bytes: 0, partial_files: 0 },
+    ]);
+    expect(data.storage.media_bytes).toBe(1_300);
+
+    const pretty = stripAnsi(
+      (
+        await runCliSuccess(["status", "--sizes", "--format", "pretty"], {
+          env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+        })
+      ).stdout,
+    );
+    expect(pretty).toContain("Media Cache");
+    expect(pretty).toMatch(/Account #1\s+1000 B · 1 file · 1 partial 300 B/);
+  });
+
+  it("sums only the account --account selects", async () => {
+    const { data } = await sizeStatus(["--account", "2"]);
+
+    expect(data.storage.cache_bytes).toBe(0);
+  });
+
+  it("tells to stop the daemon before vacuuming a cache without auto_vacuum", async () => {
+    const db = env.openCacheDb(1);
+    db.run("PRAGMA auto_vacuum = NONE");
+    db.run("VACUUM");
+    createMessagesCache(db).upsertBatch(
+      Array.from({ length: 600 }, (_, i) => ({
+        chat_id: 101,
+        message_id: i + 2,
+        text: `made-up note ${i + 2} about the weekly plan`,
+        message_type: "text",
+        date: 1_760_000_000 + i,
+        raw_json: "{}",
+      })),
+    );
+    db.run("DELETE FROM messages_cache WHERE message_id > 10");
+    db.run("PRAGMA wal_checkpoint(TRUNCATE)");
+    const pretty = async (freeDisk?: number) =>
+      stripAnsi(
+        (
+          await runCliSuccess(["status", "--format", "pretty"], {
+            env: {
+              ...env.getCliOptions().env,
+              ...NO_CREDENTIALS,
+              ...(freeDisk === undefined
+                ? {}
+                : { TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES: String(freeDisk) }),
+            },
+          })
+        ).stdout,
+      );
+    const stopFirst = "tg daemon stop && tg db vacuum --account 1 && tg daemon start";
+    const short = /needs 64\.\d MB of free disk, 1000 B free/;
+
+    const stopped = await pretty(1024 ** 3);
+    expect(stopped).toContain("tg db vacuum --account 1");
+    expect(stopped).not.toContain(stopFirst);
+    expect(stopped).not.toContain("of free disk");
+    expect(await pretty(1000)).toMatch(new RegExp(`tg db vacuum --account 1\\s+${short.source}`));
+
+    writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));
+    expect(await pretty(1024 ** 3)).toContain(stopFirst);
+    expect(await pretty(1000)).toMatch(short);
+  });
+
+  it("doesn't check the disk for a vacuum the running daemon allows in place", async () => {
+    const db = env.openCacheDb(1);
+    createMessagesCache(db).upsertBatch(
+      Array.from({ length: 600 }, (_, i) => ({
+        chat_id: 101,
+        message_id: i + 2,
+        text: `made-up note ${i + 2} about the weekly plan`,
+        message_type: "text",
+        date: 1_760_000_000 + i,
+        raw_json: "{}",
+      })),
+    );
+    db.run("DELETE FROM messages_cache WHERE message_id > 10");
+    db.run("PRAGMA wal_checkpoint(TRUNCATE)");
+    writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));
+
+    const pretty = stripAnsi(
+      (
+        await runCliSuccess(["status", "--format", "pretty"], {
+          env: {
+            ...env.getCliOptions().env,
+            ...NO_CREDENTIALS,
+            TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES: "1000",
+          },
+        })
+      ).stdout,
+    );
+
+    expect(pretty).toContain("tg db vacuum --account 1");
+    expect(pretty).not.toContain("of free disk");
+  });
+});

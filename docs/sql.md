@@ -23,23 +23,23 @@ account the command fails with `AUTH_REQUIRED`; with several and none active, wi
 `ATTACH` stays blocked, so a query never reads two accounts: query each with its own
 `--account`. Message IDs, basic group IDs and job IDs are unique only within one account.
 
-| Table | Description | TTL |
-|-------|-------------|-----|
-| `users_cache` | Cached Telegram user information | 1 week |
-| `chats_cache` | Cached chat/group/channel information | 1 week |
-| `messages_cache` | Synced messages from enabled chats | Eternal |
-| `message_attachments` | The file of each cached message (kind, name, MIME type, size, `unique_file_id`), filled for older messages by a background migration | Eternal |
-| `chat_content_protection` | What `tg media download` last found about a chat's content protection | N/A |
-| `cache_migrations` | Progress of each background migration (`tg status` shows the unfinished ones) | N/A |
-| `history_ranges` | Message ID ranges cached without gaps | Eternal |
-| `sync_state` | Global sync progress tracking | N/A |
-| `chat_sync_state` | Per-chat sync progress | N/A |
-| `sync_jobs` | Background sync job queue | Completed and failed jobs: `cache.retention.completedJobs` / `failedJobs` (24 h) |
-| `rate_limits` | API rate limiting data | `cache.retention.rateLimits` (1 h); running FLOOD_WAITs are kept |
-| `api_activity` | API call audit log | `cache.retention.apiActivity` (7 days) |
-| `daemon_status` | Daemon runtime state for this account | N/A |
-| `cache_meta` | Which account the file belongs to (`account_id`, `user_id`) | N/A |
-| `message_search_text` | View: full-text matches with the message, chat and sender columns | N/A |
+| Table                     | Description                                                                                                                          | TTL                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `users_cache`             | Cached Telegram user information                                                                                                     | 1 week                                                                           |
+| `chats_cache`             | Cached chat/group/channel information                                                                                                | 1 week                                                                           |
+| `messages_cache`          | Synced messages from enabled chats                                                                                                   | Eternal                                                                          |
+| `message_attachments`     | The file of each cached message (kind, name, MIME type, size, `unique_file_id`), filled for older messages by a background migration | Eternal                                                                          |
+| `chat_content_protection` | What `tg media download` last found about a chat's content protection                                                                | N/A                                                                              |
+| `cache_migrations`        | Progress of each background migration (`tg status` shows the unfinished ones)                                                        | N/A                                                                              |
+| `history_ranges`          | Message ID ranges cached without gaps                                                                                                | Eternal                                                                          |
+| `sync_state`              | Global sync progress tracking                                                                                                        | N/A                                                                              |
+| `chat_sync_state`         | Per-chat sync progress                                                                                                               | N/A                                                                              |
+| `sync_jobs`               | Background sync job queue                                                                                                            | Completed and failed jobs: `cache.retention.completedJobs` / `failedJobs` (24 h) |
+| `rate_limits`             | API rate limiting data                                                                                                               | `cache.retention.rateLimits` (1 h); running FLOOD_WAITs are kept                 |
+| `api_activity`            | API call audit log                                                                                                                   | `cache.retention.apiActivity` (7 days)                                           |
+| `daemon_status`           | Daemon runtime state for this account                                                                                                | N/A                                                                              |
+| `cache_meta`              | Which account the file belongs to (`account_id`, `user_id`)                                                                          | N/A                                                                              |
+| `message_search_text`     | View: full-text matches with the message, chat and sender columns                                                                    | N/A                                                                              |
 
 **Note:** Account information is stored separately in `data.db`. Use `tg accounts list` for account queries.
 
@@ -103,19 +103,19 @@ tg sql print-schema --table=users_cache --output=sql
 
 ### `tg sql`
 
-| Flag | Alias | Description | Default |
-|------|-------|-------------|---------|
-| `--query` | `-q` | SQL query to execute | - |
-| `--output` | `-o` | Output format: `json`, `csv` | `json` |
-| `--limit` | `-l` | Max rows to return (0 = unlimited) | `1000` |
-| `--account` | - | The account whose cache to query: ID, `@username` or label | The active account, else the only one |
+| Flag        | Alias | Description                                                | Default                               |
+| ----------- | ----- | ---------------------------------------------------------- | ------------------------------------- |
+| `--query`   | `-q`  | SQL query to execute                                       | -                                     |
+| `--output`  | `-o`  | Output format: `json`, `csv`                               | `json`                                |
+| `--limit`   | `-l`  | Max rows to return (0 = unlimited)                         | `1000`                                |
+| `--account` | -     | The account whose cache to query: ID, `@username` or label | The active account, else the only one |
 
 ### `tg sql print-schema`
 
-| Flag | Alias | Description | Default |
-|------|-------|-------------|---------|
-| `--table` | `-t` | Show schema for specific table | All tables |
-| `--output` | `-o` | Output format: `json`, `text`, `sql` | `json` |
+| Flag       | Alias | Description                          | Default    |
+| ---------- | ----- | ------------------------------------ | ---------- |
+| `--table`  | `-t`  | Show schema for specific table       | All tables |
+| `--output` | `-o`  | Output format: `json`, `text`, `sql` | `json`     |
 
 Every account's cache has the same schema, so `print-schema` needs no account and creates no
 file.
@@ -139,8 +139,8 @@ tg sql --query="SELECT user_id, username FROM users_cache LIMIT 2"
   "data": {
     "columns": ["user_id", "username"],
     "rows": [
-      {"user_id": "123456", "username": "alice"},
-      {"user_id": "789012", "username": "bob"}
+      { "user_id": "123456", "username": "alice" },
+      { "user_id": "789012", "username": "bob" }
     ],
     "rowCount": 2
   }
@@ -160,6 +160,7 @@ user_id,username
 ```
 
 CSV formatting follows RFC 4180:
+
 - Fields with commas, quotes, or newlines are quoted
 - Quotes are escaped by doubling (`"` → `""`)
 - NULL values are empty fields
@@ -229,6 +230,7 @@ CREATE INDEX idx_users_cache_username ON users_cache(username) WHERE username IS
 ```
 
 SQL comments include:
+
 - **Table description** as header comment
 - **TTL** if applicable (for cache tables)
 - **Column descriptions** explaining purpose
@@ -276,11 +278,13 @@ check can change the file either: a write such as `PRAGMA optimize` or
 ## Example Queries
 
 ### Count messages per chat
+
 ```bash
 tg sql --query="SELECT chat_id, COUNT(*) as count FROM messages_cache GROUP BY chat_id ORDER BY count DESC LIMIT 10"
 ```
 
 ### Messages per chat, with titles
+
 ```bash
 tg sql --query="SELECT m.chat_id, c.title, c.type, COUNT(*) AS messages FROM messages_cache m LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT) GROUP BY m.chat_id ORDER BY messages DESC, m.chat_id LIMIT 10"
 ```
@@ -292,6 +296,7 @@ Every table stores a chat under the same marked peer ID (`-100…` for supergrou
 the `chats_cache` primary key.
 
 ### Full-text search with the message text
+
 ```bash
 tg sql --query="SELECT chat_title, sender_username, datetime(date, 'unixepoch') AS sent, text FROM message_search_text WHERE message_search_text MATCH 'квартир*' AND is_deleted = 0 ORDER BY date DESC LIMIT 20"
 ```
@@ -300,6 +305,7 @@ tg sql --query="SELECT chat_title, sender_username, datetime(date, 'unixepoch') 
 `/1000` that the `*_at` columns in milliseconds need.
 
 ### Largest cached files
+
 ```bash
 tg sql --query="SELECT m.chat_id, m.message_id, a.kind, a.file_name, a.file_size FROM message_attachments a JOIN messages_cache m USING (chat_id, message_id) ORDER BY a.file_size DESC LIMIT 10"
 ```
@@ -312,21 +318,25 @@ progress, `tg db migrate` finishes it). Until then their file is only in `raw_js
 finds.
 
 ### Find users by username pattern
+
 ```bash
 tg sql --query="SELECT user_id, username, first_name FROM users_cache WHERE username LIKE '%john%'"
 ```
 
 ### Check cache freshness
+
 ```bash
 tg sql --query="SELECT entity_type, datetime(last_sync_at/1000, 'unixepoch') as last_sync FROM sync_state"
 ```
 
 ### View rate limit status
+
 ```bash
 tg sql --query="SELECT method, datetime(flood_wait_until/1000, 'unixepoch') as wait_until FROM rate_limits WHERE flood_wait_until IS NOT NULL"
 ```
 
 ### Export contacts to CSV
+
 ```bash
 tg sql --query="SELECT first_name, last_name, username, phone FROM users_cache WHERE is_contact = 1" --output=csv > contacts.csv
 ```
@@ -335,23 +345,24 @@ tg sql --query="SELECT first_name, last_name, username, phone FROM users_cache W
 
 ## Error Codes
 
-| Code | Description |
-|------|-------------|
-| `SQL_SYNTAX_ERROR` | Invalid SQL syntax |
-| `SQL_TABLE_NOT_FOUND` | Table doesn't exist |
-| `SQL_WRITE_NOT_ALLOWED` | Write operation attempted |
-| `SQL_OPERATION_BLOCKED` | More than one statement in a query |
-| `AUTH_REQUIRED` | No account: log in with `tg auth login` (exit 2) |
-| `NO_ACTIVE_ACCOUNT` | Several accounts and none active: pass `--account` (exit 1) |
-| `ACCOUNT_NOT_FOUND` | `--account` matches no account (exit 6) |
-| `CACHE_UNAVAILABLE` | The account's cache can't be opened yet: an older tg still holds the shared cache, or the file belongs to another account (`details.reason`, exit 1) |
-| `CHAT_NOT_ALLOWED` | `allowedChats` is set, and SQL can't be limited to those chats ([allowed chats](configuration.md#read-only-mode-and-allowed-chats), exit 1) |
+| Code                    | Description                                                                                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SQL_SYNTAX_ERROR`      | Invalid SQL syntax                                                                                                                                   |
+| `SQL_TABLE_NOT_FOUND`   | Table doesn't exist                                                                                                                                  |
+| `SQL_WRITE_NOT_ALLOWED` | Write operation attempted                                                                                                                            |
+| `SQL_OPERATION_BLOCKED` | More than one statement in a query                                                                                                                   |
+| `AUTH_REQUIRED`         | No account: log in with `tg auth login` (exit 2)                                                                                                     |
+| `NO_ACTIVE_ACCOUNT`     | Several accounts and none active: pass `--account` (exit 1)                                                                                          |
+| `ACCOUNT_NOT_FOUND`     | `--account` matches no account (exit 6)                                                                                                              |
+| `CACHE_UNAVAILABLE`     | The account's cache can't be opened yet: an older tg still holds the shared cache, or the file belongs to another account (`details.reason`, exit 1) |
+| `CHAT_NOT_ALLOWED`      | `allowedChats` is set, and SQL can't be limited to those chats ([allowed chats](configuration.md#read-only-mode-and-allowed-chats), exit 1)          |
 
 ---
 
 ## Implementation
 
 Source files:
+
 - `src/commands/sql/query.ts` - SQL query command
 - `src/commands/sql/print-schema.ts` - Schema display command
 - `src/commands/sql/schema-text.ts` - Text and SQL format output
@@ -360,4 +371,4 @@ Source files:
 
 ---
 
-*Last updated: 2026-10-21*
+_Last updated: 2026-10-21_

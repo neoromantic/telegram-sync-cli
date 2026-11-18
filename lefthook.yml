@@ -1,4 +1,5 @@
-# Repo hooks plus devkit's shared hooks (gitleaks and the privacy scan), pulled in as a remote.
+# Repo hooks plus devkit's shared hooks (gitleaks, the privacy scan and the oxfmt/oxlint check of
+# staged files), pulled in as a remote.
 # Install once per clone: bunx lefthook install (bun install runs it through `prepare`).
 remotes:
   - git_url: https://github.com/neoromantic/devkit
@@ -10,9 +11,6 @@ remotes:
 pre-commit:
   parallel: true
   commands:
-    lint:
-      glob: "**/*.{js,ts,jsx,tsx,json}"
-      run: bun run lint:fix
     typecheck:
       glob: "**/*.{ts,tsx}"
       run: bun run typecheck

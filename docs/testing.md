@@ -4,11 +4,14 @@ This document covers the implemented testing infrastructure for telegram-sync-cl
 
 ## Overview
 
-| Type | Location | Purpose |
-|------|----------|---------|
-| Unit Tests | `src/__tests__/*.test.ts` | Fast, isolated component tests |
-| E2E Tests | `src/__e2e__/*.e2e.test.ts` | CLI execution + exit code behavior |
-| Integration Tests | `src/__integration__/*.integration.test.ts` | Real Telegram API validation (optional) |
+| Type              | Location                                                         | Purpose                                 |
+| ----------------- | ---------------------------------------------------------------- | --------------------------------------- |
+| Unit Tests        | `*.test.ts` beside the module they test (`src/db/cache.test.ts`) | Fast, isolated component tests          |
+| E2E Tests         | `*.e2e.test.ts`, mostly in `src/test/`                           | CLI execution + exit code behavior      |
+| Integration Tests | `*.integration.test.ts` in `src/test/`                           | Real Telegram API validation (optional) |
+
+Shared test helpers live in `src/test/*.test-utils.ts`. The scripts select the suites by file
+suffix: `test` runs every `*.test.ts` except `*.e2e.test.ts` and `*.integration.test.ts`.
 
 > For current coverage, run `bun run test:coverage`.
 
@@ -34,7 +37,7 @@ bun run test:coverage
 bun test --watch
 
 # Specific test file
-bun test src/__tests__/auth.test.ts
+bun test src/commands/auth.test.ts
 ```
 
 ## Unit Tests
@@ -44,7 +47,7 @@ Unit tests run without network access using mocked dependencies.
 `test-setup.ts`, preloaded for every `bun test` run, points `TELEGRAM_SYNC_CLI_DATA_DIR` at
 `.tmp/test-data-<pid>` even if the shell or `.env` sets it, so tests that use the file-backed
 cache database never touch a real data dir. It also sets `TELEGRAM_SYNC_CLI_TELEMETRY=0`, so no
-test and no CLI a test spawns sends usage stats; `src/__e2e__/telemetry.e2e.test.ts` sets it to
+test and no CLI a test spawns sends usage stats; `src/test/telemetry.e2e.test.ts` sets it to
 `debug`, which prints each event to stderr instead of sending it, or to `1` with
 `TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT` pointing at a local server (a source checkout only), to
 check that the background copy sends the events and the command doesn't wait for it.
@@ -59,9 +62,9 @@ differs between macOS and Linux.
 **In-memory database**: Each test gets an isolated SQLite instance.
 
 ```typescript
-import { createTestDatabase } from '../db'
+import { createTestDatabase } from "../db";
 
-const { accountsDb, db } = createTestDatabase()
+const { accountsDb, db } = createTestDatabase();
 ```
 
 **Dependency injection**: Services use interfaces for testability.
@@ -70,8 +73,23 @@ const { accountsDb, db } = createTestDatabase()
 const deps: AuthDependencies = {
   accountsDb: createTestDatabase().accountsDb,
   createClient: mock(() => mockClient),
-}
+};
 ```
+
+**Lint rules for tests**: `bun run lint` runs the landmines testing rules on every test file.
+
+- Keep real implementations. Fake only the Telegram client (MTProto, which has no offline
+  server), and give a fake its behaviour when you build it, not by replacing a method later.
+  To make a cache write fail, make SQLite fail it (a trigger that raises) instead of stubbing
+  the cache. Spies on `console` only observe.
+- Move time with `setSystemTime()` from `bun:test` (reset it with `setSystemTime()` in
+  `afterEach` or `finally`), or with `vi.useFakeTimers()` for intervals. Never assign
+  `Date.now` or `setTimeout`.
+- Wait for the operation or a signal it gives: its promise, a callback of a test double, or
+  output from a spawned CLI. No fixed `Bun.sleep()`.
+- No raised per-test timeouts and no retries. `bun run test:e2e` gives every e2e test 30
+  seconds. The few tests that can't do without a fixed wait or a raised timeout are listed with
+  their count in `.oxlintrc.json`.
 
 ### Core Unit Test Files
 
@@ -98,7 +116,7 @@ const deps: AuthDependencies = {
   queued again on every refresh (fake clock)
 
 The last three run the real scheduler, sync worker and job loop against a fake
-`messages.getHistory` (`helpers/fake-history.ts`; `createMultiChatHistory` routes on the
+`messages.getHistory` (`src/test/fake-history.test-utils.ts`; `createMultiChatHistory` routes on the
 request's peer).
 
 - `telegram-peer-ids.test.ts` — marked peer IDs, cross-checked against mtcute's
@@ -137,31 +155,31 @@ request's peer).
   after clean runs, the cap, halving on a FLOOD_WAIT and waiting it out, back to calm
 - `daemon-stop.test.ts` — the daemon's start and stop with fake clients: a stop during a
   FLOOD_WAIT in the startup dialog pass or a sync job ends the wait at once, and the job stays
-  pending (`helpers/flood-wait.ts` waits like mtcute's flood waiter until the request's
+  pending (`src/test/flood-wait.test-utils.ts` waits like mtcute's flood waiter until the request's
   `abortSignal` aborts)
 - `daemon-platform.test.ts` — the daemon's mtcute platform, on a real client and a temp
-  session file in a child process (`helpers/session-exit-child.ts`, no network): mtcute adds
+  session file in a child process (`src/daemon/session-exit-child.test-utils.ts`, no network): mtcute adds
   no signal listeners, a session write after SIGTERM is saved when the client closes, and an
   exit without closing it still saves the queued writes
 
 Daemon tests give each account its own in-memory cache with `addAccountRuntime(ctx, id)`
-(`helpers/daemon-runtime.ts`). Tests that `mock.module('../db', …)` use `mockDbModule`
-(`helpers/db-mock.ts`), which maps each account ID to its cache. A test that writes a SQLite
+(`src/test/daemon-runtime.test-utils.ts`). Tests that `mock.module('../db', …)` use `mockDbModule`
+(`src/test/db-mock.test-utils.ts`), which maps each account ID to its cache. A test that writes a SQLite
 file another process must find closed (the shared cache that tg moves) seeds it with
-`seedInChild(path, seeder)` (`helpers/seed-in-child.ts`, seeders in `helpers/seeders.ts`):
+`seedInChild(path, seeder)` (`src/test/seed-in-child.test-utils.ts`, seeders in `src/test/seeders.test-utils.ts`):
 bun:sqlite keeps a file open after `close()` while prepared statements remain.
 
 ### Peer ID fixtures
 
 Seed `chats_cache` the way `tg` writes it: through `dialogToCacheInput(fakeDialog(…))`
-(`helpers/fake-dialogs.ts`), `rawChatToCacheInput` or `userToPrivateChatCacheInput`, and
+(`src/test/fake-dialogs.test-utils.ts`), `rawChatToCacheInput` or `userToPrivateChatCacheInput`, and
 messages through `parseRawMessage` of a raw TL message, or with valid marked IDs. A hand-made
 row under a bare group or channel ID is the 0.2.0 format, which the next `initSyncSchema`
 migrates.
 
-- `helpers/legacy-cache.ts` builds a cache as 0.2.0 left it (`initLegacySchema`,
+- `src/test/legacy-cache.test-utils.ts` builds a cache as 0.2.0 left it (`initLegacySchema`,
   `seedLegacyCache`), for migration tests.
-- `helpers/peer-id-invariants.ts` has `assertPeerIdInvariants(db)`: every `chats_cache` and
+- `src/test/peer-id-invariants.test-utils.ts` has `assertPeerIdInvariants(db)`: every `chats_cache` and
   `chat_sync_state` ID fits its type, every chat ID in the other tables parses with mtcute, and
   none of them is a positive ID that `chats_cache` or `chat_sync_state` knows as a group or
   channel. The bootstrap, update handler, send cache and e2e tests run it at the end.
@@ -170,15 +188,15 @@ migrates.
 
 Snapshot tests lock down formatted output to catch regressions.
 
-- Example: the `snapshots` block in `src/__tests__/output.test.ts`
+- Example: the `snapshots` block in `src/utils/output.test.ts`
 - Snapshots use Bun's `toMatchSnapshot` / `toMatchInlineSnapshot`
 - Update snapshots with `bun test -u`
 
 ```typescript
-const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+const logSpy = spyOn(console, "log");
 
-setOutputFormat('json')
-success({ message: 'Snapshot test', count: 2, items: ['alpha', 'beta'] })
+setOutputFormat("json");
+success({ message: "Snapshot test", count: 2, items: ["alpha", "beta"] });
 expect(logSpy.mock.calls[0]?.[0]).toMatchInlineSnapshot(`
 "{
   "success": true,
@@ -191,7 +209,7 @@ expect(logSpy.mock.calls[0]?.[0]).toMatchInlineSnapshot(`
     ]
   }
 }"
-`)
+`);
 ```
 
 ## E2E Tests
@@ -209,7 +227,7 @@ Tests use `TELEGRAM_SYNC_CLI_DATA_DIR` to create isolated environments:
 - Automatic cleanup after each test
 
 `TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES` replaces the free disk that `tg db vacuum` and
-`tg status` read with `statfs` before a full VACUUM, so `src/__e2e__/db.e2e.test.ts` and
+`tg status` read with `statfs` before a full VACUUM, so `src/db/db.e2e.test.ts` and
 `status.e2e.test.ts` can test a disk with enough and too little room without filling one. It
 is for tests only.
 
@@ -250,7 +268,7 @@ is for tests only.
   made-up files
 - `send-file.e2e.test.ts` — `tg send --file` argument errors (`INVALID_ARGS`, exit 3) before
   any connection
-- `api.e2e.test.ts` — `tg api` with a fake Telegram client (`helpers/fake-client-cli.ts`, run
+- `api.e2e.test.ts` — `tg api` with a fake Telegram client (`src/test/fake-client-cli.test-utils.ts`, run
   as runCli's `entry`), which keeps the process alive even after it is closed, as a connected
   mtcute client might: with and without `--raw` and on a failed call, the command prints its
   output, closes the client and exits the process itself
@@ -281,26 +299,26 @@ is for tests only.
 
 ### E2E Helpers
 
-**CLI execution** (`src/__e2e__/helpers/cli.ts`):
+**CLI execution** (`src/test/cli.test-utils.ts`):
 
 ```typescript
 // Run CLI and capture output
-const result = await runCli(['accounts', 'list'])
+const result = await runCli(["accounts", "list"]);
 // result.stdout, result.stderr, result.exitCode, result.json
 ```
 
-**Test environment** (`src/__e2e__/helpers/setup.ts`):
+**Test environment** (`src/test/e2e-setup.test-utils.ts`):
 
 ```typescript
-const env = createTestEnvironment('my-test')
-env.initDatabase()
-env.seedAccounts([{ phone: '+15550000000', is_active: true }])
+const env = createTestEnvironment("my-test");
+env.initDatabase();
+env.seedAccounts([{ phone: "+15550000000", is_active: true }]);
 // accounts/1/cache.db with the current schema; open until cleanup()
-const cacheDb = env.openCacheDb(1) // env.cachePath(1) is its path
+const cacheDb = env.openCacheDb(1); // env.cachePath(1) is its path
 
-await runCli(['chats', 'list'], env.getCliOptions())
+await runCli(["chats", "list"], env.getCliOptions());
 
-env.cleanup()
+env.cleanup();
 ```
 
 Seed an account before running a cache command: with no account it fails with
@@ -308,18 +326,18 @@ Seed an account before running a cache command: with no account it fails with
 
 ## Integration Tests (Real API)
 
-`src/__integration__/` is a live smoke suite: it runs the CLI the way a user would, against the
+`src/test/telegram.integration.test.ts` is a live smoke suite: it runs the CLI the way a user would, against the
 real Telegram API. It is skipped unless the variables below are set, and it never runs in CI.
 
-| Test | What it proves |
-|------|----------------|
-| auth status and me | the session is valid; `me --fresh` writes the profile and `me` reads it back from the cache |
-| chats and contacts | dialogs and contacts come from the API, then `chats list` serves them from the cache |
-| send to Saved Messages | `send --to me` delivers a message; `tg api messages.getMessages` reads it back |
-| send caches for search | with no daemon running, `messages search` finds a message right after `send --to me`, under the own user ID |
-| messages list and get | after two sends whose cache rows are dropped, `messages list --chat me --fresh` returns them newest first from the API under the own user ID; the next read comes from the cache with equal items, `messages search` finds them, `--after` pages forward, and `messages get --context 1` reads one in context from the API, then from the cache; a cache-first `get --context 2` returns it with the newer message and up to two older ones |
-| send and download a file | `send --to me --file` uploads 700,000 made-up bytes as a document with a caption; `media download --chat me --id <id>` saves them into `accounts/<id>/media/<uniqueFileId>/` byte for byte (`cached: false`), and a second run serves them from the cache (`cached: true`) |
-| daemon | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs) into `accounts/<id>/cache.db` (no root `cache.db`), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` while sync jobs are queued: exit code 0, one "Received SIGTERM", no updates-loop error, closed-database error or failed close, no job left running and no `DaemonStopError` or `AbortError` in the output |
+| Test                     | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| auth status and me       | the session is valid; `me --fresh` writes the profile and `me` reads it back from the cache                                                                                                                                                                                                                                                                                                                                                                                   |
+| chats and contacts       | dialogs and contacts come from the API, then `chats list` serves them from the cache                                                                                                                                                                                                                                                                                                                                                                                          |
+| send to Saved Messages   | `send --to me` delivers a message; `tg api messages.getMessages` reads it back                                                                                                                                                                                                                                                                                                                                                                                                |
+| send caches for search   | with no daemon running, `messages search` finds a message right after `send --to me`, under the own user ID                                                                                                                                                                                                                                                                                                                                                                   |
+| messages list and get    | after two sends whose cache rows are dropped, `messages list --chat me --fresh` returns them newest first from the API under the own user ID; the next read comes from the cache with equal items, `messages search` finds them, `--after` pages forward, and `messages get --context 1` reads one in context from the API, then from the cache; a cache-first `get --context 2` returns it with the newer message and up to two older ones                                   |
+| send and download a file | `send --to me --file` uploads 700,000 made-up bytes as a document with a caption; `media download --chat me --id <id>` saves them into `accounts/<id>/media/<uniqueFileId>/` byte for byte (`cached: false`), and a second run serves them from the cache (`cached: true`)                                                                                                                                                                                                    |
+| daemon                   | the daemon connects, starts real-time updates, bootstraps dialogs (waiting out FLOOD_WAITs) into `accounts/<id>/cache.db` (no root `cache.db`), syncs messages into the cache, shows up in `tg status` with its own version and stops cleanly with `tg daemon stop` while sync jobs are queued: exit code 0, one "Received SIGTERM", no updates-loop error, closed-database error or failed close, no job left running and no `DaemonStopError` or `AbortError` in the output |
 
 Each test copies the session into its own temp data dir. Messages go only to the account's
 Saved Messages and are deleted after each test. A run takes about a minute.
@@ -374,7 +392,7 @@ By default fixtures are stored under:
 - `pack` — compiles the binary, packs the npm tarball, installs it globally and runs `tg` with
   no Telegram credentials.
 - `latest-deps` — weekly (Monday) and on manual runs: `bun update` within the declared ranges,
-  then typecheck and the offline suites (no lint: Biome style updates come through Renovate).
+  then typecheck and the offline suites (no lint: linter rule updates come through Renovate).
   The weekly run also builds with Bun canary.
 - `ci` — the gate job and the one required check.
 
@@ -397,7 +415,7 @@ Ensure all Telegram clients are closed. mtcute closes a client with `destroy()`:
 
 ```typescript
 // In tests, mock the destroy method
-destroy: mock(() => Promise.resolve())
+destroy: mock(() => Promise.resolve());
 ```
 
 ### Database Locked
@@ -406,6 +424,6 @@ Each test should create its own database:
 
 ```typescript
 beforeEach(() => {
-  const { accountsDb } = createTestDatabase()
-})
+  const { accountsDb } = createTestDatabase();
+});
 ```

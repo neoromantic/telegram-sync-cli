@@ -36,8 +36,9 @@ before connecting. While `allowedChats` is set, `tg api` fails with `CHAT_NOT_AL
 call can name any chat.
 
 This maps directly to mtcute's `client.call()`:
+
 ```typescript
-await client.call({ _: 'account.checkUsername', username: 'myuser' })
+await client.call({ _: "account.checkUsername", username: "myuser" });
 ```
 
 ### Argument Merging
@@ -168,6 +169,7 @@ writes the manifest to `<dataDir>/skill.json` (default `~/.telegram-sync-cli/ski
 override with `TELEGRAM_SYNC_CLI_DATA_DIR`).
 
 Fields:
+
 - `name`
 - `description`
 - `install_command`
@@ -210,6 +212,7 @@ tg contacts list --fresh
 ```
 
 Response includes cache metadata (wrapped by `success`):
+
 ```json
 {
   "success": true,
@@ -308,6 +311,7 @@ later call to that method while the account's wait runs, even from another tg pr
 ```
 
 Exit codes:
+
 - 0: Success
 - 1: General error
 - 2: Authentication required
@@ -384,6 +388,7 @@ tg api messages.getHistory --account 2 --peer @user
 ## Peer Resolution
 
 Peers can be specified in multiple formats:
+
 - Username: `@username`
 - Phone: `+15551234567`
 - User ID: `123456789`
@@ -414,6 +419,7 @@ DM with sync state or cached messages) is that user, and only otherwise a group 
 ## Type System
 
 The CLI leverages mtcute's strict TypeScript types:
+
 - Method names are validated against TL schema
 - Arguments are type-checked
 - Return types are known at compile time
@@ -426,43 +432,43 @@ The CLI leverages mtcute's strict TypeScript types:
 // src/commands/api.ts (simplified)
 export const apiCommand = defineCommand({
   args: {
-    method: { type: 'positional' },
-    json: { type: 'string' },
-    account: { type: 'string' },
-    raw: { type: 'boolean', default: false },
+    method: { type: "positional" },
+    json: { type: "string" },
+    account: { type: "string" },
+    raw: { type: "boolean", default: false },
   },
   async run({ args }) {
-    const { account } = openAccountCache(args.account)
-    let client: TelegramClient | undefined
+    const { account } = openAccountCache(args.account);
+    let client: TelegramClient | undefined;
     try {
       client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
-        context: 'cli:api',
+        context: "cli:api",
         accountId: account.id,
-      })
-      const params = mergeArgs(args, args.json)
+      });
+      const params = mergeArgs(args, args.json);
       // Typed by the TL schema: chats resolved, longs as Long, zeros filled
-      const request = await buildApiRequest(args.method, params, resolveChat)
-      const result = await client.call(request)
-      await closeClient(client)
+      const request = await buildApiRequest(args.method, params, resolveChat);
+      const result = await client.call(request);
+      await closeClient(client);
 
       if (args.raw) {
-        raw(JSON.stringify(result, replacer, 2))
+        raw(JSON.stringify(result, replacer, 2));
       } else {
-        success({ method: args.method, result })
+        success({ method: args.method, result });
       }
     } catch (err) {
-      await closeClient(client)
+      await closeClient(client);
       error(ErrorCodes.TELEGRAM_ERROR, `API call failed: ${err.message}`, {
         method: args.method,
-      })
+      });
     }
   },
-})
+});
 
 // destroy() closes the connection, which would keep the process alive, and
 // saves the session. A failure to close doesn't change the result.
 async function closeClient(client: TelegramClient | undefined) {
-  await client?.destroy().catch(() => {})
+  await client?.destroy().catch(() => {});
 }
 ```
 
@@ -477,21 +483,21 @@ Commands that fetch data follow a consistent caching pattern:
 ```typescript
 // Example from src/commands/contacts.ts
 if (!args.fresh) {
-  const cached = usersCache.getByUsername(identifier)
+  const cached = usersCache.getByUsername(identifier);
   if (cached) {
-    const stale = isCacheStale(cached.fetched_at, cacheConfig.staleness.peers)
+    const stale = isCacheStale(cached.fetched_at, cacheConfig.staleness.peers);
     success({
       ...cachedData,
-      source: 'cache',
+      source: "cache",
       stale,
-    })
-    return
+    });
+    return;
   }
 }
 
 // Fetch from API and cache
-const result = await client.call({ _: 'contacts.resolveUsername', username })
-usersCache.upsert(apiUserToCacheInput(result))
+const result = await client.call({ _: "contacts.resolveUsername", username });
+usersCache.upsert(apiUserToCacheInput(result));
 
-success({ ...freshData, source: 'api', stale: false })
+success({ ...freshData, source: "api", stale: false });
 ```

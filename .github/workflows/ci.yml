@@ -90,7 +90,7 @@ jobs:
           bun update
           bun pm ls
 
-      # No lint here: a newer Biome changes style rules, which Renovate PRs handle.
+      # No lint here: a newer oxlint changes rules, which Renovate PRs handle.
       - name: Typecheck and test
         run: |
           bun run typecheck
