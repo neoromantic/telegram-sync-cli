@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Every error says whether running the same command again can work: `error.retryable` is
-  `true` for `RATE_LIMITED`, `NETWORK_ERROR` and a media download that waited too long for
-  another tg process, `false` otherwise (#160). Nothing else in the error schema changes.
+  `true` for `RATE_LIMITED`, `NETWORK_ERROR`, a media download that waited too long for
+  another tg process and a `tg api` call Telegram failed on its side (500 or -503), `false`
+  otherwise (#160). Nothing else in the error schema changes.
 - `RATE_LIMITED` carries the suggestion `Wait <n>s, then run the same command again` (for a
   media download, "… to resume the download"), with the wait in `details.wait_seconds` as
   before, from every command: `tg api`, `tg send`, `tg chats`, `tg contacts`, `tg user`,

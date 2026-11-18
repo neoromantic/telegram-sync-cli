@@ -13,7 +13,8 @@
  * the method and max_id to stderr; messages.getPeerDialogs then returns a
  * dialog read up to that max_id, or to FAKE_TOP_MESSAGE for 0 (everything),
  * with the messages above it unread. FAKE_FLOOD_METHOD fails with a
- * FLOOD_WAIT of FAKE_FLOOD_SECONDS, and messages.sendMessage with
+ * FLOOD_WAIT of FAKE_FLOOD_SECONDS, a method of FAKE_INTERNAL_ERRORS with
+ * its Telegram-side failure, and messages.sendMessage with
  * PEER_ID_INVALID. Any other method fails the way Telegram rejects an
  * unknown one.
  */
@@ -32,6 +33,12 @@ export const FAKE_TOP_MESSAGE = 30
 export const FAKE_FLOOD_METHOD = 'help.getNearestDc'
 
 export const FAKE_FLOOD_SECONDS = 42
+
+/** Methods Telegram fails on its side, with the error code and text */
+export const FAKE_INTERNAL_ERRORS: Record<string, [number, string]> = {
+  'help.getAppConfig': [500, 'INTERNAL'],
+  'help.getCdnConfig': [-503, 'Timeout'],
+}
 
 /** A made-up help.getConfig result */
 export const FAKE_CONFIG = {
@@ -91,6 +98,14 @@ if (import.meta.main) {
           _: 'rpc_error',
           errorCode: 420,
           errorMessage: `FLOOD_WAIT_${FAKE_FLOOD_SECONDS}`,
+        })
+      }
+      const internal = FAKE_INTERNAL_ERRORS[request._]
+      if (internal) {
+        throw tl.RpcError.fromTl({
+          _: 'rpc_error',
+          errorCode: internal[0],
+          errorMessage: internal[1],
         })
       }
       if (request._ === 'messages.sendMessage') {

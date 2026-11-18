@@ -17,6 +17,7 @@ import {
   FAKE_CONFIG,
   FAKE_FLOOD_METHOD,
   FAKE_FLOOD_SECONDS,
+  FAKE_INTERNAL_ERRORS,
 } from './helpers/fake-client-cli'
 import { createTestEnvironment, type TestEnvironment } from './helpers/setup'
 
@@ -155,6 +156,22 @@ describe('E2E: errors say whether a retry can work', () => {
         message: 'API call failed: METHOD_INVALID',
         details: { method: 'help.getNothing', telegramErrorCode: 400 },
         retryable: false,
+      })
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it.each(Object.entries(FAKE_INTERNAL_ERRORS))(
+    "a failure on Telegram's side (%s) is retryable",
+    async (method, [telegramErrorCode, text]) => {
+      const result = await run(['api', method])
+
+      expect(result.exitCode).toBe(5)
+      expect(errorOf(result.stderr)).toEqual({
+        code: 'TELEGRAM_ERROR',
+        message: `API call failed: Telegram API error ${telegramErrorCode}: ${text}`,
+        details: { method, telegramErrorCode },
+        retryable: true,
       })
     },
     TEST_TIMEOUT_MS,
