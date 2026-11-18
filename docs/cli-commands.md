@@ -182,6 +182,9 @@ tg messages list --chat @username                  # the newest 20, newest first
 tg messages list --chat @username --before 1200    # the page older than message 1200
 tg messages list --chat -1001234567890 --after 0   # from the first message on
 tg messages list --chat me --limit 5 --fresh       # from Telegram, then cached
+tg messages list --chat @username --type voice,round   # every voice note and round video
+tg messages list --chat @username --since 2026-11-16   # since Monday, local midnight
+tg messages list --chat @username --type photo --since 7d --until 1d
 tg messages get --chat @username --id 1200 --context 3   # 3 newer and 3 older around it
 tg messages search --query "hello world"           # both words, any order
 tg messages search --query '"hello world"'         # the exact phrase (or --phrase)
@@ -224,6 +227,50 @@ are read from Telegram until a page covers them, so while the daemon runs, the n
 active chat asks Telegram. The newest page comes from the cache when a range holds it, so
 without a running daemon it can miss recent messages. See
 [caching.md](caching.md#chat-history). `--fresh` always reads the window from Telegram.
+
+#### Filtering a chat
+
+`--type`, `--since` and `--until` narrow `tg messages list` to some messages of the chat:
+
+- `--type` takes one or more of `text`, `photo`, `video`, `round`, `animation`, `document`,
+  `sticker`, `voice`, `audio`, `poll`, `contact`, `location`, `venue`, `game`, `invoice`,
+  `webpage`, `dice`, `service` and `unknown`, comma-separated (`--type voice,round`) or repeated.
+  Each is an item's `messageType`, except `round` and `animation`: round video messages and GIFs
+  have `messageType: "video"` and are matched by their `attachment.kind`, so `video` covers them
+  too. Any other value is `INVALID_ARGS` (exit 3).
+- `--since` (sent at or after) and `--until` (sent before) take the forms of
+  `tg messages search`: a date, a date and time, or a duration back from now (`24h`, `7d`).
+- Paging works as without filters: `nextBefore` and `nextAfter` page through the filtered list,
+  and a filter that matches nothing is an empty page.
+
+A filtered page reads only the cache: Telegram's history has no such filters, so `--fresh` with a
+filter is `INVALID_ARGS`. The page lists every cached match and adds three keys:
+
+```json
+{ "chatId": -1001234567890, "items": [ … ], "limit": 20, "before": null, "after": null,
+  "nextBefore": 45, "nextAfter": 60, "source": "cache", "stale": false,
+  "complete": false, "missingBefore": 63,
+  "suggestion": "The cache may lack messages of this page: fetch the missing history with tg messages list --chat -1001234567890 --before 63 --limit 100 (repeat with its nextBefore while this stays incomplete), or turn on history sync with tg chats sync -1001234567890. Then run this command again." }
+```
+
+`complete` is `true` when one cached range (see above) holds every message the page covers: from
+the window's newest message (the newest cached one, or the one below `--before` or `--until`) to
+its oldest (message 1, the one above `--after`, or the first one sent at `--since`), or to the
+last item of a full page. Cached messages sent before `--since` or after `--until` mark where the
+window ends, as dates rise with message IDs. When `complete` is `false`, items past a gap may be
+missing: `missingBefore` is where the newest gap ends, so the unfiltered
+`tg messages list --before <missingBefore>` fetches the page below it from Telegram and caches
+it; repeat until the filtered page is complete, or let the daemon fetch the history
+(`tg chats sync`). `missingBefore` is `null` when the chat has no cached message (fetch its
+newest page) or when only `--type` is in doubt: while the background migration that types
+messages cached by older versions runs, `--type` pages are incomplete and the suggestion says to
+run `tg db migrate`. As for the newest unfiltered page, the newest cached message stands for the
+chat's newest, and messages that arrived live since the last catch-up are outside any range, so
+while the daemon runs the newest page of an active chat is incomplete until an unfiltered newest
+page caches them.
+
+`tg messages search --type` keeps the same types among the search hits; `filters.type` echoes
+it (`null` without the flag).
 
 `tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each
 side: `{ chatId, message, newer, older, source, stale }`. `newer` and `older` are newest first,

@@ -8,7 +8,18 @@ import {
   MESSAGE_ROW_COLUMNS,
   MESSAGE_ROW_JOINS,
   type MessageSearchRow,
+  messageTypeCondition,
 } from './messages-search'
+
+/** `tg messages list --type/--since/--until` */
+export interface MessageFilter {
+  /** MESSAGE_TYPE_FILTERS values */
+  types?: readonly string[]
+  /** Sent at or after this Unix time, in seconds */
+  since?: number
+  /** Sent before this Unix time, in seconds */
+  until?: number
+}
 
 export interface HistoryListOptions {
   limit: number
@@ -19,6 +30,7 @@ export interface HistoryListOptions {
   includeDeleted?: boolean
   /** Only messages the account received */
   incomingOnly?: boolean
+  filter?: MessageFilter
 }
 
 export interface MessagesHistory {
@@ -32,16 +44,40 @@ export interface MessagesHistory {
   getMany(chatId: number, messageIds: number[]): MessageSearchRow[]
   /** How many incoming messages above `after` are cached, deleted ones not */
   countIncomingAfter(chatId: number, after: number): number
+  /**
+   * The lowest cached message ID from `low` to `high` sent at or after
+   * `time`, deleted messages included
+   */
+  firstSentFrom(
+    chatId: number,
+    low: number,
+    high: number,
+    time: number,
+  ): number | null
+  /** The highest cached message ID from `low` to `high` sent before `time` */
+  lastSentBefore(
+    chatId: number,
+    low: number,
+    high: number,
+    time: number,
+  ): number | null
 }
 
 export function createMessagesHistory(db: Database): MessagesHistory {
   return {
     list(
       chatId,
-      { limit, before, after, includeDeleted = false, incomingOnly = false },
+      {
+        limit,
+        before,
+        after,
+        includeDeleted = false,
+        incomingOnly = false,
+        filter = {},
+      },
     ) {
       const conditions = ['m.chat_id = ?']
-      const params: number[] = [chatId]
+      const params: Array<number | string> = [chatId]
 
       if (!includeDeleted) {
         conditions.push('m.is_deleted = 0')
@@ -56,6 +92,19 @@ export function createMessagesHistory(db: Database): MessagesHistory {
       if (after !== undefined) {
         conditions.push('m.message_id > ?')
         params.push(after)
+      }
+      if (filter.since !== undefined) {
+        conditions.push('m.date >= ?')
+        params.push(filter.since)
+      }
+      if (filter.until !== undefined) {
+        conditions.push('m.date < ?')
+        params.push(filter.until)
+      }
+      if (filter.types !== undefined) {
+        const typed = messageTypeCondition(filter.types)
+        conditions.push(typed.condition)
+        params.push(...typed.params)
       }
       params.push(limit)
 
@@ -99,6 +148,26 @@ export function createMessagesHistory(db: Database): MessagesHistory {
         `)
         .get(chatId, after) as { n: number }
       return row.n
+    },
+
+    firstSentFrom(chatId, low, high, time) {
+      const row = db
+        .query(`
+          SELECT MIN(message_id) AS id FROM messages_cache
+          WHERE chat_id = ? AND message_id BETWEEN ? AND ? AND date >= ?
+        `)
+        .get(chatId, low, high, time) as { id: number | null }
+      return row.id
+    },
+
+    lastSentBefore(chatId, low, high, time) {
+      const row = db
+        .query(`
+          SELECT MAX(message_id) AS id FROM messages_cache
+          WHERE chat_id = ? AND message_id BETWEEN ? AND ? AND date < ?
+        `)
+        .get(chatId, low, high, time) as { id: number | null }
+      return row.id
     },
   }
 }

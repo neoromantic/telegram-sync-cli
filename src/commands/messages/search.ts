@@ -12,28 +12,15 @@ import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { normalizeUsername } from '../../utils/identifiers'
 import { error, success } from '../../utils/output'
 import { buildSnippet, snippetTerms } from '../../utils/search-snippet'
-import { parseTimeBound } from '../../utils/time-bounds'
 import { allowedChatIds } from '../access'
+import {
+  parseTimeWindow,
+  parseTypeArg,
+  SINCE_ARG_DESCRIPTION,
+  TYPE_ARG_DESCRIPTION,
+  UNTIL_ARG_DESCRIPTION,
+} from './filters'
 import { messageItemReader } from './helpers'
-
-/** A --since/--until value as Unix seconds; INVALID_ARGS when it is none */
-function parseBound(
-  value: string | undefined,
-  name: 'since' | 'until',
-  now: number,
-): number | undefined {
-  if (value === undefined) return undefined
-  const seconds = parseTimeBound(value, { now, end: name === 'until' })
-  if (seconds === null) {
-    error(
-      ErrorCodes.INVALID_ARGS,
-      `Invalid --${name}: ${value}`,
-      { [name]: value },
-      'Use a date (2026-10-01), a date and time (2026-10-01T09:30, local unless it ends with Z or an offset) or a duration back from now (30m, 24h, 7d, 2w)',
-    )
-  }
-  return seconds
-}
 
 /**
  * A --chat or --sender value: an ID as tg prints it, a username (with or
@@ -113,13 +100,15 @@ export const searchMessagesCommand = defineCommand({
     },
     since: {
       type: 'string',
-      description:
-        'Only messages sent at or after: a date (2026-10-01), a date and time (2026-10-01T09:30) or a duration back from now (24h, 7d)',
+      description: SINCE_ARG_DESCRIPTION,
     },
     until: {
       type: 'string',
-      description:
-        'Only messages sent before: a date and time, a duration back from now, or a date (its whole day included)',
+      description: UNTIL_ARG_DESCRIPTION,
+    },
+    type: {
+      type: 'string',
+      description: TYPE_ARG_DESCRIPTION,
     },
     sort: {
       type: 'string',
@@ -144,7 +133,7 @@ export const searchMessagesCommand = defineCommand({
       description: ACCOUNT_SELECTOR_DESCRIPTION,
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const query = (args.query ?? '').trim()
     if (!query) {
       error(ErrorCodes.INVALID_ARGS, 'Search query is required')
@@ -169,15 +158,8 @@ export const searchMessagesCommand = defineCommand({
       )
     }
 
-    const now = Date.now()
-    const since = parseBound(args.since, 'since', now)
-    const until = parseBound(args.until, 'until', now)
-    if (since !== undefined && until !== undefined && since >= until) {
-      error(
-        ErrorCodes.INVALID_ARGS,
-        `--since (${args.since}) must be earlier than --until (${args.until})`,
-      )
-    }
+    const { since, until } = parseTimeWindow(args)
+    const types = parseTypeArg(rawArgs ?? [])
 
     const { account, db: cacheDb } = openAccountCache(args.account)
     const chatFilter = parseIdentifier(args.chat, 'chat', account.user_id)
@@ -197,6 +179,7 @@ export const searchMessagesCommand = defineCommand({
         senderUsername: senderFilter?.username,
         since,
         until,
+        types,
       }
       const results = search.search(query, { ...options, limit, offset, sort })
       const count = args.count ? search.count(query, options) : null
@@ -214,6 +197,7 @@ export const searchMessagesCommand = defineCommand({
           phrase: args.phrase ?? false,
           since: args.since ?? null,
           until: args.until ?? null,
+          type: types ?? null,
         },
         sort,
         results: results.map((row) => {

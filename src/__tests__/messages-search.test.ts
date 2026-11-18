@@ -112,6 +112,27 @@ describe('MessagesSearch', () => {
     })
   }
 
+  it('keeps the --type values, round matched on the attachment kind', () => {
+    seedBaseData()
+    db.run(
+      "UPDATE messages_cache SET message_type = 'video' WHERE message_id IN (1, 2)",
+    )
+    db.run(`
+      INSERT INTO message_attachments (chat_id, message_id, kind, source, unique_file_id)
+      VALUES (-1001234567890, 1, 'round', 'message', 'round-1'),
+             (-200, 2, 'video', 'message', 'video-2')
+    `)
+    const search = createMessagesSearch(db)
+    const ids = (types: string[]) =>
+      search.search('hello', { types }).map((row) => row.message_id)
+
+    expect(ids(['video'])).toEqual([2, 1])
+    expect(ids(['round'])).toEqual([1])
+    expect(ids(['text', 'round'])).toEqual([1])
+    expect(ids(['voice'])).toEqual([])
+    expect(search.count('hello', { types: ['round', 'video'] })).toBe(2)
+  })
+
   it('searches text and orders results by date desc', () => {
     seedBaseData()
 

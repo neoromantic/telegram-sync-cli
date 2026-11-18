@@ -3,6 +3,8 @@
  */
 import type { Database } from 'bun:sqlite'
 
+import { ATTACHMENT_KIND_FILTERS } from '../utils/message-type'
+
 /**
  * What makes a query FTS5 syntax rather than plain words: `"`, `*`, `:`,
  * parentheses, `^` at the start of a word, `+` standing between phrases, or
@@ -131,6 +133,8 @@ export interface MessageSearchOptions {
   since?: number
   /** Messages sent before this Unix time, in seconds */
   until?: number
+  /** Only messages of these types (MESSAGE_TYPE_FILTERS) */
+  types?: readonly string[]
   /** Newest first (default), or best match first by FTS5 bm25 */
   sort?: MessageSearchSort
 }
@@ -167,6 +171,35 @@ export interface MessagesSearchService {
   search(query: string, options?: MessageSearchOptions): MessageSearchRow[]
   /** How many messages match, with the same filters and no page */
   count(query: string, options?: MessageSearchOptions): number
+}
+
+/**
+ * The condition that keeps messages of these `--type` values, over
+ * `messages_cache m`: a message_type, or for `round` and `animation` the
+ * kind of the message's own attachment
+ */
+export function messageTypeCondition(types: readonly string[]): {
+  condition: string
+  params: string[]
+} {
+  const kinds = types.filter((type) => ATTACHMENT_KIND_FILTERS.includes(type))
+  const messageTypes = types.filter((type) => !kinds.includes(type))
+  const marks = (values: string[]) => values.map(() => '?').join(', ')
+  const parts: string[] = []
+  if (messageTypes.length > 0) {
+    parts.push(`m.message_type IN (${marks(messageTypes)})`)
+  }
+  if (kinds.length > 0) {
+    parts.push(`EXISTS (
+      SELECT 1 FROM message_attachments a
+      WHERE a.chat_id = m.chat_id AND a.message_id = m.message_id
+        AND a.source = 'message' AND a.kind IN (${marks(kinds)})
+    )`)
+  }
+  return {
+    condition: `(${parts.join(' OR ')})`,
+    params: [...messageTypes, ...kinds],
+  }
 }
 
 /** The WHERE conditions of a search besides the match, and their parameters */
@@ -216,6 +249,14 @@ function searchFilter(options: MessageSearchOptions): {
   if (options.until !== undefined) {
     conditions.push('m.date < ?')
     params.push(options.until)
+  }
+
+  if (options.types !== undefined) {
+    const { condition, params: typeParams } = messageTypeCondition(
+      options.types,
+    )
+    conditions.push(condition)
+    params.push(...typeParams)
   }
 
   return { conditions, params }

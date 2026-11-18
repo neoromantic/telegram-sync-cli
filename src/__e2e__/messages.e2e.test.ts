@@ -16,8 +16,13 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { range } from '../__tests__/helpers/fake-history'
 import { LEGACY } from '../__tests__/helpers/legacy-cache'
-import { videoMessage } from '../__tests__/helpers/media-messages'
+import {
+  roundMessage,
+  videoMessage,
+  voiceMessage,
+} from '../__tests__/helpers/media-messages'
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
 import { photoMessage } from '../__tests__/helpers/photo-message'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
@@ -1003,6 +1008,272 @@ describe('E2E: Message attachments', () => {
       [2, 'photo'],
       [3, 'video'],
     ])
+  })
+})
+
+/** A fully cached supergroup and one cached in part, for list filters */
+const PIER_CLUB_RAW_ID = 1_555_000_003
+const PIER_CLUB_ID = -1_001_555_000_003
+const DOCK_CLUB_RAW_ID = 1_555_000_004
+const DOCK_CLUB_ID = -1_001_555_000_004
+/** 2025-10-10T00:00Z; Pier Club's messages are 12 hours apart from it */
+const PIER_START = Date.UTC(2025, 9, 10) / 1000
+
+type FilteredListData = ListData & {
+  complete: boolean
+  missingBefore: number | null
+  suggestion: string | null
+}
+
+describe('E2E: Messages List filters', () => {
+  let env: TestEnvironment
+
+  beforeAll(() => {
+    env = createTestEnvironment('messages-list-filters')
+    env.initDatabase()
+    env.seedAccounts([
+      { phone: '+15550000000', user_id: SELF_ID, is_active: true },
+    ])
+    const db = env.openCacheDb(1)
+    createChatsCache(db).upsertMany(
+      [
+        fakeDialog({
+          kind: 'supergroup',
+          id: PIER_CLUB_RAW_ID,
+          title: 'Pier Club',
+          username: 'pierclub',
+        }),
+        fakeDialog({
+          kind: 'supergroup',
+          id: DOCK_CLUB_RAW_ID,
+          title: 'Dock Club',
+          username: 'dockclub',
+        }),
+      ].map(dialogToCacheInput),
+    )
+
+    // Pier Club, 1-12, every message cached by history pages
+    const pier = { _: 'peerChannel' as const, channelId: PIER_CLUB_RAW_ID }
+    const kinds =
+      'voice round text video voice photo round text voice video round voice'
+    const pierMessages = kinds.split(' ').map((kind, index) => {
+      const id = index + 1
+      const date = PIER_START + index * 12 * 3600
+      const raw =
+        kind === 'voice'
+          ? voiceMessage(pier, id)
+          : kind === 'round'
+            ? roundMessage(pier, id)
+            : kind === 'video'
+              ? videoMessage(pier, id)
+              : kind === 'photo'
+                ? photoMessage(pier, id)
+                : { _: 'message', id, peerId: pier, message: `note ${id}` }
+      return parseRawMessage({ ...raw, date }, PIER_CLUB_ID)!
+    })
+
+    // Dock Club, 41-62 an hour apart up to now: history pages cached 41-60,
+    // and 61-62 arrived live
+    const dock = { _: 'peerChannel' as const, channelId: DOCK_CLUB_RAW_ID }
+    const now = Math.floor(Date.now() / 1000)
+    const dockMessages = range(41, 62).map((id) => {
+      const date = now - (62 - id) * 3600
+      const raw =
+        id % 5 === 0
+          ? voiceMessage(dock, id)
+          : { _: 'message', id, peerId: dock, message: `note ${id}` }
+      return parseRawMessage({ ...raw, date }, DOCK_CLUB_ID)!
+    })
+
+    createMessagesCache(db).upsertBatch([...pierMessages, ...dockMessages])
+    createHistoryRanges(db).add(PIER_CLUB_ID, { low: 1, high: 12 })
+    createHistoryRanges(db).add(DOCK_CLUB_ID, { low: 41, high: 60 })
+  })
+
+  afterAll(() => {
+    env.cleanup()
+  })
+
+  const options = () => ({
+    env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+  })
+
+  async function list(...args: string[]): Promise<FilteredListData> {
+    const result = await runCliSuccess(['messages', 'list', ...args], options())
+    return (result.json as { data: FilteredListData }).data
+  }
+
+  const ids = (data: ListData) => data.items.map((item) => item.messageId)
+  const WINDOW = [
+    '--since',
+    '2025-10-12T00:00Z',
+    '--until',
+    '2025-10-14T00:00Z',
+  ]
+
+  it('lists every voice note of a chat in one command', async () => {
+    const data = await list('--chat', '@pierclub', '--type', 'voice')
+
+    expect(ids(data)).toEqual([12, 9, 5, 1])
+    expect(data.items.every((item) => item.attachment?.kind === 'voice')).toBe(
+      true,
+    )
+    expect(data).toMatchObject({
+      source: 'cache',
+      complete: true,
+      missingBefore: null,
+      suggestion: null,
+    })
+  })
+
+  it('takes several types, round video messages among them', async () => {
+    const data = await list('--chat', '@pierclub', '--type', 'voice,round')
+
+    expect(ids(data)).toEqual([12, 11, 9, 7, 5, 2, 1])
+    expect(
+      await list('--chat', '@pierclub', '--type', 'voice', '--type', 'round'),
+    ).toEqual(data)
+    // video covers round video messages too
+    expect(ids(await list('--chat', '@pierclub', '--type', 'video'))).toEqual([
+      11, 10, 7, 4, 2,
+    ])
+  })
+
+  it('lists a date window', async () => {
+    const data = await list('--chat', '@pierclub', ...WINDOW)
+
+    expect(ids(data)).toEqual([8, 7, 6, 5])
+    expect(data.complete).toBe(true)
+  })
+
+  it('combines type and date', async () => {
+    const data = await list(
+      '--chat',
+      '@pierclub',
+      '--type',
+      'voice,round',
+      ...WINDOW,
+    )
+
+    expect(ids(data)).toEqual([7, 5])
+    expect(data.complete).toBe(true)
+  })
+
+  it('pages through the filtered list with the cursors', async () => {
+    const filter = [
+      '--chat',
+      '@pierclub',
+      '--type',
+      'voice,round',
+      '--limit',
+      '3',
+    ]
+
+    const back: number[][] = []
+    let before: string | undefined
+    for (;;) {
+      const data = await list(
+        ...filter,
+        ...(before ? ['--before', before] : []),
+      )
+      expect(data.complete).toBe(true)
+      if (data.items.length === 0) break
+      back.push(ids(data))
+      before = String(data.nextBefore)
+    }
+    expect(back).toEqual([[12, 11, 9], [7, 5, 2], [1]])
+
+    const forward: number[][] = []
+    let after = '0'
+    for (;;) {
+      const data = await list(...filter, '--after', after)
+      expect(data.complete).toBe(true)
+      if (data.items.length === 0) break
+      forward.push(ids(data))
+      after = String(data.nextAfter)
+    }
+    expect(forward).toEqual([[5, 2, 1], [11, 9, 7], [12]])
+  })
+
+  it('returns an empty page when nothing matches', async () => {
+    const data = await list('--chat', '@pierclub', '--type', 'sticker')
+
+    expect(data).toMatchObject({
+      items: [],
+      nextBefore: null,
+      nextAfter: null,
+      complete: true,
+    })
+  })
+
+  it('says the page is incomplete where the cache has gaps', async () => {
+    // 61-62 arrived live: no range says what lies between them and 60
+    const voices = await list('--chat', '@dockclub', '--type', 'voice')
+    expect(ids(voices)).toEqual([60, 55, 50, 45])
+    expect(voices).toMatchObject({ complete: false, missingBefore: 63 })
+    expect(voices.suggestion).toContain(
+      `tg messages list --chat ${DOCK_CLUB_ID} --before 63 --limit 100`,
+    )
+
+    // Nothing below 41 is cached, and a two-day window reaches below it
+    const twoDays = ['--chat', '@dockclub', '--since', '2d', '--until', '90m']
+    const all = await list(...twoDays, '--limit', '50')
+    expect(ids(all)).toEqual(range(41, 60).reverse())
+    expect(all).toMatchObject({ complete: false, missingBefore: 41 })
+
+    // A full page vouches only down to its last item; the next one doesn't
+    const full = await list(...twoDays, '--limit', '20')
+    expect(full).toMatchObject({ complete: true, nextBefore: 41 })
+    const next = await list(...twoDays, '--before', '41')
+    expect(next).toMatchObject({
+      items: [],
+      complete: false,
+      missingBefore: 41,
+    })
+
+    // The last 12.5 hours before the live messages lie inside the range
+    const halfDay = await list(
+      '--chat',
+      '@dockclub',
+      '--since',
+      '750m',
+      '--until',
+      '90m',
+    )
+    expect(ids(halfDay)).toEqual(range(50, 60).reverse())
+    expect(halfDay.complete).toBe(true)
+  })
+
+  it('adds no keys without filters', async () => {
+    const data = await list('--chat', '@pierclub')
+
+    expect(Object.keys(data)).toEqual([
+      'chatId',
+      'items',
+      'limit',
+      'before',
+      'after',
+      'nextBefore',
+      'nextAfter',
+      'source',
+      'stale',
+    ])
+  })
+
+  it.each([
+    [['--type', 'voice', '--fresh'], '--fresh'],
+    [['--type', 'voicenote'], 'Invalid --type'],
+    [['--since', 'monday'], 'Invalid --since'],
+  ])('rejects %p', async (args, message) => {
+    const result = await runCli(
+      ['messages', 'list', '--chat', '@pierclub', ...args],
+      options(),
+    )
+
+    expect(result.exitCode).toBe(3)
+    const json = result.json as ErrorData
+    expect(json.error.code).toBe('INVALID_ARGS')
+    expect(json.error.message).toContain(message)
   })
 })
 

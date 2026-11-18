@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg messages list` takes `--type`, `--since` and `--until`, so every voice note of a chat, or
+  the chat since Monday, is one command instead of `tg api messages.search` with a hand-built
+  peer and filter. `--type` takes one or more message types, comma-separated or repeated
+  (`voice`, `photo`, `video`, `document`…), plus `round` and `animation` for the round video
+  messages and GIFs that `video` also covers; `--since` and `--until` take the forms of
+  `tg messages search`. A filtered page reads only the cache, and pages with `--before` and
+  `--after` as before. It adds `complete`: `false` when the cache may lack messages of the page
+  (a gap in the cached history, messages that arrived live, or `--type` while `tg db migrate`
+  has older rows to type), with `missingBefore`, the `--before` of the unfiltered
+  `tg messages list` page that fetches the missing history, and a `suggestion`. Without the new
+  flags the output is unchanged. `tg messages search` takes `--type` too, and echoes it in
+  `filters.type`.
+
 ## [0.13.1] - 2026-11-18
 
 ### Fixed

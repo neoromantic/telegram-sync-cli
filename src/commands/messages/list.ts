@@ -5,6 +5,13 @@ import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success } from '../../utils/output'
 import {
+  parseTimeWindow,
+  parseTypeArg,
+  SINCE_ARG_DESCRIPTION,
+  TYPE_ARG_DESCRIPTION,
+  UNTIL_ARG_DESCRIPTION,
+} from './filters'
+import {
   CHAT_ARG_DESCRIPTION,
   MAX_MESSAGE_ID,
   openHistory,
@@ -40,6 +47,12 @@ export const listMessagesCommand = defineCommand({
       description:
         'The messages right after this message ID (pass nextAfter to page forward; 0 starts at the first message)',
     },
+    type: {
+      type: 'string',
+      description: `${TYPE_ARG_DESCRIPTION}. With --type, --since or --until the page comes from the cache only, with complete saying whether the cache holds all of it`,
+    },
+    since: { type: 'string', description: SINCE_ARG_DESCRIPTION },
+    until: { type: 'string', description: UNTIL_ARG_DESCRIPTION },
     includeDeleted: {
       type: 'boolean',
       description: 'Include deleted messages',
@@ -55,7 +68,7 @@ export const listMessagesCommand = defineCommand({
       description: ACCOUNT_SELECTOR_DESCRIPTION,
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const limit = parseIntegerArg(args.limit, 'limit', {
       min: 1,
       max: 100,
@@ -76,6 +89,18 @@ export const listMessagesCommand = defineCommand({
         { after, before },
       )
     }
+    const types = parseTypeArg(rawArgs ?? [])
+    const { since, until } = parseTimeWindow(args)
+    const filtered =
+      types !== undefined || since !== undefined || until !== undefined
+    if (filtered && args.fresh) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        '--fresh reads an unfiltered page from Telegram; --type, --since and --until read the cache',
+        undefined,
+        'Fetch pages with tg messages list --fresh (no filters), then filter',
+      )
+    }
     const { account } = openAccountCache(args.account)
 
     try {
@@ -88,6 +113,7 @@ export const listMessagesCommand = defineCommand({
         window: { limit, before, after },
         includeDeleted: args.includeDeleted ?? false,
         fresh: args.fresh ?? false,
+        filter: filtered ? { types, since, until } : undefined,
       })
       success(result)
     } catch (err) {

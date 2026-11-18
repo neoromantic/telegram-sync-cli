@@ -17,11 +17,16 @@ import {
   rawMessageId,
 } from '../../daemon/sync-worker-real-helpers'
 import type { AccountsDbInterface } from '../../db'
+import { readMigrationStatus } from '../../db/background-migrations'
 import type { ChatsCache } from '../../db/chats-cache'
 import { createHistoryRanges, type PageBounds } from '../../db/history-ranges'
 import { createMessagesCache } from '../../db/messages-cache'
-import { createMessagesHistory } from '../../db/messages-history'
+import {
+  createMessagesHistory,
+  type MessageFilter,
+} from '../../db/messages-history'
 import type { MessageSearchRow } from '../../db/messages-search'
+import { MESSAGE_TYPES_MIGRATION } from '../../db/raw-json-migrations'
 import { createUsersCache, type UsersCache } from '../../db/users-cache'
 import type { MessageSearchItem } from '../../types'
 import { verbose } from '../../utils/output'
@@ -205,6 +210,8 @@ export interface ListHistoryOptions {
   window: HistoryWindow
   includeDeleted: boolean
   fresh: boolean
+  /** Read only the cache, with these filters (see filteredCoverage) */
+  filter?: MessageFilter
 }
 
 export interface ListHistoryResult {
@@ -220,6 +227,20 @@ export interface ListHistoryResult {
   nextAfter: number | null
   source: 'cache' | 'api'
   stale: false
+}
+
+export interface FilteredCoverage {
+  /** The cache holds every message the filtered page covers */
+  complete: boolean
+  /**
+   * Where the newest gap in that span ends: pass it as `--before` to an
+   * unfiltered `tg messages list` to fetch the page below it. Null when
+   * complete, when only a migration is missing, or when the chat has no
+   * cached message (fetch its newest page)
+   */
+  missingBefore: number | null
+  /** What to run to complete the page; null when complete */
+  suggestion: string | null
 }
 
 interface CachedWindow {
@@ -299,19 +320,110 @@ async function readHistoryPage({
 }
 
 /**
+ * The gap in the message IDs a filtered page vouches for, or null when one
+ * recorded range covers them. The span runs from the window's newest
+ * message to its oldest, or to the last item of a full page. A cached
+ * message sent at or after `until` (before `since`) bounds it from above
+ * (below), as dates rise with message IDs. As for an unfiltered newest
+ * page, the newest cached message stands for the chat's newest.
+ */
+function filteredGap(
+  cacheDb: Database,
+  chatId: number,
+  { limit, before, after }: HistoryWindow,
+  filter: MessageFilter,
+  ids: number[],
+): { missingBefore: number | null } | null {
+  const newest = createMessagesCache(cacheDb).getLatestMessageId(chatId)
+  if (newest === null) return { missingBefore: before ?? null }
+
+  const history = createMessagesHistory(cacheDb)
+  let low = (after ?? 0) + 1
+  let high = Math.min(newest, (before ?? Number.MAX_VALUE) - 1)
+  if (filter.until !== undefined) {
+    const late = history.firstSentFrom(chatId, low, high, filter.until)
+    if (late !== null) high = late - 1
+  }
+  if (filter.since !== undefined) {
+    const early = history.lastSentBefore(chatId, low, high, filter.since)
+    if (early !== null) low = early + 1
+  }
+  if (ids.length === limit) {
+    if (after === undefined) low = Math.min(...ids)
+    else high = Math.max(...ids)
+  }
+  if (low > high) return null
+
+  const range = createHistoryRanges(cacheDb).find(chatId, high)
+  if (range && range.low <= low) return null
+  return { missingBefore: range ? range.low : high + 1 }
+}
+
+/**
+ * Whether a filtered page is the whole answer. A gap in the cached history
+ * makes it incomplete, and so does `--type` while the migration that types
+ * older rows is unfinished.
+ */
+function filteredCoverage(
+  cacheDb: Database,
+  chatId: number,
+  window: HistoryWindow,
+  filter: MessageFilter,
+  ids: number[],
+): FilteredCoverage {
+  const gap = filteredGap(cacheDb, chatId, window, filter, ids)
+  const migrating =
+    filter.types !== undefined &&
+    readMigrationStatus(cacheDb).some(
+      (m) => m.name === MESSAGE_TYPES_MIGRATION && m.state !== 'done',
+    )
+
+  const steps: string[] = []
+  if (migrating) {
+    steps.push('run tg db migrate (older messages are still being typed)')
+  }
+  if (gap) {
+    const page =
+      gap.missingBefore === null ? '' : ` --before ${gap.missingBefore}`
+    steps.push(
+      `fetch the missing history with tg messages list --chat ${chatId}${page} --limit 100 (repeat with its nextBefore while this stays incomplete), or turn on history sync with tg chats sync ${chatId}`,
+    )
+  }
+  return {
+    complete: steps.length === 0,
+    missingBefore: gap?.missingBefore ?? null,
+    suggestion:
+      steps.length === 0
+        ? null
+        : `The cache may lack messages of this page: ${steps.join('; ')}. Then run this command again.`,
+  }
+}
+
+/**
  * One page of a chat, newest first. The cache answers when it holds the
  * whole window without a gap; otherwise, or with `fresh`, Telegram does.
+ * With a filter only the cache answers, and the result says whether it
+ * holds the whole page.
  */
 export async function listHistory(
   options: ListHistoryOptions,
-): Promise<ListHistoryResult> {
-  const { chat, window } = options
-  const { rows, source } = await readHistoryPage(options)
+): Promise<ListHistoryResult & Partial<FilteredCoverage>> {
+  const { cacheDb, chat, window, filter } = options
+  const { rows, source } = filter
+    ? {
+        rows: createMessagesHistory(cacheDb).list(chat.chatId, {
+          ...window,
+          includeDeleted: options.includeDeleted,
+          filter,
+        }),
+        source: 'cache' as const,
+      }
+    : await readHistoryPage(options)
   const ids = rows.map((row) => row.message_id)
 
-  return {
+  const page: ListHistoryResult = {
     chatId: chat.chatId,
-    items: messageRowsToItems(options.cacheDb, rows),
+    items: messageRowsToItems(cacheDb, rows),
     limit: window.limit,
     before: window.before ?? null,
     after: window.after ?? null,
@@ -319,6 +431,11 @@ export async function listHistory(
     nextAfter: ids.length > 0 ? Math.max(...ids) : null,
     source,
     stale: false,
+  }
+  if (!filter) return page
+  return {
+    ...page,
+    ...filteredCoverage(cacheDb, chat.chatId, window, filter, ids),
   }
 }
 
