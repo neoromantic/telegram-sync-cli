@@ -1,6 +1,3 @@
-/**
- * Tests for messages cache service
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import { createMessagesCache, type MessageInput, type MessagesCache } from "../db/messages-cache";
@@ -69,25 +66,19 @@ describe("MessagesCache", () => {
         raw_json: "{}",
       };
 
-      // Insert original message
       cache.upsert(message);
       const original = cache.get(100, 1);
       const originalCreatedAt = original?.created_at;
 
       expect(originalCreatedAt).toBeDefined();
 
-      // Wait a bit to ensure timestamps would differ
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      // Update the message
       cache.upsert({ ...message, text: "Updated", is_edited: true });
       const updated = cache.get(100, 1);
 
-      // created_at should be preserved
       expect(updated?.created_at).toBe(originalCreatedAt);
-      // updated_at should change
       expect(updated?.updated_at).toBeGreaterThanOrEqual(originalCreatedAt!);
-      // Content should be updated
       expect(updated?.text).toBe("Updated");
     });
 
@@ -101,12 +92,10 @@ describe("MessagesCache", () => {
         raw_json: "{}",
       };
 
-      // Insert original
       cache.upsert(message);
       const original = cache.get(100, 1);
       const originalCreatedAt = original?.created_at;
 
-      // Wait and update multiple times
       await new Promise((resolve) => setTimeout(resolve, 10));
       cache.upsert({ ...message, text: "Version 2" });
 
@@ -118,11 +107,8 @@ describe("MessagesCache", () => {
 
       const final = cache.get(100, 1);
 
-      // created_at should still be the original timestamp
       expect(final?.created_at).toBe(originalCreatedAt);
-      // Content should reflect latest update
       expect(final?.text).toBe("Version 4");
-      // updated_at should be newer than created_at
       expect(final?.updated_at).toBeGreaterThan(originalCreatedAt!);
     });
   });
@@ -199,7 +185,6 @@ describe("MessagesCache", () => {
     });
 
     it("finds chat IDs for existing messages", () => {
-      // Create messages in different chats
       cache.upsert({
         chat_id: 100,
         message_id: 1,
@@ -227,7 +212,7 @@ describe("MessagesCache", () => {
 
       const { chatIds } = cache.findChatIdsByMessageIds([1, 2, 3, 999]);
 
-      expect(chatIds.size).toBe(3); // 999 not found
+      expect(chatIds.size).toBe(3);
       expect(chatIds.get(1)).toBe(100);
       expect(chatIds.get(2)).toBe(200);
       expect(chatIds.get(3)).toBe(100);
@@ -275,7 +260,6 @@ describe("MessagesCache", () => {
     });
 
     it("marks messages as deleted across multiple chats", () => {
-      // Create messages in different chats (simulating DMs and groups)
       cache.upsert({
         chat_id: 100,
         message_id: 1,
@@ -309,14 +293,13 @@ describe("MessagesCache", () => {
         raw_json: "{}",
       });
 
-      // Delete messages 1, 2, and 3 (without knowing their chat IDs)
       const { deleted } = cache.markDeletedByMessageIds([1, 2, 3]);
 
       expect(deleted).toBe(3);
       expect(cache.get(100, 1)?.is_deleted).toBe(1);
       expect(cache.get(200, 2)?.is_deleted).toBe(1);
       expect(cache.get(100, 3)?.is_deleted).toBe(1);
-      expect(cache.get(300, 4)?.is_deleted).toBe(0); // Unaffected
+      expect(cache.get(300, 4)?.is_deleted).toBe(0);
     });
 
     it("handles partial matches gracefully", () => {
@@ -329,7 +312,6 @@ describe("MessagesCache", () => {
         raw_json: "{}",
       });
 
-      // Try to delete messages where only one exists
       const { deleted } = cache.markDeletedByMessageIds([5, 999, 1000]);
 
       expect(deleted).toBe(1);
@@ -388,7 +370,6 @@ describe("MessagesCache", () => {
       expect(cache.get(200, 42)?.is_deleted).toBe(1);
     });
 
-    /** Caches message 7 in each of the given chats */
     function cacheMessageSeven(chatIds: number[]): void {
       for (const chatId of chatIds) {
         cache.upsert({
@@ -510,7 +491,7 @@ describe("MessagesCache", () => {
         raw_json: "{}",
       });
 
-      const editDate = originalDate + 60000; // 1 minute later
+      const editDate = originalDate + 60000;
       cache.updateText(100, 1, "Edited text", editDate);
 
       const msg = cache.get(100, 1);
@@ -701,13 +682,11 @@ describe("MessagesCache writes and the search index", () => {
     raw_json: '{"_":"message","views":10}',
   };
 
-  /** Rows written since the connection opened, search index rows included */
   const totalChanges = () => (db.query("SELECT total_changes() AS n").get() as { n: number }).n;
   const find = (query: string) =>
     createMessagesSearch(db)
       .search(query, { includeDeleted: true })
       .map((row) => row.message_id);
-  /** Rename the sender without touching the message's index row */
   const renameSender = (lastName: string) =>
     createUsersCache(db).upsert({
       user_id: "123",

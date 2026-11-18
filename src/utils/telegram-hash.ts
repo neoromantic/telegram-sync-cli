@@ -1,8 +1,3 @@
-/**
- * Telegram's 64-bit hash for methods that take a `hash` and answer
- * `…NotModified` when nothing changed (https://core.telegram.org/api/offsets)
- */
-
 const MASK_64 = (1n << 64n) - 1n;
 
 /** Telegram's xor-shift hash of the values, as a signed 64-bit integer */

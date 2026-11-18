@@ -1,13 +1,3 @@
-/**
- * Rate limiting service tests
- *
- * Tests for RateLimitsService including:
- * - Recording API calls
- * - Flood wait management
- * - API activity logging
- * - Status summary
- */
-
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createRateLimitsService, type RateLimitsService } from "../db/rate-limits";
@@ -23,31 +13,22 @@ describe("RateLimitsService", () => {
     db = createAccountCacheDb();
     service = createRateLimitsService(db);
 
-    // Store original Date.now for restoration
     originalDateNow = Date.now;
   });
 
   afterEach(() => {
-    // Restore original Date.now
     Date.now = originalDateNow;
     db.close();
   });
 
-  /**
-   * Helper to mock Date.now to a specific timestamp
-   */
   function mockTime(timestampMs: number): void {
     Date.now = () => timestampMs;
   }
 
-  /**
-   * Helper to get current unix timestamp in seconds
-   */
   function nowSeconds(): number {
     return Math.floor(Date.now() / 1000);
   }
 
-  /** The rate windows recordCall wrote */
   function callWindows() {
     return db
       .query(
@@ -56,7 +37,6 @@ describe("RateLimitsService", () => {
       .all();
   }
 
-  /** The rows logActivity wrote */
   function activityRows() {
     return db
       .query(
@@ -64,10 +44,6 @@ describe("RateLimitsService", () => {
       )
       .all();
   }
-
-  // ===========================================================================
-  // Recording API calls (recordCall)
-  // ===========================================================================
 
   describe("recordCall", () => {
     const baseTime = 1700000000000;
@@ -100,7 +76,6 @@ describe("RateLimitsService", () => {
       service.recordCall("messages.sendMessage");
       service.recordCall("messages.sendMessage");
 
-      // Move time forward by more than 60 seconds (window size)
       mockTime(baseTime + 61000);
 
       service.recordCall("messages.sendMessage");
@@ -119,10 +94,6 @@ describe("RateLimitsService", () => {
       ]);
     });
   });
-
-  // ===========================================================================
-  // Flood wait management
-  // ===========================================================================
 
   describe("setFloodWait", () => {
     it("should store flood wait block correctly", () => {
@@ -177,7 +148,6 @@ describe("RateLimitsService", () => {
 
       service.setFloodWait("messages.sendMessage", 30);
 
-      // Move time forward past the flood wait expiry
       mockTime(baseTime + 35000);
 
       const floodWait = service.getFloodWait("messages.sendMessage");
@@ -205,7 +175,6 @@ describe("RateLimitsService", () => {
 
       service.setFloodWait("messages.sendMessage", 30);
 
-      // Move time forward past expiry
       mockTime(baseTime + 35000);
 
       expect(service.isBlocked("messages.sendMessage")).toBe(false);
@@ -229,7 +198,6 @@ describe("RateLimitsService", () => {
 
       service.setFloodWait("messages.sendMessage", 60);
 
-      // Move forward 20 seconds
       mockTime(baseTime + 20000);
 
       const waitTime = service.getWaitTime("messages.sendMessage");
@@ -247,7 +215,6 @@ describe("RateLimitsService", () => {
 
       service.setFloodWait("messages.sendMessage", 30);
 
-      // Move time forward past expiry
       mockTime(baseTime + 35000);
 
       const waitTime = service.getWaitTime("messages.sendMessage");
@@ -260,17 +227,12 @@ describe("RateLimitsService", () => {
 
       service.setFloodWait("messages.sendMessage", 10);
 
-      // Move time way past expiry
       mockTime(baseTime + 100000);
 
       const waitTime = service.getWaitTime("messages.sendMessage");
       expect(waitTime).toBe(0);
     });
   });
-
-  // ===========================================================================
-  // API activity logging
-  // ===========================================================================
 
   describe("logActivity", () => {
     it("should store activity entries", () => {
@@ -319,16 +281,11 @@ describe("RateLimitsService", () => {
     });
   });
 
-  // ===========================================================================
-  // Status
-  // ===========================================================================
-
   describe("getStatus", () => {
     it("should return complete summary", () => {
       const baseTime = 1700000000000;
       mockTime(baseTime);
 
-      // getStatus counts the calls logged in api_activity
       for (const method of [
         "messages.sendMessage",
         "messages.sendMessage",
@@ -372,7 +329,6 @@ describe("RateLimitsService", () => {
       service.setFloodWait("messages.sendMessage", 10);
       service.setFloodWait("contacts.getContacts", 100);
 
-      // Move time forward so first one expires
       mockTime(baseTime + 15000);
 
       const status = service.getStatus();
@@ -399,7 +355,6 @@ describe("RateLimitsService", () => {
         success: 1,
       });
 
-      // Move forward 2 minutes
       mockTime(baseTime + 120000);
 
       service.logActivity({
@@ -410,7 +365,6 @@ describe("RateLimitsService", () => {
 
       const status = service.getStatus();
 
-      // Only the recent call should be counted
       expect(status.totalCalls).toBe(1);
       expect(status.callsByMethod).toEqual({
         "contacts.getContacts": 1,
@@ -418,7 +372,6 @@ describe("RateLimitsService", () => {
     });
 
     it("counts the last 60 seconds across a rate window boundary", async () => {
-      // 50 s into a calendar minute
       const minute = 1_700_000_000_000 - (1_700_000_000_000 % 60_000);
       let now = minute + 50_000;
       const clocked = createRateLimitsService(db, { now: () => now });
@@ -430,16 +383,15 @@ describe("RateLimitsService", () => {
         });
       };
 
-      await callAt(minute - 10_000); // 100 s before the status: too old
-      await callAt(minute + 50_000); // the minute that ended
-      await callAt(minute + 70_000); // the current minute
+      await callAt(minute - 10_000);
+      await callAt(minute + 50_000);
+      await callAt(minute + 70_000);
       now = minute + 90_000;
 
       const status = clocked.getStatus();
       expect(status.totalCalls).toBe(2);
       expect(status.callsByMethod).toEqual({ "messages.getHistory": 2 });
 
-      // The current calendar window alone holds one of them
       const windows = db
         .query("SELECT window_start, call_count FROM rate_limits ORDER BY window_start")
         .all();
@@ -450,10 +402,6 @@ describe("RateLimitsService", () => {
     });
   });
 
-  // ===========================================================================
-  // Edge cases and error handling
-  // ===========================================================================
-
   describe("edge cases", () => {
     it("should handle zero wait time for flood wait", () => {
       const baseTime = 1700000000000;
@@ -461,9 +409,7 @@ describe("RateLimitsService", () => {
 
       service.setFloodWait("messages.sendMessage", 0);
 
-      // With 0 wait time, should immediately be unblocked
       const isBlocked = service.isBlocked("messages.sendMessage");
-      // May be true or false depending on timing, but shouldn't throw
       expect(typeof isBlocked).toBe("boolean");
     });
 
@@ -471,7 +417,6 @@ describe("RateLimitsService", () => {
       const baseTime = 1700000000000;
       mockTime(baseTime);
 
-      // Set a very large wait time (1 day)
       service.setFloodWait("messages.sendMessage", 86400);
 
       const floodWait = service.getFloodWait("messages.sendMessage");

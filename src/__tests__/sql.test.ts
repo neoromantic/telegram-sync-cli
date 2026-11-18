@@ -1,6 +1,3 @@
-/**
- * SQL command tests
- */
 import { describe, expect, it } from "bun:test";
 
 import { CHAT_TYPE_VALUES } from "../commands/chats/helpers";
@@ -134,7 +131,6 @@ describe("SQL Command", () => {
     });
 
     it("blocks INSERT even after SELECT", () => {
-      // Someone might try to bypass by putting SELECT first
       expect(isReadOnlyQuery("SELECT 1; INSERT INTO users_cache VALUES (1)")).toBe(false);
     });
 

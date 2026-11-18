@@ -1,11 +1,3 @@
-/**
- * The first background migrations (#89): rows written by older versions
- * get the raw_json form toRawJson writes now (byte arrays as base64, Long
- * values as decimal strings, no fileReference; #86, #108, #95). Messages
- * also get the attachment row (#22) and the message_type a history page
- * gives now. One pass over messages_cache parses each row's raw_json once
- * for all three.
- */
 import type { Database } from "bun:sqlite";
 
 import { extractAttachment } from "../utils/attachment";
@@ -16,13 +8,6 @@ import type { BackgroundMigration, MigrationRow, MigrationTable } from "./backgr
 import { createMessageAttachmentsStore } from "./message-attachments";
 import { searchNamesMigration } from "./search-reindex";
 
-/**
- * The message_type a history page stores for this raw message: `text` for
- * a link preview still pending, an expired photo or unsupported media, as
- * the write path gives it. Null to keep the stored one, for raw_json that
- * isn't a TL message, such as `{}`. Older versions stored videos, voices,
- * stickers, audio and GIFs as `document`.
- */
 function rawMessageType(raw: unknown): string | null {
   const kind = (raw as { _?: unknown } | null)?._;
   if (kind !== "message" && kind !== "messageService") return null;
@@ -35,7 +20,6 @@ const messagesMigration: BackgroundMigration = {
   table: "messages_cache",
   columns: ["chat_id", "message_id", "message_type", "has_media", "raw_json"],
   prepare(db: Database) {
-    // Neither column is one the search index reads, so no re-index
     const update = db.query(`
       UPDATE messages_cache SET raw_json = $raw_json, message_type = $message_type
       WHERE rowid = $rowid
@@ -49,7 +33,6 @@ const messagesMigration: BackgroundMigration = {
 
       const messageType = rawMessageType(value) ?? (row.message_type as string);
       if (hasMedia && value !== null) {
-        // extractAttachment reads either form; this one is parsed already
         attachments.sync(row.chat_id as number, row.message_id as number, extractAttachment(value));
       }
       if (changed || messageType !== row.message_type) {
@@ -63,17 +46,6 @@ const messagesMigration: BackgroundMigration = {
   },
 };
 
-/**
- * Messages an older version cached live without their raw message have
- * raw_json '{}' (#130): no attachment row, no fields for tg sql, and nothing
- * fetches them again. The pass queues one refetch job per such chat, which
- * the daemon runs at the lowest priority. refetch_chats remembers each chat
- * it queued, so a later batch never queues it again, whatever became of its
- * job (done, failed, deleted): a row Telegram doesn't have or a request
- * that fails for good is asked for once. The SQL names the job type and
- * priority itself (SyncJobType.RefetchMessages, SyncPriority.Background):
- * sync-schema.ts imports this module.
- */
 const refetchEmptyMigration: BackgroundMigration = {
   name: "messages_refetch_empty_raw_json",
   description: "Queue a refetch of messages cached with an empty raw_json",
@@ -84,7 +56,6 @@ const refetchEmptyMigration: BackgroundMigration = {
       INSERT OR IGNORE INTO refetch_chats (chat_id, queued_at)
       VALUES ($chat_id, $now)
     `);
-    // A live message without its raw form may have queued one already
     const queue = db.query(`
       INSERT INTO sync_jobs (chat_id, job_type, priority, status, created_at)
       SELECT $chat_id, 'refetch_messages', 4, 'pending', $now
@@ -102,11 +73,6 @@ const refetchEmptyMigration: BackgroundMigration = {
   },
 };
 
-/**
- * Rich messages cached before tg read them have no text, so search can't
- * find them. Only text rows without text are rich candidates: the pass
- * reads raw_json for those alone, and the update trigger re-indexes them.
- */
 const richTextMigration: BackgroundMigration = {
   name: "messages_rich_text",
   description: "Fill the text of cached rich messages, so search finds them",

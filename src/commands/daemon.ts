@@ -1,12 +1,3 @@
-/**
- * Daemon command - manage background sync daemon
- *
- * Usage:
- *   tg daemon start [--verbose|--quiet]  Start daemon in foreground
- *   tg daemon stop                       Stop running daemon
- *   tg daemon status                     Show daemon status
- */
-
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import { loadDaemonConfig } from "../config";
@@ -20,9 +11,6 @@ import { error, info, success } from "../utils/output";
 import { formatDuration } from "../utils/time";
 import { collectStorageStatus, liveConnection, readAccountStatus } from "./status";
 
-/**
- * Start subcommand - starts daemon in foreground
- */
 const startCommand = defineCommand({
   meta: {
     name: "start",
@@ -44,8 +32,6 @@ const startCommand = defineCommand({
   },
   async run({ args }) {
     const verbosity = args.quiet ? "quiet" : args.verbose ? "verbose" : "normal";
-    // Read once: a change takes effect at the next start. A bad config
-    // never keeps the daemon from starting.
     const { retention, pacing, warning } = await loadDaemonConfig();
     if (warning) createLogger(verbosity).warn(warning);
     const daemon = createDaemon({ verbosity, retention, pacing });
@@ -56,9 +42,6 @@ const startCommand = defineCommand({
   },
 });
 
-/**
- * Stop subcommand - sends SIGTERM to running daemon
- */
 const stopCommand = defineCommand({
   meta: {
     name: "stop",
@@ -89,13 +72,11 @@ const stopCommand = defineCommand({
 
     const timeoutMs = parseInt(args.timeout, 10) * 1000;
 
-    // Send SIGTERM
     info(`Stopping daemon (PID ${pid})...`);
     if (!pidFile.sendSignal("SIGTERM")) {
       error(ErrorCodes.DAEMON_SIGNAL_FAILED, "Failed to send stop signal to daemon");
     }
 
-    // Wait for process to exit
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
       if (!pidFile.isRunning()) {
@@ -105,7 +86,6 @@ const stopCommand = defineCommand({
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    // Graceful shutdown timed out
     if (!args.force) {
       error(
         ErrorCodes.DAEMON_SHUTDOWN_TIMEOUT,
@@ -126,10 +106,6 @@ const stopCommand = defineCommand({
   },
 });
 
-/**
- * Status subcommand - shows daemon status, as totals over the accounts'
- * caches
- */
 const statusCommand = defineCommand({
   meta: {
     name: "status",
@@ -151,8 +127,6 @@ const statusCommand = defineCommand({
       return;
     }
 
-    // Moves a shared cache first; a move that waits (an older daemon still
-    // holds it) is why every account below may read as empty
     const storage = collectStorageStatus(dataDir);
     const snapshots = accountsDb.getAll().map((account) => readAccountStatus(account.id));
     const livePid = pidFile.isRunning() ? pid : null;
@@ -175,8 +149,6 @@ const statusCommand = defineCommand({
       chatsEnabled: sum((s) => s.progress.chats_enabled),
       chatsHistoryComplete: sum((s) => s.progress.chats_history_complete),
       lastUpdate: summary.lastUpdate ? new Date(summary.lastUpdate).toISOString() : null,
-      // Each account's share; connection and messagesSynced come from the
-      // rows the live daemon wrote
       accounts: snapshots.map((snapshot) => {
         const connection = liveConnection(snapshot, livePid);
         return {

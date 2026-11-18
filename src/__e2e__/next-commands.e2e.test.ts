@@ -1,9 +1,3 @@
-/**
- * E2E tests for `next` in success answers: each paged read suggests the
- * command for its next page, and running that string in a shell returns the
- * page with the account and every filter kept
- */
-
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,7 +17,6 @@ import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
 const TEAM_CHAT_ID = -1001234567890;
 const ALICE_ID = 10;
 const BOB_ID = 11;
-/** The second account, selected by a label with a space */
 const WORK = "Work Phone";
 const PHRASE = `--it's $5 "today"`;
 
@@ -47,7 +40,6 @@ function options() {
   return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } };
 }
 
-/** Run `next[0].command` as a shell would; it must succeed */
 async function follow(previous: Answer): Promise<Answer> {
   const command = previous.next?.[0]?.command;
   if (!command) throw new Error(`No next command: ${JSON.stringify(previous)}`);
@@ -125,7 +117,6 @@ beforeAll(() => {
       dialogToCacheInput,
     ),
   );
-  // Messages 1-7 of Team Chat; Alice says the phrase in 1-5 (Bob in 6)
   takePartIn(work, -4241, -4242, -4243, TEAM_CHAT_ID);
   createMessagesCache(work).upsertBatch([
     ...[1, 2, 3, 4, 5].map((id) => message(TEAM_CHAT_ID, id, ALICE_ID, `it's $5 "today" (${id})`)),
@@ -164,7 +155,6 @@ describe("E2E: next for messages list", () => {
     expect(second.data.before).toBe(5);
     const third = await follow(second);
     expect(messageIds(third.data)).toEqual([1]);
-    // A short page reached the first message
     expect(third.next).toBeUndefined();
   });
 

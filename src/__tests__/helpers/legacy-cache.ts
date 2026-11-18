@@ -1,9 +1,3 @@
-/**
- * A cache as 0.2.0 left it (#18): the same tables, but groups and channels
- * in chats_cache under their bare IDs, a channel sender in from_id under
- * its bare ID, user_version 0 and search index version 1. messages_cache and
- * the sync tables already hold marked IDs. Made-up data only.
- */
 import type { Database } from "bun:sqlite";
 
 import { dialogToCacheInput } from "../../commands/chats/helpers";

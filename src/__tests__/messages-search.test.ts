@@ -1,6 +1,3 @@
-/**
- * Tests for messages search service (FTS5)
- */
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { createChatsCache } from "../db/chats-cache";
@@ -136,7 +133,6 @@ describe("MessagesSearch", () => {
 
     const search = createMessagesSearch(db);
 
-    // Filter by chat_id -1001234567890 (Team Chat)
     const results = search.search("hello", { chatId: -1001234567890 });
 
     expect(results).toHaveLength(1);
@@ -144,7 +140,6 @@ describe("MessagesSearch", () => {
     expect(results[0]!.message_id).toBe(1);
     expect(results[0]!.text).toBe("hello team");
 
-    // Filter by chat_id -200 (Random)
     const results2 = search.search("hello", { chatId: -200 });
 
     expect(results2).toHaveLength(1);
@@ -158,7 +153,6 @@ describe("MessagesSearch", () => {
 
     const search = createMessagesSearch(db);
 
-    // Filter by from_id 10 (Alice)
     const results = search.search("hello", { senderId: 10 });
 
     expect(results).toHaveLength(1);
@@ -166,7 +160,6 @@ describe("MessagesSearch", () => {
     expect(results[0]!.message_id).toBe(1);
     expect(results[0]!.sender_username).toBe("alice");
 
-    // Filter by from_id 11 (Bob) - excludes deleted by default
     const results2 = search.search("hello", { senderId: 11 });
 
     expect(results2).toHaveLength(1);
@@ -180,7 +173,6 @@ describe("MessagesSearch", () => {
 
     const search = createMessagesSearch(db);
 
-    // Both chatId and senderId matching (Alice in Team Chat)
     const results = search.search("hello", {
       chatId: -1001234567890,
       senderId: 10,
@@ -191,7 +183,6 @@ describe("MessagesSearch", () => {
     expect(results[0]!.from_id).toBe(10);
     expect(results[0]!.message_id).toBe(1);
 
-    // chatId matches but senderId doesn't match any non-deleted messages
     const results2 = search.search("hello", {
       chatId: -1001234567890,
       senderId: 11,
@@ -199,7 +190,6 @@ describe("MessagesSearch", () => {
 
     expect(results2).toHaveLength(0);
 
-    // Include deleted to find Bob's message in Team Chat
     const results3 = search.search("hello", {
       chatId: -1001234567890,
       senderId: 11,
@@ -257,7 +247,6 @@ describe("MessagesSearch", () => {
       }),
     );
 
-    // Message with hyphen (Russian "che-nit" slang)
     messagesCache.upsert({
       chat_id: -1001234567890,
       message_id: 1,
@@ -268,7 +257,6 @@ describe("MessagesSearch", () => {
       raw_json: "{}",
     });
 
-    // Message with asterisk
     messagesCache.upsert({
       chat_id: -1001234567890,
       message_id: 2,
@@ -279,7 +267,6 @@ describe("MessagesSearch", () => {
       raw_json: "{}",
     });
 
-    // Message with parentheses
     messagesCache.upsert({
       chat_id: -1001234567890,
       message_id: 3,
@@ -292,17 +279,14 @@ describe("MessagesSearch", () => {
 
     const search = createMessagesSearch(db);
 
-    // A plain query quotes each word, so a hyphen is never syntax
     const hyphenResults = search.search("че-нить");
     expect(hyphenResults).toHaveLength(1);
     expect(hyphenResults[0]!.message_id).toBe(1);
 
-    // An asterisk is FTS5 syntax: a prefix, then another word
     const asteriskResults = search.search("test*value");
     expect(asteriskResults).toHaveLength(1);
     expect(asteriskResults[0]!.message_id).toBe(2);
 
-    // Parentheses are FTS5 syntax too; as a phrase they are punctuation
     expect(() => search.search("function(arg)")).toThrow(/fts5: syntax error/);
     const parenResults = search.search("function(arg)", { phrase: true });
     expect(parenResults).toHaveLength(1);
@@ -339,7 +323,6 @@ describe("toFts5Query", () => {
     expect(toFts5Query("C++")).toBe('"C++"');
     expect(toFts5Query("learn c++ fast")).toBe('"learn" "c++" "fast"');
     expect(toFts5Query("2^10 a+b")).toBe('"2^10" "a+b"');
-    // Between phrases and at the start of a word they stay FTS5 syntax
     expect(toFts5Query("hel* + world")).toBe("hel* + world");
     expect(toFts5Query('"a"+"b"')).toBe('"a"+"b"');
     expect(toFts5Query("x ^start")).toBe("x ^start");
@@ -358,10 +341,6 @@ describe("toFts5Query", () => {
 });
 
 describe("MessagesSearch on a contentless and a regular index", () => {
-  /**
-   * The same made-up cache, with the search index of the given kind, on a
-   * fixed clock so the rows' timestamps match
-   */
   function buildCache(contentlessSearch: boolean): Database {
     const realNow = Date.now;
     Date.now = () => 1_760_000_000_000;
@@ -465,7 +444,6 @@ describe("MessagesSearch on a contentless and a regular index", () => {
         .map((row) => row.message_id),
     );
     expect(ranked[0]).toEqual(ranked[1]!);
-    // Message 3 says hello in the shortest text, so bm25 ranks it first
     expect(ranked[0]![0]).toBe(3);
     expect(ranked[0]).not.toEqual([5, 3, 1]);
 
@@ -505,7 +483,6 @@ describe("MessagesSearch on a contentless and a regular index", () => {
         sender_username: "alice",
       });
       expect(rows[0]!.rank).toBeLessThanOrEqual(rows[1]!.rank);
-      // SQLite flattens the view and gives the MATCH to FTS5
       const plan = (
         db.query(`EXPLAIN QUERY PLAN ${sql}`).all("hello") as Array<{
           detail: string;
@@ -517,7 +494,6 @@ describe("MessagesSearch on a contentless and a regular index", () => {
 
   it("keeps the view working when the index table is rebuilt", () => {
     const db = buildCache(false);
-    // A newer SQLite drops the full-content table and builds a contentless one
     initSyncSchema(db, { contentlessSearch: true });
     expect(isContentlessSearch(db)).toBe(true);
 

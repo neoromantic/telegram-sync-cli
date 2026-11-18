@@ -1,11 +1,3 @@
-/**
- * When a failed sync job runs again, and which errors never go away.
- *
- * The daemon's client already waits out short FLOOD_WAITs and retries
- * server errors inside the call, so a job sees only what that left over:
- * long FLOOD_WAITs (a delay, handled by the worker, not here), 4xx errors,
- * network errors and timeouts, and local errors.
- */
 import { tl } from "@mtcute/bun";
 import { calculateReconnectDelay } from "./daemon-utils";
 import type { ReconnectConfig } from "./types";
@@ -26,7 +18,6 @@ export function retryDelayMs(failures: number): number {
   return calculateReconnectDelay(failures, SYNC_RETRY_CONFIG);
 }
 
-/** RPC error codes that the same request gets again on every try */
 const PERMANENT_RPC_CODES = [400, 403, 404];
 
 /**

@@ -1,7 +1,3 @@
-/**
- * Real mtcute client integration for sync workers
- */
-
 import type { SyncJobRow } from "../db/sync-schema";
 import { canMakeApiCall } from "./sync-worker-real-context";
 import { processJobReal } from "./sync-worker-real-jobs";
@@ -37,7 +33,6 @@ export function createRealSyncWorker(deps: RealSyncWorkerDeps) {
   };
 
   return {
-    /** The client this worker calls; a reconnect replaces the worker */
     client: ctx.client,
     canMakeApiCall: () => canMakeApiCall(ctx),
     processJobReal: (job: SyncJobRow) => processJobReal(ctx, job),

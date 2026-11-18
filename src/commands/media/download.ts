@@ -1,8 +1,3 @@
-/**
- * tg media download: a message's file into the account's media cache,
- * printed as JSON, copied with --out, or written to stdout with --out -.
- * A cached file needs no network and no credentials.
- */
 import { mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { defineCommand } from "citty";
@@ -26,7 +21,6 @@ import { type DownloadResult, downloadMedia } from "./download-media";
 import { DownloadInterruptedError, reportMediaError } from "./errors";
 
 const CONTEXT = "cli:media.download";
-/** Exit code of a download stopped by SIGINT or SIGTERM */
 const INTERRUPTED_EXIT_CODE = 130;
 
 function statOrNull(path: string) {
@@ -37,10 +31,6 @@ function statOrNull(path: string) {
   }
 }
 
-/**
- * Where --out puts the file: into a directory (an existing one, or a path
- * ending in a slash, created) under the file's name, else at that path
- */
 function outTarget(out: string, fileName: string): string {
   const isDir = /[/\\]$/.test(out) || statOrNull(out)?.isDirectory() === true;
   const target = resolve(isDir ? join(out, fileName) : out);
@@ -48,7 +38,6 @@ function outTarget(out: string, fileName: string): string {
   return target;
 }
 
-/** Copy the cached file to --out, never over an existing file unless asked */
 async function copyOut(result: DownloadResult, out: string, overwrite: boolean): Promise<string> {
   let target: string;
   try {
@@ -68,7 +57,6 @@ async function copyOut(result: DownloadResult, out: string, overwrite: boolean):
     );
   }
 
-  // Written next to the target, then renamed over it: never half a file
   const tmp = join(dirname(target), `.${basename(target)}.tg-${process.pid}.part`);
   try {
     await Bun.write(tmp, Bun.file(result.path));
@@ -148,7 +136,6 @@ export const downloadMediaCommand = defineCommand({
     }
     const { account } = openAccountCache(args.account);
 
-    // SIGINT/SIGTERM stop the transfer; the partial download is kept
     const controller = new AbortController();
     const stop = () => {
       if (controller.signal.aborted) process.exit(INTERRUPTED_EXIT_CODE);
@@ -160,7 +147,6 @@ export const downloadMediaCommand = defineCommand({
     let result: DownloadResult;
     try {
       const history = openHistory(account.id, CONTEXT);
-      // The instance the lazy history client wraps: one connection
       const getClient = () =>
         wrapClientCallWithRateLimits(getClientForAccount(account.id), {
           context: CONTEXT,

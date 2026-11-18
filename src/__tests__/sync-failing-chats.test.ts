@@ -1,12 +1,3 @@
-/**
- * Chats whose sync pages keep failing (#9): a transient error retries with
- * backoff and gives up after five attempts, a permanent error fails at once,
- * and neither queues the chat again on every refresh.
- *
- * Runs the real scheduler, sync worker and job loop against a fake history,
- * with a fake clock: one loop tick per second and a refresh every 30 ticks,
- * like the daemon.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, type mock } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
@@ -36,7 +27,6 @@ const T0 = 1_700_000_000_000;
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
-// Private chats with made-up user IDs, and a made-up channel
 const FAILING_CHAT = 50_001;
 const HEALTHY_CHAT = 50_002;
 const PRIVATE_CHANNEL_ID = 1234567890;
@@ -51,9 +41,7 @@ describe("chats whose sync pages keep failing", () => {
   let now: number;
   const realNow = Date.now;
 
-  /** Errors to throw instead of a page, by chat */
   const failures = new Map<number, () => unknown>();
-  /** Fake clock times of each chat's getHistory calls */
   let calls: Map<number, number[]>;
 
   beforeEach(() => {
@@ -69,7 +57,6 @@ describe("chats whose sync pages keep failing", () => {
     const chatsCache = createChatsCache(db);
     const history = createMultiChatHistory();
 
-    // Both chats are behind: 150 messages above the cursor
     for (const chatId of [FAILING_CHAT, HEALTHY_CHAT]) {
       chatSyncState.upsert({
         chat_id: chatId,
@@ -130,7 +117,6 @@ describe("chats whose sync pages keep failing", () => {
     db.close();
   });
 
-  /** Run the daemon loop for `ms`: a job step every second, a refresh every 30 */
   async function runFor(ms: number) {
     const end = now + ms;
     while (now < end) {
@@ -140,7 +126,6 @@ describe("chats whose sync pages keep failing", () => {
     }
   }
 
-  /** 100 refresh cycles, 30 seconds apart */
   async function refreshCycles(count = 100) {
     for (let i = 0; i < count; i++) {
       now += 30_000;
@@ -202,7 +187,6 @@ describe("chats whose sync pages keep failing", () => {
       },
     ]);
 
-    // The other chat was caught up meanwhile
     expect(chatSyncState.get(HEALTHY_CHAT)?.forward_cursor).toBe(1150);
 
     const logged = warnings();
@@ -248,7 +232,6 @@ describe("chats whose sync pages keep failing", () => {
     expect(callsFor(PRIVATE_CHANNEL)).toHaveLength(1);
     expectNoDuplicateRows();
 
-    // Pruning deletes the failed row a day later, so the chat gets one more try
     now = T0 + DAY + MINUTE;
     pruneCache(db, { ...getDefaultRetentionConfig(), failedJobs: DAY }, { now });
     await refreshCycles();
@@ -265,7 +248,6 @@ describe("chats whose sync pages keep failing", () => {
   ] as const) {
     it(`drops the job of a chat turned off while its page was in flight, on ${label}`, async () => {
       failures.set(FAILING_CHAT, () => {
-        // tg chats sync --off runs while the call is in flight
         chatSyncState.setSyncMode(FAILING_CHAT, "off");
         jobsService.cancelPendingForChat(FAILING_CHAT);
         return error();
@@ -275,7 +257,6 @@ describe("chats whose sync pages keep failing", () => {
       await runFor(MINUTE);
       expect(callsFor(FAILING_CHAT)).toHaveLength(1);
       expect(rowsFor(FAILING_CHAT)).toEqual([]);
-      // tg status has no failed job to show for it
       expect(jobsService.countJobs().failed).toBe(0);
 
       await refreshCycles();
@@ -302,7 +283,6 @@ describe("a chat that fails in one account", () => {
     for (const db of dbs) db.close();
   });
 
-  /** An account with a DM with user 50001, 150 messages behind */
   function seedAccount(ctx: DaemonContext, accountId: number, failure?: () => unknown) {
     const db = createAccountCacheDb();
     dbs.push(db);
@@ -375,7 +355,6 @@ describe("a chat that fails in one account", () => {
       }
     };
 
-    // Account 2 gives up on the chat after five attempts
     await runFor(20 * MINUTE);
     const failedRows = (service: SyncJobsService) =>
       service.getFailedJobs(10).map((job) => job.chat_id);
@@ -383,7 +362,6 @@ describe("a chat that fails in one account", () => {
     expect(failedRows(first.jobsService)).toEqual([]);
     expect(first.chatSyncState.get(FAILING_CHAT)?.forward_cursor).toBe(1150);
 
-    // New messages: account 1 queues and runs the same chat again
     first.history.set(FAILING_CHAT, range(1, 1200));
     first.chatSyncState.raiseTopMessageId(FAILING_CHAT, 1200);
     await runFor(2 * MINUTE);

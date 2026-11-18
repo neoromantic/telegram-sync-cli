@@ -112,7 +112,6 @@ function buildUserPeerFromApi(user: tl.RawUser, fallbackName: string): ResolvedP
   };
 }
 
-/** Keep a full user from Telegram, so the next lookup by ID hits the cache */
 function cacheResolvedUser(usersCache: UsersCache, user: tl.RawUser): void {
   if (user.min) return;
   try {
@@ -186,9 +185,6 @@ async function resolveByUsername(
 
   const resolvedChat = resolved.chats?.[0];
   if (resolvedChat) {
-    // Keep the chat's type, so a broadcast channel isn't taken for a group
-    // the account doesn't take part in (src/db/group-participation.ts).
-    // The answer has no dialog metadata, so keep what the cache knows.
     const cacheInput = rawPeerToCacheInput(resolvedChat);
     if (cacheInput) {
       const known = chatsCache.getById(cacheInput.chat_id);
@@ -232,9 +228,6 @@ async function resolveByPhone(
     const resolved = await client.call(request);
     resolvedUser = resolved.users?.find((user): user is tl.RawUser => user._ === "user") ?? null;
   } catch (err) {
-    // An RPC error means Telegram has no user with this number. Anything
-    // else (missing credentials, a rate limit, a lost connection) is not an
-    // answer, and the caller reports it.
     if (!tl.RpcError.is(err) || err.code === tl.RpcError.FLOOD) throw err;
     resolvedUser = null;
   }
@@ -247,10 +240,6 @@ async function resolveByPhone(
   throw new Error(`Could not resolve phone number ${identifier}`);
 }
 
-/**
- * The input peer for a chats_cache row, built from its marked ID. Null for
- * a row whose ID names no peer.
- */
 function peerFromCachedChat(chat: CachedChat, fallbackName?: string): ResolvedPeer | null {
   const id = Number(chat.chat_id);
   const inputPeer = toInputPeerFromPeerId(id, chat.access_hash);
@@ -258,12 +247,6 @@ function peerFromCachedChat(chat: CachedChat, fallbackName?: string): ResolvedPe
   return { inputPeer, name: chat.title || fallbackName || `Chat ${id}` };
 }
 
-/**
- * A bare positive number that 0.2.0 or older printed for a group or channel:
- * `tg chats list` showed basic group N and channel N as N. Only the cache
- * answers. Two cached chats for one number are an error, since either could
- * be meant.
- */
 function resolveLegacyChatId(identifier: string, { chatsCache }: CacheDeps): ResolvedPeer | null {
   const matches = chatsCache.getByLegacyId(Number(identifier));
   if (matches.length > 1) {
@@ -278,11 +261,6 @@ function resolveLegacyChatId(identifier: string, { chatsCache }: CacheDeps): Res
   return peerFromCachedChat(chat);
 }
 
-/**
- * A group or channel row under its bare ID, which an older binary that is
- * still running writes until the next open re-keys it: the chat 0.2.0
- * printed as N.
- */
 function peerFromBareChatRow(chat: CachedChat | null): ResolvedPeer | null {
   if (!chat || chat.type === "private") return null;
   const marked = toMarkedPeerId(Number(chat.chat_id), chat.type);
@@ -290,15 +268,6 @@ function peerFromBareChatRow(chat: CachedChat | null): ResolvedPeer | null {
   return peerFromCachedChat({ ...chat, chat_id: String(marked) });
 }
 
-/**
- * A bare ID the cache knows. A positive marked ID is a user, so users come
- * first: one with an access hash, then a chats_cache row (a private chat),
- * then any other user the cache knows (isKnownUserId): one without a hash,
- * or a DM with sync state or cached messages. Telegram may refuse a user
- * peer without an access hash, but the peer is the right one, and cache
- * reads need no hash. Last, a group or channel ID as 0.2.0 printed it:
- * cached under its marked ID, or under the bare one by an older binary.
- */
 function resolveCachedId(identifier: string, deps: CacheDeps): ResolvedPeer | null {
   const { usersCache, chatsCache, dms } = deps;
   const cachedUser = usersCache.getById(identifier);
@@ -307,8 +276,6 @@ function resolveCachedId(identifier: string, deps: CacheDeps): ResolvedPeer | nu
     return buildUserPeerFromCache(cachedUser, `User ${identifier}`);
   }
 
-  // Only a private chat has a positive marked ID. A group or channel row
-  // under one is a bare row from an older binary, re-keyed on the next open.
   const cachedChat = chatsCache.getById(identifier);
   if (cachedChat?.type === "private") {
     verbose(`Found chat ID ${identifier} in cache`);
@@ -331,13 +298,6 @@ function resolveCachedId(identifier: string, deps: CacheDeps): ResolvedPeer | nu
   return resolveLegacyChatId(identifier, deps) ?? peerFromBareChatRow(cachedChat);
 }
 
-/**
- * A positive ID the cache doesn't know is a user, as a positive marked ID
- * always is; basic group N is -N. It gets access hash 0, like a cached user
- * without one: Telegram may refuse it, but it never names a group. Only
- * plain digits count: `Number.parseInt` would read `-12.5` as -12 and `1e1`
- * as 1.
- */
 function resolveUncachedId(identifier: string): ResolvedPeer {
   const userId = /^\d+$/.test(identifier) ? Number(identifier) : 0;
   const inputPeer = toInputPeerFromPeerId(userId, null);
@@ -345,12 +305,6 @@ function resolveUncachedId(identifier: string): ResolvedPeer {
   return { inputPeer, name: `User ${userId}` };
 }
 
-/**
- * A marked ID, as every cache table stores it: -N is basic group N and
- * -100… is a channel or supergroup. A cached row gives the access hash and
- * the title; without one the peer is built from the ID alone, with no API
- * call.
- */
 function resolveByMarkedId(identifier: string, { chatsCache }: CacheDeps): ResolvedPeer {
   const marked = Number(identifier);
   if (!Number.isSafeInteger(marked) || marked >= 0) {
@@ -385,8 +339,6 @@ export async function resolvePeer(
     return { inputPeer: { _: "inputPeerSelf" }, name: "Saved Messages" };
   }
 
-  // `+` always means a phone number, with or without spaces, dashes and
-  // brackets, which would otherwise read as a username
   if (normalized.startsWith("+")) {
     const phone = normalizePhone(normalized);
     if (!phone) throw new InvalidPeerError(normalized);
@@ -402,10 +354,6 @@ export async function resolvePeer(
     return resolveByMarkedId(normalized, deps);
   }
 
-  // A positive number is an ID when the cache knows it: a user, a DM with
-  // sync state or cached messages, or a group or channel ID as 0.2.0
-  // printed it. Otherwise 10+ digits are still a phone number, and a
-  // shorter one is a user ID.
   const cached = /^\d+$/.test(normalized) ? resolveCachedId(normalized, deps) : null;
   if (cached) return cached;
 

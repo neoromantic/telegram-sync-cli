@@ -1,10 +1,3 @@
-/**
- * Write a SQLite file from a child process. Caches and services keep
- * prepared statements, and bun:sqlite closes a connection only once they
- * are finalized, so a file written in the test process stays open after
- * close(). tg moves a shared cache only when no process has it open, so it
- * would find every such file in use.
- */
 import { join } from "node:path";
 
 const SEED_SCRIPT = `

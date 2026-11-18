@@ -13,7 +13,6 @@ const HEALTH_CHECK_COOLDOWN_MS = 60_000;
 const SCHEDULER_REFRESH_INTERVAL_TICKS = 30;
 
 function jobCounts(rt: AccountRuntime): { pending: number; running: number } {
-  // db.query caches the statement
   const row = rt.db
     .query(
       `SELECT COALESCE(SUM(status = $pending), 0) AS pending,
@@ -54,10 +53,6 @@ export async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
   }
 }
 
-/**
- * Sleep `ms`, or less if the daemon stops meanwhile. The timer is set last:
- * a test's setTimeout may call `done` at once.
- */
 function sleepUnlessStopped(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
@@ -95,8 +90,6 @@ export async function waitForNextTick(
     if (ctx.state.shutdownRequested) return;
     startDueJobs(ctx);
     const after = clock.now();
-    // A clock that stands still (a test's) would wake for the same job
-    // forever
     if (after <= now) break;
     now = after;
   }
@@ -105,8 +98,6 @@ export async function waitForNextTick(
 
 async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
   for (const accountState of ctx.state.accounts.values()) {
-    // The check runs beside a running job, on the same client: a job starts
-    // on the same tick, so skipping busy accounts could skip one every time
     if (accountState.status === "connected" && accountState.client) {
       const lastActivity = accountState.lastActivity ?? 0;
       if (now - lastActivity < HEALTH_CHECK_COOLDOWN_MS) {
@@ -121,14 +112,11 @@ async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
         );
         accountState.status = "error";
         accountState.lastError = getErrorMessage(err);
-        // The reconnect's log line and tg status say how long it was down
         if (accountState.watch) accountState.watch.offlineSince ??= now;
         scheduleReconnect(ctx, accountState);
       }
     }
 
-    // A reconnect would close the client under a running job: it waits for
-    // a later health check, after the job ends
     if (
       accountState.status === "error" &&
       accountState.nextReconnectAt &&
@@ -153,23 +141,16 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
     const now = Date.now();
 
     try {
-      // Each account's job runs on its own; the loop doesn't wait for it
       startDueJobs(ctx);
     } catch (err) {
       ctx.logger.warn(`Error processing jobs: ${formatError(err)}`);
     }
 
-    // A stop as a job starts: no health check, refresh, tick or wait. The
-    // shutdown waits for the jobs and marks every account stopped.
     if (ctx.state.shutdownRequested) break;
 
-    // After a sleep or a reconnect mtcute handled itself, a dialog pass on
-    // the account's client queues catch-up for the chats that moved (#124)
     detectWake(ctx, now);
     void runDueCatchUps(ctx, now);
 
-    // Contacts: due on start (after the dialog pass) and every 30 ticks
-    // after. A due check runs in the background (#8).
     if (loopIteration === 1 || loopIteration % SCHEDULER_REFRESH_INTERVAL_TICKS === 0) {
       void maybeSyncContacts(ctx, now);
     }
@@ -192,7 +173,6 @@ export async function mainLoop(ctx: DaemonContext): Promise<void> {
       cleanupOldJobs(ctx);
     }
 
-    // Last and lowest: a few batches of each cache's background migrations
     await runMigrationsTick(ctx);
 
     await waitForNextTick(ctx, 1000);

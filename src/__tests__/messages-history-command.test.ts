@@ -1,6 +1,3 @@
-/**
- * Tests for the core of `tg messages list` (src/commands/messages/history.ts)
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
@@ -91,20 +88,17 @@ function cacheMessages(db: Database, chatId: number, ids: number[]) {
   );
 }
 
-/** Messages the daemon cached as one run, so the cache can vouch for them */
 function cacheRun(db: Database, chatId: number, low: number, high: number) {
   cacheMessages(db, chatId, range(low, high));
   createHistoryRanges(db).add(chatId, { low, high });
 }
 
-/** The recorded ranges of a chat, oldest first */
 function storedRanges(db: Database, chatId = TEAM_CHAT_ID): HistoryRange[] {
   return db
     .query("SELECT low, high FROM history_ranges WHERE chat_id = ? ORDER BY low")
     .all(chatId) as HistoryRange[];
 }
 
-/** createFakeHistory, plus the senders a real getHistory response carries */
 function historyClient(ids: number[], users: tl.TypeUser[] = []) {
   const fake = createFakeHistory(ids);
   const fakeCall = fake.client.call as unknown as (
@@ -122,7 +116,6 @@ function historyClient(ids: number[], users: tl.TypeUser[] = []) {
   };
 }
 
-/** Alice as getHistory returns her with her messages */
 const ALICE: tl.RawUser = {
   _: "user",
   id: ALICE_ID,
@@ -132,7 +125,6 @@ const ALICE: tl.RawUser = {
   accessHash: toLong("1111"),
 };
 
-/** A client whose pages hold messages from Alice, with Alice in `users` */
 function aliceClient(ids: number[]) {
   const fake = historyClient(ids, [ALICE]);
   const call = mock(async (request: GetHistoryRequest) => {
@@ -150,7 +142,6 @@ function aliceClient(ids: number[]) {
   return { client: { call } as unknown as CallClient };
 }
 
-/** The fetched rows carry Alice's name, and search finds them by it */
 function expectAliceCached(db: Database, rows: Parameters<typeof messageRowToItem>[0][]) {
   expect(rows.length).toBeGreaterThan(0);
   for (const row of rows) {
@@ -168,7 +159,6 @@ function expectAliceCached(db: Database, rows: Parameters<typeof messageRowToIte
   ).toEqual(rowIds(rows).sort((a, b) => b - a));
 }
 
-/** A client that returns every message it has, ignoring the window */
 function unboundedClient(ids: number[]) {
   const call = mock(async () => ({
     _: "messages.messages",
@@ -193,7 +183,6 @@ function rowIds(rows: Array<{ message_id: number }>) {
   return rows.map((row) => row.message_id);
 }
 
-/** Every cached message ID, newest first */
 function storedIds(db: Database): number[] {
   const rows = db
     .query("SELECT message_id FROM messages_cache ORDER BY message_id DESC")
@@ -236,7 +225,6 @@ describe("resolveHistoryChat", () => {
       }),
       chatRow(BOOK_CLUB_ID, "group", { title: "Book Club" }),
     ]);
-    // A private chat the daemon cached with no users_cache or chats_cache row
     const newDm = [NEW_USER_ID, LONG_NEW_USER_ID];
     for (const chatId of [ALICE_ID, TEAM_CHAT_ID, BOOK_CLUB_ID, SELF_ID, ...newDm]) {
       cacheRun(cacheDb, chatId, 1, 2);
@@ -416,7 +404,6 @@ describe("fetchHistoryPage", () => {
   });
 
   it("joins pages across ID gaps when paging back with nextBefore", async () => {
-    // Private chats share one ID sequence per account, so a chat's IDs skip
     const { client } = historyClient([1, 2, 3, 7, 8, 9, 10]);
     let before: number | undefined;
     for (let page = 0; page < 4; page++) {
@@ -538,7 +525,6 @@ describe("cacheHistoryResponse", () => {
       firstName: "Alice",
       accessHash: toLong("1111"),
     };
-    // Telegram leaves fromId out of an incoming private message
     const message = {
       _: "message",
       id: 7,
@@ -699,8 +685,6 @@ describe("listHistory", () => {
   });
 
   it("asks Telegram for messages cached outside any recorded range", async () => {
-    // tg send and live updates cache messages without saying what is next
-    // to them, and a fully synced chat from before ranges has none
     cacheMessages(cacheDb, TEAM_CHAT_ID, range(1, 5));
     syncState(true);
     const { client, requests } = historyClient(range(1, 5));
@@ -773,7 +757,6 @@ describe("listHistory", () => {
   });
 
   describe("with gaps in the cache", () => {
-    // Telegram holds 1-1000; the daemon cached the newest page, 951-1000
     let history: ReturnType<typeof historyClient>;
 
     beforeEach(() => {
@@ -819,7 +802,6 @@ describe("listHistory", () => {
       }
 
       expect(seen).toEqual(range(941, 1000).reverse());
-      // 951-1000 came from the cache, 941-950 from Telegram
       expect(history.requests).toHaveLength(2);
       expect(storedRanges(cacheDb)).toEqual([
         { low: 95, high: 99 },
@@ -1005,7 +987,6 @@ describe("getMessageWithContext", () => {
   });
 
   it("asks Telegram for older context when the cached message is the oldest", async () => {
-    // The daemon cached only the newest page of this chat
     const aliceChat: HistoryChat = {
       chatId: ALICE_ID,
       inputPeer: {
@@ -1027,7 +1008,6 @@ describe("getMessageWithContext", () => {
   });
 
   it("asks Telegram for newer context when nothing newer is cached", async () => {
-    // 6 and 8 are deleted, so 7 is the newest message the cache can show
     const { client, requests } = historyClient([1, 2, 3, 4, 5, 7, 9]);
 
     const result = await get(client, 7, { context: 2 });
@@ -1075,8 +1055,6 @@ describe("getMessageWithContext", () => {
         throw failure;
       });
 
-      // Nothing newer than 7 is cached (8 is deleted), so the cache lacks
-      // the newer side
       const result = await get({ call } as unknown as CallClient, 7, {
         context: 2,
       });
@@ -1090,7 +1068,6 @@ describe("getMessageWithContext", () => {
   );
 
   it("serves a cached message alone when no recorded range is next to it", async () => {
-    // A message that tg send or a live update cached
     cacheMessages(cacheDb, ALICE_ID, [42]);
     const aliceChat: HistoryChat = {
       chatId: ALICE_ID,
@@ -1126,7 +1103,6 @@ describe("getMessageWithContext", () => {
   });
 
   it("asks Telegram when a context side runs past the recorded range", async () => {
-    // Telegram holds 1-1000; the daemon cached the newest page, 951-1000
     const { client, requests } = historyClient(range(1, 1000));
     cacheRun(cacheDb, ALICE_ID, 951, 1000);
     const aliceChat: HistoryChat = {
@@ -1147,7 +1123,6 @@ describe("getMessageWithContext", () => {
   });
 
   it("asks Telegram for context across a gap in the cache", async () => {
-    // Telegram holds 1-1000; the daemon cached 951-1000 and a list page 95-99
     const { client, requests } = historyClient(range(1, 1000));
     cacheRun(cacheDb, ALICE_ID, 951, 1000);
     const aliceChat: HistoryChat = {

@@ -1,7 +1,3 @@
-/**
- * The helper that checks one peer ID format (#18) must catch a bare group
- * or channel ID in every table, not only in chats_cache
- */
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 
@@ -16,7 +12,6 @@ import { createAccountCacheDb } from "./helpers/cache-db";
 import { fakeDialog } from "./helpers/fake-dialogs";
 import { assertPeerIdInvariants } from "./helpers/peer-id-invariants";
 
-/** Team Chat, a supergroup: bare channel ID and its marked ID */
 const BARE = 1234567890;
 const MARKED = -1001234567890;
 
@@ -81,7 +76,6 @@ describe("assertPeerIdInvariants", () => {
     ["history_ranges", () => createHistoryRanges(db).add(BARE, { low: 1, high: 1 })],
   ] as const) {
     it(`catches a supergroup's bare ID in ${table}`, () => {
-      // Known as a supergroup from chats_cache only, as 0.2.0 stored it
       createChatsCache(db).upsert({
         ...dialogToCacheInput(fakeDialog({ kind: "supergroup", id: BARE, title: "Team Chat" })),
         chat_id: String(BARE),

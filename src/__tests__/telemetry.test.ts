@@ -1,7 +1,3 @@
-/**
- * Usage stats wiring: command paths, the channel, error types and the source
- * checkout rule. The client itself is devkit's and tested there.
- */
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -277,7 +273,6 @@ describe("the events a command hands over at its exit", () => {
     dirs.push(dir);
     return dir;
   };
-  /** Usage stats on, the notice seen, no AI agent */
   const on = () => {
     const dir = tempDir();
     writeFileSync(
@@ -332,7 +327,6 @@ describe("the events a command hands over at its exit", () => {
   });
 
   it("stay in the daemon, which sends them itself", () => {
-    // Its requests go to a closed local port
     const env = {
       ...on(),
       TELEGRAM_SYNC_CLI_TELEMETRY: "1",

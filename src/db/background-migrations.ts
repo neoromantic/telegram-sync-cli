@@ -1,21 +1,3 @@
-/**
- * Background migrations: one-time rewrites of every row of a big table,
- * done in small batches instead of one transaction on open (#89).
- *
- * cache_migrations has a row per registered migration with its progress.
- * Each batch is its own short write transaction: it reads the cursor (the
- * last rowid done), rewrites the next rows up to a row and a time limit and
- * moves the cursor, all at once. So a stop at any point resumes where the
- * last batch ended, two runners (the daemon and `tg db migrate`) take turns
- * without doing a row twice, and another process's write waits at most one
- * batch. A migration's rewrite is idempotent, so a row done twice (after a
- * VACUUM moved rowids) ends the same.
- *
- * A migration covers the rows up to the table's largest rowid when it
- * starts: later rows are written by this version, in the new form. Readers
- * take rows in the old and the new form alike, so a migration half done
- * changes no answer.
- */
 import type { Database } from "bun:sqlite";
 
 import { BACKGROUND_MIGRATIONS } from "./raw-json-migrations";
@@ -118,7 +100,6 @@ function registeredNames(db: Database): Set<string> {
   return new Set(rows.map((row) => row.name));
 }
 
-/** Whether the table has no rows; a database without the table has none */
 function tableIsEmpty(db: Database, table: MigrationTable): boolean {
   const exists = db
     .query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`)
@@ -197,11 +178,6 @@ export function readMigrationStatus(
   return result;
 }
 
-/**
- * Fix the rows a migration covers: up to the largest rowid now. The count
- * reads the table outside the write lock; rows written meanwhile have a
- * larger rowid and the new form.
- */
 function startMigration(db: Database, migration: BackgroundMigration, now: number): void {
   const { end, total } = db
     .query(`SELECT COALESCE(MAX(rowid), 0) AS end, COUNT(*) AS total FROM ${migration.table}`)
@@ -254,7 +230,6 @@ export function runMigrationBatch(
   try {
     return db
       .transaction((): BatchResult => {
-        // Read again under the lock: another runner may have moved on
         const record = readRecord(db, migration.name);
         if (!record || record.state === "done") {
           return { rows: 0, finished: true };
@@ -275,7 +250,6 @@ export function runMigrationBatch(
           count += 1;
           if (now() - started >= limits.maxMs) break;
         }
-        // Fewer rows than asked for: nothing is left below end_rowid
         const finished =
           cursor >= (record.end_rowid ?? 0) ||
           (count === rows.length && rows.length < limits.maxRows);
@@ -306,9 +280,7 @@ function recordError(db: Database, name: string, err: unknown, now: number): voi
       $error: err instanceof Error ? err.message : String(err),
       $now: now,
     });
-  } catch {
-    // The cache may be busy or read-only; the error is rethrown anyway
-  }
+  } catch {}
 }
 
 /**
@@ -426,7 +398,6 @@ export async function runPendingMigrations(
       if (migration.writesSearch) await mergeBetweenBatches();
     }
   }
-  // Checked first, outside the write lock: the queue is empty most ticks
   while (search && hasQueuedReindex(db)) {
     if (options.shouldStop?.()) return total;
     const batch = runReindexBatch(db, limits);
@@ -435,7 +406,6 @@ export async function runPendingMigrations(
     await options.yieldBetweenBatches?.();
     await mergeBetweenBatches();
   }
-  // The same: one read while nothing was written since the last merge
   while (search && isSearchMergeDue(db)) {
     if (options.shouldStop?.()) return total;
     if (runSearchMergeBatch(db, limits).finished) break;

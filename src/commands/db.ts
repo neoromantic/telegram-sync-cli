@@ -1,11 +1,3 @@
-/**
- * Database maintenance commands
- *
- * Usage:
- *   tg db vacuum [--account <selector>]   Prune and compact an account's cache
- *   tg db migrate [--account <selector>]  Finish an account's background migrations
- */
-
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { defineCommand } from "citty";
@@ -42,7 +34,6 @@ function sqliteCode(err: unknown): string {
   return typeof code === "string" ? code : "";
 }
 
-/** The retention the other commands use; a bad config.json fails as there */
 async function loadRetention() {
   try {
     return (await getResolvedCacheConfig()).retention;
@@ -116,7 +107,6 @@ const vacuumCommand = defineCommand({
       return;
     }
 
-    // Refuse before writing anything
     const autoVacuum = readAutoVacuum(db);
     if (daemonRunning && autoVacuum === "none") {
       needsStoppedDaemon(account.id);
@@ -142,7 +132,6 @@ const vacuumCommand = defineCommand({
       }
     }
 
-    // Each prune batch commits on its own, so a later failure keeps it
     let pruned: PruneResult | null = null;
     try {
       pruned = pruneCache(db, retention);
@@ -192,10 +181,6 @@ const vacuumCommand = defineCommand({
   },
 });
 
-/**
- * A line on stderr per batch, `messages_raw_json_v2 42% 12000 / 28571 rows`,
- * for a person at a terminal; undefined when nobody watches
- */
 function migrationProgress():
   | ((name: string, done: number, total: number | null) => void)
   | undefined {

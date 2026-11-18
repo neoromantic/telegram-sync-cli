@@ -1,7 +1,3 @@
-/**
- * Errors of `tg media download`, thrown by its core (download-media.ts) and
- * reported by the command with the stable error schema
- */
 import type { ErrorCode } from "../../types";
 import { error, isRetryableCode } from "../../utils/output";
 import { reportHistoryError } from "../messages/helpers";

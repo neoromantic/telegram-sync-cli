@@ -1,17 +1,3 @@
-/**
- * E2E tests for exit codes
- *
- * Verifies that the CLI returns correct exit codes for various scenarios.
- * Exit code mapping:
- * - 0: Success
- * - 1: GENERAL_ERROR and the cache, SQL and media codes (NO_MEDIA, FILE_EXISTS…)
- * - 2: AUTH_REQUIRED
- * - 3: INVALID_ARGS
- * - 4: NETWORK_ERROR
- * - 5: TELEGRAM_ERROR
- * - 6: ACCOUNT_NOT_FOUND
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -97,7 +83,6 @@ describe("E2E: Exit Codes", () => {
     });
 
     it("should return 6 when getting info with no active account", async () => {
-      // Database is empty, no active account
       const result = await runCliFailure(["accounts", "info"], 6, env.getCliOptions());
 
       expect(result.exitCode).toBe(6);

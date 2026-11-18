@@ -1,6 +1,3 @@
-/**
- * Additional tests for daemon account connection + event wiring
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import * as mtcute from "@mtcute/bun";
@@ -80,7 +77,6 @@ class MockEvent<TArgs extends unknown[]> {
 
 let testCacheDb: Database;
 
-// Mutable client behavior
 let nextGetMe: {
   id: number;
   firstName: string;
@@ -92,7 +88,6 @@ let getMeError: Error | null = null;
 let updatesLoopError: Error | null = null;
 
 const createdClients: MockTelegramClient[] = [];
-// Client lifecycle calls in order, e.g. 'start:0', 'destroy:0'
 const lifecycle: string[] = [];
 
 class MockTelegramClient {
@@ -209,7 +204,6 @@ function createAccountsDb(seed: AccountSeed[]): AccountsDbInterface {
   };
 }
 
-/** A context whose accounts all have a runtime on the test cache */
 function createContext(accountsDb: AccountsDbInterface): DaemonContext {
   const ctx = testDaemonContext({ accountsDb });
   for (const account of accountsDb.getAll()) {
@@ -254,7 +248,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     setupEventHandlers(ctx, accountState);
 
     const now = new Date("2024-01-01T00:00:00Z");
-    // mtcute gives the chat and the sender as marked IDs
     const channelId = -1000000001000;
     const message = {
       id: 42,
@@ -418,7 +411,6 @@ describe("daemon-accounts: connection + event wiring", () => {
       date,
       version: 1,
     };
-    // Telegram leaves fromId out of all but the outgoing message
     const messages: Array<tl.RawMessage | tl.RawMessageService> = [
       {
         _: "message",
@@ -548,7 +540,6 @@ describe("daemon-accounts: connection + event wiring", () => {
       }),
     );
 
-    // The first page of this DM builds its InputPeer from this row
     expect(chatsCache.getById("5550001")?.access_hash).toBe("777");
     expect(buildInputPeer(5550001, chatsCache)).toEqual({
       _: "inputPeerUser",
@@ -606,7 +597,6 @@ describe("daemon-accounts: connection + event wiring", () => {
   });
 
   describe("deletes of a message ID that several chats cache", () => {
-    /** Caches each of `messageIds` in each of `chatIds` */
     async function wireWithMessages(chatIds: number[], messageIds = [7]) {
       const accountsDb = createAccountsDb([{ id: 1, phone: "+15550000001", user_id: 101 }]);
       const ctx = createContext(accountsDb);
@@ -756,7 +746,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     const account = accountsDb.getById(2);
     expect(account?.user_id).toBe(555);
     expect(createdClients[0]?.startUpdatesLoop).toHaveBeenCalled();
-    // The removed account stops running; its cache files stay
     expect(ctx.runtime.accounts.has(1)).toBe(false);
     expect(ctx.runtime.accounts.has(2)).toBe(true);
   });
@@ -786,7 +775,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     accountState.status = "error";
     expect(await attemptReconnect(ctx, accountState)).toBe(true);
 
-    // Session files stay open until the daemon closes the client (#56)
     expect(createdClients).toHaveLength(2);
     for (const client of createdClients) {
       expect(client.options.platform).toBe(daemonPlatform);
@@ -852,7 +840,6 @@ describe("daemon-accounts: connection + event wiring", () => {
       expect(accountState?.status).toBe("error");
       expect(accountState?.lastError).toBe("AUTH_KEY_UNREGISTERED");
 
-      // Shutdown doesn't close it a second time
       await disconnectAllAccounts(ctx);
       expect(client.destroy).toHaveBeenCalledTimes(1);
     });
@@ -901,7 +888,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     expect(await connectAccount(ctx, 1, "+15550000001", null)).toBe(true);
     const client = createdClients[0]!;
 
-    // An error handler is set, so mtcute never prints "unhandled error"
     expect(client.onError.handlers).toHaveLength(1);
     const failure = new Error("Could not connect to DC 2");
     failure.stack = "Error: Could not connect to DC 2\n    at source dump";
@@ -912,7 +898,6 @@ describe("daemon-accounts: connection + event wiring", () => {
       "[Account 1] Telegram client error: Could not connect to DC 2",
     );
 
-    // Only errors without --verbose
     expect(client.log.mgr.level).toBe(1);
   });
 
@@ -967,7 +952,6 @@ describe("daemon-accounts: connection + event wiring", () => {
       expect(accountState.eventHandlers).toBeUndefined();
     }
 
-    // A second call finds nothing left to close
     await disconnectAllAccounts(ctx);
     for (const client of createdClients) {
       expect(client.destroy).toHaveBeenCalledTimes(1);
@@ -979,8 +963,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     const { connectAccount, disconnectAllAccounts } = await import("../daemon/daemon-accounts");
     expect(await connectAccount(ctx, 1, "+15550000001", null)).toBe(true);
 
-    // The updates loop dispatches the batch it was handling when destroy()
-    // stopped it
     const client = createdClients[0]!;
     let handlersDuringDestroy = -1;
     client.destroy.mockImplementation(async () => {
@@ -1023,8 +1005,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     nextGetMe = { id: 5550002, firstName: "Sam", lastName: "Example" };
     expect(await connectAccount(ctx, 2, "+15550000002", null)).toBe(true);
 
-    // Session files stay open until destroy(), so a closed one is a fault
-    // worth a warning, not an expected part of the stop (#56)
     createdClients[0]!.destroy.mockImplementation(async () => {
       throw new Error("Database has closed");
     });
@@ -1107,7 +1087,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     expect(oldClient.onRawUpdate.handlers).toHaveLength(1);
     expect(oldWorker?.client).toBe(oldClient as unknown as TelegramClient);
 
-    // What a failed health check leaves behind
     const accountState = ctx.state.accounts.get(1)!;
     accountState.status = "error";
 
@@ -1119,7 +1098,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     expect(reconnected?.client).toBe(newClient as unknown as TelegramClient);
     expect(reconnected?.status).toBe("connected");
 
-    // The old client is detached and closed before the new one opens the session
     expect(oldClient.onNewMessage.handlers).toHaveLength(0);
     expect(oldClient.onEditMessage.handlers).toHaveLength(0);
     expect(oldClient.onDeleteMessage.handlers).toHaveLength(0);
@@ -1127,7 +1105,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     expect(oldClient.destroy).toHaveBeenCalledTimes(1);
     expect(lifecycle).toEqual(["start:0", "destroy:0", "start:1"]);
 
-    // The new client has one set of handlers and a running updates loop
     expect(newClient.onNewMessage.handlers).toHaveLength(1);
     expect(newClient.onEditMessage.handlers).toHaveLength(1);
     expect(newClient.onDeleteMessage.handlers).toHaveLength(1);
@@ -1135,7 +1112,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     expect(newClient.startUpdatesLoop).toHaveBeenCalledTimes(1);
     expect(newClient.destroy).not.toHaveBeenCalled();
 
-    // A live message on the new client reaches the cache
     newClient.onNewMessage.emit(
       asMessage({
         id: 7,
@@ -1149,12 +1125,10 @@ describe("daemon-accounts: connection + event wiring", () => {
     const cached = createMessagesCache(testCacheDb).get(2000, 7);
     expect(cached?.text).toBe("After reconnect");
 
-    // The sync worker was rebuilt on the new client
     const worker = ctx.runtime.accounts.get(1)?.worker;
     expect(worker).not.toBe(oldWorker);
     expect(worker?.client).toBe(newClient as unknown as TelegramClient);
 
-    // Shutdown closes the new client and leaves the old one alone
     const { disconnectAllAccounts } = await import("../daemon/daemon-accounts");
     await disconnectAllAccounts(ctx);
     expect(oldClient.destroy).toHaveBeenCalledTimes(1);
@@ -1169,14 +1143,12 @@ describe("daemon-accounts: connection + event wiring", () => {
     const { attemptReconnect, connectAccount } = await import("../daemon/daemon-accounts");
     const { checkAt } = ctx.runtime.contacts;
 
-    // mtcute doesn't replay what the account missed while it was down
     const beforeConnect = Date.now();
     expect(await connectAccount(ctx, 1, "+15550000001", null)).toBe(true);
     const connectedAt = checkAt.get(1);
     expect(connectedAt).toBeGreaterThanOrEqual(beforeConnect);
     expect(connectedAt).toBeLessThanOrEqual(Date.now());
 
-    // The check ran; a reconnect asks for the next one
     checkAt.delete(1);
     const accountState = ctx.state.accounts.get(1)!;
     accountState.status = "error";

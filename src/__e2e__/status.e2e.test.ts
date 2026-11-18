@@ -1,8 +1,3 @@
-/**
- * E2E tests for tg status: the sync job counts and list, from a seeded
- * cache, without Telegram credentials
- */
-
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -51,7 +46,6 @@ interface StatusResult {
   };
 }
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
 const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
 
 describe("E2E: status", () => {
@@ -73,7 +67,6 @@ describe("E2E: status", () => {
     return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } };
   }
 
-  /** Insert a job row as the daemon leaves it */
   function seedJob(job: {
     chat_id: number;
     job_type: SyncJobType;
@@ -101,7 +94,6 @@ describe("E2E: status", () => {
     return (cacheDb.query("SELECT last_insert_rowid() AS id").get() as { id: number }).id;
   }
 
-  /** Give a chat sync state with a mode, as tg chats sync leaves it */
   function seedChat(chatId: number, chatType: "private" | "channel", mode: SyncMode) {
     const chatSyncState = createChatSyncStateService(cacheDb);
     chatSyncState.upsert({
@@ -115,7 +107,6 @@ describe("E2E: status", () => {
 
   const modeOf = (chatId: number) => createChatSyncStateService(cacheDb).get(chatId)?.sync_mode;
 
-  /** A channel turned on with CHANNEL_PRIVATE, and an auto DM out of attempts */
   function seedFailed() {
     const now = Date.now();
     seedChat(-1001234567890, "channel", "on");
@@ -273,13 +264,11 @@ describe("E2E: status", () => {
     return stripAnsi(result.stdout);
   }
 
-  /** The retry commands the pretty output prints, one per line */
   const retryCommands = (output: string) =>
     [...output.matchAll(/^\s+tg (chats sync .+)$/gm)].map((match) => match[1]!.split(" "));
 
   it("shows failed jobs and their errors in pretty output", async () => {
     seedFailed();
-    // Jobs that haven't failed are listed, but get no retry command
     seedChat(1002, "private", "auto");
     seedJob({
       chat_id: 1002,
@@ -331,7 +320,6 @@ describe("E2E: status", () => {
     expect(output).toMatch(/Pending\s+2 jobs/);
     expect(output).toMatch(/Retrying\s+1 jobs/);
     expect(output).toMatch(/chat:1004 attempt 2 of 5, next in \d+m \d+s: connection reset/);
-    // A FLOOD_WAIT deferral used no attempt, so it shows only when it runs
     expect(output).toMatch(/chat:1006 next in \d+m \d+s$/m);
     expect(output).not.toMatch(/Failed\s+\d+ jobs/);
   });
@@ -357,7 +345,6 @@ describe("E2E: status", () => {
 
   it("says when a stopped daemon last wrote its status", async () => {
     const lastUpdate = Date.now() - 2 * HOUR;
-    // What setDaemonStopped leaves: no daemon_pid, the last tick's time
     cacheDb.run(
       `INSERT INTO daemon_status (key, value) VALUES
          ('daemon_status', 'stopped'),
@@ -411,7 +398,6 @@ describe("E2E: status, history progress and API calls", () => {
     env.seedAccounts([{ phone: "+15550000001", is_active: true }]);
     cacheDb = env.openCacheDb(1);
 
-    // A group with 1,000 messages on the server, 200 of them cached
     const state = createChatSyncStateService(cacheDb);
     state.upsert({
       chat_id: -4242,
@@ -432,7 +418,6 @@ describe("E2E: status, history progress and API calls", () => {
       })),
     );
 
-    // Two history pages in the last minutes, and calls 30 s and 90 s ago
     const now = Date.now();
     for (const completedAt of [now - 4 * 60_000, now - 2 * 60_000]) {
       cacheDb.run(
@@ -479,10 +464,8 @@ describe("E2E: status, history progress and API calls", () => {
         },
       ],
     });
-    // About 100 messages over the 4 minutes since the first page
     expect(data.progress.history.messages_per_minute).toBeGreaterThan(20);
     expect(data.progress.history.eta_seconds).toBeGreaterThan(0);
-    // One call after the first, over the 90 s since it; no live daemon
     expect(data.progress.history.calls_per_second).toBe(0.01);
     expect(data.progress.history.pacing).toBeNull();
     expect(data.accounts.accounts[0]?.progress.history).toMatchObject({
@@ -516,8 +499,6 @@ describe("E2E: status, senders missing from the cache (#143)", () => {
     env.seedAccounts([{ phone: "+15550000001", is_active: true }]);
     const cacheDb = env.openCacheDb(1);
 
-    // Three senders of a basic group, one of them cached; Telegram was
-    // asked for another one and didn't return them
     takePartIn(cacheDb, -4242);
     createMessagesCache(cacheDb).upsertBatch(
       [7001, 7002, 7003].map((fromId, i) => ({
@@ -586,7 +567,6 @@ describe("E2E: status, daemon version", () => {
     env = createTestEnvironment("status-daemon-version");
     env.initDatabase();
     env.seedAccounts([{ phone: "+15550000001", is_active: true }]);
-    // The daemon writes its rows to each account's own cache
     cacheDb = env.openCacheDb(1);
   });
 
@@ -598,14 +578,12 @@ describe("E2E: status, daemon version", () => {
     return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } };
   }
 
-  /** The test runner is alive, so tg status sees a running daemon */
   function writePidFile() {
     writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));
   }
 
   const daemonStatus = () => createDaemonStatusService(cacheDb);
 
-  /** The rows a daemon that records no version writes at start */
   function seedUnversionedDaemon(pid: number) {
     const service = daemonStatus();
     service.set("daemon_pid", String(pid));
@@ -711,7 +689,6 @@ describe("E2E: status, daemon version", () => {
     expect(output).not.toContain("tg daemon stop");
   });
 
-  /** A stopped daemon reports no version and no hint */
   async function expectNoVersionWhileStopped() {
     const { data } = await status();
     expect(data.daemon).toMatchObject({
@@ -732,7 +709,6 @@ describe("E2E: status, daemon version", () => {
   });
 
   it("reports no version for a daemon that stopped cleanly", async () => {
-    // No PID file and no daemon_pid row: both PIDs are null
     daemonStatus().setDaemonRunning(4242, OTHER);
     daemonStatus().setDaemonStopped();
 
@@ -744,7 +720,6 @@ describe("E2E: status, daemon version", () => {
   });
 
   it("compares nothing while the daemon is still starting", async () => {
-    // The PID file is written, but the rows are still the previous daemon's
     writePidFile();
     daemonStatus().setDaemonRunning(process.pid + 1, OTHER);
 
@@ -796,7 +771,6 @@ describe("E2E: status cache size", () => {
     env = createTestEnvironment("status-size");
     env.initDatabase();
     env.seedAccounts([{ phone: "+15550000001", is_active: true }, { phone: "+15550000002" }]);
-    // Account 2 has no cache file
     createMessagesCache(env.openCacheDb(1)).upsertBatch([
       {
         chat_id: 101,
@@ -875,7 +849,6 @@ describe("E2E: status cache size", () => {
   });
 
   it("tells to stop the daemon before vacuuming a cache without auto_vacuum", async () => {
-    // A cache of an older version, most of it free pages
     const db = env.openCacheDb(1);
     db.run("PRAGMA auto_vacuum = NONE");
     db.run("VACUUM");
@@ -912,7 +885,6 @@ describe("E2E: status cache size", () => {
     expect(stopped).toContain("tg db vacuum --account 1");
     expect(stopped).not.toContain(stopFirst);
     expect(stopped).not.toContain("of free disk");
-    // The full vacuum the hint suggests would fail at once on a short disk
     expect(await pretty(1000)).toMatch(new RegExp(`tg db vacuum --account 1\\s+${short.source}`));
 
     writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));

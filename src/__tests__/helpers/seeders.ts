@@ -1,7 +1,3 @@
-/**
- * Seeders for seedInChild: each takes the database and JSON arguments.
- * Made-up data only.
- */
 import type { Database } from "bun:sqlite";
 import { createChatsCache } from "../../db/chats-cache";
 import { createMessagesCache } from "../../db/messages-cache";

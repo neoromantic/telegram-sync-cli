@@ -1,9 +1,3 @@
-/**
- * Writes each declared command output into docs/cli-commands.md as a field
- * table, between `<!-- output: <command> -->` and `<!-- /output -->`.
- * `bun run docs:outputs`; src/__tests__/docs-outputs.test.ts fails when the
- * file is out of date.
- */
 import { z } from "zod";
 import { chatsListOutput } from "../src/commands/chats/list-output";
 

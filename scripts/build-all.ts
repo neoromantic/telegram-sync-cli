@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { $ } from "bun";
 
-// Read version from package.json
 const pkg = await Bun.file("package.json").json();
 
 const targets = [
@@ -12,7 +11,6 @@ const targets = [
   { target: "bun-windows-x64", output: "tg-windows-x64.exe" },
 ] as const;
 
-// Ensure dist directory exists
 if (!existsSync("dist")) {
   mkdirSync("dist");
 }
@@ -33,7 +31,6 @@ for (const { target, output } of targets) {
   }
 }
 
-// Summary
 const succeeded = results.filter((r) => r.success).length;
 const failed = results.filter((r) => !r.success).length;
 

@@ -71,7 +71,6 @@ function validateQueryArgs(
 }
 
 function formatSqlError(message: string, query: string): never {
-  // The read-only connection refused a write the check above let through
   if (/readonly database|read-only/i.test(message)) {
     error(
       ErrorCodes.SQL_WRITE_NOT_ALLOWED,
@@ -115,8 +114,6 @@ export const sqlQueryCommand = defineCommand({
       type: "string",
       description: "SQL query to execute (required unless using a subcommand)",
     },
-    // A string, not an enum: print-schema takes its own formats, and citty
-    // would reject them here before the subcommand runs
     output: {
       type: "string",
       alias: "o",
@@ -147,7 +144,6 @@ export const sqlQueryCommand = defineCommand({
         );
       }
 
-      // Flags before the subcommand count too (tg sql -o sql print-schema)
       const idx = rawArgs?.indexOf("print-schema") ?? -1;
       const remainingArgs =
         idx >= 0 ? rawArgs.filter((_, i) => i !== idx) : (rawArgs?.slice(1) ?? []);
@@ -165,10 +161,6 @@ export const sqlQueryCommand = defineCommand({
     const { query, output, limit, limitStr } = parseQueryArgs(sqlArgs);
     validateQueryArgs(query, output, limit, limitStr);
 
-    // Each account has its own cache; ATTACH stays blocked, so a query never
-    // reads two accounts. openAccountCache creates and migrates the cache;
-    // the query then runs on a read-only connection, since the keyword check
-    // lets PRAGMA writes (user_version, journal_mode) through
     const { account } = openAccountCache(sqlArgs.account);
     let db: Database;
     try {

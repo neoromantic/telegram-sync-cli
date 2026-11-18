@@ -1,8 +1,3 @@
-/**
- * E2E tests for read-only mode and the chat allowlist. The write and the
- * chat-scoped commands are enumerated from the command tree, so a new
- * command is covered as soon as COMMAND_ACCESS classifies it.
- */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -48,7 +43,6 @@ function message(
   )!;
 }
 
-/** Every chat's one cached message is unread */
 const UNREAD = { unreadCount: 1, readInboxMaxId: 0 };
 
 interface CommandArg {
@@ -56,11 +50,6 @@ interface CommandArg {
   required?: boolean;
 }
 
-/**
- * The argv of a command, with a made-up value for each required arg and
- * `chat` for the chat args: enough to reach the checks, which run before
- * the command reads any value
- */
 function argv(path: string, chat?: string): string[] {
   const node = runnableCommands(main).find((c) => c.path === path)?.node as {
     args?: Record<string, CommandArg>;
@@ -234,7 +223,6 @@ describe("E2E: read-only mode and allowedChats", () => {
         ["messages", "search", "--query", "hello", "--chat", String(SELF_ID)],
         options(ALLOWED),
       );
-      // Alice by her username is refused with her ID
       const { json } = await refusal(["messages", "list", "--chat", "@alice"], ALLOWED);
       expect(json.error.details).toEqual({ chat: "@alice", id: ALICE_ID });
     });
@@ -280,7 +268,6 @@ describe("E2E: read-only mode and allowedChats", () => {
     });
 
     it("tg messages wait without --chat returns only an allowed chat new message", async () => {
-      // The test runner is alive: its PID and daemon rows make a running daemon
       const pidPath = join(env.dataDir, "daemon.pid");
       await Bun.write(pidPath, String(process.pid));
       createDaemonStatusService(env.openCacheDb(1)).setDaemonRunning(process.pid, "test");
@@ -289,7 +276,6 @@ describe("E2E: read-only mode and allowedChats", () => {
           env: { ...options(ALLOWED).env, VERBOSE: "1" },
         });
         const stdout = new Response(proc.stdout).text();
-        // Wait for the start point, then store a message in each chat at once
         const reader = proc.stderr.getReader();
         let stderr = "";
         while (!stderr.includes("Waiting for messages")) {

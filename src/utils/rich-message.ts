@@ -1,12 +1,3 @@
-/**
- * The text of a rich message (a list of page blocks instead of a text with
- * entities), in Telegram's rich Markdown: the syntax a Markdown rich message
- * is sent with, and its HTML tags where Markdown has none. Media, maps,
- * embeds and buttons become a bracketed placeholder such as
- * `[photo: caption]`. It reads every form raw_json takes, Long values as
- * mtcute Long objects or decimal strings, and never throws: a block or text
- * type it doesn't know gives its nested text, or a placeholder naming it.
- */
 import { longToDecimal } from "./attachment";
 
 type RawObject = Record<string, unknown>;
@@ -25,7 +16,6 @@ function list(value: unknown): RawObject[] {
     : [];
 }
 
-/** Files a rich message's media blocks point at, by ID */
 interface RenderContext {
   documents: Map<string, RawObject>;
 }
@@ -42,7 +32,6 @@ const INLINE_WRAP: Record<string, [string, string]> = {
   textSuperscript: ["<sup>", "</sup>"],
 };
 
-/** textDate flags → the letters of a tg://time format */
 const DATE_FORMAT_FLAGS: Array<[string, string]> = [
   ["relative", "r"],
   ["dayOfWeek", "w"],
@@ -52,7 +41,6 @@ const DATE_FORMAT_FLAGS: Array<[string, string]> = [
   ["longTime", "T"],
 ];
 
-/** Telegram writes a footnote reference as a link to `#fn-<id>` */
 function footnoteId(url: string, prefix: string): string | null {
   return url.startsWith(prefix) ? url.slice(prefix.length) : null;
 }
@@ -62,7 +50,6 @@ function flatten(node: RawObject): RawObject[] {
   return list(node.texts).flatMap(flatten);
 }
 
-/** `[^id]` for a superscript that only links to a footnote */
 function footnoteReference(node: RawObject): string | null {
   const parts = flatten(node).filter(
     (part) => part._ !== "textEmpty" && !(part._ === "textAnchor" && renderText(part.text) === ""),
@@ -105,7 +92,6 @@ export function renderText(input: unknown): string {
       return list(node.texts).map(renderText).join("");
     case "textUrl": {
       const url = str(node.url);
-      // In-document links (footnote back-references, anchors) lead nowhere here
       if (url.startsWith("#") || url === "") return inner();
       return `[${inner()}](${url})`;
     }
@@ -133,8 +119,6 @@ export function renderText(input: unknown): string {
     case "textButton":
       return buttonPlaceholder(inner(), node.type);
     default:
-      // textAnchor, textDiff and the auto-detected entities (mentions,
-      // hashtags, URLs…) show their text; a type added later does too
       if ("text" in node) return inner();
       if (Array.isArray(node.texts)) return list(node.texts).map(renderText).join("");
       return `[${kind || "unknown text"}]`;
@@ -155,7 +139,6 @@ function placeholder(label: string, caption: unknown): string {
   return text ? `[${label}: ${text}]` : `[${label}]`;
 }
 
-/** `document plan.pdf`: the kind, then the file's name or title if the message has the file */
 function fileLabel(kind: string, idField: unknown, context: RenderContext): string {
   const id = longToDecimal(idField);
   const doc = id ? context.documents.get(id) : undefined;
@@ -222,7 +205,6 @@ function alignment(cell: RawObject | undefined): string {
   return "---";
 }
 
-/** A GFM pipe table; the first row is its header, a cell spanning N columns fills N */
 function renderTable(block: RawObject): string {
   const rows = list(block.rows).map((row) =>
     list(row.cells).flatMap((cell) => {
@@ -245,7 +227,6 @@ function renderTable(block: RawObject): string {
   return title ? `${title}\n\n${table}` : table;
 }
 
-/** A footer that holds a footnote: `[^id]: text` */
 function renderFooter(text: unknown): string {
   const parts = flatten(asObject(text) ?? {});
   const anchor = parts.find(

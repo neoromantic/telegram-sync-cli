@@ -1,6 +1,3 @@
-/**
- * E2E tests for user commands (tg me, tg user)
- */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { runCli, runCliFailure } from "./helpers/cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
@@ -27,10 +24,8 @@ describe("E2E: User Commands", () => {
     });
 
     it("should require authentication", async () => {
-      // No accounts seeded, so should fail with AUTH_REQUIRED (exit code 2)
       const result = await runCliFailure(["me"], 2, env.getCliOptions());
 
-      // Should indicate no active account
       expect(result.exitCode).toBe(2);
       const response = result.json as {
         success: boolean;
@@ -64,10 +59,8 @@ describe("E2E: User Commands", () => {
     });
 
     it("should require identifier argument", async () => {
-      // Running without identifier should show help or error
       const result = await runCli(["user"], env.getCliOptions());
 
-      // Citty shows help when required args are missing
       expect(result.stdout + result.stderr).toMatch(/identifier|usage|help/i);
     });
 
@@ -86,7 +79,6 @@ describe("E2E: User Commands", () => {
     });
 
     it("should require authentication for lookup", async () => {
-      // No accounts seeded, so there is no cache to read either
       const result = await runCliFailure(["user", "@testuser"], 2, env.getCliOptions());
 
       expect(result.json).toMatchObject({
@@ -114,13 +106,10 @@ describe("E2E: User Commands", () => {
 
   describe("Output format", () => {
     it("should respect --format json flag for me", async () => {
-      // Even though it will error (no auth), it should output JSON
       const result = await runCli(["--format", "json", "me"], env.getCliOptions());
 
-      // Output should be parseable JSON (either success or error)
       const combined = result.stdout + result.stderr;
       expect(() => {
-        // Find JSON in output
         const jsonMatch = combined.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           JSON.parse(jsonMatch[0]);

@@ -1,9 +1,3 @@
-/**
- * E2E tests for background migrations (#89): `tg status` shows them,
- * `tg db migrate` finishes them, on a made-up cache as 0.5.0 left it,
- * without Telegram credentials
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
 import { seedOldFormCache } from "../__tests__/helpers/old-form-cache";
@@ -30,7 +24,6 @@ interface MigrateOutput {
 }
 
 const MESSAGES = 14;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
 const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
 
 describe("E2E: background migrations", () => {
@@ -85,7 +78,6 @@ describe("E2E: background migrations", () => {
     const after = (await runCliSuccess(["status"], options())).json as StatusOutput;
     expect(after.data.migrations).toEqual([]);
 
-    // Long values read as decimal strings in tg sql (#108)
     const sql = await runCliSuccess(
       [
         "sql",
@@ -95,7 +87,6 @@ describe("E2E: background migrations", () => {
     );
     expect(JSON.stringify(sql.json)).toContain('"-700000000000000001"');
 
-    // Running it again finds nothing to do
     const again = (await runCliSuccess(["db", "migrate", "--account", "1"], options()))
       .json as MigrateOutput;
     expect(again.data.rows).toBe(0);
@@ -104,7 +95,6 @@ describe("E2E: background migrations", () => {
   it("opens a migrated cache without the write lock", async () => {
     await runCliSuccess(["db", "migrate", "--account", "1"], options());
 
-    // Another process holds the write lock for the whole command
     const holder = env.openCacheDb(1);
     holder.run("BEGIN IMMEDIATE");
     try {

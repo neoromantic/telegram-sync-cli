@@ -1,7 +1,6 @@
 const WRITE_KEYWORDS =
   /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|ATTACH|DETACH|VACUUM|REINDEX)\b/;
 
-/** The pragmas whose argument names what to read, not a value to set */
 const READ_PRAGMAS_WITH_ARGUMENT = new Set([
   "TABLE_INFO",
   "TABLE_XINFO",
@@ -59,9 +58,6 @@ export function isReadOnlyQuery(query: string): boolean {
     return false;
   }
 
-  // Setting a pragma writes or changes the file, in either form
-  // (PRAGMA user_version = 0, PRAGMA writable_schema(1)); reading one
-  // (PRAGMA user_version) or a table's pragma (PRAGMA table_info(t)) is fine
   if (/^PRAGMA [\w.]+ ?=/.test(normalized)) {
     return false;
   }
@@ -78,7 +74,6 @@ export function applyQueryLimit(query: string, limit: number): string {
   const withoutSemicolon = trimmed.endsWith(";") ? trimmed.slice(0, -1).trimEnd() : trimmed;
 
   if (limit <= 0) return withoutSemicolon;
-  // A pragma takes no LIMIT clause, and returns few rows
   if (/^PRAGMA\b/i.test(withoutSemicolon)) return withoutSemicolon;
   if (/\bLIMIT\b/i.test(withoutSemicolon)) return withoutSemicolon;
 

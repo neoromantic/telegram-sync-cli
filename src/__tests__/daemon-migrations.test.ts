@@ -1,7 +1,3 @@
-/**
- * The daemon's background migrations (#89): a budget per tick, a clean
- * stop, a wait after a failure. Made-up data only.
- */
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 
@@ -41,7 +37,6 @@ describe("runMigrationsTick", () => {
     const ctx = testDaemonContext();
     const rt = addAccountRuntime(ctx, 1, oldCache());
     let clock = 0;
-    // Every reading of the clock is 1 ms later; the budget is 10
     const now = () => clock++;
 
     await runMigrationsTick(ctx, { budgetMs: 10, limits: LIMITS, now });

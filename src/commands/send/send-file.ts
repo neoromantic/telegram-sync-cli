@@ -1,7 +1,3 @@
-/**
- * `tg send --file`: upload one file through the account's rate-limited
- * client and send it with messages.sendMedia, as a photo or a document
- */
 import { basename } from "node:path";
 import type { TelegramClient, tl } from "@mtcute/bun";
 import { uploadFile } from "@mtcute/bun/methods.js";
@@ -12,7 +8,6 @@ import { transferClient } from "../../utils/telegram-transfer";
 
 export type SendFileKind = "photo" | "document";
 
-/** Images Telegram shows as a photo; anything else is sent as a document */
 const PHOTO_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 /** Telegram's limit for a photo: a bigger image is sent as a document */
 export const PHOTO_MAX_BYTES = 10 * 1024 * 1024;
@@ -72,12 +67,7 @@ export async function sendFile(
   const kind = chooseSendKind(mimeType, size, request.forceDocument);
 
   const upload = deps.upload ?? uploadFile;
-  // uploadFile reads the account's premium flag from the session, which only
-  // a prepared client has loaded; `--to me` resolves offline, so no call has
-  // prepared it yet
   await client.prepare();
-  // A stream, not the BunFile: mtcute would send a BunFile's full local
-  // path as the file name
   const uploaded = await upload(transferClient(client), {
     file: file.stream(),
     fileName,
@@ -94,7 +84,6 @@ export async function sendFile(
           file: uploaded.inputFile,
           mimeType: uploaded.mime,
           attributes: [{ _: "documentAttributeFilename", fileName }],
-          // Else Telegram turns a GIF into an animation and a video into a video
           forceFile: true,
         };
 

@@ -1,11 +1,3 @@
-/**
- * Live smoke tests against the real Telegram API.
- *
- * Each test runs the CLI the way a user would, in an isolated data dir that
- * holds a copy of a pre-authenticated session. Messages go only to the test
- * account's own Saved Messages and are deleted afterwards.
- */
-
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
@@ -17,17 +9,13 @@ import { createIntegrationEnvironment, type IntegrationEnvironment } from "./hel
 const TEST_ACCOUNT = process.env.TELEGRAM_TEST_ACCOUNT;
 const TEST_SESSION_PATH =
   process.env.TELEGRAM_TEST_SESSION_PATH ?? process.env.TELEGRAM_TEST_SESSION;
-// test-setup.ts replaces TELEGRAM_API_* with dummies and stashes the real
-// values under TELEGRAM_TEST_API_*
 const API_ID = process.env.TELEGRAM_TEST_API_ID;
 const API_HASH = process.env.TELEGRAM_TEST_API_HASH;
 const SHOULD_RUN = Boolean(TEST_ACCOUNT && TEST_SESSION_PATH && API_ID && API_HASH);
-// The daemon needs a live connection; fixtures can't replay real-time updates
 const CAN_RUN_DAEMON = SHOULD_RUN && process.env.TELEGRAM_API_REPLAY !== "1";
 
 const API_TIMEOUT_MS = 30_000;
 const DAEMON_TEST_TIMEOUT_MS = 420_000;
-// Two 512 KB download parts, the second one short
 const SMOKE_FILE_SIZE = 700_000;
 
 type Envelope<T> = { success: boolean; data: T };
@@ -36,7 +24,6 @@ function uniqueMarker(): string {
   return `tgsmoke${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Made-up bytes without a short period, so a misplaced part shows */
 function smokeBytes(length: number): Uint8Array {
   const bytes = new Uint8Array(length);
   let state = 0x2545f491;
@@ -49,7 +36,6 @@ function smokeBytes(length: number): Uint8Array {
   return bytes;
 }
 
-/** Keep draining a stream so a chatty child never blocks on a full pipe */
 function collectOutput(stream: ReadableStream<Uint8Array>) {
   let text = "";
   const decoder = new TextDecoder();
@@ -59,7 +45,6 @@ function collectOutput(stream: ReadableStream<Uint8Array>) {
     }
   })();
   return {
-    /** Resolves once the stream has closed */
     done,
     get text() {
       return text;
@@ -215,8 +200,6 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
       expect(payload.data.results).toHaveLength(1);
       expect(payload.data.results[0]?.text).toContain(marker);
 
-      // Saved Messages is cached under the own user ID, like the daemon does,
-      // and the own user is the sender
       const me = await runCliSuccess(["me"], cli());
       const userId = (me.json as Envelope<{ user: { id: number } }>).data.user.id;
       expect(payload.data.results[0]).toMatchObject({
@@ -260,7 +243,6 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
       const idA = await sendToSavedMessages(`tg smoke test ${markerA}`);
       const idB = await sendToSavedMessages(`tg smoke test ${markerB}`);
 
-      // tg send caches what it sends; drop that so the read has to fetch
       const cacheDb = new Database(env.cachePath());
       cacheDb.run("DELETE FROM messages_cache WHERE message_id IN (?, ?)", [idA, idB]);
       cacheDb.close();
@@ -272,7 +254,6 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
       expect(fresh.chatId).toBe(userId);
       expect(fresh.items.slice(0, 2).map((item) => item.messageId)).toEqual([idB, idA]);
       expect(fresh.items[1]?.text).toContain(markerA);
-      // Telegram sends Saved Messages without fromId: the own user is the sender
       expect(fresh.items.slice(0, 2).map((item) => item.fromId)).toEqual([userId, userId]);
 
       const cached = await list("--limit", "5");
@@ -296,8 +277,6 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
       expect(fromCache.source).toBe("cache");
       expect(fromCache.message).toEqual(around.message);
 
-      // Cache-first with a wider context: the newer side of the newest
-      // message may still ask Telegram, so only the items are pinned
       const wide = await get("--id", String(idA), "--context", "2");
       expect(wide.message).toEqual(around.message);
       expect(wide.message.text).toContain(markerA);
@@ -414,16 +393,12 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
           "the daemon to start real-time updates",
         );
 
-        // Bootstrap waits out FLOOD_WAITs on messages.getDialogs
         await waitFor(
           async () => (/Bootstrapped \d+ dialogs/.test(logs.text) ? true : null),
           150_000,
           "the dialog bootstrap",
         );
 
-        // Real dialogs land under marked IDs (#18). Read the file directly:
-        // every CLI open re-keys bare rows first, so tg sql would hide them.
-        // Each account has its own cache; nothing writes the shared one
         expect(existsSync(join(env.dataDir, "cache.db"))).toBe(false);
         const cacheFile = new Database(env.cachePath(), {
           readonly: true,
@@ -476,8 +451,6 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
           "sync jobs to cache messages",
         );
 
-        // Every group gets a participation check, a messages.search for the
-        // account's own messages; one that answered marks its group checked
         const sqlCount = async (query: string) => {
           const result = await runCli(["sql", "--query", query], cli());
           const payload = result.json as Envelope<{
@@ -501,7 +474,6 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
           );
         }
 
-        // First pages run next to catch-up instead of waiting behind it (#6)
         await waitFor(
           async () => {
             const result = await runCli(
@@ -536,8 +508,6 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
           },
         });
 
-        // Stop during an active sync, while the clients still write update
-        // state and peers to their session files (#56)
         await waitFor(
           async () => {
             const result = await runCli(
@@ -562,9 +532,6 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
         expect(stop.json).toMatchObject({ success: true });
         expect(await daemon.exited).toBe(0);
         await Promise.all([logs.done, errors.done]);
-        // The session files stay open until each client closes, so the
-        // signal isn't sent a second time and no write fails (#56). mtcute
-        // logs to stdout.
         expect(logs.text.match(/Received SIGTERM/g)).toHaveLength(1);
         expect(logs.text).not.toMatch(
           /updates loop encountered error|failed to write pending updates|Database has closed|closed database/,
@@ -572,8 +539,6 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
         expect(errors.text).not.toMatch(
           /Failed to close client|Database has closed|closed database/,
         );
-        // The stop cuts short the request a sync job waits on and leaves the
-        // job pending, with nothing logged for it (#64)
         const running = await runCliSuccess(
           ["sql", "--query", "SELECT COUNT(*) AS n FROM sync_jobs WHERE status = 'running'"],
           cli(),

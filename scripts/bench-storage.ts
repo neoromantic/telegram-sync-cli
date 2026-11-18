@@ -1,17 +1,3 @@
-/**
- * Storage benchmark: builds a made-up account cache through tg's own write
- * paths and measures its size, write rates, query latency and maintenance.
- * See docs/storage.md for what it measures and the numbers.
- *
- *   bun run bench:storage [--messages N] [--out file.json] [--seed S]
- *                         [--runs R] [--cli-runs R] [--old-form] [--keep]
- *
- * --old-form writes the history as tg 0.5.0 and older wrote it instead and
- * times `tg db migrate` bringing it to the current form.
- *
- * Everything lives in a temp folder under $TMPDIR, removed at the end
- * (--keep leaves it). It never reads or writes ~/.telegram-sync-cli.
- */
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, statfsSync } from "node:fs";
 import { release, tmpdir } from "node:os";
@@ -60,12 +46,10 @@ for (const [name, value] of Object.entries({
   }
 }
 
-/** Messages per history page, as the daemon and the CLI fetch them */
 const PAGE_SIZE = 100;
 const ROOT = resolve(import.meta.dir, "..");
 
-// The data dir must be set before src/db/index.ts is imported: it opens
-// <dataDir>/data.db at import time
+// WARNING: set the data dir before importing src/db/index, which opens data.db as it loads.
 const dataDir = mkdtempSync(join(tmpdir(), "tg-bench-"));
 process.env.TELEGRAM_SYNC_CLI_DATA_DIR = dataDir;
 process.env.TELEGRAM_SYNC_CLI_TELEMETRY = "0";
@@ -111,8 +95,6 @@ type RawUser = Parameters<typeof apiUserToCacheInput>[0];
 type RawChat = Parameters<typeof rawChatToCacheInput>[0];
 type PageUsers = Parameters<typeof cacheHistoryResponse>[3];
 
-// ── Helpers ─────────────────────────────────────────────────────────────
-
 function log(message: string): void {
   console.error(`[bench] ${message}`);
 }
@@ -141,7 +123,6 @@ function summarize(samples: number[], first: number): Timing {
   };
 }
 
-/** The first run, then `runs` timed runs; returns the timing and the last result */
 async function time<T>(
   runs: number,
   fn: () => T | Promise<T>,
@@ -158,7 +139,6 @@ async function time<T>(
   return { timing: summarize(samples, first), result };
 }
 
-/** Durations of one kind of write transaction */
 function writeTimes() {
   const stats = { count: 0, ms: 0, max_ms: 0, over_100ms: 0 };
   return {
@@ -185,16 +165,11 @@ function writeTimes() {
 
 type WriteTimes = ReturnType<typeof writeTimes>;
 
-/**
- * A merge batch of the search index when one is due, as the daemon runs it
- * after its writes, or between the batches of a re-index ('bulk')
- */
 function backgroundMerge(db: Database, merges: WriteTimes, mode: "rest" | "bulk" = "rest"): void {
   if (!isSearchMergeDue(db, mode)) return;
   merges.time(() => runSearchMergeBatch(db, DEFAULT_BATCH_LIMITS, mode));
 }
 
-/** Merge batches until nothing is left to merge */
 function mergeAll(db: Database, merges: WriteTimes): void {
   while (isSearchMergeDue(db)) {
     if (merges.time(() => runSearchMergeBatch(db, DEFAULT_BATCH_LIMITS)).finished) {
@@ -203,14 +178,9 @@ function mergeAll(db: Database, merges: WriteTimes): void {
   }
 }
 
-/**
- * The search index's size and segments, and what asking it whether one
- * message has `word` costs, over the 2,000 newest messages (#149)
- */
 function measureIndex(db: Database, cachePath: string, word: string) {
   db.run("PRAGMA wal_checkpoint(TRUNCATE)");
   const size = readCacheSize(db, cachePath, { tables: true });
-  // Rows of message_search_data name their segment in the upper bits
   const segments = count(
     db,
     "SELECT COUNT(DISTINCT id >> 37) AS n FROM message_search_data WHERE (id >> 37) BETWEEN 1 AND 65535",
@@ -236,13 +206,6 @@ function measureIndex(db: Database, cachePath: string, word: string) {
   };
 }
 
-/**
- * The one-off re-index of names (#93), batch by batch as the runners do
- * it, with a merge batch after each and merges at the end; or as 0.9.0 to
- * 0.11.1 did it, with FTS5 merging inside the writes and no merge of
- * deleted entries, in batches of 250 messages as the daemon's are cut at
- * 50 ms (#149)
- */
 function reindexNames(db: Database, merge: boolean) {
   db.run(`DELETE FROM cache_migrations WHERE name = '${searchNamesMigration.name}'`);
   registerBackgroundMigrations(db);
@@ -262,7 +225,6 @@ function reindexNames(db: Database, merge: boolean) {
     if (merge) backgroundMerge(db, merges, "bulk");
   }
   if (merge) mergeAll(db, merges);
-  // This version's options again, as opening the cache sets them
   else configureSearchMerges(db, true);
   const seconds = (performance.now() - start) / 1000;
   return {
@@ -278,11 +240,6 @@ function fileBytes(path: string): number {
   return Bun.file(path).size;
 }
 
-/**
- * Watch free disk and the WAL while another process works on the cache.
- * `stop()` returns the most disk it took beyond the start and the biggest
- * WAL seen.
- */
 function watchDisk(cachePath: string) {
   const free = () => {
     const stat = statfsSync(dataDir);
@@ -306,7 +263,6 @@ function watchDisk(cachePath: string) {
   };
 }
 
-/** Run `tg <argv>` from source as a new process; its time and stdout */
 async function cli(argv: string[]): Promise<{ ms: number; stdout: string }> {
   const start = performance.now();
   const proc = Bun.spawn(["bun", "--no-env-file", join(ROOT, "src/index.ts"), ...argv], {
@@ -338,7 +294,6 @@ async function timeCli(argv: string[]): Promise<Timing> {
   return summarize(samples, first);
 }
 
-/** A client that fails the run if a command tries to reach Telegram */
 const offlineClient = {
   call: () => {
     throw new Error("The benchmark is offline: the cache should answer");
@@ -358,7 +313,6 @@ function historyChat(chat: BenchChat) {
   return { chatId: chat.chatId, inputPeer } as unknown as Parameters<typeof listHistory>[0]["chat"];
 }
 
-/** A chat's history page `p`, newest first; page 0 is the newest */
 function historyPage(data: Dataset, chat: BenchChat, p: number) {
   const high = chat.size - 1 - p * PAGE_SIZE;
   const low = Math.max(0, high - PAGE_SIZE + 1);
@@ -383,13 +337,6 @@ function count(db: Database, sql: string): number {
   return (db.query(sql).get() as { n: number }).n;
 }
 
-// ── Writes ──────────────────────────────────────────────────────────────
-
-/**
- * Users and chats first: the search index reads sender and chat names when
- * a message row is written. `oldForm` stores raw_json as plain
- * JSON.stringify writes it, as tg 0.5.0 and older did.
- */
 function writePeers(db: Database, data: Dataset, oldForm: boolean): void {
   const usersCache = createUsersCache(db);
   const chatsCache = createChatsCache(db);
@@ -421,19 +368,12 @@ function writePeers(db: Database, data: Dataset, oldForm: boolean): void {
   })();
 }
 
-/** The message_type tg 0.5.0 and older stored for a history page message */
 function oldMessageType(message: Record<string, unknown>): string {
   const media = message.media as { _?: string } | undefined;
   if (media?._ === "messageMediaDocument") return "document";
   return resolveRawMessageType(message).messageType;
 }
 
-/**
- * A history page as tg 0.5.0 and older wrote it: raw_json by plain
- * JSON.stringify (byte arrays as objects with a key per byte, Long values
- * as `{ low, high, unsigned }`, fileReference kept) and every file a
- * `document`. Its attachment rows are dropped afterwards.
- */
 function writeOldFormPage(
   db: Database,
   chat: BenchChat,
@@ -464,7 +404,6 @@ function writeOldFormPage(
   })();
 }
 
-/** Every chat's pages newest first, as history sync fetches them */
 function writeHistory(db: Database, data: Dataset, oldForm: boolean) {
   const pages = writeTimes();
   const merges = writeTimes();
@@ -506,7 +445,6 @@ function writeHistory(db: Database, data: Dataset, oldForm: boolean) {
   };
 }
 
-/** About 1 in 100 messages marked deleted, as delete updates do */
 function markDeletions(db: Database, data: Dataset): void {
   const messagesCache = createMessagesCache(db);
   const r = rng(SEED * 7919);
@@ -519,9 +457,6 @@ function markDeletions(db: Database, data: Dataset): void {
   }
 }
 
-// ── Sizes ───────────────────────────────────────────────────────────────
-
-/** The cache's size by table, as `tg status --sizes` counts it, and raw_json's share */
 function measureSize(db: Database, cachePath: string) {
   db.run("PRAGMA wal_checkpoint(TRUNCATE)");
   const messages = count(db, "SELECT COUNT(*) AS n FROM messages_cache");
@@ -567,11 +502,6 @@ function measureSize(db: Database, cachePath: string) {
   };
 }
 
-/**
- * raw_json of an even sample of rows compressed row by row (gzip, zstd),
- * and the whole sample as one zstd stream: the most a shared dictionary
- * could approach (#97). Nothing is written back.
- */
 function measureRawJsonCompression(db: Database, total: number) {
   const step = Math.max(1, Math.floor(total / 20_000));
   const rows = db
@@ -598,8 +528,6 @@ function measureRawJsonCompression(db: Database, total: number) {
     },
   };
 }
-
-// ── Runs ────────────────────────────────────────────────────────────────
 
 interface RunContext {
   accountId: number;
@@ -642,15 +570,12 @@ function describe(data: Dataset, sqliteVersion: string) {
   };
 }
 
-/** The cache as this version writes it: writes, size, queries, maintenance */
 async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   log("writing history pages");
   const history = writeHistory(db, data, false);
 
-  // Re-fetch: the newest pages again, unchanged (#87)
   log("fetching pages again unchanged");
   db.run("PRAGMA wal_checkpoint(TRUNCATE)");
-  // fetched_at is in ms: the last history write must be older than this
   Bun.sleepSync(2);
   const refetchStart = Date.now();
   let refetchMs = 0;
@@ -680,9 +605,6 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   ).n;
   const refetchWal = fileBytes(`${cachePath}-wal`);
 
-  // Live: one message per write transaction, as the daemon's updates come.
-  // Not the biggest chat: live messages record no history range, so its
-  // newest page would go to Telegram.
   log("writing live messages one by one");
   const messagesCache = createMessagesCache(db);
   const liveChats = data.chats.slice(1, 11);
@@ -716,14 +638,10 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   const compression = measureRawJsonCompression(db, size.messages);
   const attachments = count(db, "SELECT COUNT(*) AS n FROM message_attachments");
 
-  // ── Queries ───────────────────────────────────────────────────────────
   log("timing queries");
-  // Latin words match one form; Cyrillic stems take endings, for `stem*`
   const latin = wordsOf(data, false);
   const common = latin[0]!;
-  // In about 7% of the messages
   const midWord = latin[6]!;
-  // The sender with the fewest messages: none among the newest
   const rareSender = count(
     db,
     "SELECT from_id AS n FROM messages_cache WHERE from_id IS NOT NULL GROUP BY from_id ORDER BY COUNT(*), from_id LIMIT 1",
@@ -736,7 +654,6 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   const search = createMessagesSearch(db);
   const toItem = messageItemReader(db);
 
-  /** `tg messages search` minus printing: the query, items and snippets */
   function runSearch(
     query: string,
     options: Parameters<typeof search.search>[1] & {
@@ -831,7 +748,6 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
     queries[name] = { query, ...timing, result };
   }
 
-  // tg sql: a read-only connection, as the command opens it
   const sqlFts = `SELECT chat_id, COUNT(*) AS n FROM message_search_text WHERE message_search_text MATCH '${twoWords}' GROUP BY chat_id ORDER BY n DESC LIMIT 10`;
   const sqlScan =
     "SELECT message_type, COUNT(*) AS n, SUM(LENGTH(raw_json)) AS raw FROM messages_cache GROUP BY message_type";
@@ -860,7 +776,6 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
     };
   }
 
-  // The CLI end to end, process start included
   log("timing CLI commands");
   const cliTimes: Record<string, Timing & { command: string }> = {};
   for (const [name, argv] of [
@@ -877,20 +792,13 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
     };
   }
 
-  // ── Maintenance ───────────────────────────────────────────────────────
-  // The index as the writes above left it, merged in the background
   const indexKept = measureIndex(db, cachePath, common);
 
-  // The one-off re-index of names (#93), as an upgraded cache runs it: in
-  // batches, each its own transaction, with merges between them (#149)
   log("re-indexing names");
   const queued = count(db, "SELECT COUNT(*) AS n FROM search_reindex_queue");
   const reindex = reindexNames(db, true);
   const indexAfterReindex = measureIndex(db, cachePath, common);
 
-  // The same as 0.11.1 did it, which left the caches #149 found: every
-  // message's old entries kept in segments whose entries are all deleted.
-  // Then the search of such an index, and the merges that clean it up
   log("re-indexing names as 0.11.1 did");
   const unmergedReindex = reindexNames(db, false);
   const indexUnmerged = measureIndex(db, cachePath, common);
@@ -992,17 +900,10 @@ async function runCurrent({ accountId, db, cachePath, data }: RunContext) {
   };
 }
 
-/**
- * A cache tg 0.5.0 or older wrote, as an upgrade finds it: then `tg db
- * migrate` brings every row to the current form (#89), and `tg db vacuum`
- * gives the space back
- */
 async function runOldForm({ accountId, db, cachePath, data }: RunContext) {
   log("writing history pages in the old form");
   const history = writeHistory(db, data, true);
   markDeletions(db, data);
-  // An old cache has no attachment rows and registers the migrations as
-  // pending on its first open by this version
   db.run("DELETE FROM message_attachments");
   db.run("DROP TABLE cache_migrations");
   registerBackgroundMigrations(db);
@@ -1064,8 +965,6 @@ async function runOldForm({ accountId, db, cachePath, data }: RunContext) {
   };
 }
 
-// ── Main ────────────────────────────────────────────────────────────────
-
 const startedAt = performance.now();
 
 try {
@@ -1107,9 +1006,6 @@ try {
   else rmSync(dataDir, { recursive: true, force: true });
 }
 
-// ── Markdown ────────────────────────────────────────────────────────────
-
-/** Decimal megabytes, as docs/storage.md gives sizes */
 function mb(bytes: number): string {
   return `${(bytes / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 })} MB`;
 }

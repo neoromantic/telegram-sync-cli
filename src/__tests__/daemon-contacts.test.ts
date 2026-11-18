@@ -1,8 +1,3 @@
-/**
- * The daemon's contacts sync (#8): when a check is due, what it sends and
- * what it writes. The fake client's `call` returns promises the test
- * resolves; `now` is injected, no timer runs.
- */
 import type { Database } from "bun:sqlite";
 import { describe, expect, it, mock } from "bun:test";
 import { join } from "node:path";
@@ -45,7 +40,6 @@ interface PendingCall {
   reject: (err: unknown) => void;
 }
 
-/** A client whose every call waits until the test settles it */
 function fakeClient() {
   const calls: PendingCall[] = [];
   const withParams = mock((params: RpcCallOptions) => ({
@@ -264,7 +258,6 @@ describe("maybeSyncContacts", () => {
     applyContactsSnapshot(db, contactsList([1001]), NOW - WEEK);
 
     const started = maybeSyncContacts(ctx, NOW);
-    // The connection drops: the reconnect closes the client and fails the call
     const accountState = ctx.state.accounts.get(1);
     if (accountState) accountState.status = "reconnecting";
     calls[0]?.reject(new Error("connection closed"));
@@ -397,7 +390,6 @@ describe("handleContactRawUpdate", () => {
     handleContactRawUpdate(ctx, 1, db, peerSettings([fullUser(true)]), NOW);
     expect(cachedRow(db)?.is_contact).toBe(1);
 
-    // An existing non-contact row is marked too
     const other = setup();
     seed(other.db, false);
     handleContactRawUpdate(other.ctx, 1, other.db, peerSettings([fullUser(true)]), NOW);
@@ -434,7 +426,6 @@ describe("handleContactRawUpdate", () => {
     handleContactRawUpdate(ctx, 1, db, userUpdate(), NOW);
     expect(ctx.runtime.contacts.checkAt.get(1)).toBe(NOW + CONTACTS_HINT_DELAY_MS);
 
-    // A min user is no better; a second hint keeps the first time
     handleContactRawUpdate(ctx, 1, db, peerSettings([fullUser(false, { min: true })]), NOW + 5000);
     expect(ctx.runtime.contacts.checkAt.get(1)).toBe(NOW + CONTACTS_HINT_DELAY_MS);
     expect(cachedRow(db)).toEqual(before);
@@ -497,7 +488,6 @@ describe("handleContactRawUpdate", () => {
   });
 
   it("keeps a hint that arrived while a check ran, for a check of its own", async () => {
-    // With no earlier request, and while the start check serves its own
     for (const startCheck of [false, true]) {
       const ctx = createContext();
       const { client, calls } = fakeClient();
@@ -509,7 +499,6 @@ describe("handleContactRawUpdate", () => {
       calls[0]?.resolve(notModified);
       await Promise.all(started);
 
-      // The list the check got may predate the change the hint is about
       expect(ctx.runtime.contacts.checkAt.get(1)).toBe(NOW + CONTACTS_HINT_DELAY_MS);
     }
   });
@@ -522,7 +511,6 @@ describe("handleContactRawUpdate", () => {
     const started = maybeSyncContacts(ctx, NOW);
     handleContactRawUpdate(ctx, 1, db, peerSettings([fullUser(true)]), NOW);
     expect(cachedRow(db)?.is_contact).toBe(1);
-    // The reply predates the change and leaves the new contact out
     calls[0]?.resolve(contactsList([]));
     await Promise.all(started);
 
@@ -532,7 +520,6 @@ describe("handleContactRawUpdate", () => {
 });
 describe("loadContactsTtl", () => {
   let dirs = 0;
-  // A fresh data dir under the test data dir, with this config.json
   async function withConfig(config: string): Promise<ReturnType<typeof createContext>> {
     const ctx = createContext();
     ctx.dataDir = join(

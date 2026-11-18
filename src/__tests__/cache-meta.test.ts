@@ -1,6 +1,3 @@
-/**
- * The owner stamp of an account's cache (src/db/cache-meta.ts)
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
@@ -47,7 +44,6 @@ describe("checkCacheOwner", () => {
     checkCacheOwner(db, { id: 1, user_id: 101 }, PATH);
 
     expect(() => checkCacheOwner(db, { id: 1, user_id: 101 }, PATH)).not.toThrow();
-    // An account that doesn't know its user yet opens it too
     expect(() => checkCacheOwner(db, { id: 1, user_id: null }, PATH)).not.toThrow();
   });
 
@@ -71,12 +67,10 @@ describe("checkCacheOwner", () => {
   });
 
   describe("a file of an account that is gone", () => {
-    /** data.db's accounts: ID → Telegram user (null: not known yet) */
     const accountsWith = (users: Record<number, number | null>) => (accountId: number) =>
       accountId in users ? users[accountId] : undefined;
 
     beforeEach(() => {
-      // Account 1 of user 101 wrote the file, then logged out
       checkCacheOwner(db, { id: 1, user_id: 101 }, PATH);
     });
 

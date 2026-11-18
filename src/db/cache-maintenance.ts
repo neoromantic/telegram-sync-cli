@@ -1,11 +1,3 @@
-/**
- * Keeping an account's cache small: measuring it, pruning the bookkeeping
- * tables and giving free pages back to the disk.
- *
- * Messages, chats and users are never pruned here (messages are eternal);
- * only the rows that record how the cache was filled: API activity, rate
- * limit windows and finished sync jobs. Database only, no CLI or daemon.
- */
 import type { Database } from "bun:sqlite";
 import { statfsSync } from "node:fs";
 import { dirname } from "node:path";
@@ -36,28 +28,14 @@ export interface PruneOptions {
 
 const DEFAULT_PRUNE_BATCH_SIZE = 5000;
 
-/**
- * api_activity timestamps below this are seconds: 0.8.0 and older wrote
- * them so. As ms it would be March 1973, so no ms timestamp is below it.
- */
 const SECONDS_TIMESTAMP_LIMIT = 100_000_000_000;
 
-/**
- * Turn the api_activity timestamps older versions wrote in seconds into ms.
- * Idempotent, and cheap: the table keeps a week of calls, and the index on
- * timestamp finds the second-based rows at its start.
- */
 function convertSecondsActivity(db: Database): number {
   return db
     .query("UPDATE api_activity SET timestamp = timestamp * 1000 WHERE timestamp < $limit")
     .run({ $limit: SECONDS_TIMESTAMP_LIMIT }).changes;
 }
 
-/**
- * Delete the rows matching `where` in short batches, each its own
- * autocommit statement, so a first prune of a large table never holds the
- * write lock for seconds while the daemon and a command want it.
- */
 function deleteInBatches(
   db: Database,
   table: string,
@@ -165,7 +143,6 @@ export function readAutoVacuum(db: Database): AutoVacuumMode {
   return AUTO_VACUUM_MODES[pragmaNumber(db, "auto_vacuum")] ?? "none";
 }
 
-/** A file's size in bytes, 0 when it doesn't exist */
 function fileSize(path: string): number {
   try {
     return Bun.file(path).size;
@@ -174,7 +151,6 @@ function fileSize(path: string): number {
   }
 }
 
-/** Every table's bytes from dbstat; null when this SQLite lacks it */
 function readTableSizes(db: Database): Record<string, number> | null {
   let rows: Array<{ name: string; pgsize: number }>;
   try {
@@ -192,7 +168,6 @@ function readTableSizes(db: Database): Record<string, number> | null {
     sql: string | null;
   }>;
   const tableOf = new Map(schema.map((row) => [row.name, row.tbl_name]));
-  // An FTS5 table keeps its data in shadow tables named <table>_data, …
   const virtualTables = schema
     .filter((row) => /^CREATE VIRTUAL TABLE/i.test(row.sql ?? ""))
     .map((row) => row.name);
@@ -259,11 +234,6 @@ export interface VacuumResult {
   rebuilt_search: boolean;
 }
 
-/**
- * A full VACUUM's peak need of free disk, the new copy plus the WAL: up to
- * 2.16 times the file in `bun run bench:storage` (docs/storage.md). 2.2
- * times the file plus 64 MB covers every measured peak.
- */
 const VACUUM_DISK_FACTOR = 2.2;
 const VACUUM_DISK_MARGIN_BYTES = 64 * 1024 * 1024;
 
@@ -274,10 +244,6 @@ export interface VacuumDiskCheck {
   enough: boolean;
 }
 
-/**
- * Bytes free to this user on the file system of `dir`.
- * TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES replaces the reading in e2e tests.
- */
 function readFreeDiskBytes(dir: string): number {
   const injected = process.env.TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES;
   if (injected) return Number(injected);
@@ -292,9 +258,7 @@ export function checkVacuumDisk(path: string): VacuumDiskCheck {
   return { needed_bytes, free_bytes, enough: free_bytes >= needed_bytes };
 }
 
-/** Pages released per incremental_vacuum step, each its own short write */
 const INCREMENTAL_VACUUM_STEP_PAGES = 1024;
-/** Enough steps for a 4 TB file of 4 KB pages; stops a loop that never ends */
 const INCREMENTAL_VACUUM_MAX_STEPS = 1_000_000;
 
 /** What tells whether a VACUUM moved the rows of messages_cache */
@@ -329,12 +293,6 @@ function totalBytes(path: string): number {
   return fileSize(path) + fileSize(`${path}-wal`);
 }
 
-/**
- * Empty the WAL into the file; false when a reader or writer held it.
- * A TRUNCATE checkpoint holds the write lock while it waits for readers on
- * an older snapshot, so with the daemon running it doesn't wait at all:
- * a busy cache reports false at once instead of holding the daemon's writes.
- */
 function checkpoint(db: Database, options: { wait: boolean }): boolean {
   const run = () =>
     db.query("PRAGMA wal_checkpoint(TRUNCATE)").get() as {
@@ -392,8 +350,6 @@ export function vacuumCache(
     db.run("PRAGMA auto_vacuum = INCREMENTAL");
     withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => db.run("VACUUM"));
     rebuilt_search = rebuildSearchIfRowidsMoved(db, before);
-    // A background migration's cursor is a rowid, which the VACUUM may have
-    // moved in any table: unfinished ones start over
     restartUnfinishedMigrations(db);
   }
 

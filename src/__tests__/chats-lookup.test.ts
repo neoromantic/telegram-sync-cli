@@ -1,6 +1,3 @@
-/**
- * findCachedChatById: how tg chats get and tg chats sync read a numeric ID
- */
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 

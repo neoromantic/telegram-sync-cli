@@ -1,7 +1,3 @@
-/**
- * Transfer progress on stderr, for a person at a terminal: never on stdout,
- * and nothing when stderr is not a TTY or the output is quiet
- */
 import { formatBytes } from "./formatting";
 import { getOutputFormat } from "./output";
 
@@ -27,7 +23,6 @@ export function createProgress(
     const text = known
       ? `${label} ${Math.floor((Math.min(done, total) / total) * 100)}% ${formatBytes(done)} / ${formatBytes(total)}`
       : `${label} ${formatBytes(done)}`;
-    // \x1b[K clears what a longer line left
     stream.write(`\r${text}\x1b[K`);
     if (known && done >= total) {
       finished = true;

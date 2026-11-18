@@ -23,14 +23,8 @@ import {
 } from "./helpers";
 import { resolveHistoryChat } from "./history";
 
-/** How often the cache is checked for new messages */
 const POLL_MS = 200;
 
-/**
- * Fail unless the daemon runs for the account: only it stores new messages,
- * so without it nothing would ever arrive. It runs when daemon.pid names a
- * live process and the account's daemon rows are that process's.
- */
 function requireDaemon(account: Account, cacheDb: Database): void {
   const pid = createPidFile(join(getDataDir(), "daemon.pid")).read();
   const daemon = createDaemonStatusService(cacheDb).getDaemonInfo();
@@ -45,10 +39,6 @@ function requireDaemon(account: Account, cacheDb: Database): void {
   );
 }
 
-/**
- * The account's cache, the daemon check and `--chat` resolved: what wait and
- * watch read
- */
 async function openFeed(
   args: { account?: string; chat?: string; after?: string },
   context: string,
@@ -72,7 +62,6 @@ async function openFeed(
       reportHistoryError(err, "resolve the chat");
     }
   }
-  // Without --chat, every chat's messages: keep to allowedChats
   const allowed = chatId === undefined ? await allowedChatIds(account.id) : null;
   const feed = createNewMessagesFeed(db, {
     chatId,
@@ -146,7 +135,6 @@ export const waitMessagesCommand = defineCommand({
     }
 
     const messages = rows.sort(oldestFirst).map(toItem);
-    // Message IDs are per chat, so only a wait on one chat has a cursor
     const next =
       args.chat !== undefined && messages.length > 0
         ? [

@@ -1,7 +1,3 @@
-/**
- * E2E tests for the messages commands: search, list and get
- */
-
 import { Database } from "bun:sqlite";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
@@ -173,8 +169,6 @@ describe("E2E: Messages Search on a cache from 0.2.0", () => {
     env = createTestEnvironment("messages-search-legacy");
     env.initDatabase();
     env.seedAccounts([{ phone: "+15550000000", name: "Test Account", is_active: true }]);
-    // The shared cache of 0.3 and older, at the root of the data dir: the
-    // first command moves it to the only account
     seedInChild(join(env.dataDir, "cache.db"), "legacySharedCache");
   });
 
@@ -254,14 +248,12 @@ describe("E2E: Messages Search on a cache from 0.2.0", () => {
   });
 });
 
-/** Raw peers of the search fixture */
 const TEAM_CHAT_PEER = { _: "peerChannel", channelId: 1234567890 } as const;
 const BOOK_CLUB_PEER = { _: "peerChat", chatId: 4242 } as const;
 const NEWS_PEER = { _: "peerChannel", channelId: 2222222222 } as const;
 const ALICE_PEER = { _: "peerUser", userId: 10 } as const;
 const BOB_PEER = { _: "peerUser", userId: 11 } as const;
 
-/** A cached message, mapped from a raw one the way the sync worker maps it */
 function syncedMessage(
   peer: Parameters<typeof toPeerIdFromRawPeer>[0] & object,
   id: number,
@@ -281,11 +273,6 @@ function syncedMessage(
   )!;
 }
 
-/**
- * Four chats, seeded the way the daemon caches them: the supergroup Team
- * Chat (@teamchat), the basic group Book Club, the channel Example News and
- * a DM with Alice
- */
 function seedCacheData(db: Database): void {
   const now = Date.now();
   const usersCache = createUsersCache(db);
@@ -337,8 +324,6 @@ function seedCacheData(db: Database): void {
       is_deleted: true,
     },
     syncedMessage(BOOK_CLUB_PEER, 3, "hello club", BOB_PEER),
-    // Telegram leaves the sender out of a channel post and an incoming DM;
-    // the chat is the sender
     syncedMessage(NEWS_PEER, 4, "hello subscribers"),
     syncedMessage(ALICE_PEER, 5, "hello from Alice"),
   ]);
@@ -362,23 +347,15 @@ interface ErrorData {
 }
 
 const SELF_ID = 999;
-/** The own user ID of the second, inactive account */
 const SECOND_SELF_ID = 998;
 const SECOND_ACCOUNT_ID = 2;
 const ALICE_ID = 10;
 const TEAM_CHAT_ID = -1001234567890;
 const BOOK_CLUB_ID = -4242;
 const NEWS_ID = -1002222222222;
-/** Bob is in users_cache without an access hash */
 const BOB_ID = 11;
-/** A private chat with cached messages and no users_cache or chats_cache row */
 const NEW_DM_ID = 7_000_000_001;
 
-/**
- * One seeded cache for a describe block. The commands under test only read
- * it, so the blocks seed once. Every call runs without credentials: a cache
- * miss fails fast instead of reaching the network.
- */
 function useSeededHistory(name: string) {
   let env: TestEnvironment;
 
@@ -454,7 +431,6 @@ describe("E2E: Messages List", () => {
     pages.push(data.items.map((item) => item.messageId));
     expect(pages[2]).toEqual([1]);
 
-    // Message IDs start at 1, so the end of history needs no Telegram call
     const end = await list("--chat", "@alice", "--limit", "3", "--before", "1");
     expect(end.items).toEqual([]);
     expect(end.source).toBe("cache");
@@ -475,8 +451,6 @@ describe("E2E: Messages List", () => {
   });
 
   it("asks Telegram when the cache cannot vouch for the window", async () => {
-    // Nothing newer than 7 is cached (8 is deleted), and no cached page
-    // covers the message of the DM: both need Telegram, so credentials
     for (const args of [
       ["--chat", "@alice", "--after", "7"],
       ["--chat", String(NEW_DM_ID)],
@@ -541,7 +515,6 @@ describe("E2E: Messages List", () => {
     expect(bookClub.chatId).toBe(BOOK_CLUB_ID);
     expect(bookClub.items.map((item) => item.messageId)).toEqual([1]);
 
-    // A user with no access hash is user 11, not basic group -11
     const bob = await list("--chat", String(BOB_ID));
     expect(bob.chatId).toBe(BOB_ID);
     expect(bob.items.map((item) => item.text)).toEqual(["got the tickets"]);
@@ -570,8 +543,6 @@ describe("E2E: Messages List", () => {
     const { exitCode, json } = await listFailure("--chat", "@alice", ...flags.split(" "));
     expect(exitCode).toBe(3);
     expect(json.error.code).toBe("INVALID_ARGS");
-    // A cache miss without credentials is INVALID_ARGS too: make sure the
-    // flag was rejected before any Telegram call
     expect(json.error.message).not.toContain("TELEGRAM_API_ID");
     expect(json.error.message).toMatch(
       /^Invalid --(limit|before|after):|must be smaller than --before/,
@@ -637,8 +608,6 @@ describe("E2E: Messages Get", () => {
   });
 
   it("serves the context the cache holds when Telegram cannot be asked", async () => {
-    // 8 is deleted, so the cache has nothing newer than 7 to show. Telegram
-    // would be asked for the newer side, but there are no credentials.
     const data = await get("--chat", "@alice", "--id", "7", "--context", "2");
 
     expect(data.message.messageId).toBe(7);
@@ -790,8 +759,6 @@ describe("E2E: Message attachments", () => {
     createMessagesCache(db).upsertBatch([
       textInput!,
       photoInput!,
-      // A row an older version wrote: bytes as objects with a key per byte,
-      // the old history type, and no message_attachments row
       {
         ...videoInput!,
         message_type: "document",
@@ -858,7 +825,6 @@ describe("E2E: Message attachments", () => {
   });
 });
 
-/** A private chat with only calls in it, and a supergroup with a pin */
 const CALLER_ID = 7_000_000_101;
 const HARBOR_RAW_ID = 1_555_000_002;
 const HARBOR_ID = -1_001_555_000_002;
@@ -997,13 +963,11 @@ describe("E2E: Service message actions", () => {
   });
 });
 
-/** A supergroup where reports are sent as rich messages */
 const GARDEN_RAW_ID = 1_555_000_003;
 const GARDEN_ID = -1_001_555_000_003;
 
 describe("E2E: Rich messages", () => {
   const peer = { _: "peerChannel" as const, channelId: GARDEN_RAW_ID };
-  // As tg 0.13.1 cached it: the rich content only in raw_json, no text
   const olderReport = richTlMessage(peer, 3, [
     {
       _: "pageBlockTable",
@@ -1191,8 +1155,6 @@ function seedHistory(db: Database): void {
     message(NEW_DM_ID, 1, NEW_DM_ID, "one kiwi smoothie, please"),
   ]);
 
-  // The pages the daemon cached, each a run from message 1. No page covers
-  // the DM's message, as when a live update cached it.
   const ranges = createHistoryRanges(db);
   for (const [chatId, high] of [
     [ALICE_ID, 8],
@@ -1205,7 +1167,6 @@ function seedHistory(db: Database): void {
   }
 }
 
-/** The second account's own cache: a page of its Saved Messages */
 function seedSecondAccount(db: Database): void {
   createMessagesCache(db).upsertBatch([
     {

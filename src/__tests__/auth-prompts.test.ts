@@ -1,6 +1,3 @@
-/**
- * Tests for auth prompt utilities in non-TTY environments
- */
 import { describe, expect, it, mock } from "bun:test";
 
 const questionMock = mock(async (_message: string) => "  secret  ");

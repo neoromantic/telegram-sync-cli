@@ -1,13 +1,3 @@
-/**
- * E2E tests for tg api with a fake Telegram client
- *
- * The fake client keeps the process alive even after it is closed, as a
- * connected mtcute client might. Every path of tg api has to close the
- * client and then exit the process itself: a path that only closes it
- * prints its output and never exits, and one that doesn't await the close
- * exits without closing it.
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createUsersCache } from "../db/users-cache";
 import { type CliOptions, runCli } from "./helpers/cli";
@@ -21,7 +11,6 @@ import {
 } from "./helpers/fake-client-cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
 
-// A run that hangs fails on this timeout, before the test's own
 const HANG_TIMEOUT_MS = 8_000;
 const TEST_TIMEOUT_MS = 15_000;
 
@@ -130,7 +119,6 @@ describe("E2E: errors say whether a retry can work", () => {
       expect(first.exitCode).toBe(5);
       expect(errorOf(first.stderr)).toEqual(RATE_LIMITED);
 
-      // Recorded for the account: the next run fails before calling Telegram
       const second = await run(["api", FAKE_FLOOD_METHOD]);
       expect(second.exitCode).toBe(5);
       expect(errorOf(second.stderr)).toMatchObject({
@@ -197,7 +185,6 @@ describe("E2E: errors say whether a retry can work", () => {
   it(
     "a @username Telegram refuses gets no suggestion",
     async () => {
-      // A cached user, so the username resolves without a Telegram call
       createUsersCache(env.openCacheDb(1)).upsert({
         user_id: "1001",
         username: "alice",

@@ -1,7 +1,3 @@
-/**
- * Authentication commands
- */
-
 import { stdin as input, stdout as output } from "node:process";
 import type { Interface as ReadlineInterface } from "node:readline";
 import * as readline from "node:readline/promises";
@@ -40,12 +36,10 @@ export async function prompt(message: string): Promise<string> {
  * Falls back to regular prompt for non-TTY environments
  */
 export async function promptPassword(message: string): Promise<string> {
-  // Fall back to regular prompt for non-TTY environments
   if (!process.stdin.isTTY) {
     return prompt(message);
   }
 
-  // Use sync readline API for output hijacking (promises API doesn't expose _writeToOutput)
   const syncReadline = await import("node:readline");
 
   const rl = syncReadline.createInterface({
@@ -54,7 +48,6 @@ export async function promptPassword(message: string): Promise<string> {
     terminal: true,
   });
 
-  // Hijack output to hide typed characters
   let stdoutMuted = false;
   const rlWithWrite = rl as ReadlineInterface & {
     _writeToOutput: (stringToWrite: string) => void;
@@ -116,14 +109,6 @@ export function getDefaultDependencies(): AuthDependencies {
   };
 }
 
-/**
- * Make a login's account the one the next command uses (#62): in
- * config.json when it sets activeAccount, as every start applies that key,
- * then as the only active account in data.db. Only after the login
- * succeeded, so a failed one changes the active account in neither, and
- * config.json first, so a config.json that can't be written leaves
- * data.db's active account alone
- */
 async function activateLoggedInAccount(accountId: number, deps: AuthDependencies): Promise<void> {
   await deps.keepActiveAccountInConfig(accountId);
   deps.accountsDb.setActive(accountId);
@@ -147,11 +132,6 @@ interface QrLoginAccount {
   label?: string | null;
 }
 
-/**
- * Save the signed-in user on the login's account. When another account
- * already has this user_id, keep that one and delete the login's account.
- * Returns the account kept
- */
 function saveLoggedInUser(
   accountsDb: AccountsDbInterface,
   account: Account,
@@ -186,15 +166,12 @@ export async function loginWithPhone(
   const label = options.label?.trim();
   const labelValue = label ? label : undefined;
 
-  // Reuse the account record of this phone or create one. It becomes the
-  // active account only once the login succeeds
   const account = accountsDb.getByPhone(phone) ?? accountsDb.create({ phone, label: labelValue });
 
   const client = createClient(account.id);
   let loggedIn: PhoneLoginAccount;
 
   try {
-    // Start authentication flow
     const user = await client.start({
       phone: () => Promise.resolve(phone),
       code: async () => prompt("Enter the verification code: "),
@@ -206,7 +183,6 @@ export async function loginWithPhone(
       label: labelValue,
     });
 
-    // Close client to allow process to exit
     await client.destroy();
 
     loggedIn = {
@@ -217,7 +193,6 @@ export async function loginWithPhone(
       label: labelValue ?? finalAccount.label ?? null,
     };
   } catch (err) {
-    // Close client even on error
     await client.destroy().catch(() => {});
     const message = err instanceof Error ? err.message : "Unknown error";
     return { success: false, error: message };
@@ -240,12 +215,10 @@ export async function loginWithQr(
 }> {
   const { accountsDb, createClient } = deps;
 
-  // Create a new account record for QR login
   const label = accountName?.trim();
   const name = label && label.length > 0 ? label : `qr_account_${Date.now()}`;
-  // It becomes the active account only once the login succeeds
   const account = accountsDb.create({
-    phone: `qr:${name}`, // QR logins don't have phone until authenticated
+    phone: `qr:${name}`,
     name,
     label: label && label.length > 0 ? label : undefined,
   });
@@ -254,7 +227,6 @@ export async function loginWithQr(
   let loggedIn: QrLoginAccount;
 
   try {
-    // The QR code and its status lines go to stderr, apart from the JSON on stdout
     const user = await client.signInQr({
       onUrlUpdated: (url: string, expires: Date) => {
         console.error(deps.renderQr(url));
@@ -274,11 +246,9 @@ export async function loginWithQr(
       label: label && label.length > 0 ? label : undefined,
     });
     if (finalAccount.id === account.id) {
-      // QR logins don't expose the phone number
       accountsDb.update(account.id, { phone: `user:${user.id}` });
     }
 
-    // Close client to allow process to exit
     await client.destroy();
 
     loggedIn = {
@@ -289,9 +259,7 @@ export async function loginWithQr(
       label: label ?? finalAccount.label ?? null,
     };
   } catch (err) {
-    // Close client even on error
     await client.destroy().catch(() => {});
-    // Clean up account on failure
     accountsDb.delete(account.id);
     const message = err instanceof Error ? err.message : "Unknown error";
     return { success: false, error: message };
@@ -324,13 +292,10 @@ export async function logout(
   const client = getClient(account.id);
 
   try {
-    // Log out from Telegram
     await client.call({ _: "auth.logOut" });
 
-    // Close client to allow process to exit
     await client.destroy();
 
-    // Remove account from database
     accountsDb.delete(account.id);
 
     return {
@@ -339,7 +304,6 @@ export async function logout(
       phone: account.phone,
     };
   } catch (err) {
-    // Close client even on error
     await client.destroy().catch(() => {});
     const message = err instanceof Error ? err.message : "Unknown error";
     return { success: false, error: message };
@@ -381,7 +345,6 @@ export async function getAuthStatus(
 
     if (authorized) {
       const me = await client.getMe();
-      // Close client to allow process to exit
       await client.destroy();
       return {
         authenticated: true,
@@ -395,7 +358,6 @@ export async function getAuthStatus(
       };
     }
 
-    // Close client to allow process to exit
     await client.destroy();
     return {
       authenticated: false,
@@ -406,7 +368,6 @@ export async function getAuthStatus(
       message: 'Account exists but not authenticated. Run "tg auth login" to authenticate.',
     };
   } catch {
-    // Close client even on error
     await client.destroy().catch(() => {});
     return {
       authenticated: false,
@@ -419,18 +380,12 @@ export async function getAuthStatus(
   }
 }
 
-/**
- * Report missing/invalid API credentials as INVALID_ARGS instead of crashing
- */
 function exitOnConfigError(err: unknown): void {
   if (err instanceof ConfigError) {
     error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues });
   }
 }
 
-/**
- * Fail fast before touching the accounts database when credentials are missing
- */
 function ensureCredentials(): void {
   try {
     requireDefaultConfig();

@@ -1,10 +1,3 @@
-/**
- * Every API call of the daemon's clients goes to the account's rate window
- * and api_activity (#127): sync pages, contacts checks, dialog passes, the
- * joined-communities check, getMe at start, reconnect and health checks,
- * and mtcute's own calls (updates.getDifference and the like). A network
- * middleware sees each request mtcute sends, whichever method made it.
- */
 import type { Database } from "bun:sqlite";
 import type { RpcCallMiddleware } from "@mtcute/bun";
 import { createRateLimitsService, type RateLimitsService } from "../db/rate-limits";
@@ -22,7 +15,6 @@ export function floodWaitSecondsOf(errorMessage: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** An RPC error mtcute's network layer returns instead of throwing */
 function rpcErrorOf(result: unknown): { errorCode: number; errorMessage: string } | null {
   const value = result as {
     _?: unknown;
@@ -64,9 +56,7 @@ export function apiActivityMiddleware(
     if (seconds === null || !onFloodWait) return;
     try {
       onFloodWait(method, seconds);
-    } catch {
-      // Pacing never fails the request
-    }
+    } catch {}
   };
 
   return async (ctx, next) => {
@@ -76,7 +66,6 @@ export function apiActivityMiddleware(
       if (!db) return next(ctx);
       rateLimits = serviceFor(db);
     } catch {
-      // A cache that can't be written to still lets the request through
       return next(ctx);
     }
     const method = ctx.request._;
@@ -91,15 +80,11 @@ export function apiActivityMiddleware(
           response_ms: rateLimits.now() - start,
           context: message ?? context,
         });
-      } catch {
-        // The request's outcome matters more than its log line
-      }
+      } catch {}
     };
     try {
       rateLimits.recordCall(method);
-    } catch {
-      // Same as above
-    }
+    } catch {}
 
     try {
       const result = await next(ctx);

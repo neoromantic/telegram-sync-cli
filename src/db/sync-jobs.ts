@@ -1,7 +1,3 @@
-/**
- * Sync jobs service
- * Manages the job queue for background synchronization
- */
 import type { Database } from "bun:sqlite";
 import {
   CHAT_INDEPENDENT_JOB_TYPES_SQL,
@@ -12,8 +8,6 @@ import {
   SyncPriority,
 } from "./sync-schema";
 
-// The priority of a job's chat lane: an initial load of a fully synced chat
-// goes first. NULL when the chat has no sync state.
 const LANE_PRIORITY_SQL = `(
   SELECT CASE
     WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
@@ -23,7 +17,6 @@ const LANE_PRIORITY_SQL = `(
   WHERE s.chat_id = sync_jobs.chat_id
 )`;
 
-// A refetch or a sender fetch runs whether its chat syncs or not
 const RUNS_FOR_CHAT_SQL = `(job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
   SELECT 1 FROM chat_sync_state s
   WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
@@ -220,8 +213,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         AND ${RUNS_FOR_CHAT_SQL}
     `),
 
-    // The chat's mode may have changed while the job ran, so the retry takes
-    // the chat's lane priority now. A refetch or a sender fetch keeps its own.
     retryLater: db.prepare(`
       UPDATE sync_jobs
       SET status = $pending_status, attempts = attempts + $inc,
@@ -348,11 +339,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     getLastInsertId: db.query(`SELECT last_insert_rowid() as id`),
   };
 
-  /**
-   * Delete a running job whose chat was turned off. Each statement is atomic,
-   * and tg chats sync turns a chat off in an IMMEDIATE transaction, so the
-   * guarded update before this and the mode change can't interleave.
-   */
   function dropRunning(id: number): "cancelled" | "not_running" {
     const deleted = stmts.deleteRunning.run({
       $id: id,
@@ -401,7 +387,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       jobTypes.forEach((jobType, i) => {
         params[`$type${i}`] = jobType;
       });
-      // query() caches the statement per SQL text, so each lane prepares once.
       return (
         db
           .query(`

@@ -1,10 +1,3 @@
-/**
- * A cache as tg 0.5.0 and older wrote it: raw_json by plain JSON.stringify
- * (byte arrays as objects with a key per byte, Long values as `{ low, high,
- * unsigned }`, fileReference kept), videos, voices, stickers and GIFs of
- * history pages stored as `document`, and no attachment rows. Made-up data
- * only.
- */
 import type { Database } from "bun:sqlite";
 import { Long } from "@mtcute/bun";
 
@@ -56,7 +49,6 @@ export function oldFormMessages(count: number) {
   });
 }
 
-/** The message_type 0.5.0 stored for a history page message */
 function oldMessageType(message: { media?: unknown }): string {
   const media = message.media as { _?: string } | undefined;
   if (!media) return "text";
@@ -102,7 +94,6 @@ export function oldFormChats() {
 export function seedOldFormCache(db: Database, args: { messages: number }): void {
   initCacheSchema(db);
   initSyncSchema(db);
-  // A new cache registers its migrations as done; this one predates them
   db.run("DROP TABLE cache_migrations");
 
   const now = 1_760_000_000_000;

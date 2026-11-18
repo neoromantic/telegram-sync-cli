@@ -81,7 +81,6 @@ function handleSendError(recipient: string, err: unknown, rich: boolean): never 
       ErrorCodes.TELEGRAM_ERROR,
       `Invalid recipient: ${recipient}. Make sure the user/chat exists and you have access to it.`,
       undefined,
-      // A user ID the cache has no access hash for
       /^\d+$/.test(recipient.trim())
         ? "Send to the user's @username or +phone once: tg caches the user, and its ID works after that"
         : undefined,
@@ -97,7 +96,6 @@ function handleSendError(recipient: string, err: unknown, rich: boolean): never 
   error(ErrorCodes.TELEGRAM_ERROR, `Failed to send message: ${message}`);
 }
 
-/** How Telegram reads --message: as a rich message it parses itself */
 type RichFormat = "markdown" | "html";
 
 function richMessage(text: string, format: RichFormat): tl.TypeInputRichMessage {
@@ -116,7 +114,6 @@ function sendMessageRequest(
   const request: tl.messages.RawSendMessageRequest = {
     _: "messages.sendMessage",
     peer,
-    // A rich message carries its content in richMessage and has no text
     message: format ? "" : text,
     randomId: toLong(BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))),
     noWebpage: false,
@@ -134,12 +131,10 @@ function sendMessageRequest(
   return request;
 }
 
-/** What to send: text, or one file with an optional caption */
 type SendContent =
   | { file: null; text: string; format: RichFormat | null }
   | { file: string; caption: string; forceDocument: boolean };
 
-/** Exits with INVALID_ARGS unless path names a readable, non-empty regular file */
 function checkSendableFile(path: string): void {
   let size: number;
   try {
@@ -157,7 +152,6 @@ function checkSendableFile(path: string): void {
   }
 }
 
-/** Checks that need no account and no network, run before either opens */
 function readSendContent(
   args: {
     message?: string;
@@ -273,7 +267,6 @@ export const sendCommand = defineCommand({
     },
   },
   setup(ctx) {
-    // A chat allowlist can resolve the recipient before run().
     if (ctx.args.markdown || ctx.args.html) {
       ctx.data = readSendContent(ctx.args, ctx.rawArgs);
     }
@@ -285,7 +278,6 @@ export const sendCommand = defineCommand({
 
     const content: SendContent = data ?? readSendContent(args, rawArgs ?? []);
 
-    // The recipient resolves with this account's access hashes
     const { account, db: cacheDb } = openAccountCache(args.account);
     const accountId = account.id;
 

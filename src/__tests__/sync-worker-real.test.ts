@@ -1,6 +1,3 @@
-/**
- * Tests for real sync worker wrapper behavior
- */
 import { describe, expect, it, mock } from "bun:test";
 import type { TelegramClient } from "@mtcute/bun";
 import { createRealSyncWorker } from "../daemon/sync-worker-real";

@@ -1,10 +1,3 @@
-/**
- * Read-only mode and the chat allowlist (`readOnly`, `allowedChats`): what
- * each command does on Telegram and which chats it names, in one table that
- * covers every command, and the checks that run before a command does.
- * They guard against mistakes, not against a process that wants around
- * them: anything with a shell can edit config.json or open the cache.
- */
 import { type AccessSettings, ConfigError, loadAccessSettings } from "../config";
 import { ErrorCodes } from "../types";
 import { openAccountCache } from "../utils/account-cache";
@@ -32,9 +25,7 @@ export function isReadMethod(method: string): boolean {
   return dot > 0 && /^(get|search|resolve|check)/.test(method.slice(dot + 1));
 }
 
-/** Reads only the cache or local files, or Telegram without naming a chat */
 const LOCAL: CommandAccess = {};
-/** A read of the chat named by --chat */
 const CHAT: CommandAccess = { chatArgs: ["chat"] };
 
 /**
@@ -45,7 +36,6 @@ const CHAT: CommandAccess = { chatArgs: ["chat"] };
  * messages.
  */
 export const COMMAND_ACCESS: Record<string, CommandAccess> = {
-  // A login signs a new session in on Telegram, logout ends one
   "auth login": { write: true },
   "auth login-qr": { write: true },
   "auth logout": { write: true },
@@ -73,11 +63,9 @@ export const COMMAND_ACCESS: Record<string, CommandAccess> = {
   "messages list": CHAT,
   "messages get": CHAT,
   "messages search": { chatArgs: ["chat"], crossChat: true },
-  // Without --chat, wait, watch and unread read every chat: they keep to allowedChats
   "messages wait": { chatArgs: ["chat"], crossChat: true },
   "messages watch": { chatArgs: ["chat"], crossChat: true },
   "messages unread": { chatArgs: ["chat"], crossChat: true },
-  // Marks the chat read on Telegram
   "messages read": { write: true, chatArgs: ["chat"] },
   "media download": CHAT,
   "media clean": LOCAL,
@@ -142,7 +130,6 @@ export function guardCommands(cmd: CommandNode): void {
   }
 }
 
-/** readOnly and allowedChats; INVALID_ARGS for a bad value */
 async function readAccessSettings(): Promise<AccessSettings> {
   try {
     return await loadAccessSettings();
@@ -195,7 +182,6 @@ export async function checkAccess(
     );
   }
   for (const name of access.chatArgs ?? []) {
-    // A positional chat as the command reads it
     const input = positional.includes(name) ? positionalChat(args[name], rawArgs) : args[name];
     if (typeof input === "string" && input.trim() !== "") {
       await checkChatAllowed(input, args.account as string | undefined, allowed);
@@ -205,11 +191,6 @@ export async function checkAccess(
 
 type HistoryDeps = ReturnType<typeof openHistory>;
 
-/**
- * The marked IDs of the list: an ID as given, @username and me as
- * `tg messages list --chat` resolves them (cache-first; me is the account's
- * own user ID)
- */
 async function resolveAllowed(entries: string[], deps: HistoryDeps): Promise<Set<number>> {
   const ids = new Set<number>();
   for (const entry of entries) {
@@ -225,7 +206,6 @@ async function resolveAllowed(entries: string[], deps: HistoryDeps): Promise<Set
 const ALLOWED_SUGGESTION =
   "Only the chats in allowedChats (config.json or TELEGRAM_SYNC_CLI_ALLOWED_CHATS) can be used; tg status lists them";
 
-/** CHAT_NOT_ALLOWED unless the chat resolves to an ID of the list */
 async function checkChatAllowed(
   input: string,
   accountSelector: string | undefined,

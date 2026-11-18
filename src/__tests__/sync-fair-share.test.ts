@@ -1,11 +1,3 @@
-/**
- * The job budget on a large account: history backfill and first pages must
- * make progress next to forward catch-up (#6), and chats that are caught up
- * must cost nothing.
- *
- * Runs the real scheduler, sync worker and job loop against a fake history
- * for 500 chats.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { TelegramClient } from "@mtcute/bun";
@@ -27,7 +19,6 @@ import { createAccountCacheDb } from "./helpers/cache-db";
 import { addAccountRuntime, testDaemonContext } from "./helpers/daemon-runtime";
 import { createMultiChatHistory, type GetHistoryRequest, range } from "./helpers/fake-history";
 
-// Private chats with made-up user IDs, 100 or 200 per group
 const GAP_CHATS = range(10_001, 10_200);
 const CAUGHT_UP_CHATS = range(20_001, 20_100);
 const HISTORY_CHATS = range(30_001, 30_100);
@@ -75,7 +66,6 @@ describe("job budget with 500 chats", () => {
     const messagesCache = createMessagesCache(db);
     history = createMultiChatHistory();
 
-    // 150 messages arrived above the cursor while the daemon was stopped
     for (const chatId of GAP_CHATS) {
       seed(
         chatId,
@@ -83,7 +73,6 @@ describe("job budget with 500 chats", () => {
         range(1, 1150),
       );
     }
-    // Nothing new since the last run
     for (const chatId of CAUGHT_UP_CHATS) {
       seed(
         chatId,
@@ -91,11 +80,9 @@ describe("job budget with 500 chats", () => {
         range(1, CURSOR),
       );
     }
-    // Up to date, with messages 1-300 still to backfill
     for (const chatId of HISTORY_CHATS) {
       seed(chatId, { forward: CURSOR, backward: 301, top: CURSOR }, range(1, CURSOR));
     }
-    // Never synced, 300 messages each
     for (const chatId of NEW_CHATS) {
       seed(chatId, {}, range(1, 300));
     }
@@ -123,7 +110,6 @@ describe("job budget with 500 chats", () => {
     db.close();
   });
 
-  /** Give the account a sync worker on this client */
   function useClient(client: TelegramClient) {
     account().worker = createRealSyncWorker({
       client,
@@ -138,16 +124,10 @@ describe("job budget with 500 chats", () => {
     });
   }
 
-  /** The account's runtime: its cache, scheduler and worker */
   function account() {
     return ctx.runtime.accounts.get(1)!;
   }
 
-  /**
-   * Run up to `limit` jobs through the daemon's job step, without the
-   * inter-job delay, refreshing the queues every 10 jobs like the loop's
-   * periodic refresh. Returns the jobs that ran, in order.
-   */
   async function runJobs(limit: number) {
     const ran: Array<{ id: number; type: string }> = [];
     while (ran.length < limit) {
@@ -184,7 +164,6 @@ describe("job budget with 500 chats", () => {
     expect(firstHistory).toBeGreaterThanOrEqual(0);
     expect(firstHistory).toBeLessThan(4);
 
-    // Caught-up chats cost nothing; each gap chat takes two pages
     for (const chatId of CAUGHT_UP_CHATS) {
       expect(history.requestsFor(chatId)).toHaveLength(0);
     }
@@ -192,10 +171,8 @@ describe("job budget with 500 chats", () => {
       400,
     );
 
-    // The queue drained
     scheduler.refreshQueues();
     expect(scheduler.getNextJob()).toBeNull();
-    // 400 catch-up pages, 100 first pages, 2 + 3 history pages per chat
     expect(ran.length).toBe(1000);
     expect(countOf("SELECT COUNT(*) AS n FROM sync_jobs WHERE status != 'completed'")).toBe(0);
     expect(history.requestCount).toBe(ran.length);
@@ -243,7 +220,6 @@ describe("job budget with 500 chats", () => {
 
     await scheduler.initializeForStartup();
 
-    // Catch-up, first page, catch-up, then the history page that floods
     const ran: SyncJobRow[] = [];
     for (let i = 0; i < 4; i++) {
       ran.push(scheduler.getNextJob()!);
@@ -255,7 +231,6 @@ describe("job budget with 500 chats", () => {
     expect(flooded).toBe(true);
     expect(chatSyncState.get(historyChat)?.backward_cursor).toBe(301);
 
-    // The wait is a delay: the job keeps its attempts and nothing failed
     const failedRows = () => countOf("SELECT COUNT(*) AS n FROM sync_jobs WHERE status = 'failed'");
     expect(failedRows()).toBe(0);
     expect(jobsService.getById(floodedJob.id)).toMatchObject({
@@ -264,7 +239,6 @@ describe("job budget with 500 chats", () => {
       error_message: "Rate limited: wait 30s",
     });
 
-    // While the block lasts, no lane runs a job
     const requests = history.requestCount;
     const pending = jobsService.getPendingJobs().length;
     for (let i = 0; i < 5; i++) {
@@ -299,7 +273,6 @@ describe("job budget with 500 chats", () => {
     const state = chatSyncState.get(historyChat);
     expect(state?.backward_cursor).toBe(1);
     expect(state?.history_complete).toBe(1);
-    // The page that flooded ran again as the same job
     expect(jobsService.getById(floodedJob.id)).toMatchObject({
       status: "completed",
       attempts: 0,
@@ -311,7 +284,6 @@ describe("job budget with 500 chats", () => {
     const chatId = GAP_CHATS[0]!;
     useClient({
       call: async (request: GetHistoryRequest) => {
-        // The CLI turns the chat off while its first page is in flight
         chatSyncState.setSyncMode(chatId, "off");
         jobsService.cancelPendingForChat(chatId);
         return history.client.call(request as never);
@@ -322,7 +294,6 @@ describe("job budget with 500 chats", () => {
     account().pacer = createSyncPacer();
     await processJobs(ctx);
 
-    // The running page finished, but its full page queued nothing
     const state = chatSyncState.get(chatId);
     expect(state?.forward_cursor).toBe(1100);
     expect(state?.sync_enabled).toBe(0);
@@ -445,9 +416,7 @@ describe("job budget with two accounts", () => {
       await processJobs(ctx);
     }
 
-    // Both accounts run every tick
     expect(ran.slice(0, 6).map((job) => job.accountId)).toEqual([1, 2, 1, 2, 1, 2]);
-    // Account 2's first pages and history start at once
     const secondTypes = ran
       .filter((job) => job.accountId === 2)
       .slice(0, 4)

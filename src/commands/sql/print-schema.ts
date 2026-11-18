@@ -49,7 +49,6 @@ function handleSingleTable(tableName: string, format: string): void {
     );
   }
 
-  // Every account's cache has this schema: no account needed, no file created
   const db = createSchemaOnlyDb();
 
   if (format === "text") {

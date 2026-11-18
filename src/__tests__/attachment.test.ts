@@ -1,7 +1,3 @@
-/**
- * The file of a cached message, read from its raw TL message in every form
- * raw_json takes (src/utils/attachment.ts)
- */
 import { describe, expect, it } from "bun:test";
 import { _messageMediaFromTl, Long, Thumbnail, type tl } from "@mtcute/bun";
 
@@ -27,11 +23,6 @@ import { fakeBytes, photoMessage } from "./helpers/photo-message";
 
 const peer = { _: "peerUser" as const, userId: 1001 };
 
-/**
- * The uniqueFileId mtcute gives the media of a raw message. mtcute decodes
- * every preview of a photo on the way, and the made-up stripped previews
- * aren't real JPEG data, so they are left out.
- */
 function mtcuteUniqueFileId(message: { media: unknown }): string {
   const media = message.media as { photo?: { sizes: Array<{ _: string }> } };
   const raw = media.photo

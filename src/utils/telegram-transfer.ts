@@ -1,13 +1,3 @@
-/**
- * The client file transfers (upload.getFile, upload.saveFilePart) run on.
- *
- * mtcute sends every getFile with `floodSleepThreshold: Infinity`, so it
- * would sleep through any FLOOD_WAIT and only a stall timeout would end the
- * download. Through this facade it sleeps through short waits only (such
- * as the FLOOD_PREMIUM_WAIT of a download without Premium); a longer one
- * reaches the rate-limit wrapper (telegram-rate-limits.ts), which records
- * it for the account and throws RateLimitError.
- */
 import type { TelegramClient } from "@mtcute/bun";
 
 /** Flood waits up to this long are slept through during a transfer */

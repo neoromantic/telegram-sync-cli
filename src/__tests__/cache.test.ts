@@ -1,13 +1,3 @@
-/**
- * Comprehensive tests for the cache system
- *
- * Tests:
- * - Duration parsing (parseDuration)
- * - Staleness checking (isCacheStale)
- * - UsersCache operations
- * - ChatsCache operations
- */
-
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 
@@ -16,10 +6,6 @@ import type { ChatType, DurationString } from "../db/types";
 import { isCacheStale, parseDuration } from "../db/types";
 import { createUsersCache, UsersCache } from "../db/users-cache";
 import { createAccountCacheDb } from "./helpers/cache-db";
-
-// =============================================================================
-// Duration Parsing Tests
-// =============================================================================
 
 describe("parseDuration", () => {
   describe("valid durations", () => {
@@ -87,12 +73,8 @@ describe("parseDuration", () => {
   });
 });
 
-// =============================================================================
-// Staleness Checking Tests
-// =============================================================================
-
 describe("isCacheStale", () => {
-  const TTL_MS = 60000; // 1 minute
+  const TTL_MS = 60000;
 
   describe("fresh data", () => {
     it("should return false for freshly fetched data", () => {
@@ -101,29 +83,29 @@ describe("isCacheStale", () => {
     });
 
     it("should return false for data fetched 30s ago (within 1min TTL)", () => {
-      const fetchedAt = Date.now() - 30000; // 30 seconds ago
+      const fetchedAt = Date.now() - 30000;
       expect(isCacheStale(fetchedAt, TTL_MS)).toBe(false);
     });
 
     it("should return false for data at 59s (just under TTL)", () => {
-      const fetchedAt = Date.now() - 59000; // 59 seconds ago
+      const fetchedAt = Date.now() - 59000;
       expect(isCacheStale(fetchedAt, TTL_MS)).toBe(false);
     });
   });
 
   describe("stale data", () => {
     it("should return true for data fetched beyond TTL", () => {
-      const fetchedAt = Date.now() - 120000; // 2 minutes ago
+      const fetchedAt = Date.now() - 120000;
       expect(isCacheStale(fetchedAt, TTL_MS)).toBe(true);
     });
 
     it("should return true for very old data", () => {
-      const fetchedAt = Date.now() - 86400000; // 1 day ago
+      const fetchedAt = Date.now() - 86400000;
       expect(isCacheStale(fetchedAt, TTL_MS)).toBe(true);
     });
 
     it("should return true for data at 61s (just over TTL)", () => {
-      const fetchedAt = Date.now() - 61000; // 61 seconds ago
+      const fetchedAt = Date.now() - 61000;
       expect(isCacheStale(fetchedAt, TTL_MS)).toBe(true);
     });
   });
@@ -135,7 +117,6 @@ describe("isCacheStale", () => {
 
     it("should handle zero TTL (always stale except exact moment)", () => {
       const now = Date.now();
-      // Data from 1ms ago is stale with 0 TTL
       expect(isCacheStale(now - 1, 0)).toBe(true);
     });
 
@@ -146,8 +127,6 @@ describe("isCacheStale", () => {
     });
 
     it("should return true at exactly TTL boundary", () => {
-      // At exactly TTL, Date.now() - fetchedAt === TTL, so > is false
-      // But due to timing, we test slightly over
       const fetchedAt = Date.now() - TTL_MS - 1;
       expect(isCacheStale(fetchedAt, TTL_MS)).toBe(true);
     });
@@ -158,10 +137,6 @@ describe("isCacheStale", () => {
     });
   });
 });
-
-// =============================================================================
-// UsersCache Tests
-// =============================================================================
 
 describe("UsersCache", () => {
   let db: Database;
@@ -408,13 +383,13 @@ describe("UsersCache", () => {
     });
 
     it("should respect limit parameter", () => {
-      const results = usersCache.search("a", 2); // Alice, Charlie, David all have 'a'
+      const results = usersCache.search("a", 2);
 
       expect(results.length).toBeLessThanOrEqual(2);
     });
 
     it("should handle partial matches", () => {
-      const results = usersCache.search("li"); // Alice, Charlie
+      const results = usersCache.search("li");
 
       expect(results.length).toBeGreaterThanOrEqual(2);
     });
@@ -536,7 +511,6 @@ describe("UsersCache", () => {
       const original = usersCache.getById("123456");
       const originalCreatedAt = original?.created_at;
 
-      // Small delay
       usersCache.upsert(createTestUser({ first_name: "Updated" }));
       const updated = usersCache.getById("123456");
 
@@ -545,10 +519,6 @@ describe("UsersCache", () => {
     });
   });
 });
-
-// =============================================================================
-// ChatsCache Tests
-// =============================================================================
 
 describe("ChatsCache", () => {
   let db: Database;
@@ -654,7 +624,6 @@ describe("ChatsCache", () => {
 
   describe("list", () => {
     beforeEach(() => {
-      // Create chats with different types and timestamps
       chatsCache.upsert(
         createTestChat({
           chat_id: "1",
@@ -709,7 +678,6 @@ describe("ChatsCache", () => {
     it("should order by last_message_at by default (newest first)", () => {
       const chats = chatsCache.list();
 
-      // Alice should be first (most recent)
       expect(chats[0]?.title).toBe("Alice");
     });
 
@@ -781,7 +749,7 @@ describe("ChatsCache", () => {
     it("should find chats by title", () => {
       const results = chatsCache.search("Tech");
 
-      expect(results.length).toBe(2); // Tech Discussion and technews
+      expect(results.length).toBe(2);
     });
 
     it("should find chats by username", () => {
@@ -929,10 +897,6 @@ describe("ChatsCache", () => {
     });
   });
 });
-
-// =============================================================================
-// Factory Function Tests
-// =============================================================================
 
 describe("Factory Functions", () => {
   describe("createUsersCache", () => {

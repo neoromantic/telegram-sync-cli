@@ -1,7 +1,3 @@
-/**
- * Chats cache service for caching Telegram chats/dialogs
- * Uses bun:sqlite with prepared statements for typed queries
- */
 import type { Database } from "bun:sqlite";
 
 import { legacyChatIdCandidates } from "../utils/telegram-peer-ids";
@@ -48,7 +44,6 @@ export class ChatsCache {
   private setReadInboxStmt;
 
   constructor(private db: Database) {
-    // Create prepared statements
     this.getByIdStmt = db
       .query("SELECT * FROM chats_cache WHERE chat_id = $chat_id")
       .as(ChatCacheRow);
@@ -92,8 +87,6 @@ export class ChatsCache {
 
     this.countByTypeStmt = db.query("SELECT COUNT(*) as count FROM chats_cache WHERE type = $type");
 
-    // A message above the newest one known and above the read boundary is
-    // a new unread one. An unknown count or boundary stays unknown.
     this.noteLiveMessageStmt = db.query(`
       UPDATE chats_cache SET
         unread_count = CASE
@@ -140,7 +133,6 @@ export class ChatsCache {
    * Get chat by username (without @)
    */
   getByUsername(username: string): CachedChat | null {
-    // Strip @ if present
     const cleanUsername = username.startsWith("@") ? username.slice(1) : username;
     return this.getByUsernameStmt.get({ $username: cleanUsername });
   }
@@ -204,7 +196,6 @@ export class ChatsCache {
   upsertMany(chats: CachedChatInput[]): void {
     if (chats.length === 0) return;
 
-    // Use transaction for bulk insert
     this.db.transaction(() => {
       for (const chat of chats) {
         this.upsert(chat);
@@ -218,7 +209,6 @@ export class ChatsCache {
   list(opts: ListChatsOptions = {}): CachedChat[] {
     const { limit = 50, offset = 0, type, orderBy = "last_message_at", unread = false } = opts;
 
-    // Determine order clause
     const orderClause =
       orderBy === "title"
         ? "ORDER BY title COLLATE NOCASE ASC"

@@ -1,9 +1,3 @@
-/**
- * The file a cached message holds, read from its raw TL message. It reads
- * every form raw_json takes: Long values as mtcute Long objects,
- * `{ low, high, unsigned }`, decimal strings or numbers; byte arrays as
- * base64 strings or objects with a key per byte, which it never reads.
- */
 import { classifyDocument } from "./message-type";
 
 export type AttachmentKind =
@@ -99,7 +93,6 @@ function longToNumber(value: unknown): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
-/** Telegram's run-length encoding: each run of zero bytes becomes 0, count */
 function rleEncode(bytes: Uint8Array): Uint8Array {
   const out: number[] = [];
   let zeros = 0;
@@ -129,14 +122,12 @@ export function uniqueFileIdOf(type: 1 | 2, id: bigint, thumbType?: string): str
   view.setInt32(0, type, true);
   view.setBigInt64(4, BigInt.asIntN(64, id), true);
   if (thumbType !== undefined) {
-    // mtcute writes the animated avatar type 'u' as '\0'
     const code = thumbType === "u" ? 0 : thumbType.charCodeAt(0);
     bytes[12] = code === 97 ? 0 : code === 99 ? 1 : (code + 5) & 0xff;
   }
   return rleEncode(bytes).toBase64({ alphabet: "base64url", omitPadding: true });
 }
 
-/** A message from any form raw_json and the writers take */
 function toMessage(input: unknown): RawObject | null {
   let value = input;
   if (typeof value === "string") {
@@ -158,7 +149,6 @@ export type PickedMedia =
   | { file: "photo"; raw: RawObject; source: AttachmentSource }
   | { file: "document"; raw: RawObject; source: AttachmentSource };
 
-/** The photo or document a message holds, as mtcute picks its media */
 function pickMedia(message: RawObject): PickedMedia | null {
   const media = asObject(message.media);
   if (!media) return null;
@@ -198,7 +188,6 @@ interface PhotoSize {
   progressive: boolean;
 }
 
-/** The photoSize and photoSizeProgressive entries of a size list */
 function plainSizes(sizes: unknown): PhotoSize[] {
   if (!Array.isArray(sizes)) return [];
   const result: PhotoSize[] = [];
@@ -230,10 +219,6 @@ function plainSizes(sizes: unknown): PhotoSize[] {
   return result;
 }
 
-/**
- * The size mtcute's Photo downloads: the progressive size if any, else the
- * plain size with the most bytes
- */
 function bestPhotoSize(photo: RawObject): PhotoSize | null {
   const sizes = plainSizes(photo.sizes);
   const progressive = sizes.find((size) => size.progressive);
@@ -292,7 +277,6 @@ function documentKind(doc: RawObject): {
       return { kind: type, dimensions: null, timed: attr };
     case "video": {
       if (attr?._ !== "documentAttributeVideo") {
-        // A GIF sent as an image
         return { kind: "animation", dimensions: attr, timed: null };
       }
       const animated = attributes.some((it) => it._ === "documentAttributeAnimated");

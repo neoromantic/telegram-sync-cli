@@ -32,7 +32,6 @@ export function cacheUnavailableSuggestion(reason: string): string {
 
 /** Report a cache that can't be opened, or rethrow another error */
 export function reportCacheError(err: unknown, accountId?: number): never {
-  // A file or database error: its type and scrubbed message go to usage stats
   reportLocalError(err);
   if (isCacheUnavailableError(err)) {
     error(

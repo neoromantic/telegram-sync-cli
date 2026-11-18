@@ -37,13 +37,6 @@ function fromCachedChat(chat: CachedChat): ResolvedChat {
   };
 }
 
-/**
- * Find the chat in the cache: by @username, by an ID as findCachedChatById
- * reads it (the marked ID `tg chats list` shows, a user's private chat, or a
- * bare group or channel ID as 0.2.0 showed it), then by an ID the daemon has
- * sync state for (a chat seen only live). A bare ID that names two cached
- * chats throws AmbiguousPeerError.
- */
 function resolveChat(db: Database, input: string): ResolvedChat | null {
   if (isUsernameIdentifier(input)) {
     const chat = createChatsCache(db).getByUsername(input);
@@ -135,7 +128,6 @@ export const syncChatCommand = defineCommand({
       type: "positional",
       description:
         'Chat: @username or the ID from "tg chats list" (-100… for channels, -N for basic groups)',
-      // Checked in run(): the parser reads a marked ID such as -100… as flags
       required: false,
     },
     off: {
@@ -176,10 +168,7 @@ export const syncChatCommand = defineCommand({
       );
     }
 
-    // A community only groups linked chats: there is no history to fetch,
-    // so jobs for it would only fail (#58)
     if (mode === "on" && chat.type === "community") {
-      // 0.4 turned a community on, and its jobs keep failing until it's off
       const turnedOn = createChatSyncStateService(db).get(chat.peerId)?.sync_mode === "on";
       error(
         ErrorCodes.INVALID_ARGS,
@@ -198,8 +187,6 @@ export const syncChatCommand = defineCommand({
       title: chat.title,
       username: chat.username,
       mode: state.sync_mode,
-      // A group takes new messages only while the account takes part in it,
-      // whatever the mode
       ...chatSyncView(createGroupParticipation(db), chat.peerId, state),
       historyComplete: state.history_complete === 1,
       syncedMessages: state.synced_messages,

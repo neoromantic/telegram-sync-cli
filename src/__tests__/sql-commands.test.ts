@@ -1,6 +1,3 @@
-/**
- * SQL command integration tests
- */
 import type { Database } from "bun:sqlite";
 import type { Mock } from "bun:test";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
@@ -318,7 +315,6 @@ describe("SQL Commands", () => {
       expect(parsed.data.version).toBeGreaterThan(0);
       expect(Array.isArray(parsed.data.tables)).toBe(true);
       expect(parsed.data.tables.length).toBeGreaterThan(0);
-      // Verify table structure
       const firstTable = parsed.data.tables[0];
       expect(firstTable).toHaveProperty("name");
       expect(firstTable).toHaveProperty("description");
@@ -334,17 +330,14 @@ describe("SQL Commands", () => {
         args: { output: "text", _: [] },
       });
 
-      // Should be called multiple times (once per table + separator lines)
       expect(logSpy.mock.calls.length).toBeGreaterThan(2);
 
-      // Check that separator lines are present (=.repeat(80))
       const calls = logSpy.mock.calls.map((c) => c[0] as string);
       const separatorCalls = calls.filter(
         (c) => typeof c === "string" && c.includes("=".repeat(80)),
       );
       expect(separatorCalls.length).toBeGreaterThan(0);
 
-      // Check that table names are present
       const hasUsersCache = calls.some((c) => typeof c === "string" && c.includes("users_cache"));
       expect(hasUsersCache).toBe(true);
     });
@@ -357,17 +350,14 @@ describe("SQL Commands", () => {
         args: { output: "sql", _: [] },
       });
 
-      // Should be called multiple times (once per table + separator lines)
       expect(logSpy.mock.calls.length).toBeGreaterThan(2);
 
-      // Check that SQL separator lines are present (-- .repeat(27))
       const calls = logSpy.mock.calls.map((c) => c[0] as string);
       const separatorCalls = calls.filter(
         (c) => typeof c === "string" && c.includes("-- ".repeat(27)),
       );
       expect(separatorCalls.length).toBeGreaterThan(0);
 
-      // Check that CREATE TABLE statements are present
       const createTableCalls = calls.filter(
         (c) => typeof c === "string" && c.includes("CREATE TABLE"),
       );

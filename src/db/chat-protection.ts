@@ -1,8 +1,3 @@
-/**
- * chat_content_protection: the chat-level answer of the last online
- * content-protection check of `tg media download`, so a cache hit refuses
- * a protected chat's files offline too. Written only by the CLI.
- */
 import type { Database } from "bun:sqlite";
 
 /** Why a chat's content is protected */

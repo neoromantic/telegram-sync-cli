@@ -1,7 +1,3 @@
-/**
- * Per-account daemon runtimes for unit tests: each account gets its own
- * in-memory cache, as accounts/<id>/cache.db is in production.
- */
 import type { Database } from "bun:sqlite";
 import { type Mock, mock } from "bun:test";
 import {

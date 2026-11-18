@@ -11,7 +11,6 @@ import {
   toRawPeerId,
 } from "../utils/telegram-peer-ids";
 
-/** Bare IDs of each chat type, boundaries included */
 const SAMPLES = [
   { type: "private", raw: 1001, marked: 1001 },
   { type: "group", raw: 4001, marked: -4001 },

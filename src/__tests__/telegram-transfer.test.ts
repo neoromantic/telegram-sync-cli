@@ -1,7 +1,3 @@
-/**
- * The transfer facade: every call sleeps through flood waits up to 10 s
- * only, and everything else is the client's own
- */
 import { describe, expect, it } from "bun:test";
 import type { TelegramClient } from "@mtcute/bun";
 

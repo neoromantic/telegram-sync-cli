@@ -1,6 +1,3 @@
-/**
- * Skill command helper tests
- */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -186,14 +183,11 @@ describe("tryStat", () => {
     const result = await skillModule.tryStat(nonExistentPath);
 
     expect(result.exists).toBe(false);
-    // Type assertion needed since TypeScript can't narrow the union
     const notExistsResult = result as { exists: false; error?: string };
     expect(notExistsResult.error).toBeUndefined();
   });
 
   it("returns exists: false with error for non-ENOENT errors", async () => {
-    // Use a path that causes ENOTDIR error - trying to stat a path
-    // through a file as if it were a directory
     const filePath = join(dataDir, "blocking-file.txt");
     await Bun.write(filePath, "block");
     const invalidPath = join(filePath, "subpath", "child");
@@ -202,7 +196,6 @@ describe("tryStat", () => {
       const result = await skillModule.tryStat(invalidPath);
 
       expect(result.exists).toBe(false);
-      // Type assertion needed since TypeScript can't narrow the union
       const notExistsResult = result as { exists: false; error?: string };
       expect(notExistsResult.error).toBeDefined();
       expect(typeof notExistsResult.error).toBe("string");
@@ -216,7 +209,6 @@ describe("tryStat", () => {
 
 describe("checkDataDirAccess write failure", () => {
   it("reports write failure when directory is not writable", async () => {
-    // Skip on Windows where chmod behaves differently
     if (process.platform === "win32") {
       return;
     }
@@ -225,7 +217,6 @@ describe("checkDataDirAccess write failure", () => {
     mkdirSync(readOnlyDir, { recursive: true });
 
     try {
-      // Make directory read-only (remove write permission)
       chmodSync(readOnlyDir, 0o444);
 
       const status = await skillModule.checkDataDirAccess(readOnlyDir);
@@ -236,7 +227,6 @@ describe("checkDataDirAccess write failure", () => {
       expect(status.error).toBeDefined();
       expect(typeof status.error).toBe("string");
     } finally {
-      // Restore permissions before cleanup
       chmodSync(readOnlyDir, 0o755);
       rmSync(readOnlyDir, { recursive: true, force: true });
     }
@@ -246,14 +236,11 @@ describe("checkDataDirAccess write failure", () => {
     const filePath = join(dataDir, "file-not-dir.txt");
     await Bun.write(filePath, "content");
 
-    // Try to treat the file as a directory - Bun.write with createPath
-    // should fail when trying to create subdirectory under a file
     const invalidPath = join(filePath, "subdir");
 
     try {
       const status = await skillModule.checkDataDirAccess(invalidPath);
 
-      // This should fail because filePath is a file, not a directory
       expect(status.writable).toBe(false);
     } finally {
       await Bun.file(filePath)
@@ -265,36 +252,29 @@ describe("checkDataDirAccess write failure", () => {
 
 describe("skillInstallCommand error path", () => {
   it("calls error() when write to invalid path fails", async () => {
-    // Skip on Windows where chmod behaves differently
     if (process.platform === "win32") {
       return;
     }
 
-    // Create a read-only directory to cause write failure
     const readOnlyDir = join(dataDir, "readonly-install-dir");
     mkdirSync(readOnlyDir, { recursive: true });
 
     try {
-      // Make directory read-only
       chmodSync(readOnlyDir, 0o444);
 
       const targetPath = join(readOnlyDir, "skill.json");
 
-      // installSkillManifest should throw when it can't write
       await expect(skillModule.installSkillManifest(targetPath)).rejects.toThrow();
     } finally {
-      // Restore permissions before cleanup
       chmodSync(readOnlyDir, 0o755);
       rmSync(readOnlyDir, { recursive: true, force: true });
     }
   });
 
   it("installSkillManifest throws on ENOTDIR path", async () => {
-    // Create a file that blocks the path
     const blockingFile = join(dataDir, "blocking-install-file.txt");
     await Bun.write(blockingFile, "block");
 
-    // Try to write to a path through the file
     const invalidPath = join(blockingFile, "subdir", "skill.json");
 
     try {
@@ -307,31 +287,24 @@ describe("skillInstallCommand error path", () => {
   });
 
   it("skillInstallCommand.run catches error and calls error()", async () => {
-    // Skip on Windows where chmod behaves differently
     if (process.platform === "win32") {
       return;
     }
 
-    // Make the data dir read-only so skillInstallCommand.run() will fail
-    // when it tries to write to the default skill.json path
     const prevDataDir = process.env.TELEGRAM_SYNC_CLI_DATA_DIR;
     const readOnlyDataDir = join(dataDir, "readonly-data");
     mkdirSync(readOnlyDataDir, { recursive: true });
 
     try {
-      // Make directory read-only
       chmodSync(readOnlyDataDir, 0o444);
       process.env.TELEGRAM_SYNC_CLI_DATA_DIR = readOnlyDataDir;
 
-      // Re-import the module to pick up the new env
       const freshModule = await import("../commands/skill");
 
-      // The command should throw (via error()) when it can't write
       await expect(freshModule.skillInstallCommand.run?.({} as never)).rejects.toThrow(
         "Failed to write skill manifest",
       );
     } finally {
-      // Restore permissions and env before cleanup
       chmodSync(readOnlyDataDir, 0o755);
       rmSync(readOnlyDataDir, { recursive: true, force: true });
       if (prevDataDir === undefined) {

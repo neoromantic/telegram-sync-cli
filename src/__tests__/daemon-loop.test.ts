@@ -1,6 +1,3 @@
-/**
- * Tests for daemon main loop control flow (no module mocks)
- */
 import { describe, expect, it, mock } from "bun:test";
 import type { TelegramClient } from "@mtcute/bun";
 import type { DaemonContext } from "../daemon/daemon-context";
@@ -94,7 +91,6 @@ async function runWithImmediateTimeouts(
   }
 }
 
-/** Stop the loop after `ticks` status writes of account 1 */
 function stopAfterTicks(ctx: DaemonContext, ticks: number) {
   let count = 0;
   return createMockStatusService({
@@ -163,8 +159,6 @@ describe("mainLoop", () => {
 
   it("writes each account's tick to its own cache", async () => {
     const ctx = createContext();
-    // Each account's queue is counted from its own cache, with or without a
-    // scheduler
     const seedJobs = (db: ReturnType<typeof createAccountCacheDb>, statuses: string[]) => {
       for (const [i, status] of statuses.entries()) {
         db.run("INSERT INTO sync_jobs (chat_id, job_type, priority, status) VALUES (?, ?, ?, ?)", [
@@ -291,8 +285,6 @@ describe("mainLoop", () => {
 
     let clock = Date.UTC(2026, 0, 1);
     const fake = fakeDialogClient([{ kind: "user", id: 1002, topMessage: 1004 }]);
-    // The laptop sleeps for 9 h while the 60th tick waits on getMe; mtcute
-    // reconnects within 2 s of the wake, too fast to count as offline
     const client = Object.assign(fake.client, {
       getMe: async () => {
         clock += 9 * 3_600_000;
@@ -381,8 +373,6 @@ describe("mainLoop", () => {
       attempts: 0,
       next_run_at: 0,
     };
-    // A job is due on the 60th tick, when the health check is due too; the
-    // stop arrives while it runs
     let picks = 0;
     const worker = {
       client: {} as TelegramClient,
@@ -432,7 +422,6 @@ describe("mainLoop", () => {
     }
 
     expect(worker.processJobReal).toHaveBeenCalledTimes(1);
-    // Ticks 1 to 59 wrote their status and waited; the 60th did neither
     expect(picks).toBe(60);
     expect(ticks).toBe(59);
     expect(timeouts).toBe(59);
@@ -441,7 +430,6 @@ describe("mainLoop", () => {
 
   it("looks for due contacts on the first tick and then every 30th", async () => {
     const ctx = createContext();
-    // Every look finds the list due, so each look is one request
     ctx.runtime.contacts.peersTtlMs = 0;
     const requests: string[] = [];
     const client = {
@@ -469,7 +457,6 @@ describe("mainLoop", () => {
     });
 
     await runWithImmediateTimeouts(() => mainLoop(ctx));
-    // Tick 1 and tick 30; the check of tick 1 ended long before tick 30
     expect(requests).toEqual(["contacts.getContacts", "contacts.getContacts"]);
   });
 
@@ -496,7 +483,6 @@ describe("mainLoop", () => {
     });
 
     await runWithImmediateTimeouts(() => mainLoop(ctx));
-    // All 30 ticks ran; the account still had its first check running
     expect(requests).toEqual(["contacts.getContacts"]);
   });
 
@@ -549,7 +535,6 @@ describe("mainLoop", () => {
     const ticks: number[] = [];
     let tick = 1;
     const signal = ctx.runtime.shutdown.signal;
-    // Account 1's job waits until the stop ends it, like a FLOOD_WAIT
     const firstWorker = {
       client: {} as TelegramClient,
       canMakeApiCall: () => true,
@@ -607,7 +592,6 @@ describe("mainLoop", () => {
 
     expect(firstWorker.processJobReal).toHaveBeenCalledTimes(1);
     expect(secondWorker.processJobReal).toHaveBeenCalledTimes(3);
-    // 3 s from the end of each job
     expect(ticks).toEqual([1, 4, 7]);
     expect(events).toEqual(["2 done 1", "2 done 2", "2 done 3", "1 stopped"]);
     expect(ctx.runtime.jobsInFlight.size).toBe(0);
@@ -639,8 +623,6 @@ describe("mainLoop", () => {
         ),
       }) as unknown as RealSyncWorker;
     const getMe = mock(async () => ({}));
-    // Account 1 is connected; account 2 is due to reconnect. Both start a
-    // job on the first tick, still running at the 60th.
     for (const accountId of [1, 2]) {
       addAccountRuntime(ctx, accountId, createAccountCacheDb(), {
         statusService: accountId === 1 ? stopAfterTicks(ctx, 61) : createMockStatusService(),
@@ -658,8 +640,6 @@ describe("mainLoop", () => {
     Date.now = () => 120000;
     try {
       await runWithImmediateTimeouts(async () => {
-        // The job starts while account 2 is connected, then its connection
-        // fails
         startDueJobs(ctx);
         second.status = "error";
         second.nextReconnectAt = 1;
@@ -669,10 +649,8 @@ describe("mainLoop", () => {
       Date.now = originalNow;
     }
 
-    // Account 1's health check ran beside its job
     expect(getMe).toHaveBeenCalledTimes(1);
     expect(ctx.state.accounts.get(1)?.status).toBe("connected");
-    // Account 2's reconnect didn't close the client under its job
     expect(second.status).toBe("error");
     expect(second.nextReconnectAt).toBe(1);
 
@@ -684,7 +662,6 @@ describe("mainLoop", () => {
 });
 
 describe("waitForNextTick (#133)", () => {
-  /** A clock the fake sleep moves; `onSleep` runs before each sleep ends */
   function fakeClock(start: number, onSleep: (ms: number) => void = () => {}) {
     let now = start;
     const sleeps: number[] = [];
@@ -704,7 +681,6 @@ describe("waitForNextTick (#133)", () => {
     };
   }
 
-  /** Account 1 with history due, whose last job started at `lastStart` */
   function historyAccount(ctx: DaemonContext, lastStart: number) {
     const starts: number[] = [];
     const rt = addAccountRuntime(ctx, 1, createAccountCacheDb(), {
@@ -730,7 +706,6 @@ describe("waitForNextTick (#133)", () => {
   it("wakes inside the tick when an account's next job is due, then sleeps the rest", async () => {
     const ctx = createContext();
     const time = fakeClock(10_000);
-    // Started 1029 ms ago at 0.7 calls/s: due in 400 ms
     const { starts } = historyAccount(ctx, 10_000 - 1029);
     const originalNow = Date.now;
     Date.now = () => time.now;

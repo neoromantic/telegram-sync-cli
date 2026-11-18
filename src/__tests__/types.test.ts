@@ -1,7 +1,3 @@
-/**
- * Types module tests
- * Verifies type definitions and error codes
- */
 import { describe, expect, it } from "bun:test";
 import {
   type Account,

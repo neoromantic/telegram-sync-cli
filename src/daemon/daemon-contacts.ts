@@ -1,14 +1,3 @@
-/**
- * The daemon keeps each account's contact list current (#8). It only reads
- * from Telegram: contacts.getContacts with the hash of the cached list, so
- * an unchanged list costs one tiny contactsNotModified reply.
- *
- * A check is due when the cached list is older than the peer TTL, after
- * each start and reconnect, or when an update hinted at a change
- * (`checkAt`). The main loop looks once at the
- * start and then every 30 ticks; a check runs in the background and never
- * holds the job loop.
- */
 import type { Database } from "bun:sqlite";
 import type { RawUpdateInfo, TelegramClient } from "@mtcute/bun";
 import { tl } from "@mtcute/bun";
@@ -47,7 +36,6 @@ export async function loadContactsTtl(ctx: DaemonContext): Promise<void> {
     const config = await getResolvedCacheConfig({ dataDir: ctx.dataDir });
     ctx.runtime.contacts.peersTtlMs = config.staleness.peers;
   } catch (err) {
-    // Not worth stopping a daemon whose accounts already connected
     const why = err instanceof ConfigError ? err.message : formatError(err);
     ctx.logger.warn(
       `Failed to read the cache config, contacts sync uses the default peer TTL: ${why}`,
@@ -111,13 +99,10 @@ export async function syncAccountContacts(
   state.inFlight.add(accountId);
 
   try {
-    // The client's network middleware counts and logs the call
     const result = await client
       .withParams({ abortSignal: ctx.runtime.shutdown.signal })
       .call({ _: CONTACTS_METHOD, hash: contactsHash(rt.db) });
 
-    // A stop while the request ran: write nothing. The check and the write
-    // are one synchronous block, so a stop can't land between them.
     if (ctx.state.shutdownRequested) {
       ctx.logger.debug(`[Account ${accountId}] Contacts check ended by the daemon stop`);
       return;
@@ -132,7 +117,6 @@ export async function syncAccountContacts(
         `[Account ${accountId}] Contacts synced: ${applied.contacts} (${applied.unmarked} no longer contacts)`,
       );
     }
-    // A hint that arrived while the request ran was moved past `now`
     if ((state.checkAt.get(accountId) ?? Number.POSITIVE_INFINITY) <= now) {
       state.checkAt.delete(accountId);
     }
@@ -161,7 +145,6 @@ function handleContactsError(
     const seconds = Math.max(1, err.seconds);
     state.retryAt.set(accountId, now + seconds * 1000);
     try {
-      // The CLI sees it too: they share the account's rate limits
       createRateLimitsService(db).setFloodWait(CONTACTS_METHOD, seconds);
     } catch (writeErr) {
       ctx.logger.warn(
@@ -175,7 +158,6 @@ function handleContactsError(
   }
 
   state.retryAt.set(accountId, now + CONTACTS_RETRY_MS);
-  // A reconnect closes the old client, failing its request; the new one checks
   if (ctx.state.accounts.get(accountId)?.status !== "connected") {
     ctx.logger.debug(
       `[Account ${accountId}] Contacts check ended by a lost connection: ${formatError(err)}`,
@@ -268,13 +250,11 @@ export function handleContactRawUpdate(
     const cached = db
       .query("SELECT is_contact FROM users_cache WHERE user_id = ?")
       .get(String(userId)) as { is_contact: number } | null;
-    // A non-contact we don't cache stays out; an unchanged flag costs no write
     if (cached ? cached.is_contact === isContact : !isContact) return;
 
     const input = apiUserToCacheInput(user);
     input.fetched_at = now;
     createUsersCache(db).upsert(input);
-    // A running check's older list would overwrite this row and set the hash
     if (ctx.runtime.contacts.inFlight.has(accountId)) {
       requestContactsCheck(ctx, accountId, now);
     }

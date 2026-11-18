@@ -1,9 +1,3 @@
-/**
- * Parses the real output of tg chats list strictly against its declaration
- * (src/commands/chats/list-output.ts): a field added, removed, renamed or
- * retyped in the command without the declaration fails here
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { chatsListOutput } from "../commands/chats/list-output";
 import { createChatSyncStateService } from "../db/chat-sync-state";
@@ -39,7 +33,6 @@ describe("E2E: tg chats list output", () => {
     env.initDatabase();
     env.seedAccounts([{ phone: "+15550000000", is_active: true }]);
     const cacheDb = env.openCacheDb(1);
-    // Every chat type, and each nullable field both set and null
     createChatsCache(cacheDb).upsertMany([
       chat({
         chat_id: "100",

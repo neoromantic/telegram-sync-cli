@@ -1,9 +1,3 @@
-/**
- * E2E tests for output format flags
- *
- * Tests --format json/pretty/quiet behavior.
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { runCliSuccess } from "./helpers/cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
@@ -62,7 +56,6 @@ describe("E2E: Output Formats", () => {
         success?: boolean;
       };
 
-      // pretty format outputs data directly without success wrapper
       expect(response.accounts).toBeDefined();
       expect(response.success).toBeUndefined();
     });
@@ -75,7 +68,6 @@ describe("E2E: Output Formats", () => {
         env.getCliOptions(),
       );
 
-      // quiet mode should have no stdout
       expect(result.stdout).toBe("");
       expect(result.json).toBeUndefined();
     });

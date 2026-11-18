@@ -1,6 +1,3 @@
-/**
- * Account management commands
- */
 import { defineCommand } from "citty";
 
 import { accountsDb } from "../db";
@@ -9,7 +6,6 @@ import { settleCacheLayoutBeforeAccountChange } from "../utils/account-cache";
 import { keepActiveAccountInConfig } from "../utils/active-account";
 import { error, success } from "../utils/output";
 
-/** What to do about an ACCOUNT_NOT_FOUND error for --id, if any account exists */
 function listAccountIds(): string | undefined {
   return accountsDb.getAll().length > 0
     ? "Run tg accounts list to see the account IDs, then pass one to --id"

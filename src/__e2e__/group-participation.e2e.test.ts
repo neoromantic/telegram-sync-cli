@@ -1,10 +1,3 @@
-/**
- * E2E: a group the account doesn't take part in adds no messages to the
- * cache, yet `tg messages list --fresh` still shows Telegram's page. The
- * page is a replay fixture recorded with a stub client, so no network is
- * used. Made-up data only.
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import type { TelegramClient } from "@mtcute/bun";
@@ -18,7 +11,6 @@ import { wrapClientCallWithRecordReplay } from "../utils/telegram-record-replay"
 import { runCliSuccess } from "./helpers/cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
 
-/** Basic group 4101 */
 const GROUP_ID = -4101;
 const ALICE_ID = 7101;
 
@@ -57,7 +49,6 @@ describe("E2E: groups the account does not take part in", () => {
     env.cleanup();
   });
 
-  /** Record the newest page of the group as the CLI asks for it */
   async function recordNewestPage(): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
     const messages = [3, 2, 1].map((id) => ({

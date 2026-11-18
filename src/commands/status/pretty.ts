@@ -11,10 +11,6 @@ import { c, icons, jobStatusIcon, printHeader, printRow } from "./formatters";
 export type StatusSnapshot = Awaited<ReturnType<typeof collectStatus>>;
 type StatusJob = StatusSnapshot["sync"]["jobs"][number];
 
-/**
- * With several accounts each listed item says whose cache it is in; with
- * one the output stays as it was
- */
 function hasSeveralAccounts(status: StatusSnapshot): boolean {
   return status.accounts.total > 1;
 }
@@ -73,7 +69,6 @@ function printDaemonSection(status: StatusSnapshot): void {
   if (version_mismatch) printDaemonVersionHint(version, status.cli_version);
 }
 
-/** Whether a version is newer than another; an invalid one counts as older */
 function isNewerVersion(version: string, than: string): boolean {
   try {
     return Bun.semver.order(version, than) > 0;
@@ -82,10 +77,6 @@ function isNewerVersion(version: string, than: string): boolean {
   }
 }
 
-/**
- * Say what to do about a running daemon of another version. Restarting a
- * newer daemon with this tg would downgrade it, so then use the newer tg.
- */
 function printDaemonVersionHint(version: string | null, cliVersion: string): void {
   console.log();
   if (version !== null && isNewerVersion(version, cliVersion)) {
@@ -106,7 +97,6 @@ function printDaemonVersionHint(version: string | null, cliVersion: string): voi
   console.log(`    ${c.value("tg daemon start")}`);
 }
 
-/** What a failed job or one waiting to run again is waiting for */
 function jobRetryDetail(job: StatusJob): string {
   const error = job.error ? `: ${job.error}` : "";
 
@@ -127,11 +117,6 @@ function jobRetryDetail(job: StatusJob): string {
   return next ? c.dim(` ${next}`) : "";
 }
 
-/**
- * The tg chats sync command that deletes a chat's failed jobs and keeps its
- * mode: without a flag the command turns the chat on. With several accounts
- * it names the account whose cache holds the job.
- */
 function retrySyncCommand(chatId: number, mode: SyncMode | null, accountId: number | null): string {
   const flag = mode === "on" ? "" : mode === "off" ? " --off" : " --auto";
   const account = accountId === null ? "" : ` --account ${accountId}`;
@@ -242,7 +227,6 @@ function printSyncProgressSection(status: StatusSnapshot): void {
   }
 }
 
-/** Messages cached of the counts Telegram gave, and what is left (#126) */
 function printHistoryProgress(status: StatusSnapshot): void {
   const history = status.progress.history;
   if (history.messages_known > 0) {
@@ -341,7 +325,6 @@ function printAccountsSection(status: StatusSnapshot): void {
     printRow("Active", c.warning("None"));
   }
 
-  // With --account the list holds that account only; its line still shows
   if (status.accounts.total <= 1) {
     return;
   }
@@ -361,7 +344,6 @@ function printAccountsSection(status: StatusSnapshot): void {
 
 type StatusAccount = StatusSnapshot["accounts"]["accounts"][number];
 
-/** One account's own figures, on the line under it */
 function accountSummary(acc: StatusAccount): string {
   if (acc.cache.status === "error") {
     return c.red(`cache error: ${acc.cache.error ?? "unknown"}`);
@@ -393,20 +375,13 @@ function accountSummary(acc: StatusAccount): string {
   return parts.join(c.dim(" · "));
 }
 
-/** Free pages above this share of the file earn a `tg db vacuum` hint */
 const VACUUM_HINT_FREE_SHARE = 0.1;
-/** After a background migration rewrote rows, a smaller share does */
 const VACUUM_HINT_MIGRATED_FREE_SHARE = 0.01;
 
-/** Whether a finished background migration rewrote rows of the cache */
 function migrationRewroteRows(acc: StatusAccount): boolean {
   return acc.migrations.some((migration) => migration.state === "done" && migration.done > 0);
 }
 
-/**
- * Each account's cache size: the file, its WAL and the free pages inside
- * it, and with --sizes its three largest tables
- */
 function printCacheSizeSection(status: StatusSnapshot): void {
   const sized = status.accounts.accounts.filter((acc) => acc.cache.size);
   if (sized.length === 0) return;
@@ -435,7 +410,6 @@ function printCacheSizeSection(status: StatusSnapshot): void {
       : VACUUM_HINT_FREE_SHARE;
     if (size.file_bytes > 0 && size.free_bytes > size.file_bytes * freeShare) {
       const vacuum = `tg db vacuum --account ${acc.id}`;
-      // A cache without auto_vacuum needs a full vacuum, with the daemon stopped
       const stopFirst = daemonRunning && size.auto_vacuum === "none";
       let hint = c.value(stopFirst ? `tg daemon stop && ${vacuum} && tg daemon start` : vacuum);
       if (stopFirst || !daemonRunning) {
@@ -458,10 +432,6 @@ function printCacheSizeSection(status: StatusSnapshot): void {
   }
 }
 
-/**
- * Background migrations not finished yet (#89), with their progress; shown
- * only when there is one
- */
 function printMigrationsSection(status: StatusSnapshot): void {
   if (status.migrations.length === 0) return;
 
@@ -493,7 +463,6 @@ function printMigrationsSection(status: StatusSnapshot): void {
   }
 }
 
-/** With --sizes, each account's media cache: files and partial downloads */
 function printMediaCacheSection(status: StatusSnapshot): void {
   const sized = status.accounts.accounts.filter((acc) => acc.media);
   if (sized.length === 0) return;
@@ -512,10 +481,6 @@ function printMediaCacheSection(status: StatusSnapshot): void {
   }
 }
 
-/**
- * Shared caches of an older version that were set aside, and a move that
- * waits; shown only when there is one
- */
 function printStorageSection(status: StatusSnapshot): void {
   const { legacy_caches, migration } = status.storage;
   if (legacy_caches.length === 0 && !migration) return;
@@ -538,10 +503,6 @@ function printStorageSection(status: StatusSnapshot): void {
   }
 }
 
-/**
- * With --account, a line under the title says which account the figures
- * cover, so they don't read as totals over every account
- */
 function printScope(status: StatusSnapshot): void {
   if (status.account_id === null) return;
   const account = status.accounts.accounts.find((acc) => acc.id === status.account_id);
@@ -552,7 +513,6 @@ function printScope(status: StatusSnapshot): void {
   );
 }
 
-/** One line for read-only mode and the chat allowlist, when either is on */
 function printAccess(status: StatusSnapshot): void {
   const { read_only, allowed_chats } = status.access;
   const parts = [

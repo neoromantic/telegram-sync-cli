@@ -1,13 +1,7 @@
-/**
- * QR codes for the terminal
- */
-
 import { encode } from "uqr";
 
-/** The quiet zone the QR code standard asks for, in modules */
 const QUIET_ZONE = 4;
 
-/** Black text on a white background, so the code reads the same in dark and light themes */
 const COLORS = "\x1b[30;47m";
 const RESET = "\x1b[0m";
 

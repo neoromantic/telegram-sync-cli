@@ -28,11 +28,6 @@ function isResolvedChat(peer: tl.TypeChat | undefined): peer is ResolvedChat {
   return Boolean(peer && peer._ !== "chatEmpty");
 }
 
-/**
- * The cached chat for @username or an ID, as findCachedChatById reads it: a
- * marked ID, a user's private chat, or a bare group or channel ID as 0.2.0
- * printed it, unless it names two cached chats.
- */
 function findCachedChat(db: Database, identifier: string, isUsername: boolean) {
   if (isUsername) return createChatsCache(db).getByUsername(identifier);
   return findCachedChatById(db, identifier);
@@ -55,10 +50,6 @@ function getCachedChat(
   };
 }
 
-/**
- * Telegram is asked by @username only, so an ID the cache doesn't answer
- * fails before any account or credentials are needed
- */
 function assertUsernameIdentifier(isUsername: boolean, identifier: string, fresh: boolean): void {
   if (isUsername) return;
   if (fresh) {

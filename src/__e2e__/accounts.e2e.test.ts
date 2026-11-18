@@ -1,10 +1,3 @@
-/**
- * E2E tests for accounts commands
- *
- * Tests accounts list, switch, remove, and info commands
- * using an isolated database environment.
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { runCliFailure, runCliSuccess } from "./helpers/cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
@@ -59,19 +52,16 @@ describe("E2E: Accounts Commands", () => {
       expect(response.data.accounts).toHaveLength(3);
       expect(response.data.total).toBe(3);
 
-      // Check first account
       const account1 = response.data.accounts[0]!;
       expect(account1.id).toBe(1);
       expect(account1.phone).toBe("+1111111111");
       expect(account1.name).toBe("Account 1");
       expect(account1.isActive).toBe(true);
 
-      // Check second account
       const account2 = response.data.accounts[1]!;
       expect(account2.id).toBe(2);
       expect(account2.isActive).toBe(false);
 
-      // Check third account (no name)
       const account3 = response.data.accounts[2]!;
       expect(account3.name).toBeNull();
     });
@@ -127,10 +117,8 @@ describe("E2E: Accounts Commands", () => {
     });
 
     it("should verify account is now active after switch", async () => {
-      // Switch to account 2
       await runCliSuccess(["accounts", "switch", "--id", "2"], env.getCliOptions());
 
-      // Verify via info command
       const result = await runCliSuccess(["accounts", "info"], env.getCliOptions());
 
       const response = result.json as {
@@ -175,10 +163,8 @@ describe("E2E: Accounts Commands", () => {
     });
 
     it("should verify account is gone after removal", async () => {
-      // Remove account 2
       await runCliSuccess(["accounts", "remove", "--id", "2"], env.getCliOptions());
 
-      // Verify via list
       const result = await runCliSuccess(["accounts", "list"], env.getCliOptions());
 
       const response = result.json as {
@@ -231,7 +217,6 @@ describe("E2E: Accounts Commands", () => {
     });
 
     it("should fail when no active account and no ID given", async () => {
-      // Create fresh environment with no active accounts
       env.cleanup();
       env = createTestEnvironment("accounts-no-active");
       env.initDatabase();

@@ -1,24 +1,3 @@
-/**
- * Runs the tg CLI (src/index.ts) with a fake Telegram client in place of
- * mtcute's, for api.e2e.test.ts. Pass it as `entry` to runCli.
- *
- * The fake client keeps the process alive even after destroy(), which
- * prints FAKE_CLIENT_DESTROYED to stderr: a connected mtcute client might
- * leave a handle open after it is closed, and that can't be checked
- * offline. So tg api ends only through an explicit exit, as raw(),
- * success() and error() do.
- *
- * help.getConfig returns FAKE_CONFIG. messages.readHistory and
- * channels.readHistory mark the chat read and print FAKE_CLIENT_CALL with
- * the method and max_id to stderr; messages.getPeerDialogs then returns a
- * dialog read up to that max_id, or to FAKE_TOP_MESSAGE for 0 (everything),
- * with the messages above it unread. FAKE_FLOOD_METHOD fails with a
- * FLOOD_WAIT of FAKE_FLOOD_SECONDS, a method of FAKE_INTERNAL_ERRORS with
- * its Telegram-side failure, and messages.sendMessage with
- * PEER_ID_INVALID. Any other method fails the way Telegram rejects an
- * unknown one.
- */
-
 /** This file, to pass as runCli's `entry` */
 export const FAKE_CLIENT_CLI = import.meta.path;
 
@@ -52,12 +31,10 @@ export const FAKE_CONFIG = {
 };
 
 if (import.meta.main) {
-  // mock.module works in a plain `bun run` script too, not only in bun test
   const { mock } = await import("bun:test");
   const { tl } = await import("@mtcute/bun");
   const telegram = await import("../../services/telegram");
 
-  // Never cleared, not even by destroy()
   setInterval(() => {}, 60_000);
   let readMaxId = 0;
   const client = {
@@ -114,9 +91,6 @@ if (import.meta.main) {
       }
       throw Object.assign(new Error("METHOD_INVALID"), { code: 400 });
     },
-    // Real destroy() closes the connection and saves the session
-    // asynchronously, so the marker comes only after an await: a caller that
-    // exits without awaiting destroy() never prints it
     async destroy() {
       await Bun.sleep(20);
       console.error(FAKE_CLIENT_DESTROYED);

@@ -1,9 +1,3 @@
-/**
- * Print the CHANGELOG.md section of a release, for its GitHub Release notes.
- *
- *   bun scripts/changelog-section.ts v1.2.3
- */
-
 const tag = Bun.argv[2];
 if (!tag) {
   console.error("Usage: bun scripts/changelog-section.ts <tag>");

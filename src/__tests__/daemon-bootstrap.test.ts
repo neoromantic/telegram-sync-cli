@@ -1,7 +1,3 @@
-/**
- * Tests for the daemon's dialog pass: what it writes to chats_cache and
- * chat_sync_state.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { TelegramClient } from "@mtcute/bun";
@@ -59,7 +55,6 @@ describe("bootstrapDialogs", () => {
     return fake;
   }
 
-  /** A private chat that has synced up to `cursor` */
   function seedSynced(userId: number, cursor: number, top: number | null) {
     chatSyncState.upsert({
       chat_id: userId,
@@ -113,7 +108,6 @@ describe("bootstrapDialogs", () => {
   });
 
   it("gives bots and deleted accounts the newest page only, keeping what is cached (#131)", async () => {
-    // A bot an older version synced in full, with a history job pending
     seedSynced(1001, 50, 50);
     testCacheDb.run("UPDATE chat_sync_state SET history_complete = 0 WHERE chat_id = 1001");
     const jobs = createSyncJobsService(testCacheDb);
@@ -131,7 +125,6 @@ describe("bootstrapDialogs", () => {
       is_outgoing: false,
       raw_json: "{}",
     });
-    // A bot turned on by hand keeps its full history
     seedSynced(1004, 20, 20);
     testCacheDb.run("UPDATE chat_sync_state SET history_complete = 0 WHERE chat_id = 1004");
     chatSyncState.setSyncMode(1004, "on");
@@ -176,12 +169,10 @@ describe("bootstrapDialogs", () => {
       ]),
     );
     expect(pending).toHaveLength(3);
-    // Messages are eternal: the bot keeps what is cached
     expect(createMessagesCache(testCacheDb).get(1001, 50)).not.toBeNull();
   });
 
   it("keeps the newest post of each chat with sync off, and only theirs (#125)", async () => {
-    // A synced DM, turned off; a channel turned on with tg chats sync
     seedSynced(1001, 10, 10);
     chatSyncState.setSyncMode(1001, "off");
     chatSyncState.upsert({
@@ -193,7 +184,6 @@ describe("bootstrapDialogs", () => {
     chatSyncState.setSyncMode(-1_000_000_002_003, "on");
 
     await runPass([
-      // A channel is off by the policy: no catch-up for it
       {
         kind: "channel",
         id: 2002,
@@ -208,14 +198,11 @@ describe("bootstrapDialogs", () => {
     const messages = createMessagesCache(testCacheDb);
     expect(messages.get(-1_000_000_002_002, 15)).toMatchObject({
       text: "Example post",
-      // A channel post is sent by the channel
       from_id: -1_000_000_002_002,
     });
     expect(messages.get(1001, 12)).not.toBeNull();
-    // Synced chats get their messages from the sync jobs
     expect(messages.get(-1_000_000_002_003, 7)).toBeNull();
     expect(messages.get(1004, 3)).toBeNull();
-    // The cursor still means every message up to it is cached
     expect(chatSyncState.get(-1_000_000_002_002)?.forward_cursor).toBeNull();
   });
 
@@ -269,11 +256,9 @@ describe("bootstrapDialogs", () => {
     const participation = createMessagesCache(testCacheDb).participation;
     expect(participation.status(-4301)).toBe("active");
     expect(participation.status(-1_000_000_004_302)).toBe("unknown");
-    // An archived group without participation keeps no newest message
     expect(createMessagesCache(testCacheDb).get(-1_000_000_004_302, 4)).toBeNull();
     expect(chatSyncState.get(-1_000_000_004_302)).toBeNull();
 
-    // A second pass queues none twice
     const { refreshDialogsAfterReconnect } = await import("../daemon/daemon-bootstrap");
     await refreshDialogsAfterReconnect(ctx, 1, fakeDialogClient(dialogs).client);
     expect(checks()).toHaveLength(2);
@@ -287,7 +272,6 @@ describe("bootstrapDialogs", () => {
     expect(
       infoLines.some(([line]) => /Bootstrapped 1 dialogs \(0 archived\)/.test(String(line))),
     ).toBe(true);
-    // An account without communities costs one request and no warning
     expect(fake.communityCalls).toHaveLength(1);
     expect(ctx.logger.warn).not.toHaveBeenCalled();
     expect(infoLines.some(([line]) => /0 communities/.test(String(line)))).toBe(true);
@@ -302,12 +286,10 @@ describe("bootstrapDialogs", () => {
       type: "community",
       access_hash: "777",
     });
-    // No messages of its own: nothing to sync
     expect(chatSyncState.get(-1005555555555)).toBeNull();
     expect(fake.communityCalls).toHaveLength(1);
     expect(fake.communityCalls[0]).toEqual({
       abortSignal: ctx.runtime.shutdown.signal,
-      // A FLOOD_WAIT fails the request instead of holding up the sync start
       floodSleepThreshold: 0,
     });
     expect(
@@ -320,7 +302,6 @@ describe("bootstrapDialogs", () => {
 
   it("a failed communities request is a warning and the pass stays complete", async () => {
     const { markUnvisitedChats, syncAccountDialogs } = await import("../daemon/daemon-bootstrap");
-    // Left: no longer in the dialog list
     seedSynced(1001, 1000, 1200);
     const { client } = fakeDialogClient([{ kind: "user", id: 1002, topMessage: 5 }], {
       communitiesError: new Error("RPC_CALL_FAIL"),
@@ -332,7 +313,6 @@ describe("bootstrapDialogs", () => {
 
     expect(result).toMatchObject({ complete: true, stopped: false });
     expect(createChatsCache(testCacheDb).getById("1002")).not.toBeNull();
-    // Caught up as after any complete pass
     expect(chatSyncState.get(1001)?.top_message_id).toBe(1000);
     expect(ctx.logger.warn).toHaveBeenCalledTimes(1);
     expect(ctx.logger.warn).toHaveBeenCalledWith(
@@ -349,7 +329,6 @@ describe("bootstrapDialogs", () => {
     });
     addAccountRuntime(ctx, 1, testCacheDb);
 
-    // Stopped, so the caller marks nothing and refreshes no queues
     expect(await syncAccountDialogs(ctx, 1, fake.client)).toMatchObject({
       complete: false,
       stopped: true,
@@ -357,7 +336,6 @@ describe("bootstrapDialogs", () => {
 
     expect(ctx.logger.warn).not.toHaveBeenCalled();
     expect(ctx.logger.info).not.toHaveBeenCalledWith(expect.stringContaining("Bootstrapped"));
-    // The stop signal ended the wait, not the fake's guard timer
     expect(ctx.logger.debug).not.toHaveBeenCalledWith(
       expect.stringContaining("Communities request failed"),
     );
@@ -367,7 +345,6 @@ describe("bootstrapDialogs", () => {
   });
 
   it("fetchJoinedCommunities passes the stop signal and keeps only usable communities", async () => {
-    // A real client that never connects: only its RPC call is replaced
     const client = new TelegramClient({
       apiId: 1,
       apiHash: "test-api-hash",
@@ -426,7 +403,6 @@ describe("bootstrapDialogs", () => {
     await runPass([
       { kind: "user", id: 1001, topMessage: 450 },
       { kind: "user", id: 1002, topMessage: 320 },
-      // No top message in the dialog: the top stays unknown
       { kind: "user", id: 1003 },
     ]);
 
@@ -486,7 +462,6 @@ describe("bootstrapDialogs", () => {
       title: "Team Chat",
       access_hash: "777",
     });
-    // A bare ID names no chat any more
     expect(chatsCache.getById("4001")).toBeNull();
     expect(chatsCache.getById("1234567890")).toBeNull();
     assertPeerIdInvariants(testCacheDb);
@@ -504,7 +479,6 @@ describe("bootstrapDialogs", () => {
   });
 
   it("marks unvisited chats caught up after a complete pass", async () => {
-    // Left or deleted: no longer in the dialog list
     seedSynced(1001, 1000, null);
     seedSynced(1002, 1000, 1200);
     seedSynced(1003, 50, 50);
@@ -517,8 +491,6 @@ describe("bootstrapDialogs", () => {
   });
 
   it("checks an opted-in chat that no dialog lists on every start", async () => {
-    // A public channel the user never joined, turned on with tg chats sync:
-    // no dialog list shows it and no live update reaches it
     const channelId = -1_000_000_003_003;
     chatSyncState.upsert({
       chat_id: channelId,
@@ -531,7 +503,6 @@ describe("bootstrapDialogs", () => {
     });
     chatSyncState.setSyncMode(channelId, "on");
     chatSyncState.raiseTopMessageId(channelId, 900);
-    // Left: no longer in the dialog list
     seedSynced(1001, 1000, 1200);
 
     await runPass([{ kind: "user", id: 1003, topMessage: 50 }]);
@@ -592,12 +563,10 @@ describe("bootstrapDialogs", () => {
 
   it("marks an account's left chats caught up even when another account's pass fails", async () => {
     const { bootstrapDialogs } = await import("../daemon/daemon-bootstrap");
-    // Account 1 left chat 1001; its pass completes
     seedSynced(1001, 1000, 1200);
     seedSynced(1003, 50, 50);
     connect(ctx, 1, fakeDialogClient([{ kind: "user", id: 1003, topMessage: 50 }]).client);
     addAccountRuntime(ctx, 1, testCacheDb);
-    // Account 2's pass fails before it lists chat 2001
     const otherDb = createAccountCacheDb();
     const otherState = createChatSyncStateService(otherDb);
     otherState.upsert({
@@ -622,7 +591,6 @@ describe("bootstrapDialogs", () => {
 
     expect(chatSyncState.get(1001)?.top_message_id).toBe(1000);
     expect(chatSyncState.get(1003)?.top_message_id).toBe(50);
-    // Unknown after a failed pass: it gets a checking page
     expect(otherState.get(2001)?.top_message_id).toBeNull();
     otherDb.close();
   });
@@ -652,14 +620,12 @@ describe("bootstrapDialogs", () => {
 
     expect(otherState.get(2001)?.top_message_id).toBe(1200);
     expect(otherState.get(2001)?.forward_cursor).toBe(1000);
-    // Account 1's complete pass didn't list 1001: left, caught up
     expect(chatSyncState.get(1001)?.top_message_id).toBe(1000);
     otherDb.close();
   });
 
   it("a stop during the startup pass ends it at the next dialog and skips the other accounts", async () => {
     const { bootstrapDialogs } = await import("../daemon/daemon-bootstrap");
-    // A synced chat the pass doesn't reach before the stop
     seedSynced(1005, 1000, 1200);
     const first = fakeDialogClient(
       [
@@ -692,7 +658,6 @@ describe("bootstrapDialogs", () => {
       "[Account 1] Dialog pass stopped after 1 dialogs: the daemon is stopping",
     );
     expect(second.calls).toEqual([]);
-    // Neither caught up nor unknown: the stop tells nothing about it
     expect(chatSyncState.get(1005)).toMatchObject({
       forward_cursor: 1000,
       top_message_id: 1200,
@@ -702,7 +667,6 @@ describe("bootstrapDialogs", () => {
 
   it("a stop during a FLOOD_WAIT in the startup pass ends the wait at once", async () => {
     const { bootstrapDialogs } = await import("../daemon/daemon-bootstrap");
-    // A synced chat the pass doesn't reach before the stop
     seedSynced(1005, 1000, 1200);
     const first = fakeDialogClient(
       [
@@ -730,7 +694,6 @@ describe("bootstrapDialogs", () => {
         .all()
         .map((row) => (row as { chat_id: string }).chat_id),
     ).toEqual(["1001"]);
-    // Neither caught up nor unknown: the stop tells nothing about it
     expect(chatSyncState.get(1005)).toMatchObject({
       forward_cursor: 1000,
       top_message_id: 1200,
@@ -751,7 +714,6 @@ describe("bootstrapDialogs", () => {
   });
 
   it("passes the stop signal to every page request of mtcute's iterDialogs", async () => {
-    // A real client that never connects: only its RPC call is replaced
     const client = new TelegramClient({
       apiId: 1,
       apiHash: "test-api-hash",
@@ -791,8 +753,6 @@ describe("bootstrapDialogs", () => {
 
   it("logs a dialog pass, the communities check and a health check's getMe to api_activity", async () => {
     const { syncAccountDialogs } = await import("../daemon/daemon-bootstrap");
-    // A real client on the daemon's middlewares; only the network below
-    // them is replaced
     const client = new TelegramClient({
       apiId: 1,
       apiHash: "test-api-hash",
@@ -859,7 +819,6 @@ describe("bootstrapDialogs", () => {
 
   it("a stop right after a complete pass still marks unvisited chats", async () => {
     const { bootstrapDialogs } = await import("../daemon/daemon-bootstrap");
-    // Left: no longer in the dialog list
     seedSynced(1001, 1000, 1200);
     const dialogs: FakeDialogInput[] = [
       { kind: "user", id: 1002, topMessage: 10 },
@@ -881,7 +840,6 @@ describe("bootstrapDialogs", () => {
 
     expect(chatSyncState.get(1001)?.top_message_id).toBe(1000);
     expect(createChatsCache(testCacheDb).getById("1003")).not.toBeNull();
-    // The stop skips the communities request
     expect(first.communityCalls).toEqual([]);
     expect(second.calls).toEqual([]);
     otherDb.close();
@@ -890,7 +848,6 @@ describe("bootstrapDialogs", () => {
   it("a dialog page that fails during a stop is logged at debug and marks nothing", async () => {
     const { bootstrapDialogs } = await import("../daemon/daemon-bootstrap");
     seedSynced(1005, 1000, 1200);
-    // The page after the stop signal fails
     const first = fakeDialogClient(
       [
         { kind: "user", id: 1001, topMessage: 10 },
@@ -918,7 +875,6 @@ describe("bootstrapDialogs", () => {
         "[Account 1] Dialog page failed during the stop: Error: FLOOD_WAIT_600",
       ),
     );
-    // Not unknown: a pass the stop ended tells nothing about it
     expect(chatSyncState.get(1005)?.top_message_id).toBe(1200);
     expect(second.calls).toEqual([]);
     otherDb.close();
@@ -926,8 +882,6 @@ describe("bootstrapDialogs", () => {
 
   it("a cache write that fails during a stop is still a warning", async () => {
     const { bootstrapDialogs } = await import("../daemon/daemon-bootstrap");
-    // The stop closes nothing under the startup pass, so a failed save
-    // after it is a cache fault
     testCacheDb.run(
       `CREATE TRIGGER fail_chat_save BEFORE INSERT ON chats_cache
        BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END`,

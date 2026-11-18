@@ -1,7 +1,3 @@
-/**
- * tg status reads each account's cache on its own: a cache that opens but
- * fails a query reports an error for that account only. Made-up data only.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -51,7 +47,6 @@ beforeEach(() => {
     ]);
     caches.set(accountId, cache);
   }
-  // Account 1's cache opens, but a query fails, as with a corrupt page
   caches.get(1)!.run("DROP TABLE messages_cache");
 });
 

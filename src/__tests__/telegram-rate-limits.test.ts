@@ -1,7 +1,3 @@
-/**
- * Tests for the rate-limit wrapper around client.call
- * (src/utils/telegram-rate-limits.ts)
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
@@ -15,7 +11,6 @@ import {
 import { createAccountCacheDb } from "./helpers/cache-db";
 import { createFakeAccountsDb, mockDbModule, testAccount } from "./helpers/db-mock";
 
-// Each account has its own cache, where its rate limits live
 const accountCaches = new Map<number, Database>();
 mock.module("../db", () =>
   mockDbModule({
@@ -81,7 +76,6 @@ describe("wrapClientCallWithRateLimits", () => {
     expect((first as Error).cause).toBe(flood);
     expect(rateLimits.isBlocked(METHOD)).toBe(true);
 
-    // The next call doesn't reach Telegram
     const second = await failureOf(send);
     expect(second).toBeInstanceOf(RateLimitError);
     expect(call).toHaveBeenCalledTimes(1);
@@ -140,7 +134,6 @@ describe("rate limits per account", () => {
 
     expect(getRateLimitsService(1).isBlocked(METHOD)).toBe(true);
     expect(getRateLimitsService(2).isBlocked(METHOD)).toBe(false);
-    // The other account still calls Telegram
     expect(await second.call(request)).toEqual({ _: "ok" });
   });
 

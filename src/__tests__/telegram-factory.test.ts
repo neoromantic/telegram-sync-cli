@@ -1,6 +1,3 @@
-/**
- * Tests for Telegram client factory wiring
- */
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import * as mtcute from "@mtcute/bun";
 

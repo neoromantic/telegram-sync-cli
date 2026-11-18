@@ -48,34 +48,22 @@ export function accountLabel(account: {
   username?: string | null;
 }): string {
   if (account.username) return `#${account.accountId} (@${account.username})`;
-  // An account added by user ID has a placeholder, not a phone
   if (!account.phone || account.phone.startsWith("user:")) {
     return `#${account.accountId}`;
   }
   return `#${account.accountId} (${maskPhone(account.phone)})`;
 }
 
-// mtcute's log levels (LogManager.ERROR, WARN, DEBUG)
 const MTCUTE_ERROR = 1;
 const MTCUTE_WARN = 2;
 
-/** Same error again within this window: debug level, not another warning */
 const REPEATED_ERROR_WINDOW_MS = 5 * 60 * 1000;
 
-/**
- * mtcute fills in `%j` (JSON) and `%e` (an error's stack) before the daemon
- * sees the line. A payload is a Telegram object that may hold users (phone,
- * name) or message text: only its type is kept, `<messages.dialogs>`.
- */
 function stripPayloadsAndStacks(text: string): string {
-  return (
-    text
-      // A stack's frames: "\n    at fn (file:1:2)"
-      .replace(/\n\s*at\s[^\n]*/g, "")
-      // From the first JSON object or array to the end of the line
-      .replace(/(\[\s*)?\{"_":"([\w.]+)"[\s\S]*$/, (_m, _arr, type) => `<${type}>`)
-      .replace(/\[?\s*[{[]"[\s\S]*$/, "<payload>")
-  );
+  return text
+    .replace(/\n\s*at\s[^\n]*/g, "")
+    .replace(/(\[\s*)?\{"_":"([\w.]+)"[\s\S]*$/, (_m, _arr, type) => `<${type}>`)
+    .replace(/\[?\s*[{[]"[\s\S]*$/, "<payload>");
 }
 
 /**
@@ -84,14 +72,13 @@ function stripPayloadsAndStacks(text: string): string {
  */
 export function formatClientLog(fmt: string, args: unknown[]): string {
   const rest = [...args];
-  const text = stripPayloadsAndStacks(
-    fmt
-      // mtcute adds the account's user ID; the daemon's tag names the account
-      .replace(/^\[USER [^\]]*\] /, ""),
-  ).replace(/%[sdifo]/gi, () => {
-    if (rest.length === 0) return "";
-    return describeArg(rest.shift());
-  });
+  const text = stripPayloadsAndStacks(fmt.replace(/^\[USER [^\]]*\] /, "")).replace(
+    /%[sdifo]/gi,
+    () => {
+      if (rest.length === 0) return "";
+      return describeArg(rest.shift());
+    },
+  );
   const extra = rest.map(describeArg).filter((part) => part.length > 0);
   return [text.trim(), ...extra].join(" ").replace(/\s+/g, " ").trim();
 }
@@ -123,14 +110,10 @@ export function routeClientLogs(
   mgr.handler = (_color, level, logTag, fmt, args) => {
     const line = `${tag} [mtcute ${logTag}] ${formatClientLog(fmt, args)}`;
     if (level <= MTCUTE_ERROR) logger.error(line);
-    // The update manager's gap chatter (pts_before does not match …) is
-    // normal on a busy account: hundreds of lines a day
     else if (level === MTCUTE_WARN && logTag !== "updates") logger.warn(line);
     else logger.debug(line);
   };
 
-  // A client with an error handler never prints "unhandled error". A
-  // dropped network repeats the same error on every retry: one warning.
   let lastError: { message: string; at: number } | undefined;
   client.onError.add((err) => {
     const message = getErrorMessage(err).replace(/\s+/g, " ").trim();

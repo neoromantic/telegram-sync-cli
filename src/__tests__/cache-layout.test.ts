@@ -1,10 +1,3 @@
-/**
- * The move of the shared cache of 0.3 and older to the per-account layout
- * (src/db/cache-layout.ts), on temp data dirs. Every shared cache is
- * written from a child process: a file the test process wrote stays open
- * after close() (see seed-in-child.ts), and tg moves a file only when no
- * process has it open.
- */
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import {
   chmodSync,
@@ -34,10 +27,6 @@ import { createTestDatabase } from "../db/index";
 import { seedInChild } from "./helpers/seed-in-child";
 import { holdOpen, rowCounts } from "./helpers/shared-cache";
 
-/**
- * Every file under the data dir, relative to it, except data.db's and the
- * sidecars of per-account caches that a seeding process left
- */
 function filesIn(dir: string): string[] {
   return (readdirSync(dir, { recursive: true }) as string[])
     .filter((name) => !name.startsWith("data.db"))
@@ -46,10 +35,8 @@ function filesIn(dir: string): string[] {
     .sort();
 }
 
-/** File modes don't stop root, so the permission cases skip under it */
 const isRoot = process.getuid?.() === 0;
 
-/** Run with a file or directory's mode changed, then put it back */
 function withMode<T>(path: string, mode: number, run: () => T): T {
   const before = statSync(path).mode & 0o777;
   chmodSync(path, mode);
@@ -60,11 +47,6 @@ function withMode<T>(path: string, mode: number, run: () => T): T {
   }
 }
 
-/**
- * A shared cache that a fold already switched to rollback-journal mode,
- * without the -shm macOS leaves: opening it needs no write to the
- * directory, so only the rename, mkdir or unlink can fail
- */
 function seedFolded(path: string, options: { empty?: boolean } = {}) {
   seedInChild(path, "foldedCache", options);
   rmSync(`${path}-shm`, { force: true });
@@ -99,7 +81,6 @@ describe("migrateSharedCache", () => {
     return { dataDir, db: data.db, accounts: data.accountsDb, notice };
   }
 
-  /** A per-account cache that a newer run already created */
   function createAccountCache(accountId: number) {
     mkdirSync(join(dataDir, "accounts", String(accountId)), {
       recursive: true,
@@ -154,7 +135,6 @@ describe("migrateSharedCache", () => {
           expect(rowCounts(parked)).toEqual(before!);
           expect(notice).toHaveBeenCalledTimes(1);
           expect(notice.mock.calls[0]![0]).toContain(parked);
-          // Never merged into an account's cache
           if (accountCache) {
             expect(rowCounts(accountCachePath(dataDir, 1))).toEqual({
               messages_cache: 0,
@@ -248,7 +228,6 @@ describe("migrateSharedCache", () => {
       seedInChild(shared, "legacySharedCache");
       const before = rowCounts(shared);
 
-      // SQLite can't lock a read-only file: SQLITE_IOERR_LOCK, not corrupt
       const result = withMode(shared, 0o444, () => migrateSharedCache(deps()));
 
       expect(result).toEqual({
@@ -261,8 +240,6 @@ describe("migrateSharedCache", () => {
       expect(listSharedCaches(dataDir)).toEqual([]);
       expect(notice).not.toHaveBeenCalled();
       expect(data.db.inTransaction).toBe(false);
-      // SQLite keeps this process's read-only descriptor for the file, so
-      // the adopt that follows is the next process's
       expect(rowCounts(shared)).toEqual(before);
     });
 
@@ -286,8 +263,6 @@ describe("migrateSharedCache", () => {
       seedInChild(shared, "legacySharedCache");
       const before = rowCounts(shared);
 
-      // A data dir it can't write: the fold can't create or delete the
-      // journal files, as with a full disk
       const result = withMode(dataDir, 0o500, () => migrateSharedCache(deps()));
 
       expect(result).toEqual({
@@ -363,7 +338,6 @@ describe("migrateSharedCache", () => {
     const before = rowCounts(shared);
     const target = accountCachePath(dataDir, 1);
     mkdirSync(join(dataDir, "accounts", "1"), { recursive: true });
-    // SQLite would replay a -wal it finds next to the moved file
     writeFileSync(`${target}-wal`, "rows of another database ".repeat(40));
     writeFileSync(`${target}-shm`, "stale index");
 
@@ -533,7 +507,6 @@ describe("createCacheLayoutGuard", () => {
     seedInChild(legacyCachePath(dataDir), "legacySharedCache");
 
     expect(layout.ensure("strict").state).toBe("adopted");
-    // A file an older tg writes later waits for the next process
     seedInChild(legacyCachePath(dataDir), "emptyCache");
     expect(layout.ensure("strict").state).toBe("adopted");
     expect(existsSync(legacyCachePath(dataDir))).toBe(true);
@@ -558,7 +531,6 @@ describe("createCacheLayoutGuard", () => {
       await holder.release();
     }
 
-    // Blocked is not remembered: the next call moves it
     expect(layout.ensure("strict").state).toBe("adopted");
   }, 20_000);
 

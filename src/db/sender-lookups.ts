@@ -1,15 +1,3 @@
-/**
- * Senders missing from the cache (#143). A cached message whose sender has
- * no users_cache row shows only the sender's ID, and `sender:name` misses
- * it: history synced before 0.9.0 (#126) left such messages, and a live
- * message whose sender came as a "min" user still does. Once a day the
- * daemon lists every such sender here with one recent message of theirs; a
- * fetch_senders job asks Telegram for up to 100 of those messages of one
- * chat by ID, and the reply carries their senders with access hashes. The
- * new users_cache rows re-index the senders' messages (search-reindex.ts).
- * A sender Telegram doesn't return (a message deleted since, a chat left)
- * is asked again after 30 days, with their newest message then.
- */
 import type { Database } from "bun:sqlite";
 
 import { CHANNEL_PEER_ID_OFFSET } from "../utils/telegram-peer-ids";
@@ -38,17 +26,10 @@ export function createSenderLookupsSchema(db: Database): void {
   `);
 }
 
-/** Whether users_cache has the user `id` names */
 function cachedUserSql(id: string): string {
   return `EXISTS (SELECT 1 FROM users_cache WHERE user_id = CAST(${id} AS TEXT))`;
 }
 
-/**
- * Every user that sent a cached message, one index seek each: a walk from
- * one sender to the next on idx_messages_cache_from instead of a scan of
- * every message (about 6 ms for 40,000 senders of 1.16M messages, where a
- * DISTINCT over the messages takes 200 ms)
- */
 const MISSING_SENDERS_CTE = `
   senders(id) AS (
     SELECT MIN(from_id) FROM messages_cache WHERE from_id > 0
@@ -100,7 +81,6 @@ export function createSenderLookups(db: Database): SenderLookups {
   )`;
   const stmts = {
     dropCached: db.prepare(`DELETE FROM sender_lookups WHERE ${cachedUserSql("sender_id")}`),
-    // A SELECT before ON CONFLICT needs its WHERE (SQLite's upsert parsing)
     list: db.prepare(`
       WITH RECURSIVE ${MISSING_SENDERS_CTE}
       INSERT INTO sender_lookups (sender_id, chat_id, message_id)
@@ -120,7 +100,6 @@ export function createSenderLookups(db: Database): SenderLookups {
       WHERE sender_lookups.asked_at <= $retry_before
     `),
     countWaiting: db.query("SELECT COUNT(*) AS count FROM sender_lookups WHERE asked_at IS NULL"),
-    // A sender cached since the scan, by history or a live message, makes no job
     chatsDue: db.query(`
       SELECT DISTINCT chat_id FROM sender_lookups
       WHERE asked_at IS NULL AND NOT ${cachedUserSql("sender_id")}

@@ -1,7 +1,3 @@
-/**
- * Catch-up after mtcute reconnects on its own or the computer wakes (#124),
- * with fake clients and injected clocks
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, type mock } from "bun:test";
 import {
@@ -43,7 +39,6 @@ describe("noteConnectionState", () => {
     const watch = createConnectionWatch();
     noteConnectionState(watch, "connecting", T0);
     noteConnectionState(watch, "connected", T0 + 3_000);
-    // mtcute fetching what it missed is online too
     noteConnectionState(watch, "updating", T0 + 3_500);
     noteConnectionState(watch, "connected", T0 + 4_000);
 
@@ -58,7 +53,6 @@ describe("noteConnectionState", () => {
     noteConnectionState(watch, "connected", T0 + 90_000);
     expect(watch.pending?.dueAt).toBe(T0 + CATCH_UP_MIN_INTERVAL_MS);
 
-    // Another drop meanwhile: the longer outage, and the wait settles again
     noteConnectionState(watch, "offline", T0 + 100_000);
     noteConnectionState(watch, "connected", T0 + 102_000);
     expect(watch.pending).toMatchObject({
@@ -77,7 +71,6 @@ describe("catch-up after a reconnect or a wake", () => {
     cacheDb = createAccountCacheDb();
     jobsService = createSyncJobsService(cacheDb);
     chatSyncState = createChatSyncStateService(cacheDb);
-    // Two synced chats, both caught up to message 1000
     for (const userId of [1001, 1002]) {
       chatSyncState.upsert({
         chat_id: userId,
@@ -96,7 +89,6 @@ describe("catch-up after a reconnect or a wake", () => {
     cacheDb.close();
   });
 
-  /** A connected account whose client lists 1002 with a newer message */
   function connectedAccount() {
     const ctx = testDaemonContext();
     const rt = addAccountRuntime(ctx, 1, cacheDb, {
@@ -135,7 +127,6 @@ describe("catch-up after a reconnect or a wake", () => {
     noteConnectionState(watch, "connecting", T0);
     noteConnectionState(watch, "connected", T0 + 9 * HOUR);
 
-    // Not before the connection settled
     expect(runDueCatchUps(ctx, T0 + 9 * HOUR + 1_000)).toEqual([]);
     const started = runDueCatchUps(ctx, T0 + 9 * HOUR + CATCH_UP_SETTLE_MS);
     expect(started).toHaveLength(1);
@@ -154,7 +145,6 @@ describe("catch-up after a reconnect or a wake", () => {
       chats: 1,
     });
 
-    // Done: nothing runs again until the next reconnect
     expect(runDueCatchUps(ctx, T0 + 10 * HOUR)).toEqual([]);
   });
 

@@ -1,7 +1,3 @@
-/**
- * Database module tests
- */
-
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { type AccountsDbInterface, createTestDatabase } from "../db";
@@ -181,7 +177,6 @@ describe("Database Module", () => {
 
     it("should return first active if multiple", () => {
       const first = accountsDb.create({ phone: "+1111111111", is_active: true });
-      // Manually insert another active for edge case
       db.run("INSERT INTO accounts (phone, is_active) VALUES ('+2222222222', 1)");
 
       const found = accountsDb.getActive();
@@ -270,10 +265,8 @@ describe("Database Module", () => {
       const account = accountsDb.create({ phone: "+1234567890" });
       const _originalUpdatedAt = account.updated_at;
 
-      // Small delay to ensure timestamp difference
       const updated = accountsDb.update(account.id, { name: "New" });
 
-      // Note: SQLite CURRENT_TIMESTAMP has second precision, so we just check it's defined
       expect(updated?.updated_at).toBeDefined();
     });
   });
@@ -286,11 +279,10 @@ describe("Database Module", () => {
       const updated = accountsDb.getById(account.id);
 
       expect(updated?.session_data).toBe("new-session-data");
-      expect(updated?.name).toBe("Test"); // Unchanged
+      expect(updated?.name).toBe("Test");
     });
 
     it("should not throw for non-existent ID", () => {
-      // Just verify it doesn't throw
       expect(() => accountsDb.updateSession(999, "data")).not.toThrow();
     });
   });

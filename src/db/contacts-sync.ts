@@ -1,12 +1,3 @@
-/**
- * The account's contact list in its cache: users_cache.is_contact marks the
- * contacts, and the `contacts` row of sync_state says when the list was
- * last checked against Telegram (#8).
- *
- * A full list from contacts.getContacts is the truth: a user it lists is a
- * contact, a cached contact it leaves out no longer is. Rows are never
- * deleted; a former contact keeps its user row with is_contact = 0.
- */
 import type { Database } from "bun:sqlite";
 import type { tl } from "@mtcute/bun";
 import { isRawUser } from "../commands/user/helpers";

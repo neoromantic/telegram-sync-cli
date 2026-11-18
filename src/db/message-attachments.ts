@@ -1,7 +1,3 @@
-/**
- * message_attachments: the file of each cached message that has one, kept
- * next to its messages_cache row by messages-cache.ts
- */
 import type { Database } from "bun:sqlite";
 
 import type { AttachmentInfo } from "../utils/attachment";
@@ -31,7 +27,6 @@ export interface MessageAttachmentsStore {
   heldOutsideChat(uniqueFileId: string, chatId: number): boolean;
 }
 
-/** The columns a message written again overwrites */
 const ATTACHMENT_COLUMNS = [
   "kind",
   "source",
@@ -47,7 +42,6 @@ const ATTACHMENT_COLUMNS = [
 
 export function createMessageAttachmentsStore(db: Database): MessageAttachmentsStore {
   const stmts = {
-    // A row written again unchanged writes nothing
     upsert: db.prepare(`
       INSERT INTO message_attachments (
         chat_id, message_id, ${ATTACHMENT_COLUMNS.join(", ")}

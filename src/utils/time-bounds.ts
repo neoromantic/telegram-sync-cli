@@ -5,7 +5,6 @@ const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME =
   /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
 
-/** A date's local midnight, or null for a day the calendar lacks (2026-02-30) */
 function localDate(value: string): Date | null {
   const [year, month, day] = value.split("-").map(Number);
   const date = new Date(year!, month! - 1, day!);
@@ -37,8 +36,6 @@ export function parseTimeBound(
     if (options.end) date.setDate(date.getDate() + 1);
     ms = date.getTime();
   } else if (DATE_TIME.test(input)) {
-    // Date.parse moves 2026-02-30T09:30 to March and reads T24:00 as the
-    // next day, so the calendar and the clock are checked first
     const [, date, hour, minute, second] = input.match(DATE_TIME)!;
     if (!localDate(date!)) return null;
     if (Number(hour) > 23 || Number(minute) > 59 || Number(second ?? 0) > 59) {

@@ -1,7 +1,3 @@
-/**
- * Users cache service
- * Provides typed access to the users_cache table
- */
 import type { Database } from "bun:sqlite";
 
 import { UserCacheRow } from "./schema";
@@ -43,9 +39,6 @@ export interface UserCacheInput {
   raw_json: string;
 }
 
-/**
- * Compute display name from first_name and last_name
- */
 function computeDisplayName(
   firstName: string | null | undefined,
   lastName: string | null | undefined,
@@ -77,7 +70,6 @@ export class UsersCache {
    * Get user by username (without @)
    */
   getByUsername(username: string): CachedUser | null {
-    // Normalize: remove @ if present
     const normalized = username.startsWith("@") ? username.slice(1) : username;
     return (
       this.statements.getByUsername.get({
@@ -90,7 +82,6 @@ export class UsersCache {
    * Get user by phone number
    */
   getByPhone(phone: string): CachedUser | null {
-    // Normalize: remove + and spaces
     const normalized = phone.replace(/[\s+\-()]/g, "");
     return this.statements.getByPhone.get({ $phone: normalized }) ?? null;
   }
@@ -204,9 +195,6 @@ export class UsersCache {
   }
 }
 
-/**
- * Create prepared statements for users cache
- */
 function createStatements(db: Database) {
   return {
     getById: db.query("SELECT * FROM users_cache WHERE user_id = $user_id").as(UserCacheRow),

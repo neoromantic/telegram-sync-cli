@@ -1,9 +1,3 @@
-/**
- * Rate limiting service for Telegram API calls
- *
- * Implements window-based rate tracking and flood wait handling
- * as described in docs/rate-limiting.md
- */
 import type { Database, Statement } from "bun:sqlite";
 import { RateLimitRow } from "./schema";
 
@@ -60,9 +54,7 @@ export class RateLimitsService {
 
   constructor(db: Database, options: RateLimitsOptions = {}) {
     this.now = options.now ?? (() => Date.now());
-    // Prepare all statements for better performance
 
-    // Record an API call in the current window
     this.recordCallStmt = db.query(`
       INSERT INTO rate_limits (method, window_start, call_count, last_call_at)
       VALUES ($method, $window_start, 1, $now)
@@ -71,7 +63,6 @@ export class RateLimitsService {
         last_call_at = $now
     `);
 
-    // Set flood wait for a method
     this.setFloodWaitStmt = db.query(`
       INSERT INTO rate_limits (method, window_start, call_count, last_call_at, flood_wait_until)
       VALUES ($method, $window_start, 0, $now, $flood_wait_until)
@@ -79,7 +70,6 @@ export class RateLimitsService {
         flood_wait_until = $flood_wait_until
     `);
 
-    // Get flood wait info for a method
     this.getFloodWaitStmt = db
       .query(
         `
@@ -92,14 +82,11 @@ export class RateLimitsService {
       )
       .as(RateLimitRow);
 
-    // Log API activity
     this.logActivityStmt = db.query(`
       INSERT INTO api_activity (timestamp, method, success, error_code, response_ms, context)
       VALUES ($timestamp, $method, $success, $error_code, $response_ms, $context)
     `);
 
-    // Calls by method since a time, for status. The rate windows are
-    // calendar minutes; api_activity has each call's own time.
     this.getRecentCallsStmt = db
       .query(
         `
@@ -116,7 +103,6 @@ export class RateLimitsService {
         },
       );
 
-    // Get active flood waits
     this.getActiveFloodWaitsStmt = db
       .query(
         `
@@ -134,9 +120,6 @@ export class RateLimitsService {
     return Math.floor(this.now() / 1000);
   }
 
-  /**
-   * Get the current window start timestamp
-   */
   private getCurrentWindowStart(): number {
     const now = this.nowSeconds();
     return Math.floor(now / RATE_WINDOW_SECONDS) * RATE_WINDOW_SECONDS;
@@ -187,9 +170,6 @@ export class RateLimitsService {
       return null;
     }
 
-    // Calculate original wait seconds from window_start
-    // The flood_wait_until was set as: window_time + seconds
-    // We stored it with the window, so we can approximate
     const waitSeconds = row.flood_wait_until - row.window_start;
 
     return {
@@ -262,7 +242,6 @@ export class RateLimitsService {
       totalCalls += row.total;
     }
 
-    // Get active flood waits
     const floodWaitRows = this.getActiveFloodWaitsStmt.all({
       $now: now,
     }) as RateLimitRow[];

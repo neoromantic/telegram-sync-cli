@@ -1,10 +1,3 @@
-/**
- * Chat history for `tg messages list` and `tg messages get`: cache-first
- * reads, and Telegram pages written back to the cache so they are read back
- * exactly like cached ones. The cache answers only inside the ranges that
- * cached pages recorded (src/db/history-ranges.ts), so a read never runs
- * across a gap in the cache.
- */
 import type { Database } from "bun:sqlite";
 import type { TelegramClient, tl } from "@mtcute/bun";
 
@@ -120,7 +113,6 @@ export function cacheHistoryResponse(
   const messagesCache = createMessagesCache(cacheDb);
   const inputs = createMessageInputs(messages, chatId);
 
-  // It reads before it writes, so it takes the write lock first
   cacheDb
     .transaction(() => {
       cachePageUsers(usersCache, users);
@@ -212,9 +204,6 @@ export async function fetchHistoryPage(
     .sort((a, b) => fromAnchor * (rawMessageId(a) - rawMessageId(b)))
     .slice(0, window.limit);
 
-  // Paging back, the page is the newest messages below `before` and a short
-  // one reaches the first message. Paging forward, it is the oldest messages
-  // above `after`, and only a short one leaves nothing up to `before`.
   const short = messages.length < window.limit;
   const bounds: PageBounds =
     window.after === undefined
@@ -249,20 +238,10 @@ export interface ListHistoryResult {
 }
 
 interface CachedWindow {
-  /** Newest first, cut where the recorded range ends */
   rows: MessageSearchRow[];
-  /** The cache holds the whole window, so Telegram has nothing to add */
   whole: boolean;
 }
 
-/**
- * A window as the cache holds it. The page starts at its anchor: just below
- * `before`, or at the newest cached message, paging back; just above
- * `after` paging forward. It is whole when the recorded range that holds
- * the anchor holds `limit` messages of it, or fewer because the range
- * reaches the chat's first message (paging back) or `before` (paging
- * forward). A short page past the newest cached message is not whole.
- */
 function readCachedWindow(
   cacheDb: Database,
   chatId: number,
@@ -273,7 +252,6 @@ function readCachedWindow(
   const ranges = createHistoryRanges(cacheDb);
 
   if (after === undefined) {
-    // Message IDs start at 1
     if (before !== undefined && before <= 1) return { rows: [], whole: true };
 
     const newest = createMessagesCache(cacheDb).getLatestMessageId(chatId);
@@ -389,8 +367,6 @@ export async function fetchMessageAround(
   const older = closest(ids, messageId, -1, context);
   const keep = new Set([messageId, ...closest(ids, messageId, 1, context), ...older]);
   const page = messages.filter((message) => keep.has(rawMessageId(message)));
-  // The page is a run of consecutive messages; with fewer older messages
-  // than asked for, it reaches the first message of the chat
   const rows = cacheHistoryResponse(cacheDb, chat.chatId, page, users, {
     reachedStart: older.length < context,
   });
@@ -430,17 +406,9 @@ export interface GetMessageResult {
 
 interface CachedAround {
   around: MessageAround;
-  /** False when a side of the context has to come from Telegram */
   complete: boolean;
 }
 
-/**
- * The message and its context from the cache, or null if the message isn't
- * cached. Each side is a `list` window next to the message, so it is
- * complete only when the cache holds it whole; a side is cut where the
- * recorded range ends. A deleted message is complete as it is: Telegram no
- * longer returns it.
- */
 function readAroundFromCache(
   cacheDb: Database,
   chatId: number,
@@ -455,7 +423,6 @@ function readAroundFromCache(
     return { around: { message, newer: [], older: [] }, complete: true };
   }
 
-  // A deleted target is still returned; its context follows --includeDeleted
   const side = (bound: "after" | "before") =>
     readCachedWindow(cacheDb, chatId, { limit: context, [bound]: messageId }, includeDeleted);
   const newer = side("after");
@@ -481,9 +448,6 @@ async function readAround(
     const around = await fetchMessageAround(client, cacheDb, chat, messageId, context);
     return { around, source: "api" };
   } catch (err) {
-    // The cache holds the message: Telegram no longer returns it, or it
-    // can't be asked (no credentials or connection, a flood wait, a peer
-    // without an access hash). Serve the context the cache holds.
     if (cached) {
       verbose(`Serving message ${messageId} from the cache: ${getErrorMessage(err)}`);
       return { around: cached.around, source: "cache" };

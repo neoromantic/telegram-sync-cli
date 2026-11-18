@@ -1,8 +1,3 @@
-/**
- * Messages an older version cached live with raw_json '{}' (#130): a
- * background migration queues one refetch job per chat, and the job fetches
- * them again by ID. Made-up data only.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
@@ -36,7 +31,6 @@ let db: Database;
 let ctx: RealSyncWorkerContext;
 let requests: Record<string, unknown>[];
 
-/** A message as an older version cached it live: no raw_json */
 function seedEmpty(chatId: number, messageId: number, hasMedia = false) {
   createMessagesCache(db).upsert({
     chat_id: chatId,
@@ -59,7 +53,6 @@ function textMessage(peerId: Record<string, unknown>, id: number) {
   };
 }
 
-/** A client whose getMessages answers with `messages` */
 function answer(messages: unknown[]) {
   ctx.client = {
     call: mock(async (request: Record<string, unknown>) => {
@@ -99,7 +92,6 @@ const refetchMigration = BACKGROUND_MIGRATIONS.find(
   (migration) => migration.name === "messages_refetch_empty_raw_json",
 )!;
 
-/** Make the refetch pass pending again, as on a cache of an older version */
 function restartRefetchPass() {
   db.run(
     `UPDATE cache_migrations SET state = 'pending', cursor = 0, end_rowid = NULL, done = 0, total = NULL WHERE name = ?`,
@@ -107,7 +99,6 @@ function restartRefetchPass() {
   );
 }
 
-/** One batch of the refetch pass, then every pending job, like the daemon interleaves them */
 async function migrateBatchThenRunJobs(maxRows: number) {
   const batch = runMigrationBatch(db, refetchMigration, {
     maxRows,
@@ -131,7 +122,6 @@ describe("refetching messages cached with an empty raw_json (#130)", () => {
       date: 1_700_000_000,
       raw_json: JSON.stringify(textMessage({ _: "peerUser", userId: 6001 }, 1)),
     });
-    // A cache from an older version: the pass hasn't run on it yet
     db.run(
       `UPDATE cache_migrations SET state = 'pending', cursor = 0, end_rowid = NULL, done = 0, total = NULL`,
     );
@@ -158,7 +148,6 @@ describe("refetching messages cached with an empty raw_json (#130)", () => {
       textMessage(peer, 3),
       photo,
       { _: "messageEmpty", id: 5 },
-      // Another chat's message under a wanted ID is never written here
       textMessage({ _: "peerUser", userId: 6001 }, 3),
     ]);
 
@@ -199,7 +188,6 @@ describe("refetching messages cached with an empty raw_json (#130)", () => {
     const post = textMessage({ _: "peerChannel", channelId: CHANNEL_ID }, 9);
     answer([post]);
 
-    // The startup cleanup drops jobs of chats that are off, but not this one
     await createSyncScheduler({
       db,
       jobsService: ctx.jobsService,
@@ -227,7 +215,6 @@ describe("refetching messages cached with an empty raw_json (#130)", () => {
     const peer = { _: "peerUser", userId: DM } as const;
     for (const id of range(1, REFETCH_BATCH_SIZE + 5)) seedEmpty(DM, id);
     ctx.jobsService.queueRefetch(DM);
-    // Telegram has none of them any more
     answer([]);
 
     const [first] = ctx.jobsService.getPendingJobs();
@@ -245,7 +232,6 @@ describe("refetching messages cached with an empty raw_json (#130)", () => {
       5,
     ]);
     expect(rawJsonOf(DM, REFETCH_BATCH_SIZE + 2)).not.toBe("{}");
-    // The rows that stay '{}' are asked for once
     expect(ctx.jobsService.getPendingJobs()).toHaveLength(0);
   });
 
@@ -259,7 +245,6 @@ describe("refetching messages cached with an empty raw_json (#130)", () => {
       }),
     } as unknown as TelegramClient;
 
-    // 500 rows, the failing job, then the 501st row
     expect(await migrateBatchThenRunJobs(500)).toBe(false);
     while (!(await migrateBatchThenRunJobs(500))) {}
 
@@ -291,7 +276,6 @@ describe("refetching messages cached with an empty raw_json (#130)", () => {
       call: mock(async (request: Record<string, unknown>) => {
         requests.push(request);
         if (requests.length === 1) {
-          // A live message without its raw form lands mid-request
           seedEmpty(DM, 9);
           ctx.jobsService.queueRefetch(DM);
           return { messages: [textMessage(peer, 3)], users: [] };

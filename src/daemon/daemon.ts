@@ -1,8 +1,3 @@
-/**
- * Main daemon implementation
- * Manages Telegram connections, real-time updates, and background sync
- */
-
 import { join } from "node:path";
 import {
   type AccountsDbInterface,
@@ -98,11 +93,6 @@ export function createContext(
   };
 }
 
-/**
- * Move a shared cache from 0.3, then open every account's own cache. An
- * account whose cache can't be opened (another account's file, a corrupt
- * one) is logged and left out; the others run.
- */
 async function initializeDatabase(ctx: DaemonContext): Promise<boolean> {
   try {
     ensureCacheLayout({
@@ -149,7 +139,6 @@ async function initializeDatabase(ctx: DaemonContext): Promise<boolean> {
 }
 
 async function connectAccounts(ctx: DaemonContext): Promise<number> {
-  // Only accounts whose cache opened
   const accounts = ctx.accountsDb
     .getAll()
     .filter((account) => ctx.runtime.accounts.has(account.id));
@@ -183,8 +172,6 @@ async function cleanupWithTimeout(ctx: DaemonContext, task: () => Promise<void>)
 
 async function performCleanup(ctx: DaemonContext): Promise<void> {
   const cleanupWork = async () => {
-    // Ends the requests the sync jobs wait on, also after a mainLoop that
-    // threw, so the jobs end quickly
     requestShutdown(ctx);
     await cleanupScheduler(ctx);
     await disconnectAllAccounts(ctx);
@@ -272,8 +259,6 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
     return DaemonExitCode.AllAccountsFailed;
   }
 
-  // The dialog pass can take minutes on a large account: show each
-  // account's connection meanwhile. updateDaemonStatus logs its own errors.
   await updateDaemonStatus(ctx);
 
   try {

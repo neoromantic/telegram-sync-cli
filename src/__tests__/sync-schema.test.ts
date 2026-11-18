@@ -1,7 +1,3 @@
-/**
- * Tests for sync system database schema
- * Tests the new tables: messages_cache, chat_sync_state, sync_jobs, daemon_status
- */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -392,7 +388,6 @@ describe("sync schema", () => {
     });
 
     it("is idempotent - can be called multiple times", () => {
-      // Should not throw
       initSyncSchema(db);
       initSyncSchema(db);
       initSyncSchema(db);
@@ -403,7 +398,6 @@ describe("sync schema", () => {
         )
         .all();
 
-      // Should have exactly the expected tables (not duplicates)
       expect(tables.length).toBeGreaterThanOrEqual(3);
     });
   });
@@ -475,7 +469,6 @@ describe("determineSyncPolicy", () => {
 });
 
 describe("migration from 0.1.4", () => {
-  // chat_sync_state as 0.1.4 created it
   const CHAT_SYNC_STATE_0_1_4 = `
     CREATE TABLE chat_sync_state (
       chat_id           INTEGER PRIMARY KEY,
@@ -495,7 +488,6 @@ describe("migration from 0.1.4", () => {
     )
   `;
 
-  // sync_jobs as 0.1.4 created it
   const SYNC_JOBS_0_1_4 = `
     CREATE TABLE sync_jobs (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -553,7 +545,6 @@ describe("migration from 0.1.4", () => {
 
   const schemaOf = (db: Database) =>
     db.query("SELECT type, name, sql FROM sqlite_master ORDER BY name").all();
-  // prepare(), not query(): query() caches the statement and its columns
   const rowOf = (db: Database) =>
     db.prepare("SELECT * FROM chat_sync_state WHERE chat_id = 42").get();
 
@@ -615,7 +606,6 @@ describe("migration from 0.1.4", () => {
     const path = join(dir, "cache.db");
     const daemon = createOldDatabase(path);
     const cli = new Database(path);
-    // The second connection has read the old schema already
     expect(rowOf(cli)).not.toHaveProperty("top_message_id");
 
     expect(() => {
@@ -659,7 +649,6 @@ describe("message_id index on an existing cache", () => {
   it("adds the message_id index to an existing cache and keeps its messages", () => {
     const path = join(dir, "cache.db");
 
-    // A cache from before the index
     const old = new Database(path);
     initCacheSchema(old);
     initSyncSchema(old);
@@ -768,7 +757,6 @@ describe("contentless message_search", () => {
     const db = openCache();
     seed(db, [1, 2]);
 
-    // An older SQLite, without contentless_delete, opens the cache
     initSyncSchema(db, { contentlessSearch: false });
 
     expect(triggers(db)).toEqual([]);
@@ -802,7 +790,6 @@ describe("messages_cache writes on a cache from 0.5.0", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  /** The update trigger 0.5.0 created: it re-indexed on every update */
   const OLD_UPDATE_TRIGGER = `
     CREATE TRIGGER messages_cache_au
     AFTER UPDATE ON messages_cache
@@ -881,7 +868,6 @@ describe("messages_cache writes on a cache from 0.5.0", () => {
       const schema = schemaOf(db);
       db.close();
 
-      // A second open has nothing to do, so it only reads
       const again = new Database(path, { readonly: true });
       initCacheSchema(again);
       initSyncSchema(again, { contentlessSearch });

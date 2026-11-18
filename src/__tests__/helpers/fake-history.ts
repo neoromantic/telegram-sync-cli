@@ -1,13 +1,3 @@
-/**
- * A fake `messages.getHistory` for sync worker tests: one chat
- * (`createFakeHistory`) or many, routed on the request's peer
- * (`createMultiChatHistory`).
- *
- * It follows the server's paging rules: results are newest first, `minId`
- * and `maxId` are exclusive bounds, `offsetId` starts the page at the first
- * message older than it, and `addOffset` shifts that start (negative values
- * move it towards newer messages).
- */
 import type { TelegramClient, tl } from "@mtcute/bun";
 import { toPeerIdFromInputPeer } from "../../utils/telegram-peer-ids";
 
@@ -86,11 +76,9 @@ export function createMultiChatHistory() {
 
   return {
     client: { call } as unknown as TelegramClient,
-    /** Give a chat these messages */
     set(chatId: number, ids: Iterable<number>) {
       chats.set(chatId, new Set(ids));
     },
-    /** Requests made for a chat */
     requestsFor(chatId: number): GetHistoryRequest[] {
       return requestsByChat.get(chatId) ?? [];
     },

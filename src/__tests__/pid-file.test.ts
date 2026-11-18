@@ -1,7 +1,3 @@
-/**
- * Tests for PID file management
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +33,6 @@ describe("PidFile", () => {
     });
 
     it("throws if PID file already exists with live process", () => {
-      // Create PID file with current process (which is alive)
       writeFileSync(pidPath, process.pid.toString());
 
       const pidFile = createPidFile(pidPath);
@@ -45,8 +40,6 @@ describe("PidFile", () => {
     });
 
     it("removes stale PID file and acquires", () => {
-      // Create PID file with non-existent process ID
-      // Use a very high PID that's unlikely to exist
       writeFileSync(pidPath, "999999999");
 
       const pidFile = createPidFile(pidPath);
@@ -75,7 +68,7 @@ describe("PidFile", () => {
       pidFile.acquire();
 
       pidFile.release();
-      pidFile.release(); // Should not throw
+      pidFile.release();
       expect(existsSync(pidPath)).toBe(false);
     });
   });
@@ -134,7 +127,6 @@ describe("PidFile", () => {
       writeFileSync(pidPath, process.pid.toString());
 
       const pidFile = createPidFile(pidPath);
-      // Signal 0 just checks if process exists
       expect(pidFile.sendSignal(0)).toBe(true);
     });
 

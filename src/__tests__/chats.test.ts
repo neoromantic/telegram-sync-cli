@@ -1,12 +1,3 @@
-/**
- * Unit tests for the chats command
- *
- * Tests:
- * - chatRowToItem conversion
- * - listChatsCommand: cache hit, cache miss, --fresh flag, --type filter, pagination
- * - chat cache rows built from dialogs, raw chats and communities
- */
-
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { Chat, type TelegramClient, type tl } from "@mtcute/bun";
@@ -31,13 +22,6 @@ import { createAccountCacheDb } from "./helpers/cache-db";
 import { communityDialog, fakeDialog, fakeRawCommunity } from "./helpers/fake-dialogs";
 import { assertPeerIdInvariants } from "./helpers/peer-id-invariants";
 
-// =============================================================================
-// Test Helpers
-// =============================================================================
-
-/**
- * Create a test chat input with default values
- */
 function createTestChat(overrides: Partial<CachedChatInput> = {}): CachedChatInput {
   return {
     chat_id: "123456",
@@ -56,9 +40,6 @@ function createTestChat(overrides: Partial<CachedChatInput> = {}): CachedChatInp
   };
 }
 
-/**
- * Create multiple chats with different types for filter testing
- */
 function seedChatsWithTypes(chatsCache: ChatsCache): void {
   const chatTypes: Array<{
     id: string;
@@ -123,10 +104,6 @@ function seedChatsWithTypes(chatsCache: ChatsCache): void {
   }
 }
 
-// =============================================================================
-// ChatItem Conversion Tests
-// =============================================================================
-
 describe("Chat Item Conversion", () => {
   it("should convert cached chat with all fields", () => {
     const item = chatRowToItem(
@@ -174,10 +151,6 @@ describe("Chat Item Conversion", () => {
   });
 });
 
-// =============================================================================
-// listChatsCommand Tests
-// =============================================================================
-
 describe("listChatsCommand", () => {
   let db: Database;
   let chatsCache: ChatsCache;
@@ -189,7 +162,6 @@ describe("listChatsCommand", () => {
 
   describe("cache hit scenarios", () => {
     it("should return cached chats when cache is populated", () => {
-      // Seed the cache
       chatsCache.upsert(
         createTestChat({
           chat_id: "1",
@@ -215,7 +187,6 @@ describe("listChatsCommand", () => {
     it("should detect stale cache entries", () => {
       const cacheConfig = getDefaultCacheConfig();
 
-      // Fresh entry
       chatsCache.upsert(
         createTestChat({
           chat_id: "1",
@@ -223,7 +194,6 @@ describe("listChatsCommand", () => {
         }),
       );
 
-      // Stale entry (fetched 2 hours ago, TTL is 1 hour)
       chatsCache.upsert(
         createTestChat({
           chat_id: "2",
@@ -240,7 +210,6 @@ describe("listChatsCommand", () => {
     it("should not detect staleness for fresh entries", () => {
       const cacheConfig = getDefaultCacheConfig();
 
-      // All fresh entries
       chatsCache.upsert(
         createTestChat({
           chat_id: "1",
@@ -250,7 +219,7 @@ describe("listChatsCommand", () => {
       chatsCache.upsert(
         createTestChat({
           chat_id: "2",
-          fetched_at: Date.now() - 30 * 60 * 1000, // 30 min ago, within 1h TTL
+          fetched_at: Date.now() - 30 * 60 * 1000,
         }),
       );
 
@@ -313,7 +282,6 @@ describe("listChatsCommand", () => {
 
   describe("pagination", () => {
     beforeEach(() => {
-      // Create 10 chats for pagination testing
       for (let i = 1; i <= 10; i++) {
         chatsCache.upsert(
           createTestChat({
@@ -342,14 +310,12 @@ describe("listChatsCommand", () => {
       const allChats = chatsCache.list({ limit: 1000 });
       const total = allChats.length;
 
-      // First page
       const firstPage = chatsCache.list({ limit: 5, offset: 0 });
       const hasMoreFirstPage = 0 + 5 < total;
 
       expect(firstPage.length).toBe(5);
       expect(hasMoreFirstPage).toBe(true);
 
-      // Last page
       const lastPage = chatsCache.list({ limit: 5, offset: 5 });
       const hasMoreLastPage = 5 + 5 < total;
 
@@ -383,14 +349,11 @@ describe("listChatsCommand", () => {
       chatsCache.upsert(createTestChat({ chat_id: "1", title: "Cached Chat" }));
 
       const fresh = true;
-      // When fresh=true, we skip cache check and fetch from API
-      // Simulate the logic: if fresh, don't return from cache
       const shouldFetchFromApi = fresh || chatsCache.list().length === 0;
 
       expect(shouldFetchFromApi).toBe(true);
     });
 
-    /** Params of every `withParams` call of the last `apiClient` */
     let withParams: unknown[] = [];
 
     function apiClient(communities: () => Promise<Chat[]>) {
@@ -420,7 +383,6 @@ describe("listChatsCommand", () => {
       expect(chatsCache.list({ type: "community" })).toMatchObject([
         { chat_id: "-1005555555555", access_hash: "777" },
       ]);
-      // A FLOOD_WAIT fails the request instead of holding up the list
       expect(withParams).toEqual([{ floodSleepThreshold: 0 }]);
     });
 
@@ -439,7 +401,6 @@ describe("listChatsCommand", () => {
 
   describe("ordering", () => {
     beforeEach(() => {
-      // Create chats with different timestamps
       const now = Date.now();
       chatsCache.upsert(
         createTestChat({
@@ -467,9 +428,9 @@ describe("listChatsCommand", () => {
     it("should order by last_message_at descending by default", () => {
       const chats = chatsCache.list({ orderBy: "last_message_at" });
 
-      expect(chats[0]?.title).toBe("Alpha"); // Most recent
+      expect(chats[0]?.title).toBe("Alpha");
       expect(chats[1]?.title).toBe("Middle");
-      expect(chats[2]?.title).toBe("Zebra"); // Oldest
+      expect(chats[2]?.title).toBe("Zebra");
     });
 
     it("should order by title when specified", () => {
@@ -481,10 +442,6 @@ describe("listChatsCommand", () => {
     });
   });
 });
-
-// =============================================================================
-// Dialog Conversion Tests
-// =============================================================================
 
 describe("Chat cache rows", () => {
   it("stores each dialog under its marked peer ID", () => {
@@ -584,7 +541,6 @@ describe("Chat cache rows", () => {
     ).toMatchObject({ chat_id: "-1001234567890", access_hash: "888" });
   });
 
-  /** Example Community, a raw community with a channel ID */
   const community: tl.RawCommunity = {
     _: "community",
     id: 5555555556,

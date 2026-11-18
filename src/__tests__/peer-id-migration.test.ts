@@ -1,6 +1,3 @@
-/**
- * The move of a 0.2.0 cache to marked peer IDs (#18), run by initSyncSchema
- */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -61,7 +58,6 @@ function busyTimeout(db: Database): number {
   return (db.query("PRAGMA busy_timeout").get() as { timeout: number }).timeout;
 }
 
-/** from_id and forward_from_id of every cached message, by chat and ID */
 function senderIds(db: Database): unknown[] {
   return db
     .query(
@@ -112,7 +108,6 @@ describe("peer ID migration", () => {
       }),
       chatRow("4001", "group", { title: "No raw" }),
       chatRow("4002", "channel", { title: "Channel, no raw" }),
-      // raw_json that names another chat doesn't count
       chatRow("4003", "group", {
         title: "Wrong raw",
         raw_json: JSON.stringify({ _: "channel", id: 9 }),
@@ -183,7 +178,6 @@ describe("peer ID migration", () => {
       priority: SyncPriority.High,
     });
     const tables = ["chat_sync_state", "sync_jobs", "history_ranges", "users_cache"];
-    // Only the sender and forward columns of messages_cache change
     const messages = () =>
       dump(db, "messages_cache").map((row) => {
         const { from_id, forward_from_id, ...rest } = row as Record<string, unknown>;
@@ -210,7 +204,6 @@ describe("peer ID migration", () => {
       legacyMessageRow(rawMessage(team, 3, "forwarded", alice, channel)),
       legacyMessageRow(rawMessage(team, 4, "forwarded too", alice, group)),
       legacyMessageRow(rawMessage(team, 5, "from a user", alice, alice)),
-      // A live message already had the marked sender
       {
         ...legacyMessageRow(rawMessage(team, 6, "live", channel)),
         from_id: -1000000000333,
@@ -226,7 +219,6 @@ describe("peer ID migration", () => {
         forward_from_id: 222,
         raw_json: '{"fromId":',
       },
-      // A stored ID that isn't the bare ID of the peer raw_json names stays
       {
         ...legacyMessageRow(rawMessage(team, 9, "other", channel, channel)),
         from_id: 444,
@@ -286,7 +278,6 @@ describe("peer ID migration", () => {
 
   it("stops indexing a channel sender under the user with its bare ID", () => {
     seedLegacyCache(db);
-    // A user whose ID equals the bare ID of the channel that posts
     createUsersCache(db).upsert({
       user_id: String(LEGACY.senderChannel.id),
       first_name: "Zed",
@@ -424,7 +415,6 @@ describe("peer ID migration", () => {
   it("indexes group and channel titles for search, without a new index version", () => {
     seedLegacyCache(db);
     const search = createMessagesSearch(db);
-    // 0.2.0 indexed no title for a group or channel
     expect(search.search("Team Chat")).toEqual([]);
 
     initSyncSchema(db);
@@ -445,7 +435,6 @@ describe("peer ID migration", () => {
     seedLegacyCache(db);
     initSyncSchema(db);
 
-    // A 0.2.0 daemon still running caches a chat the old way
     createChatsCache(db).upsert(
       legacyChatRow({ kind: "channel", id: 3333333333, title: "Late News" }),
     );
@@ -456,8 +445,6 @@ describe("peer ID migration", () => {
   });
 
   it("gives a cached message without fromId its chat as the sender, once (#44)", () => {
-    // A cache that 0.3.0 wrote: marked IDs, but history pages left from_id
-    // NULL for a message Telegram sends without fromId
     db.run("PRAGMA user_version = 2");
     const alice = { _: "peerUser", userId: LEGACY.alice.id } as const;
     const bob = { _: "peerUser", userId: 11 } as const;
@@ -499,7 +486,6 @@ describe("peer ID migration", () => {
       historyRow(alice, 1, "lunch at noon?"),
       historyRow(news, 2, "weekly digest", { post: true }),
       historyRow(self, 3, "note to self"),
-      // A sender in fromId stays as it is
       {
         ...historyRow(team, 4, "from Bob", { fromId: bob }),
         from_id: 11,
@@ -509,7 +495,6 @@ describe("peer ID migration", () => {
       historyRow(team, 7, "new peer type", {
         fromId: { _: "peerSomethingNew", id: 12 },
       }),
-      // Not a peer at all: no sender, and the migration doesn't fail
       { ...historyRow(team, 8, "odd raw"), raw_json: '{"fromId":"x"}' },
       {
         ...historyRow(team, 9, "odd raw"),
@@ -547,8 +532,6 @@ describe("peer ID migration", () => {
       }),
     ]);
 
-    // It runs once: a 0.2.0 daemon still running caches a bare chat, so the
-    // migration runs again and re-keys it, but a row it caches keeps NULL
     createMessagesCache(db).upsertBatch([historyRow(alice, 10, "running late")]);
     createChatsCache(db).upsert(
       legacyChatRow({ kind: "channel", id: 3333333333, title: "Late News" }),
@@ -596,7 +579,6 @@ describe("peer ID migration on a shared file", () => {
   });
 });
 
-/** What getCacheDb runs when it opens the file */
 function openCache(db: Database): void {
   initCacheSchema(db);
   initSyncSchema(db);

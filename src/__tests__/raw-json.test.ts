@@ -28,8 +28,6 @@ describe("toRawJson", () => {
     const plain = JSON.stringify(message).length;
     const compact = toRawJson(message).length;
 
-    // Plain JSON writes every byte as a key of its own: 7,000+ characters
-    // for 1,030 bytes; base64 takes 4 characters per 3 bytes
     expect(plain).toBeGreaterThan(7_000);
     expect(compact).toBeLessThan(2_000);
   });

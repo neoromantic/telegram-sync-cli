@@ -1,6 +1,3 @@
-/**
- * Tests for sync worker real helpers/context
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
@@ -307,7 +304,6 @@ describe("sync-worker real helpers/context", () => {
     });
 
     it("makes no request once the daemon is stopping", async () => {
-      // mtcute's flood waiter would sleep out a stored wait on an aborted signal
       const call = mock(emptyPage);
       const shutdown = new AbortController();
       shutdown.abort(new DaemonStopError());
@@ -446,7 +442,6 @@ describe("sync-worker real helpers/context", () => {
       });
       expect(rateLimits.isBlocked("messages.getHistory")).toBe(false);
 
-      // Any other abort is an error like the rest
       const aborted = new DOMException("The operation was aborted", "AbortError");
       expect(resolveJobError(ctx, aborted)).toEqual({
         success: false,

@@ -1,6 +1,3 @@
-/**
- * Tests for daemon context defaults
- */
 import { describe, expect, it } from "bun:test";
 import {
   createDaemonRuntime,
@@ -41,7 +38,6 @@ describe("daemon-context", () => {
       message: "The daemon is stopping",
     });
 
-    // A second signal, SIGINT after SIGTERM say, keeps the first reason
     const reason = signal.reason;
     requestShutdown(ctx);
     expect(signal.reason).toBe(reason);

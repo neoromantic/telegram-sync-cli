@@ -1,6 +1,3 @@
-/**
- * Tests for update handlers
- */
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { tl } from "@mtcute/bun";
@@ -89,10 +86,8 @@ describe("UpdateHandlers", () => {
       const cached = messagesCache.get(100, 42);
       expect(cached).not.toBeNull();
       expect(cached?.raw_json).toBe(JSON.stringify(rawMessage));
-      // The live path stores the raw message: nothing to fetch again (#130)
       expect(createSyncJobsService(db).getJobsForChat(100)).toHaveLength(0);
 
-      // Verify the raw JSON can be parsed back
       const parsed = JSON.parse(cached!.raw_json);
       expect(parsed._).toBe("message");
       expect(parsed.id).toBe(42);
@@ -242,8 +237,6 @@ describe("UpdateHandlers", () => {
     });
 
     it("leaves the forward cursor to catch-up for newer messages", async () => {
-      // Messages 6-9 may have arrived while the daemon was stopped, so a
-      // live message 10 must not mark them as cached.
       chatSyncState.upsert({
         chat_id: 100,
         chat_type: "private",
@@ -428,7 +421,6 @@ describe("UpdateHandlers", () => {
     }
 
     it("caches a new DM, so its first page can build an InputPeer", async () => {
-      // Without a chats_cache row the access hash would be 0
       expect(buildInputPeer(5550001, chatsCache)).toMatchObject({
         accessHash: toLong(0),
       });
@@ -578,7 +570,6 @@ describe("UpdateHandlers", () => {
 
   describe("handleEditMessage", () => {
     it("updates message text", async () => {
-      // Insert original message
       messagesCache.upsert({
         chat_id: 100,
         message_id: 1,
@@ -608,7 +599,6 @@ describe("UpdateHandlers", () => {
 
   describe("handleDeleteMessages", () => {
     it("marks messages as deleted", async () => {
-      // Insert messages
       messagesCache.upsert({
         chat_id: 100,
         message_id: 1,
@@ -643,7 +633,6 @@ describe("UpdateHandlers", () => {
 
   describe("handleDeleteMessagesWithoutChat", () => {
     it("marks messages as deleted when chat ID is unknown", async () => {
-      // Insert messages in different chats (simulating DMs and groups)
       messagesCache.upsert({
         chat_id: 100,
         message_id: 1,
@@ -666,7 +655,6 @@ describe("UpdateHandlers", () => {
         receivedAt: Date.now(),
       };
 
-      // Delete messages without providing chat IDs (as mtcute does for non-channel chats)
       const { deleted } = await handlers.handleDeleteMessagesWithoutChat(ctx, {
         messageIds: [1, 2],
       });
@@ -682,7 +670,6 @@ describe("UpdateHandlers", () => {
         receivedAt: Date.now(),
       };
 
-      // Try to delete messages that don't exist in cache
       const { deleted } = await handlers.handleDeleteMessagesWithoutChat(ctx, {
         messageIds: [999, 1000],
       });
@@ -758,7 +745,6 @@ describe("UpdateHandlers error handling", () => {
 
   describe("handleNewMessage", () => {
     it("logs error and continues when database operation fails", async () => {
-      // Create handlers with mock logger
       const handlers = createUpdateHandlers({
         db,
         messagesCache,
@@ -766,7 +752,6 @@ describe("UpdateHandlers error handling", () => {
         logger: mockLogger,
       });
 
-      // Spy on messagesCache.upsert to throw an error
       const upsertSpy = spyOn(messagesCache, "upsert").mockImplementation(() => {
         throw new Error("Database write failed");
       });
@@ -776,7 +761,6 @@ describe("UpdateHandlers error handling", () => {
         receivedAt: Date.now(),
       };
 
-      // Should NOT throw
       await handlers.handleNewMessage(ctx, {
         chatId: 100,
         messageId: 1,
@@ -786,7 +770,6 @@ describe("UpdateHandlers error handling", () => {
         isOutgoing: false,
       });
 
-      // Should have logged the error
       expect(errorLogs.length).toBe(1);
       expect(errorLogs[0]).toContain("Failed to handle new message");
       expect(errorLogs[0]).toContain("chatId=100");
@@ -815,7 +798,6 @@ describe("UpdateHandlers error handling", () => {
         receivedAt: Date.now(),
       };
 
-      // Should NOT throw
       await handlers.handleEditMessage(ctx, {
         chatId: 200,
         messageId: 5,
@@ -851,7 +833,6 @@ describe("UpdateHandlers error handling", () => {
         receivedAt: Date.now(),
       };
 
-      // Should NOT throw
       await handlers.handleDeleteMessages(ctx, {
         chatId: 300,
         messageIds: [10, 11, 12],

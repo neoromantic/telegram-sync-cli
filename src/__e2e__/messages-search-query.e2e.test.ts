@@ -1,7 +1,3 @@
-/**
- * E2E tests for the query rules of tg messages search
- */
-
 import type { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
@@ -22,7 +18,6 @@ const BOB_ID = 11;
 const HOUR = 3600;
 const DAY = 24 * HOUR;
 
-/** Made-up messages: [id, chat, sender, text, age in seconds] */
 const MESSAGES = [
   [1, TEAM_CHAT_ID, ALICE_ID, "the deploy failed with an error", 1 * HOUR],
   [2, TEAM_CHAT_ID, BOB_ID, "request timeout again", 2 * HOUR],
@@ -86,7 +81,6 @@ describe("E2E: messages search query rules", () => {
   beforeAll(() => {
     env = createTestEnvironment("messages-search-query");
     env.initDatabase();
-    // Account 2 knows its own user ID (Alice); account 1 doesn't
     env.seedAccounts([
       { phone: "+15550000000", is_active: true },
       { phone: "+15550000001", user_id: ALICE_ID },
@@ -205,7 +199,6 @@ describe("E2E: messages search query rules", () => {
   });
 
   it("reads me in --chat and --sender as the own user ID", async () => {
-    // Saved Messages is the chat under the own user ID
     expect(await ids("hello", "--account", "2", "--chat", "me")).toEqual([12]);
     expect(await ids("hello", "--account", "2", "--chat", "ME")).toEqual([12]);
     expect(await ids("hello", "--account", "2", "--sender", "me")).toEqual([3, 5, 12]);
@@ -222,7 +215,6 @@ describe("E2E: messages search query rules", () => {
     expect(result.json).toMatchObject({
       error: { message: "Invalid --sender: a b", details: { sender: "a b" } },
     });
-    // A username without @ still works
     expect(await ids("hello", "--chat", "teamchat")).toEqual([3]);
   });
 
@@ -267,7 +259,6 @@ describe("E2E: messages search query rules", () => {
       6: "сдаю **квартиру** на месяц",
       7: "**квартира** свободна",
     });
-    // Found by the sender only: the start of the text, nothing highlighted
     expect(await snippets("sender:alice AND chat:club")).toEqual({
       5: "hello world from the club",
     });

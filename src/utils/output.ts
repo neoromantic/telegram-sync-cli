@@ -1,6 +1,3 @@
-/**
- * Output utilities for consistent CLI output
- */
 import { ExitPending, exitAfterFlush, isExiting, reportCliError } from "../telemetry";
 import {
   type ErrorCode,
@@ -10,7 +7,6 @@ import {
   type OutputFormat,
 } from "../types";
 
-/** Current output format (can be overridden per-command) */
 let currentFormat: OutputFormat = "json";
 
 /**
@@ -33,7 +29,6 @@ export function getOutputFormat(): OutputFormat {
  * In test mode, this just logs and returns.
  */
 export function success<T>(data: T, next: NextCommand[] = []): void {
-  // An exit is under way: the run already printed its result
   if (isExiting()) return;
   const result: Output<T> =
     next.length > 0 ? { success: true, data, next } : { success: true, data };
@@ -44,13 +39,11 @@ export function success<T>(data: T, next: NextCommand[] = []): void {
       break;
     case "pretty":
       console.log(JSON.stringify(data, null, 2));
-      // stderr keeps stdout the data's JSON alone
       for (const { command, why } of next) {
         console.error(`Next: ${why}\n  ${command}`);
       }
       break;
     case "quiet":
-      // No output for quiet mode
       break;
   }
 
@@ -76,18 +69,12 @@ export async function rawFile(path: string): Promise<void> {
   exitAfterSuccess();
 }
 
-/**
- * In production mode, exit to close any active connections (e.g., mtcute TelegramClient)
- * This prevents the process from hanging when the event loop is kept alive by open sockets.
- * Only the daemon's exit waits for usage stats, up to 500 ms.
- */
 function exitAfterSuccess(): void {
   if (process.env.BUN_ENV !== "test" && process.env.NODE_ENV !== "test") {
     void exitAfterFlush(0);
   }
 }
 
-/** Codes whose command can succeed when run again unchanged */
 const RETRYABLE_CODES: ReadonlySet<ErrorCode> = new Set([
   ErrorCodes.RATE_LIMITED,
   ErrorCodes.NETWORK_ERROR,
@@ -109,7 +96,6 @@ export function error(
   suggestion?: string,
   retryable = isRetryableCode(code),
 ): never {
-  // An exit is under way: the run already reported its outcome
   if (isExiting()) throw new ExitPending();
   const result: Output<never> = {
     success: false,
@@ -120,7 +106,6 @@ export function error(
     console.error(JSON.stringify(result, null, 2));
   }
 
-  // In test mode, throw instead of exiting
   if (process.env.BUN_ENV === "test" || process.env.NODE_ENV === "test") {
     const err = new Error(message) as Error & {
       code: ErrorCode;
@@ -135,12 +120,7 @@ export function error(
     throw err;
   }
 
-  // The code (or Telegram's RPC error name) only: messages can name chats,
-  // users or a query
   reportCliError(code, message);
-  // Exits at once, or in the daemon after up to 500 ms of sending usage
-  // stats. Then the throw ends the command, and src/index.ts holds it until
-  // the exit.
   void exitAfterFlush(getExitCode(code));
   throw new ExitPending();
 }

@@ -1,6 +1,3 @@
-/**
- * Tests for daemon lifecycle (no module mocks)
- */
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -52,8 +49,6 @@ describe("daemon start", () => {
   });
 
   it("returns NoAccounts when credentials are set but no accounts configured", async () => {
-    // Credentials come from test-setup.ts; set them explicitly so this test
-    // does not depend on preload order or the developer's .env
     withCredentials("12345", "test-api-hash");
     const daemon = createDaemon(
       { pidPath, shutdownTimeoutMs: 1_000_000 },

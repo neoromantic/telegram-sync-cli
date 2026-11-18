@@ -1,8 +1,3 @@
-/**
- * Search snippets: a fragment of a message's text around the first word a
- * query matched, matched words in `**`. FTS5's snippet() needs the text in
- * the index, which the contentless index doesn't keep, so tg builds them.
- */
 import { hasFts5Syntax } from "../db/messages-search";
 
 /** A word to highlight; a prefix term (`hel*`) matches words that start with it */
@@ -11,21 +6,12 @@ export interface SnippetTerm {
   prefix: boolean;
 }
 
-/** Words on each side of the first match */
 const CONTEXT_WORDS = 10;
 
-/** A token as FTS5's unicode61 sees one: letters, digits and marks */
 const TOKEN = /[\p{L}\p{N}\p{Co}\p{M}]+/gu;
 
-/** The longest fragment, in UTF-16 code units, for text with long words or none */
 const MAX_SNIPPET_LENGTH = 300;
 
-/**
- * A token compared the way unicode61 (remove_diacritics=1) compares it:
- * case-insensitive, and a Latin letter with one diacritic is the bare
- * letter (`café` is `cafe`). A letter with two keeps them (`ộ` is not `o`),
- * and other scripts keep theirs (`й` stays `й`).
- */
 function fold(token: string): string {
   return token
     .toLowerCase()
@@ -36,7 +22,6 @@ function fold(token: string): string {
     .normalize("NFC");
 }
 
-/** An offset moved off the second half of a surrogate pair, so no emoji is cut */
 function keepPair(text: string, at: number): number {
   const code = text.charCodeAt(at);
   return at > 0 && code >= 0xdc00 && code <= 0xdfff ? at - 1 : at;
@@ -46,7 +31,6 @@ function tokenize(text: string): string[] {
   return text.match(TOKEN) ?? [];
 }
 
-/** The terms of one phrase: its words, the last one a prefix when `*` follows */
 function phraseTerms(text: string, prefix: boolean): SnippetTerm[] {
   const words = tokenize(text).map(fold);
   return words.map((word, i) => ({
@@ -55,7 +39,6 @@ function phraseTerms(text: string, prefix: boolean): SnippetTerm[] {
   }));
 }
 
-/** The query split the way FTS5 reads it: strings, barewords and punctuation */
 function lexQuery(query: string): Array<{ kind: string; text: string }> {
   const tokens: Array<{ kind: string; text: string }> = [];
   let i = 0;
@@ -106,7 +89,6 @@ export function snippetTerms(query: string, options: { phrase?: boolean } = {}):
   const peek = () => tokens[pos];
   const isOperator = (token = peek()) => token?.kind === "word" && OPERATORS.has(token.text);
 
-  /** A phrase, `^` and `+` joined phrases included, with its prefix stars */
   function phrase(): SnippetTerm[] {
     const terms: SnippetTerm[] = [];
     while (pos < tokens.length) {
@@ -124,7 +106,6 @@ export function snippetTerms(query: string, options: { phrase?: boolean } = {}):
     return terms;
   }
 
-  /** Whether a column filter lets its operand match the text column */
   function columnFilter(): boolean | undefined {
     const start = pos;
     const negated = peek()?.kind === "-";
@@ -146,7 +127,6 @@ export function snippetTerms(query: string, options: { phrase?: boolean } = {}):
     return negated ? !text : text;
   }
 
-  /** One operand: a phrase, a NEAR group or a parenthesized expression */
   function operand(): SnippetTerm[] {
     const inText = columnFilter() ?? true;
     let terms: SnippetTerm[];
@@ -222,8 +202,6 @@ export function buildSnippet(text: string | null, terms: SnippetTerm[]): string 
   let start = from <= 0 ? 0 : words[from]!.start;
   let end = to >= words.length - 1 ? text.length : words[to]!.end;
 
-  // Long words, or emoji with no words at all, can make ten words a lot of
-  // text: keep the match in view and cut the rest
   if (end - start > MAX_SNIPPET_LENGTH) {
     const anchor = hit ? words[first]!.start : start;
     start = keepPair(text, Math.max(start, anchor - MAX_SNIPPET_LENGTH / 2));

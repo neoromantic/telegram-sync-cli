@@ -1,24 +1,3 @@
-/**
- * Per-account cache layout, and the move of the shared cache that 0.3 and
- * older kept at `<dataDir>/cache.db`.
- *
- * Each account's cache, sync state, jobs and rate limits live in
- * `<dataDir>/accounts/<id>/cache.db`. The first command of this version
- * that needs a cache finds the old shared file and:
- *
- * - with exactly one account and no per-account cache yet, moves it to that
- *   account (adopt): every cursor, job and rate limit carries over;
- * - otherwise sets it aside: an empty file is deleted, any other one becomes
- *   `shared-cache.db` (or `shared-cache-2.db`, …), never merged into an
- *   account and never overwritten. Its rows can't be split by account.
- *
- * Before the move the file is switched to `journal_mode = DELETE`, which
- * folds the WAL into the file and only works while no other process has it
- * open: an older tg still running keeps it in place. Only a file that is
- * not a database (or a malformed one) is set aside without a fold; any
- * other error, such as a read-only file or a full disk, keeps it in place
- * too, so a single account never loses its cache to a transient error.
- */
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -49,19 +28,7 @@ export function isCacheUnavailableError(err: unknown): err is CacheUnavailableEr
   return err instanceof CacheUnavailableError;
 }
 
-export type CacheLayoutState =
-  /** No shared cache: nothing to do */
-  | "none"
-  /** The shared cache became the only account's cache */
-  | "adopted"
-  /** The shared cache was renamed to shared-cache*.db */
-  | "parked"
-  /** The shared cache had no data and was deleted */
-  | "deleted"
-  /** The shared cache stays for now; a later run moves it */
-  | "deferred"
-  /** The only account's cache can't be opened until the shared one moves */
-  | "blocked";
+export type CacheLayoutState = "none" | "adopted" | "parked" | "deleted" | "deferred" | "blocked";
 
 export interface CacheLayoutResult {
   state: CacheLayoutState;
@@ -96,7 +63,6 @@ export const MEDIA_DIR = "media";
 const SHARED_CACHE_BASENAME = "shared-cache";
 const SIDECARS = ["-wal", "-shm"] as const;
 
-/** Tables whose rows make a shared cache worth keeping */
 const DATA_TABLES = [
   "messages_cache",
   "chats_cache",
@@ -106,9 +72,7 @@ const DATA_TABLES = [
   "sync_jobs",
 ] as const;
 
-/** How long a process waits for another one that is moving the file */
 const MOVE_LOCK_TIMEOUT_MS = 60_000;
-/** How long the fold waits for a reader of the shared cache */
 const FOLD_BUSY_TIMEOUT_MS = 2_000;
 
 export function accountDirPath(dataDir: string, accountId: number): string {
@@ -142,7 +106,6 @@ function isTaken(path: string): boolean {
   return existsSync(path) || SIDECARS.some((suffix) => existsSync(path + suffix));
 }
 
-/** The first shared-cache*.db name that no file uses; rename overwrites */
 function nextSharedCachePath(dataDir: string): string {
   for (let index = 1; ; index++) {
     const path = join(dataDir, sharedCacheName(index));
@@ -181,11 +144,6 @@ function isBusyError(err: unknown): boolean {
   return /database is locked|database table is locked/i.test(err.message);
 }
 
-/**
- * The file itself is broken: not a database, or a malformed one. Any other
- * error (a read-only file, a full disk, an I/O error) says nothing about
- * the rows, so the file stays where it is.
- */
 function isCorruptError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const code = sqliteCode(err);
@@ -195,7 +153,6 @@ function isCorruptError(err: unknown): boolean {
   return /file is not a database|database disk image is malformed/i.test(err.message);
 }
 
-/** What a failed open or fold means for the file */
 function foldFailure(err: unknown): FoldResult {
   if (isBusyError(err)) return { state: "in_use" };
   if (isCorruptError(err)) return { state: "unreadable" };
@@ -217,19 +174,9 @@ function hasRows(db: Database, table: string): boolean {
 }
 
 export type FoldResult =
-  /**
-   * Folded: the file holds every row and has no sidecars. `hasData` is
-   * known only when the fold was asked to check it.
-   */
   | { state: "folded"; hasData?: boolean }
-  /** Another process has it open */
   | { state: "in_use" }
-  /** Not a database, or a malformed one: kept as it is */
   | { state: "unreadable" }
-  /**
-   * Any other error (a read-only file, a full disk, an I/O error): the file
-   * stays in place, and a later run tries again
-   */
   | { state: "error"; error: string };
 
 /**
@@ -293,7 +240,6 @@ export function foldSharedCache(path: string, options: { checkData?: boolean } =
   return hasData === undefined ? { state: "folded" } : { state: "folded", hasData };
 }
 
-/** Move a file and whichever sidecars it still has */
 function moveWithSidecars(from: string, to: string): void {
   renameSync(from, to);
   for (const suffix of SIDECARS) {
@@ -309,7 +255,6 @@ function moveWithSidecars(from: string, to: string): void {
  */
 export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
   const shared = legacyCachePath(deps.dataDir);
-  // The common case: one stat, no lock, no write
   if (!existsSync(shared)) return { state: "none" };
 
   const { db } = deps;
@@ -328,19 +273,14 @@ export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
       return { state: "blocked", reason: "shared_cache_in_use", path: shared };
     }
 
-    // Another process may have moved it while this one waited
     if (!existsSync(shared)) return { state: "none" };
 
     const accounts = deps.accounts.getAll();
     const adopter =
       accounts.length === 1 && !anyAccountCacheExists(deps.dataDir) ? accounts[0]! : null;
 
-    // An adopter takes the file whatever it holds, so only a file set
-    // aside or deleted needs its rows checked
     const fold = foldSharedCache(shared, { checkData: adopter === null });
     if (fold.state === "in_use" || fold.state === "error") {
-      // Adopting blocks: an empty per-account cache created now would force
-      // the shared file aside later. Nothing waits for a set-aside file.
       const reason = fold.state === "in_use" ? "shared_cache_in_use" : "move_failed";
       return adopter
         ? { state: "blocked", reason, path: shared, accountId: adopter.id }
@@ -354,8 +294,6 @@ export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
           recursive: true,
           mode: 0o700,
         });
-        // Sidecars without their database are left over; SQLite would
-        // replay a stray -wal into the moved file
         for (const suffix of SIDECARS) {
           if (existsSync(target + suffix)) unlinkSync(target + suffix);
         }

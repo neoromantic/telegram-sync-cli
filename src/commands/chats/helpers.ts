@@ -128,10 +128,6 @@ export function userToPrivateChatCacheInput(user: tl.RawUser): CachedChatInput {
 /** A chat that a resolved username or an update can carry */
 export type ResolvedChat = Exclude<tl.TypeChat, tl.RawChatEmpty>;
 
-/**
- * A chat with a channel ID (-100…), reached with its access hash: a channel
- * or a community
- */
 function hasChannelId(
   chat: tl.TypeChat,
 ): chat is tl.RawChannel | tl.RawChannelForbidden | tl.RawCommunity | tl.RawCommunityForbidden {
@@ -183,12 +179,9 @@ export async function fetchJoinedCommunities(
   client: Pick<TelegramClient, "getJoinedCommunities">,
 ): Promise<CachedChatInput[]> {
   const chats = await client.getJoinedCommunities();
-  return (
-    chats
-      // A min community's access hash works only in the update that carried it
-      .filter((chat) => !(chat.raw._ === "community" && chat.raw.min))
-      .map((chat) => rawChatToCacheInput(chat.raw))
-  );
+  return chats
+    .filter((chat) => !(chat.raw._ === "community" && chat.raw.min))
+    .map((chat) => rawChatToCacheInput(chat.raw));
 }
 
 /**

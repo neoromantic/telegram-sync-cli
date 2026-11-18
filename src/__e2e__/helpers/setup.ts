@@ -1,10 +1,3 @@
-/**
- * Test environment setup for E2E tests
- *
- * Creates isolated temporary directories with fresh databases
- * to ensure tests don't affect production data.
- */
-
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,9 +44,6 @@ export interface TestEnvironment {
   getCliOptions(): { env: Record<string, string> };
 }
 
-/**
- * Initialize database schema (matches src/db/index.ts)
- */
 function initSchema(db: Database): void {
   db.run("PRAGMA journal_mode = WAL");
 
@@ -85,12 +75,10 @@ function initSchema(db: Database): void {
  * @param testName - Unique name for this test (used in directory path)
  */
 export function createTestEnvironment(testName: string): TestEnvironment {
-  // Create unique directory for this test
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 8);
   const dataDir = join(E2E_TEST_BASE, `${testName}-${timestamp}-${randomSuffix}`);
 
-  // Ensure directory exists
   mkdirSync(dataDir, { recursive: true });
 
   let db: Database | null = null;
@@ -145,7 +133,6 @@ export function createTestEnvironment(testName: string): TestEnvironment {
     },
 
     cleanup(): void {
-      // Close database if open
       if (db) {
         db.close();
         db = null;
@@ -153,7 +140,6 @@ export function createTestEnvironment(testName: string): TestEnvironment {
       for (const cacheDb of cacheDbs.values()) cacheDb.close();
       cacheDbs.clear();
 
-      // Remove the test directory
       if (existsSync(dataDir)) {
         rmSync(dataDir, { recursive: true, force: true });
       }

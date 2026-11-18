@@ -1,26 +1,9 @@
-/**
- * Database schema for caching
- * Uses bun:sqlite for local data storage
- *
- * Tables:
- * - users_cache: Cached user/contact information
- * - chats_cache: Cached chat/channel/group information
- * - sync_state: Tracks synchronization progress
- * - rate_limits: API rate limiting data
- * - api_activity: API call audit log
- * - cache_meta: which account the file belongs to
- */
 import type { Database } from "bun:sqlite";
 
 import type { ChatType } from "./types";
 
-/**
- * The most a WAL keeps on disk after a checkpoint, 64 MB. Without a limit a
- * WAL that grew (during a VACUUM, or behind a long reader) stays that size.
- */
 const JOURNAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
 
-/** How long opening a database waits for another process's switch to WAL */
 const WAL_SWITCH_TIMEOUT_MS = 5000;
 const WAL_SWITCH_RETRY_MS = 10;
 
@@ -55,25 +38,15 @@ export function enableWal(db: Database): void {
  * Creates all tables and indexes for caching
  */
 export function initCacheSchema(db: Database): void {
-  // The CLI and the daemon write this database at the same time. Wait up to
-  // 5 s for the other one's write lock instead of failing at once (SQLite's
-  // default is not to wait).
   db.run("PRAGMA busy_timeout = 5000");
 
-  // A new file gets incremental auto_vacuum, so `tg db vacuum` can give its
-  // free pages back while the daemon runs. It has to come before the switch
-  // to WAL. Only an empty file is touched: on one with tables the pragma
-  // changes nothing until a VACUUM but still waits for the write lock, and
-  // opening a cache must never wait for it.
   const { page_count } = db.query("PRAGMA page_count").get() as {
     page_count: number;
   };
   if (page_count === 0) db.run("PRAGMA auto_vacuum = INCREMENTAL");
 
-  // Enable WAL mode for better concurrent access
   enableWal(db);
 
-  // Users cache table
   db.run(`
     CREATE TABLE IF NOT EXISTS users_cache (
       user_id TEXT PRIMARY KEY,
@@ -93,7 +66,6 @@ export function initCacheSchema(db: Database): void {
     )
   `);
 
-  // Users cache indexes
   db.run(
     "CREATE INDEX IF NOT EXISTS idx_users_cache_username ON users_cache(username) WHERE username IS NOT NULL",
   );
@@ -102,7 +74,6 @@ export function initCacheSchema(db: Database): void {
   );
   db.run("CREATE INDEX IF NOT EXISTS idx_users_cache_fetched_at ON users_cache(fetched_at)");
 
-  // Chats cache table
   db.run(`
     CREATE TABLE IF NOT EXISTS chats_cache (
       chat_id TEXT PRIMARY KEY,
@@ -124,7 +95,6 @@ export function initCacheSchema(db: Database): void {
     )
   `);
 
-  // Chats cache indexes
   db.run(
     "CREATE INDEX IF NOT EXISTS idx_chats_cache_username ON chats_cache(username) WHERE username IS NOT NULL",
   );
@@ -134,7 +104,6 @@ export function initCacheSchema(db: Database): void {
     "CREATE INDEX IF NOT EXISTS idx_chats_cache_last_message_at ON chats_cache(last_message_at DESC)",
   );
 
-  // Sync state table
   db.run(`
     CREATE TABLE IF NOT EXISTS sync_state (
       entity_type TEXT PRIMARY KEY,
@@ -147,7 +116,6 @@ export function initCacheSchema(db: Database): void {
     )
   `);
 
-  // Rate limits table
   db.run(`
     CREATE TABLE IF NOT EXISTS rate_limits (
       method TEXT NOT NULL,
@@ -159,10 +127,8 @@ export function initCacheSchema(db: Database): void {
     )
   `);
 
-  // Rate limits index
   db.run("CREATE INDEX IF NOT EXISTS idx_rate_limits_method ON rate_limits(method)");
 
-  // API activity table
   db.run(`
     CREATE TABLE IF NOT EXISTS api_activity (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,11 +141,9 @@ export function initCacheSchema(db: Database): void {
     )
   `);
 
-  // API activity indexes
   db.run("CREATE INDEX IF NOT EXISTS idx_api_activity_timestamp ON api_activity(timestamp DESC)");
   db.run("CREATE INDEX IF NOT EXISTS idx_api_activity_method ON api_activity(method)");
 
-  // Owner stamp: each account has its own cache file (see cache-meta.ts)
   db.run(`
     CREATE TABLE IF NOT EXISTS cache_meta (
       key TEXT PRIMARY KEY,
@@ -188,8 +152,6 @@ export function initCacheSchema(db: Database): void {
     )
   `);
 }
-
-// Row class types for typed queries
 
 /** User cache row class */
 export class UserCacheRow {

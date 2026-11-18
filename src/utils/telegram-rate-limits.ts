@@ -86,13 +86,11 @@ function extractFloodWaitSeconds(error: unknown): number | null {
   return null;
 }
 
-/** A FLOOD_WAIT from Telegram, as opposed to another error that has seconds */
 function isFloodWait(error: unknown): boolean {
   if (tl.RpcError.is(error)) return error.code === tl.RpcError.FLOOD;
   return error instanceof Error && /FLOOD_WAIT_\d+/.test(error.message);
 }
 
-/** Telegram's error code (420 for a FLOOD_WAIT), or null for another error */
 function apiErrorCode(error: unknown): number | null {
   if (tl.RpcError.is(error)) return error.code;
   return extractFloodWaitSeconds(error) ? tl.RpcError.FLOOD : null;
@@ -161,7 +159,6 @@ async function callWithRateLimits<T>({
     return await trackApiCall(rateLimits, method, call, context);
   } catch (err) {
     const waitSeconds = extractFloodWaitSeconds(err);
-    // The first flood wait reads like a call to a method that is blocked
     if (waitSeconds && isFloodWait(err)) {
       throw new RateLimitError(method, waitSeconds, { cause: err });
     }

@@ -1,9 +1,3 @@
-/**
- * Group participation: a group adds new messages only while the account sent
- * an ordinary message there in the last 90 days. Rule and tables:
- * docs/sync-strategy.md#group-participation, docs/database-schema.md. Dates
- * are Unix seconds; a merge keeps the newest date and never reopens a pause.
- */
 import type { Database } from "bun:sqlite";
 import { CHANNEL_PEER_ID_OFFSET } from "../utils/telegram-peer-ids";
 import { INDEX_BUILD_BUSY_TIMEOUT_MS, withBusyTimeout } from "./sync-schema";
@@ -24,8 +18,6 @@ export function isOwnOrdinaryMessage(message: {
   from_id?: number | null;
   message_type: string;
 }): boolean {
-  // A message sent as a channel or as an anonymous admin has a chat as its
-  // sender: nothing says who wrote it
   return (
     Boolean(message.is_outgoing) && (message.from_id ?? 0) > 0 && message.message_type !== "service"
   );
@@ -92,7 +84,6 @@ export function createGroupParticipationSchema(db: Database): void {
 
   withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
     db.transaction(() => {
-      // Another process may have created both tables while this one waited
       if (created()) return;
       db.run(`
         CREATE TABLE IF NOT EXISTS group_participation (
@@ -140,7 +131,6 @@ export function createGroupParticipation(db: Database): GroupParticipation {
       WHERE chat_id = $chat_id AND start_date <= $date AND end_date > $date
       LIMIT 1
     `),
-    // The next refresh queues a catch-up from the old cursor
     topUnknown: db.prepare(
       "UPDATE chat_sync_state SET top_message_id = NULL, updated_at = $now WHERE chat_id = $chat_id",
     ),
@@ -148,12 +138,6 @@ export function createGroupParticipation(db: Database): GroupParticipation {
 
   const getRow = (chatId: number) => (stmts.get.get(chatId) as ParticipationRow | null) ?? null;
 
-  /**
-   * Merge an own message (`ownDate`) or a check's answer (`checked`). A new
-   * own message after a known pause records the pause up to its date. A
-   * pause starts when the newest own message turned 90 days old, but never
-   * before the first check: what came before the rule isn't rebuilt.
-   */
   const merge = db.transaction(
     (chatId: number, ownDate: number | null, checked: boolean, now: number) => {
       const row = getRow(chatId);
@@ -170,7 +154,6 @@ export function createGroupParticipation(db: Database): GroupParticipation {
 
       const last = newer ? ownDate : prevLast;
       const fresh = last !== null && now < last + PARTICIPATION_WINDOW_SECONDS;
-      // An answered check, or a fresh own message, makes the state known
       const init = prevInit ?? (checked || fresh ? now : null);
       if (row && last === prevLast && init === prevInit) return;
       stmts.upsert.run({ $chat_id: chatId, $last: last, $init: init });
@@ -184,12 +167,10 @@ export function createGroupParticipation(db: Database): GroupParticipation {
   const service: GroupParticipation = {
     isGroup(chatId) {
       if (chatId > 0) return false;
-      // -N is a basic group; -100… is a supergroup or a channel
       if (chatId > -CHANNEL_PEER_ID_OFFSET) return true;
       const type =
         (stmts.syncType.get(chatId) as { chat_type: string } | null)?.chat_type ??
         (stmts.cachedType.get(String(chatId)) as { type: string } | null)?.type;
-      // A chat of unknown type gets no exemption
       return type !== "channel" && type !== "community";
     },
 

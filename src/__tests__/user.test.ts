@@ -1,13 +1,3 @@
-/**
- * Comprehensive unit tests for user commands (tg me, tg user)
- *
- * Tests:
- * - meCommand: Get current authenticated user info
- * - userCommand: Look up any user by @username, ID, or phone number
- * - Cache behavior and --fresh flag
- * - Error handling for auth required and user not found
- */
-
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { tl } from "@mtcute/bun";
@@ -47,17 +37,7 @@ function requireCachedUser(value: CachedUser | null, message = "Expected cached 
   return value;
 }
 
-// =============================================================================
-// Note: We no longer mock the output module to avoid interfering with other tests.
-// The output module handles test mode properly (throws instead of process.exit)
-// =============================================================================
-
-// =============================================================================
-// Mock Telegram Client Factory
-// =============================================================================
-
 let mockClient = createMockClient();
-// Account 2's client and cache, for the cases that select it with --account
 let secondClient: unknown = null;
 let secondCacheDb: Database | null = null;
 
@@ -66,7 +46,6 @@ const getClientForAccount = mock((accountId: number) =>
 );
 mock.module("../services/telegram", () => ({ getClientForAccount }));
 
-// Account 1 (active) reads the test cache, account 2 its own
 let testCacheDb: Database;
 
 mock.module("../db", () =>
@@ -83,13 +62,6 @@ mock.module("../db", () =>
   }),
 );
 
-// =============================================================================
-// Test Helpers
-// =============================================================================
-
-/**
- * Create test user data for cache
- */
 function createTestUser(overrides: Partial<UserCacheInput> = {}): UserCacheInput {
   return {
     user_id: "123456",
@@ -111,9 +83,6 @@ function createTestUser(overrides: Partial<UserCacheInput> = {}): UserCacheInput
   };
 }
 
-/**
- * Create a mock Telegram client
- */
 function createMockClient(overrides: Record<string, unknown> = {}) {
   const rawUser = makeRawUser({
     id: 123,
@@ -137,9 +106,6 @@ function isRawUser(user: tl.TypeUser): user is tl.RawUser {
   return user._ === "user";
 }
 
-/**
- * Convert API user to UserInfo (mirrors logic from user.ts)
- */
 function apiUserToUserInfo(user: tl.RawUser) {
   return {
     id: user.id,
@@ -153,9 +119,6 @@ function apiUserToUserInfo(user: tl.RawUser) {
   };
 }
 
-/**
- * Convert cached user to UserInfo (mirrors logic from user.ts)
- */
 function cachedUserToUserInfo(cached: CachedUser) {
   return {
     id: Number(cached.user_id),
@@ -169,11 +132,7 @@ function cachedUserToUserInfo(cached: CachedUser) {
   };
 }
 
-/**
- * Convert API user to cache input (mirrors logic from user.ts)
- */
 function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
-  // Create a copy without BigInt for JSON serialization
   const rawData: Record<string, unknown> = { ...user };
   if (user.accessHash !== undefined) {
     rawData.accessHash = String(user.accessHash);
@@ -194,9 +153,6 @@ function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
   };
 }
 
-/**
- * Determine identifier type (mirrors logic from user.ts)
- */
 function parseIdentifier(identifier: string): {
   isUsername: boolean;
   isPhone: boolean;
@@ -210,23 +166,15 @@ function parseIdentifier(identifier: string): {
   return { isUsername, isPhone, isUserId };
 }
 
-// =============================================================================
-// meCommand Tests
-// =============================================================================
-
 describe("meCommand", () => {
   let usersCache: UsersCache;
   const cacheConfig = getDefaultCacheConfig();
 
   beforeEach(() => {
-    // Reset mocks
-
-    // Create fresh test database
     const db = createAccountCacheDb();
     testCacheDb = db;
     usersCache = createUsersCache(db);
 
-    // Reset mock client
     mockClient = createMockClient();
   });
 
@@ -266,10 +214,8 @@ describe("meCommand", () => {
     it("should cache user after API call", async () => {
       const me = await mockClient.getMe();
 
-      // Cache the user
       usersCache.upsert(apiUserToCacheInput(me));
 
-      // Verify it's in cache
       const cached = usersCache.getById(String(me.id));
       expect(cached).not.toBeNull();
       expect(cached?.user_id).toBe("123");
@@ -277,7 +223,6 @@ describe("meCommand", () => {
     });
 
     it("should include source in response", async () => {
-      // Cache miss - source should be api
       const cached = usersCache.getById("123");
       const source = cached ? ("cache" as const) : ("api" as const);
 
@@ -287,7 +232,6 @@ describe("meCommand", () => {
 
   describe("cache behavior", () => {
     it("should return cached user when available", () => {
-      // Seed cache with current user
       usersCache.upsert(
         createTestUser({
           user_id: "123",
@@ -383,7 +327,6 @@ describe("meCommand", () => {
       const fresh = true;
       let usedCache = false;
 
-      // Simulate command logic
       if (!fresh) {
         const cached = usersCache.getById("123");
         if (cached) {
@@ -406,7 +349,6 @@ describe("meCommand", () => {
       const fresh = false;
       let usedCache = false;
 
-      // Simulate command logic
       if (!fresh) {
         const cached = usersCache.getById("123");
         if (cached) {
@@ -418,7 +360,6 @@ describe("meCommand", () => {
     });
 
     it("should update cache after fresh API call", async () => {
-      // Seed with old data
       usersCache.upsert(
         createTestUser({
           user_id: "123",
@@ -429,7 +370,6 @@ describe("meCommand", () => {
 
       const me = await mockClient.getMe();
 
-      // Simulate fresh fetch and update
       usersCache.upsert(apiUserToCacheInput(me));
 
       const cached = usersCache.getById("123");
@@ -446,7 +386,6 @@ describe("meCommand", () => {
 
       const fresh = true;
 
-      // When fresh=true, always fetch from API
       const source = fresh ? ("api" as const) : ("cache" as const);
 
       expect(source).toBe("api");
@@ -551,10 +490,6 @@ describe("meCommand", () => {
     });
   });
 });
-
-// =============================================================================
-// userCommand Tests - Lookup by Username
-// =============================================================================
 
 describe("userCommand - by username", () => {
   let usersCache: UsersCache;
@@ -777,10 +712,6 @@ describe("userCommand - by username", () => {
   });
 });
 
-// =============================================================================
-// userCommand Tests - Lookup by ID
-// =============================================================================
-
 describe("userCommand - by ID", () => {
   let usersCache: UsersCache;
 
@@ -801,7 +732,6 @@ describe("userCommand - by ID", () => {
     });
 
     it("should detect short numeric string as user ID not phone", () => {
-      // 9 digits - too short for phone
       const { isUsername, isPhone, isUserId } = parseIdentifier("123456789");
 
       expect(isUsername).toBe(false);
@@ -810,7 +740,6 @@ describe("userCommand - by ID", () => {
     });
 
     it("should distinguish user ID from phone (10+ digits)", () => {
-      // 10+ digits should be phone, not user ID
       const { isPhone, isUserId } = parseIdentifier("1234567890");
 
       expect(isPhone).toBe(true);
@@ -848,7 +777,6 @@ describe("userCommand - by ID", () => {
         }),
       );
 
-      // Query with same string ID
       const cached = usersCache.getById("12345");
       expect(cached).not.toBeNull();
     });
@@ -926,10 +854,6 @@ describe("userCommand - by ID", () => {
     });
   });
 });
-
-// =============================================================================
-// userCommand Tests - Lookup by Phone
-// =============================================================================
 
 describe("userCommand - by phone", () => {
   let usersCache: UsersCache;
@@ -1036,7 +960,6 @@ describe("userCommand - by phone", () => {
         }),
       );
 
-      // Search with different formats
       expect(usersCache.getByPhone("+5559876543")).not.toBeNull();
       expect(usersCache.getByPhone("555 987 6543")).not.toBeNull();
     });
@@ -1119,10 +1042,6 @@ describe("userCommand - by phone", () => {
     });
   });
 });
-
-// =============================================================================
-// Edge Cases
-// =============================================================================
 
 describe("Edge cases", () => {
   let usersCache: UsersCache;
@@ -1343,7 +1262,6 @@ describe("Edge cases", () => {
 
   describe("numeric-looking usernames", () => {
     it("should correctly identify username with numbers only at end", () => {
-      // "user123" should be treated as username, not ID
       const { isUsername, isUserId } = parseIdentifier("user123");
 
       expect(isUsername).toBe(true);
@@ -1351,17 +1269,12 @@ describe("Edge cases", () => {
     });
 
     it("should handle username starting with numbers", () => {
-      // "123user" is alphanumeric, should be username
       const { isUsername } = parseIdentifier("123user");
 
       expect(isUsername).toBe(true);
     });
   });
 });
-
-// =============================================================================
-// Response Structure Tests
-// =============================================================================
 
 describe("Response structure", () => {
   let usersCache: UsersCache;
@@ -1464,10 +1377,6 @@ describe("Response structure", () => {
     });
   });
 });
-
-// =============================================================================
-// Cache Input Conversion Tests
-// =============================================================================
 
 describe("Cache input conversion", () => {
   it("should convert API user to cache input", () => {
@@ -1573,10 +1482,6 @@ describe("Cache input conversion", () => {
   });
 });
 
-// =============================================================================
-// Which account a lookup uses
-// =============================================================================
-
 describe("userCommand with two accounts", () => {
   const BOB = makeRawUser({
     id: 202,
@@ -1595,7 +1500,6 @@ describe("userCommand with two accounts", () => {
   });
 
   it("fetches with --fresh on the selected account's client and caches the user there", async () => {
-    // Account 2 cached Bob under an old name; --fresh skips that
     createUsersCache(secondCacheDb!).upsert(
       createTestUser({ user_id: "202", first_name: "Old", username: null }),
     );

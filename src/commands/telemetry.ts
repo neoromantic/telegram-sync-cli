@@ -1,11 +1,3 @@
-/**
- * Telemetry command - usage stats status and the off switch
- *
- * Usage:
- *   tg telemetry status [--json]   Whether usage stats are on, and why
- *   tg telemetry on                Turn them on (marks the notice as seen)
- *   tg telemetry off               Turn them off and forget the install ID
- */
 import { defineCommand } from "citty";
 import { createTgTelemetry, DETAILS_URL, OFF_COMMAND, telemetryStatus } from "../telemetry";
 import { ErrorCodes } from "../types";

@@ -1,15 +1,7 @@
-/**
- * The detached copy of tg that sends a run's usage stats (background.ts). It
- * replays the run's calls on the client, which reads telemetry.json and
- * sends what is due as before, waits for the requests (3 seconds each) and
- * exits. It runs no command and prints nothing.
- */
 import { EVENTS_ENV, type Handoff } from "./background";
 import { createTgTelemetry } from "./index";
 
-/** The client gives each request 3 seconds */
 const SEND_MS = 3500;
-/** Whatever happens, this copy is gone by then */
 const GIVE_UP_MS = 5000;
 
 export async function sendHandoff(json: string | undefined): Promise<never> {
@@ -30,9 +22,7 @@ export async function sendHandoff(json: string | undefined): Promise<never> {
       else t.error(call[1]);
     }
     await t.flush(SEND_MS);
-  } catch {
-    // Usage stats never fail tg
-  }
+  } catch {}
   process.exit(0);
 }
 

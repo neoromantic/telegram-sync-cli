@@ -1,10 +1,3 @@
-/**
- * Unread messages for `tg messages unread` and marking them read for
- * `tg messages read`. A chat's unread state is the dialog's unread count and
- * read boundary (`read_inbox_max_id`): every incoming message up to it is
- * read. chats_cache keeps both, from the dialog list and the daemon's live
- * updates; the messages come from messages_cache, or from Telegram.
- */
 import type { Database } from "bun:sqlite";
 import type { TelegramClient, tl } from "@mtcute/bun";
 

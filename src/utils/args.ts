@@ -1,8 +1,4 @@
 /**
- * Argument parsing utilities for the generic API command
- */
-
-/**
  * Parse named arguments from argv-style array into an object
  * Supports: --key value, --key=value, --nested.key value
  */
@@ -10,10 +6,8 @@ export function parseNamedArgs(args: Record<string, unknown>): Record<string, un
   const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(args)) {
-    // Skip internal citty keys
     if (key === "_" || key === "--") continue;
 
-    // Handle nested keys (e.g., peer.username -> { peer: { username: value } })
     if (key.includes(".")) {
       setNestedValue(result, key.split("."), value);
     } else {
@@ -24,9 +18,6 @@ export function parseNamedArgs(args: Record<string, unknown>): Record<string, un
   return result;
 }
 
-/**
- * Set a value in a nested object structure
- */
 function setNestedValue(obj: Record<string, unknown>, path: string[], value: unknown): void {
   let current = obj;
   for (let i = 0; i < path.length - 1; i++) {
@@ -42,9 +33,6 @@ function setNestedValue(obj: Record<string, unknown>, path: string[], value: unk
   }
 }
 
-/**
- * Parse a value to its appropriate type
- */
 function parseValue(value: unknown): unknown {
   if (value === undefined || value === null || typeof value !== "string") {
     return value;
@@ -95,7 +83,6 @@ export function mergeArgs(
   return parsed;
 }
 
-/** A negative number after a flag is its value (`--addOffset -10`), not short options */
 const NEGATIVE_NUMBER = /^-\d+(\.\d+)?$/;
 
 /**
@@ -136,7 +123,6 @@ export function flagValues(rawArgs: string[], name: string): string[] {
     const arg = rawArgs[i]!;
     if (arg === "--") break;
     if (arg === flag) {
-      // A string flag takes the next argument whatever it is, as citty does
       values.push(rawArgs[i + 1] ?? "");
       i++;
     } else if (arg.startsWith(`${flag}=`)) {

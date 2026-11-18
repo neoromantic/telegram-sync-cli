@@ -1,9 +1,3 @@
-/**
- * Content protection for `tg media download`
- * (https://core.telegram.org/api/content-protection): media of a protected
- * chat, channel, private chat or message, and self-destructing media, is
- * never saved.
- */
 import type { TelegramClient, tl } from "@mtcute/bun";
 
 import type { ChatProtectionReason, ChatProtectionRow } from "../../db/chat-protection";
@@ -38,7 +32,6 @@ function parseJson(text: string | null): RawObject | null {
   }
 }
 
-/** A message's own protection: its noforwards flag, or a media timer */
 function messageProtection(message: RawObject | null): ProtectionResult {
   if (!message) return NOT_PROTECTED;
   if (message.noforwards === true) {
@@ -51,7 +44,6 @@ function messageProtection(message: RawObject | null): ProtectionResult {
   return NOT_PROTECTED;
 }
 
-/** A raw chat or channel object's noforwards flag */
 function chatObjectProtected(chat: RawObject | null): boolean {
   return (chat?._ === "chat" || chat?._ === "channel") && chat.noforwards === true;
 }
@@ -78,7 +70,6 @@ export function knownChatProtection(
   if (!chat || !chatObjectProtected(parseJson(chat.raw_json))) {
     return NOT_PROTECTED;
   }
-  // The online check that found protection off is newer
   if (stored !== null && chat.fetched_at <= stored.fetched_at) {
     return NOT_PROTECTED;
   }

@@ -1,7 +1,3 @@
-/**
- * History pages, tg send and live updates write the same message_type
- * (src/utils/message-type.ts)
- */
 import { describe, expect, it } from "bun:test";
 import { Long, Message, PeersIndex, type tl } from "@mtcute/bun";
 
@@ -37,7 +33,6 @@ const geoPoint = {
   accessHash: Long.fromString("1234"),
 };
 
-/** Raw messages whose live type mtcute can compute without peers */
 const COMPARED: Record<string, unknown> = {
   photo: photoMessage(peer, 1),
   voice: voiceMessage(peer, 2),
@@ -171,7 +166,6 @@ describe("resolveRawMessageType", () => {
     });
   });
 
-  // mtcute needs the peers of these to build their media
   it("types a poll, a story and a to-do list as live updates do", () => {
     expect(resolveRawMessageType(withMedia({ _: "messageMediaPoll", poll: {} }))).toEqual({
       messageType: "poll",

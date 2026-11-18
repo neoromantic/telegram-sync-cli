@@ -1,9 +1,3 @@
-/**
- * E2E tests for usage stats: the notice, what a run sends, the off switches
- * and tg telemetry. TELEGRAM_SYNC_CLI_TELEMETRY=debug prints each event to
- * stderr instead of sending it, and the background test sends to a local
- * server, so nothing leaves the machine.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import {
   existsSync,
@@ -36,7 +30,6 @@ const NO_AGENT = {
 
 const NOTICE = "telegram-sync-cli shares usage stats with its author";
 
-/** The events a run printed in debug mode */
 function events(stderr: string): Event[] {
   return stderr
     .split("\n")
@@ -47,11 +40,9 @@ function events(stderr: string): Event[] {
 describe("usage stats", () => {
   let dataDir: string;
   let stateFile: string;
-  /** An agent runs tg; events are printed, not sent */
   let debug: Record<string, string | undefined>;
 
   const readState = () => JSON.parse(readFileSync(stateFile, "utf8"));
-  /** As if an earlier run had shown the notice */
   const noticeSeen = () =>
     writeFileSync(
       stateFile,
@@ -109,7 +100,6 @@ describe("usage stats", () => {
     const result = await runCli(["chats", "search", "--query", "Weekend Crew", "--limit", "7"], {
       env: debug,
     });
-    // The exit code is the command's, after the events
     expect(result.exitCode).toBe(2);
     const sent = events(result.stderr);
     expect(sent.map((e) => e.event)).toEqual([
@@ -222,7 +212,6 @@ describe("usage stats", () => {
 describe("usage stats in the background", () => {
   let dataDir: string;
   const received: Event[] = [];
-  /** Takes each event and answers 2 seconds later */
   let server: ReturnType<typeof Bun.serve>;
 
   beforeAll(() => {
@@ -253,7 +242,6 @@ describe("usage stats in the background", () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  /** Waits for `count` events, then a little longer for any extra one */
   const arrived = async (count: number) => {
     const deadline = Date.now() + 5000;
     while (received.length < count && Date.now() < deadline) {
@@ -273,14 +261,12 @@ describe("usage stats in the background", () => {
 
   it("never delay a command, and still arrive", async () => {
     const env = statsOn(dataDir);
-    // Off: nothing is sent, and no process starts to send it
     const off = await runCli(["chats", "list"], {
       env: { ...env, DO_NOT_TRACK: "1" },
     });
     const on = await runCli(["chats", "list"], { env });
     expect(on.exitCode).toBe(2);
     expect(on.stderr).toContain("AUTH_REQUIRED");
-    // Waiting for the server would take 2 seconds, and tg used to wait 500 ms
     expect(on.duration - off.duration).toBeLessThan(250);
 
     const sent = await arrived(4);
@@ -302,7 +288,6 @@ describe("usage stats in the background", () => {
   }, 15000);
 
   it("arrive with a data directory given as a relative path", async () => {
-    // A project folder other than the temp folder the sending copy runs in
     const project = join(dataDir, "project");
     mkdirSync(join(project, "data"), { recursive: true });
     renameSync(join(dataDir, "telemetry.json"), join(project, "data", "telemetry.json"));

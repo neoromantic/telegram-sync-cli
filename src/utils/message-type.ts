@@ -1,9 +1,3 @@
-/**
- * The message_type every writer stores: live updates read it from mtcute's
- * high-level media, history pages and `tg send` from the raw TL message,
- * and both give the same value for the same message.
- */
-
 /** mtcute's media.type → the cached message_type */
 export const MESSAGE_TYPE_BY_MEDIA_TYPE: Record<string, string> = {
   photo: "photo",

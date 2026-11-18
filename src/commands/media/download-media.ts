@@ -1,10 +1,3 @@
-/**
- * The core of `tg media download`: cache-first, so a file already in the
- * account's media cache needs no network and no credentials. Otherwise the
- * message is fetched again (a fresh file reference, its protection checked
- * online) and the file downloaded to a partial download that a later run
- * resumes, then renamed into the cache.
- */
 import type { Database } from "bun:sqlite";
 import { open, rename, rm, stat } from "node:fs/promises";
 import { basename } from "node:path";
@@ -128,10 +121,8 @@ export interface DownloadResult {
   thumb: { type: string; width: number; height: number } | null;
 }
 
-/** What a run downloads: the original file, or its preview with --thumb */
 interface DownloadTarget {
   paths: MediaCachePaths;
-  /** Bytes the complete file has, when Telegram gives it */
   expectedSize: number | null;
   fileName: string;
   mimeType: string | null;
@@ -261,11 +252,6 @@ function lockTimeout(err: DownloadLockTimeoutError): MediaError {
   );
 }
 
-/**
- * The file from the cache alone: the cached message, its protection as
- * the cache knows it, and the complete file. Null when the message or the
- * file isn't cached; NO_MEDIA or CONTENT_PROTECTED as the cache tells.
- */
 function readFromCache(
   deps: DownloadDeps,
   chat: HistoryChat,
@@ -302,7 +288,6 @@ function readFromCache(
   });
 }
 
-/** mtcute's location of the file (or preview) in the fresh message */
 function fileLocation(message: FetchedRawMessage, thumb: MediaThumb | null): FileDownloadLocation {
   const media = attachmentMedia(message);
   if (!media) throw new Error("The message has no file");
@@ -339,13 +324,11 @@ const NETWORK_ERROR_CODES = new Set([
   "EAI_AGAIN",
 ]);
 
-/** Telegram wants a fresh file reference: fetching the message again gives one */
 function isFileReferenceError(err: unknown): boolean {
   if (tl.RpcError.is(err)) return err.text.startsWith("FILE_REFERENCE_");
   return err instanceof MtUnsupportedError && /file ref/i.test(err.message);
 }
 
-/** Seconds of a 420 error mtcute gives as `seconds` or Telegram as `_N` */
 function floodWaitSeconds(err: tl.RpcError): number | null {
   const seconds = (err as { seconds?: unknown }).seconds;
   if (typeof seconds === "number" && seconds > 0) return seconds;
@@ -353,7 +336,6 @@ function floodWaitSeconds(err: tl.RpcError): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** A flood wait during the transfer: the next run resumes the partial file */
 function rateLimited(method: string, waitSeconds: number): MediaError {
   const { message, details, suggestion } = describeRateLimit(method, waitSeconds);
   return new MediaError(
@@ -372,11 +354,6 @@ async function sizeOf(path: string): Promise<number> {
   }
 }
 
-/**
- * The documented error for a failed transfer: rate limits (recorded for
- * the account), a stall, a CDN file, Telegram's refusal or a lost
- * connection. Anything else is returned as it is.
- */
 async function transferError(
   err: unknown,
   target: DownloadTarget,
@@ -395,7 +372,6 @@ async function transferError(
   if (tl.RpcError.is(err) && err.code === tl.RpcError.FLOOD) {
     const seconds = floodWaitSeconds(err);
     if (seconds !== null) {
-      // FLOOD_PREMIUM_WAIT and other waits the rate-limit wrapper can't read
       rateLimits().setFloodWait(GET_FILE, seconds);
       return rateLimited(GET_FILE, seconds);
     }
@@ -457,12 +433,6 @@ interface StreamOptions {
   stallTimeoutMs: number;
 }
 
-/**
- * Download into the partial file, resuming from the last whole part it
- * holds, and rename it into the cache once it is complete. Returns the
- * offset it resumed from. The partial download stays when the transfer
- * fails or is interrupted, unless it can't be resumed.
- */
 async function streamToCache({
   client,
   location,
@@ -476,7 +446,6 @@ async function streamToCache({
   if (expectedSize !== null && have > expectedSize) have = 0;
   const offset = have - (have % PART_BYTES);
 
-  // Bun has no append API: Bun.file().writer() writes from the start
   const handle = await open(part, "a", 0o600);
   let size: number;
   try {
@@ -485,7 +454,6 @@ async function streamToCache({
     const chunks = download(transferClient(client), location, {
       offset,
       partSize: PART_SIZE_KB,
-      // An explicit size wins over the location's: a preview's own size
       fileSize: expectedSize ?? undefined,
       stallTimeout: stallTimeoutMs,
       abortSignal: deps.signal,
@@ -496,7 +464,6 @@ async function streamToCache({
         await writeAll(handle, chunk);
       }
     } catch (err) {
-      // Keep what arrived for the next run
       await handle.sync().catch(() => undefined);
       throw err;
     }
@@ -519,11 +486,6 @@ async function streamToCache({
   return offset > 0 ? offset : null;
 }
 
-/**
- * The file through Telegram: fetch the message again, refuse protected
- * content, then serve the cached file or download it under the folder's
- * lock. A file reference Telegram rejects is refreshed once.
- */
 async function downloadOnline(
   deps: DownloadDeps,
   chat: HistoryChat,
@@ -549,7 +511,6 @@ async function downloadOnline(
     if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
 
     const verdict = await checkOnlineProtection(client, chat, message, chats, deps.signal);
-    // A negative answer too: protection turned off clears the block
     if (verdict.chat) protection.record(chatId, verdict.chat, now());
     if (verdict.message.protected) {
       throw contentProtected(chatId, messageId, verdict.message.reason);
@@ -558,7 +519,6 @@ async function downloadOnline(
       throw contentProtected(chatId, messageId, verdict.chat.reason);
     }
     if (!verdict.chat) {
-      // Telegram sent no chat object: the protection last known holds
       const known = knownChatProtection(
         deps.history.chatsCache.getById(String(chatId)),
         protection.get(chatId),
@@ -587,7 +547,6 @@ async function downloadOnline(
       throw err instanceof DownloadLockTimeoutError ? lockTimeout(err) : err;
     });
     try {
-      // Another process may have finished it meanwhile
       const finished = servedFromCache();
       if (finished) return finished;
 
@@ -638,7 +597,6 @@ export async function downloadMedia(
   try {
     return await downloadOnline(deps, chat, request);
   } catch (err) {
-    // Stopped before the transfer: fetching the message or waiting for the lock
     if (deps.signal?.aborted && !(err instanceof DownloadInterruptedError)) {
       throw new DownloadInterruptedError(null, null);
     }

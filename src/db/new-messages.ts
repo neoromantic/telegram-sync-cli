@@ -1,9 +1,3 @@
-/**
- * The messages stored in an account's cache after a start point, for
- * `tg messages wait` and `watch`. Reads only the cache: the daemon (or any
- * other tg) writes it, and a poll finds new rows by their rowid, which grows
- * with every row inserted (an upsert of a cached message keeps its rowid).
- */
 import type { Database } from "bun:sqlite";
 
 import { MESSAGE_ROW_COLUMNS, MESSAGE_ROW_JOINS, type MessageSearchRow } from "./messages-search";
@@ -74,10 +68,7 @@ export function createNewMessagesFeed(
     ORDER BY m.message_id
   `);
 
-  // Read first: a commit after it makes the first poll look
   let lastVersion = dataVersion.get()?.data_version;
-  // One read transaction, so the cached messages and the start point come
-  // from the same snapshot and no row is both
   const { startRowid, initial } = db.transaction(() => ({
     startRowid: maxRowid.get()?.max ?? 0,
     initial:
@@ -87,7 +78,6 @@ export function createNewMessagesFeed(
   }))();
 
   let lastRowid = startRowid;
-  /** The newest message ID of each chat seen so far */
   const newest = new Map<number, number>();
   const newestOf = (chat: number) => {
     let id = newest.get(chat);
@@ -102,7 +92,6 @@ export function createNewMessagesFeed(
   return {
     initial,
     poll() {
-      // data_version changes only when another connection commits
       const version = dataVersion.get()?.data_version;
       if (version === lastVersion) return [];
       lastVersion = version;

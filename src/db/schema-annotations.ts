@@ -1,11 +1,3 @@
-/**
- * Schema annotation types and registry
- * Provides metadata about database tables and columns for:
- * - CLI help output
- * - Documentation generation
- * - AI/LLM context
- */
-
 /** Metadata for a database column */
 export interface ColumnAnnotation {
   /** Human-readable description */
@@ -38,14 +30,14 @@ export interface TableAnnotation {
 
 /** Semantic type hints for special handling */
 export type SemanticType =
-  | "timestamp" // Unix timestamp (milliseconds)
-  | "timestamp_sec" // Unix timestamp (seconds)
-  | "json" // JSON-encoded string
-  | "phone" // Phone number with country code
-  | "username" // Telegram @username (without @)
-  | "bigint_string" // BigInt stored as string
-  | "boolean_int" // Boolean stored as INTEGER (0/1)
-  | "enum"; // Enum value (use enumValues)
+  | "timestamp"
+  | "timestamp_sec"
+  | "json"
+  | "phone"
+  | "username"
+  | "bigint_string"
+  | "boolean_int"
+  | "enum";
 
 /** Complete schema registry */
 export interface SchemaRegistry {
@@ -54,10 +46,6 @@ export interface SchemaRegistry {
   /** Table annotations keyed by table name */
   tables: Record<string, TableAnnotation>;
 }
-
-// =============================================================================
-// Attachments (#22): the file of a cached message, one row per message
-// =============================================================================
 
 const MESSAGE_ATTACHMENTS_ANNOTATION: TableAnnotation = {
   description:
@@ -119,10 +107,6 @@ const MESSAGE_ATTACHMENTS_ANNOTATION: TableAnnotation = {
   },
 };
 
-// =============================================================================
-// Content protection (#22): the last online check of a chat's protection
-// =============================================================================
-
 const CHAT_CONTENT_PROTECTION_ANNOTATION: TableAnnotation = {
   description:
     "What the last online check of tg media download found about a chat's content protection. A protected chat's cached files are refused offline too, until an online check (--fresh) finds the protection off. Written only by tg media download.",
@@ -151,10 +135,6 @@ const CHAT_CONTENT_PROTECTION_ANNOTATION: TableAnnotation = {
     },
   },
 };
-
-// =============================================================================
-// Background migrations (#89): rewrites of every row, done in batches
-// =============================================================================
 
 const CACHE_MIGRATIONS_ANNOTATION: TableAnnotation = {
   description:
@@ -209,16 +189,9 @@ const CACHE_MIGRATIONS_ANNOTATION: TableAnnotation = {
   },
 };
 
-// =============================================================================
-// Schema Registry
-// =============================================================================
-
 export const SCHEMA_REGISTRY: SchemaRegistry = {
   version: 5,
   tables: {
-    // -------------------------------------------------------------------------
-    // Users Cache Table
-    // -------------------------------------------------------------------------
     users_cache: {
       description:
         "Cached Telegram user profiles. Includes contacts, chat participants, and any user encountered.",
@@ -301,9 +274,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Chats Cache Table
-    // -------------------------------------------------------------------------
     chats_cache: {
       description:
         "Cached Telegram chats including private chats, groups, supergroups, and channels.",
@@ -399,9 +369,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Messages Cache Table
-    // -------------------------------------------------------------------------
     messages_cache: {
       description:
         "Cached messages from synchronized chats. Messages are eternal (never considered stale).",
@@ -540,9 +507,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     chat_content_protection: CHAT_CONTENT_PROTECTION_ANNOTATION,
     cache_migrations: CACHE_MIGRATIONS_ANNOTATION,
 
-    // -------------------------------------------------------------------------
-    // History Ranges Table
-    // -------------------------------------------------------------------------
     history_ranges: {
       description:
         "Message ID ranges of a chat that messages_cache holds without a gap. Every cached getHistory page (daemon or CLI) adds the range it covers; touching ranges merge. tg messages list and get read from the cache only inside a range.",
@@ -567,9 +531,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Message Search Index (FTS5)
-    // -------------------------------------------------------------------------
     message_search: {
       description:
         "Full-text search index for messages_cache (FTS5 virtual table). On SQLite 3.43+ it is contentless: its columns read as NULL. Query the view message_search_text for matches with their text. Writes never merge its segments (FTS5 option automerge 0): the daemon and tg db migrate merge them in short batches.",
@@ -625,9 +586,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Message Search View
-    // -------------------------------------------------------------------------
     message_search_text: {
       description:
         "View: message_search joined with messages_cache, the chat and the sender, so a full-text match comes with its text. SELECT message_id, chat_title, text FROM message_search_text WHERE message_search_text MATCH 'deploy' ORDER BY rank. It stores nothing; snippet() and highlight() don't work on it (tg messages search --snippet does).",
@@ -718,9 +676,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Search Metadata
-    // -------------------------------------------------------------------------
     search_meta: {
       description: "Metadata for search index versioning and rebuilds.",
       primaryKey: "key",
@@ -740,9 +695,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Sync State Table
-    // -------------------------------------------------------------------------
     sync_state: {
       description:
         "Global sync state for entity types (contacts, dialogs). Per-chat state is in chat_sync_state.",
@@ -782,9 +734,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Chat Sync State Table
-    // -------------------------------------------------------------------------
     chat_sync_state: {
       description:
         "Tracks message synchronization progress per chat with dual cursors for bidirectional sync.",
@@ -986,9 +935,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Sync Jobs Table
-    // -------------------------------------------------------------------------
     sync_jobs: {
       description:
         "Job queue for background message synchronization. Jobs run in three lanes that take turns (catch-up, first pages, history), by priority inside a lane; sender fetches run only when those lanes are empty.",
@@ -1078,9 +1024,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Rate Limits Table
-    // -------------------------------------------------------------------------
     rate_limits: {
       description: "Tracks Telegram API rate limiting to prevent FLOOD_WAIT errors.",
       primaryKey: ["method", "window_start"],
@@ -1114,9 +1057,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // API Activity Table
-    // -------------------------------------------------------------------------
     api_activity: {
       description:
         "Audit log of Telegram API calls: every CLI call and every request of the daemon. tg status counts the last 60 seconds from it.",
@@ -1164,9 +1104,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Daemon Status Table
-    // -------------------------------------------------------------------------
     daemon_status: {
       description:
         "Key-value store for the daemon's state for this account (running, connection, progress).",
@@ -1189,9 +1126,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Cache Metadata Table
-    // -------------------------------------------------------------------------
     cache_meta: {
       description:
         "Which account this cache file belongs to. Each account has its own file, accounts/<id>/cache.db; a file stamped for another account is not opened.",
@@ -1214,10 +1148,6 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     },
   },
 };
-
-// =============================================================================
-// Utility Functions
-// =============================================================================
 
 /**
  * Get annotation for a specific table

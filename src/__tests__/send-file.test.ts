@@ -1,6 +1,3 @@
-/**
- * Tests for sending one file with `tg send --file` (src/commands/send/send-file.ts)
- */
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,7 +30,6 @@ interface UploadCall {
   bytes: Uint8Array;
 }
 
-/** An upload that reads the stream it gets and makes one part call */
 function fakeUpload() {
   const calls: UploadCall[] = [];
   const upload = (async (client: TelegramClient, params: UploadParams) => {
@@ -65,7 +61,6 @@ function fakeUpload() {
   return { upload, calls };
 }
 
-/** A sendMedia answer for a made-up message (helpers type it loosely) */
 function sentUpdates(made: { id: number }): tl.TypeUpdates {
   const message = made as unknown as tl.RawMessage;
   return {
@@ -81,9 +76,7 @@ function sentUpdates(made: { id: number }): tl.TypeUpdates {
   };
 }
 
-/** A client whose call() answers messages.sendMedia with `response` */
 function fakeClient(response: tl.TypeUpdates) {
-  // Every prepare and call, in order
   const events: string[] = [];
   const call = mock(async (request: { _: string }, _options?: unknown) => {
     events.push(request._);
@@ -188,7 +181,6 @@ describe("sendFile", () => {
       mimeType: "image/png",
       size: 2_000,
     });
-    // The upload reads the file as a stream and names it by its base name
     expect(calls).toHaveLength(1);
     expect(calls[0]?.bytes).toEqual(fakeBytes(2_000, 5));
     expect(calls[0]?.params).toMatchObject({
@@ -251,7 +243,6 @@ describe("sendFile", () => {
 
     expect(calls[0]?.client).not.toBe(client);
     expect(Object.getPrototypeOf(calls[0]?.client)).toBe(client);
-    // The part reached our client, which the rate-limit wrapper wraps
     const part = call.mock.calls.find(([request]) => request._ === "upload.saveFilePart");
     expect(part?.[1]).toEqual({ floodSleepThreshold: MEDIA_FLOOD_SLEEP_MS });
   });

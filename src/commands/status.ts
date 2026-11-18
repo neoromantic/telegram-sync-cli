@@ -1,10 +1,3 @@
-/**
- * Status command - comprehensive system status display
- *
- * Shows daemon status, sync jobs, rate limits, and account info
- * with colorful, easy-to-read output.
- */
-
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { defineCommand } from "citty";
@@ -47,37 +40,28 @@ import { error, getOutputFormat, success } from "../utils/output";
 import { VERSION } from "../version";
 import { printPrettyStatus } from "./status/pretty";
 
-/**
- * Get process memory usage (if available)
- */
 async function getProcessMemory(pid: number): Promise<number | null> {
   try {
-    // Try to read /proc on Linux
     const procFile = Bun.file(`/proc/${pid}/status`);
     if (await procFile.exists()) {
       const content = await procFile.text();
       const match = content.match(/VmRSS:\s+(\d+)\s+kB/);
       if (match?.[1]) {
-        return parseInt(match[1], 10) * 1024; // Convert to bytes
+        return parseInt(match[1], 10) * 1024;
       }
     }
-  } catch {
-    // /proc not available (macOS, etc.)
-  }
+  } catch {}
 
   try {
-    // Try ps command as fallback
     const proc = Bun.spawn(["ps", "-o", "rss=", "-p", pid.toString()], {
       stdout: "pipe",
     });
     const output = await new Response(proc.stdout).text();
     const rss = parseInt(output.trim(), 10);
     if (!Number.isNaN(rss)) {
-      return rss * 1024; // ps reports in KB
+      return rss * 1024;
     }
-  } catch {
-    // ps failed
-  }
+  } catch {}
 
   return null;
 }
@@ -114,7 +98,6 @@ export const statusCommand = defineCommand({
     const pidFile = createPidFile(pidPath);
     const accountId = resolveAccountSelector(args.account);
 
-    // Collect all status data
     let statusData: Awaited<ReturnType<typeof collectStatus>>;
     try {
       statusData = await collectStatus(pidFile, {
@@ -122,14 +105,12 @@ export const statusCommand = defineCommand({
         sizes: args.sizes,
       });
     } catch (err) {
-      // A bad TELEGRAM_SYNC_CLI_ALLOWED_CHATS
       if (err instanceof ConfigError) {
         error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues });
       }
       throw err;
     }
 
-    // Determine output format
     const format = getOutputFormat();
     const useJson = args.json || format === "json";
 
@@ -138,7 +119,6 @@ export const statusCommand = defineCommand({
       return;
     }
 
-    // Pretty print with colors
     printPrettyStatus(statusData);
   },
 });
@@ -293,7 +273,6 @@ function count(db: Database, sql: string): number {
   return (db.query(sql).get() as { count: number } | null)?.count ?? 0;
 }
 
-/** An account whose cache can't be read: zeroed figures and the error */
 function failedAccountSnapshot(accountId: number, err: unknown): AccountStatusSnapshot {
   return {
     ...emptyAccountSnapshot(accountId),
@@ -344,7 +323,6 @@ function readOpenAccountStatus(
   snapshot.daemon = createDaemonStatusService(cacheDb).getDaemonInfo();
   snapshot.migrations = readMigrationStatus(cacheDb);
 
-  // Sync jobs
   const syncService = createSyncJobsService(cacheDb);
   const counts = syncService.countJobs();
   snapshot.sync.pending_jobs = counts.pending;
@@ -366,12 +344,10 @@ function readOpenAccountStatus(
     next_run_at: job.next_run_at > nowMs ? new Date(job.next_run_at).toISOString() : null,
     sync_mode: chatSyncState.get(job.chat_id)?.sync_mode ?? null,
   });
-  // Running jobs, the next pending ones and the newest failed ones
   snapshot.sync.running = syncService.getRunningJobs().map(toStatusJob);
   snapshot.sync.pending = syncService.getPendingJobs().slice(0, 5).map(toStatusJob);
   snapshot.sync.failed = syncService.getFailedJobs(5).map(toStatusJob);
 
-  // Rate limits
   const rlStatus = createRateLimitsService(cacheDb).getStatus();
   const now = Math.floor(Date.now() / 1000);
   snapshot.rate_limits = {
@@ -386,7 +362,6 @@ function readOpenAccountStatus(
     })),
   };
 
-  // Progress
   const senderLookups = createSenderLookups(cacheDb);
   const sampleChatsRows = cacheDb
     .query(
@@ -449,7 +424,6 @@ function readOpenAccountStatus(
 function withAccountId(history: HistoryProgress, accountId: number): StatusHistoryProgress {
   return {
     ...history,
-    // Filled in once the live daemon is known
     pacing: null,
     largest_pending: history.largest_pending.map((chat) => ({
       account_id: accountId,
@@ -458,10 +432,6 @@ function withAccountId(history: HistoryProgress, accountId: number): StatusHisto
   };
 }
 
-/**
- * The pacing of several accounts: each runs at its own pace, so the
- * targets and FLOOD_WAITs add up, and it is `history` if any account is
- */
 function sumPacing(total: StatusPacing | null, pacing: StatusPacing | null): StatusPacing | null {
   if (!pacing) return total;
   if (!total) return { ...pacing };
@@ -473,11 +443,6 @@ function sumPacing(total: StatusPacing | null, pacing: StatusPacing | null): Sta
   };
 }
 
-/**
- * The history progress of several accounts. Their backfills run side by
- * side, so the time left is the longest one's, and unknown while an
- * account with messages left has no measured pace.
- */
 function sumHistoryProgress(histories: StatusHistoryProgress[]): StatusHistoryProgress {
   const total: StatusHistoryProgress = {
     ...emptyHistoryProgress(),
@@ -518,7 +483,6 @@ function sumHistoryProgress(histories: StatusHistoryProgress[]): StatusHistoryPr
   return total;
 }
 
-/** An account's media cache size; null when its folder can't be read */
 function readAccountMediaUsage(dataDir: string, accountId: number): MediaUsage | null {
   try {
     return readMediaUsage(accountMediaPath(dataDir, accountId));
@@ -559,9 +523,7 @@ export function collectStorageStatus(dataDir: string) {
   let legacyCaches: Array<{ path: string; size_bytes: number }> = [];
   try {
     legacyCaches = listSharedCaches(dataDir);
-  } catch {
-    // An unreadable data dir shows no files
-  }
+  } catch {}
 
   return { legacy_caches: legacyCaches, migration };
 }
@@ -600,7 +562,6 @@ export function liveConnection(
   };
 }
 
-/** The live daemon's pacing of an account, or null without one */
 function livePacing(snapshot: AccountStatusSnapshot, livePid: number | null): StatusPacing | null {
   const pacing = snapshot.daemon?.pacing;
   if (!pacing || !liveConnection(snapshot, livePid)) return null;
@@ -611,12 +572,10 @@ function livePacing(snapshot: AccountStatusSnapshot, livePid: number | null): St
   };
 }
 
-/** History progress without the list of chats */
 function historySummary({ largest_pending: _list, ...summary }: StatusHistoryProgress) {
   return summary;
 }
 
-/** One account's own figures, for its entry under accounts */
 function accountBreakdown(snapshot: AccountStatusSnapshot, livePid: number | null) {
   return {
     cache: snapshot.cache,
@@ -668,7 +627,6 @@ export async function collectStatus(
   const isRunning = pid !== null && pidFile.isRunning();
   const livePid = isRunning ? pid : null;
 
-  // Moves a shared cache first, so the accounts' files below are current
   const storage = collectStorageStatus(dataDir);
   const access = await loadAccessSettings({ dataDir });
 
@@ -676,8 +634,6 @@ export async function collectStatus(
   const activeAccount = accountsDb.getActive();
   const inScope = (accountId: number) =>
     options.accountId === undefined || accountId === options.accountId;
-  // dbstat reads the whole file and the media walk stats every file: only
-  // for the accounts shown
   const sizesOf = (accountId: number) => (options.sizes ?? false) && inScope(accountId);
   const allSnapshots = allAccounts.map((account) => {
     const snapshot = readAccountStatus(account.id, {
@@ -695,21 +651,15 @@ export async function collectStatus(
     snapshot.progress.history.pacing = livePacing(snapshot, livePid);
   }
 
-  // Daemon: only the rows the live daemon wrote count
   const summary = summarizeDaemonStatus(
     allSnapshots.flatMap((snapshot) => (snapshot.daemon ? [snapshot.daemon] : [])),
     livePid,
   );
-  // A daemon that holds the PID file but hasn't written its rows yet (its
-  // first open after an upgrade can wait for the shared-cache move, and an
-  // older tg writes none to accounts/<id>/cache.db) compares nothing
   const daemonWroteRows = isRunning && summary.totalAccounts > 0;
   const daemonStatus: {
     status: "running" | "stopped";
     pid: number | null;
-    /** The version the running daemon recorded at start */
     version: string | null;
-    /** A running daemon of another version, or one that recorded none */
     version_mismatch: boolean;
     uptime_seconds: number | null;
     memory_bytes: number | null;
@@ -736,9 +686,6 @@ export async function collectStatus(
     daemonStatus.memory_bytes = await getProcessMemory(pid);
   }
 
-  // Sync status. pending_jobs includes the jobs waiting for a retry;
-  // retrying_jobs counts those that failed at least once. Jobs are listed
-  // by account: running ones, the next pending ones, the newest failed ones.
   const sum = (pick: (snapshot: AccountStatusSnapshot) => number) =>
     snapshots.reduce((total, snapshot) => total + pick(snapshot), 0);
   const syncStatus = {
@@ -767,7 +714,6 @@ export async function collectStatus(
     chats_cached: sum((s) => s.progress.chats_cached),
     messages_tracked: sum((s) => s.progress.messages_tracked),
     messages_cached: sum((s) => s.progress.messages_cached),
-    // The overall top 5, ordered like each account's
     sample_chats: snapshots
       .flatMap((s) => s.progress.sample_chats)
       .sort(
@@ -802,8 +748,6 @@ export async function collectStatus(
     })),
   };
 
-  // Unfinished background migrations, by account; finished ones are under
-  // each account
   const migrationsStatus = snapshots.flatMap((s) =>
     s.migrations
       .filter((migration) => migration.state !== "done")
@@ -811,7 +755,6 @@ export async function collectStatus(
   );
 
   return {
-    /** The account the figures cover; null for every account */
     account_id: options.accountId ?? null,
     daemon: daemonStatus,
     sync: syncStatus,
@@ -821,19 +764,13 @@ export async function collectStatus(
     accounts: accountsStatus,
     storage: {
       ...storage,
-      /** The files and WALs of the caches in scope */
       cache_bytes: sum((s) =>
         s.cache.size ? s.cache.size.file_bytes + s.cache.size.wal_bytes : 0,
       ),
-      /**
-       * The media caches in scope, partial downloads included; only with
-       * --sizes. Counted apart from the caches: no shared limit.
-       */
       media_bytes: options.sizes
         ? sum((s) => (s.media ? s.media.bytes + s.media.partial_bytes : 0))
         : null,
     },
-    /** Read-only mode and the chat allowlist (null: every chat), as the commands apply them */
     access: {
       read_only: access.readOnly,
       allowed_chats: access.allowedChats,

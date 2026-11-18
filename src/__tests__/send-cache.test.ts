@@ -1,6 +1,3 @@
-/**
- * Tests for caching messages sent with `tg send` (src/commands/send/sent-message-cache.ts)
- */
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { tl } from "@mtcute/bun";
@@ -287,7 +284,6 @@ describe("buildSentMessageInputs", () => {
     });
 
     it("maps a Saved Messages updateNewMessage to the own user ID", () => {
-      // Telegram returns Saved Messages with out=false and no fromId
       const message = rawMessage({
         id: 404,
         out: false,
@@ -300,7 +296,6 @@ describe("buildSentMessageInputs", () => {
         selfRequest,
         null,
       );
-      // Same row the sync worker and a live update store for this message
       expect(input).toMatchObject({
         chat_id: SELF_ID,
         message_id: 404,
@@ -397,7 +392,6 @@ describe("cacheSentMessage", () => {
       chat_username: "exampleteam",
       chat_type: "supergroup",
     });
-    // The search index has the chat title too
     expect(createMessagesSearch(db).search("Example Team")).toHaveLength(1);
     assertPeerIdInvariants(db);
   });

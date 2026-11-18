@@ -1,6 +1,3 @@
-/**
- * Tests for chat history reads over messages_cache (src/db/messages-history.ts)
- */
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 
@@ -50,8 +47,6 @@ describe("MessagesHistory", () => {
       raw_json: "{}",
     });
 
-    // Chat CHAT_ID holds ids 1-10; 9 is deleted. Dates run against id order,
-    // so the tests prove that history pages by id, not date.
     const messagesCache = createMessagesCache(db);
     for (let id = 1; id <= 10; id++) {
       messagesCache.upsert({

@@ -1,7 +1,3 @@
-/**
- * Background migrations (#89) and the first ones: raw_json re-encode (#108,
- * #95), attachment backfill (#22) and message_type. Made-up data only.
- */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -43,7 +39,6 @@ function oldCache(): Database {
   return db;
 }
 
-/** Every row the migrations touch, to compare end states */
 function snapshot(db: Database) {
   return {
     messages: db
@@ -57,7 +52,6 @@ function snapshot(db: Database) {
   };
 }
 
-/** The search index's own pages: equal when nothing re-indexed */
 function searchIndexPages(db: Database) {
   return db.query("SELECT id, block FROM message_search_data ORDER BY id").all();
 }
@@ -98,15 +92,12 @@ describe("background migrations of a 0.5.0 cache", () => {
       }[]
     ).map((row) => extractAttachment(row.raw_json));
 
-    // raw_json and message_type aren't columns the search index reads
     const [reencode] = BACKGROUND_MIGRATIONS;
     while (!runMigrationBatch(db, reencode!, SMALL).finished) {}
     expect(searchIndexPages(db)).toEqual(indexBefore);
 
     const rows = MESSAGES + (await migrateAll(db));
 
-    // The messages four times: the re-encode, the refetch check (#130), the
-    // re-index of names (#93) and the rich text check
     expect(rows).toBe(4 * MESSAGES + oldFormUsers().length + oldFormChats().length);
     const after = snapshot(db);
     for (const [i, message] of originals.entries()) {
@@ -115,20 +106,17 @@ describe("background migrations of a 0.5.0 cache", () => {
         raw_json: string;
         updated_at: number;
       };
-      // The same text toRawJson writes for the message today (#108, #95)
       expect(row.raw_json).toBe(toRawJson(message));
       expect(row.raw_json).not.toContain("fileReference");
       expect(row.raw_json).not.toContain('"unsigned"');
       expect(row.message_type).toBe(resolveRawMessageType(message).messageType);
       expect(extractAttachment(row.raw_json)).toEqual(attachmentsBefore[i]!);
     }
-    // A video stored as document by 0.5.0 is a video now
     expect(after.messages[1]).toMatchObject({ message_type: "video" });
     expect(JSON.parse((after.messages[1] as { raw_json: string }).raw_json)).toMatchObject({
       groupedId: "-8000000000000000001",
     });
 
-    // Every media message got its attachment row
     const withFile = originals.filter((m) => extractAttachment(m) !== null);
     expect(after.attachments).toHaveLength(withFile.length);
     expect(after.attachments[0]).toMatchObject({
@@ -141,11 +129,9 @@ describe("background migrations of a 0.5.0 cache", () => {
       expect((after.users[i] as { raw_json: string }).raw_json).toBe(toRawJson(user));
     }
     for (const [i, chat] of oldFormChats().entries()) {
-      // chat_id sorts as text: -1000000003002 after -1000000003001
       expect((after.chats[i] as { raw_json: string }).raw_json).toBe(toRawJson(chat));
     }
 
-    // The rewrite isn't a change of the message
     expect(after.messages.map((m) => (m as { updated_at: number }).updated_at)).toEqual(
       updatedBefore,
     );
@@ -192,7 +178,6 @@ describe("background migrations of a 0.5.0 cache", () => {
 });
 
 describe("message_type of older rows", () => {
-  /** A message 0.5.0 cached with this media, message_type and raw_json */
   function rowsAfterMigration(rows: Array<{ id: number; type: string; raw: string }>) {
     const db = new Database(":memory:");
     seedOldFormCache(db, { messages: 0 });
@@ -252,7 +237,6 @@ describe("message_type of older rows", () => {
       expect(row.message_type).toBe(resolveRawMessageType(JSON.parse(row.raw_json)).messageType);
       expect(row.message_type).toBe("text");
     }
-    // Rows that hold no TL message keep their type and their raw_json
     expect(rows.slice(3)).toEqual([
       { message_id: 4, message_type: "photo", raw_json: "{}" },
       { message_id: 5, message_type: "photo", raw_json: "{broken" },
@@ -381,7 +365,6 @@ describe("stops and resumes", () => {
     const afterFirst = snapshot(db);
     expect(() => runMigrationBatch(db, failing, SMALL)).toThrow("disk on fire");
 
-    // The second batch's three rewritten rows rolled back with its cursor
     expect(snapshot(db)).toEqual(afterFirst);
     expect(statusByName(db).messages_raw_json_v2).toMatchObject({
       state: "running",
@@ -436,7 +419,6 @@ describe("batch limits", () => {
     const result = runMigrationBatch(db, BACKGROUND_MIGRATIONS[0]!, {
       maxRows: 500,
       maxMs: 30,
-      // Each reading of the clock is 5 ms later: one per row
       now: () => {
         clock += 5;
         return clock;
@@ -471,7 +453,6 @@ describe("a new cache", () => {
     seedOldFormCache(seed, { messages: 3 });
     seed.close();
 
-    // Another process holds the write lock; an open that wrote would fail
     const holder = new Database(path);
     holder.run("BEGIN IMMEDIATE");
     try {
@@ -491,18 +472,8 @@ describe("a new cache", () => {
   });
 });
 
-/** Each batch of the migration in the child holds the write lock this long */
 const SLOW_BATCH_MS = 100;
 
-/**
- * Runs every pending migration of MIGRATE_PATH as `tg db migrate` does, with
- * the daemon running or not (DAEMON_RUNNING), in batches of 10 rows. A
- * messages batch sleeps SLOW_BATCH_MS inside its transaction, so the
- * migration holds the lock longer than the writer's busy_timeout. Without
- * pauses between batches the writer is refused with the SQLite Bun bundles
- * on Linux; macOS's system SQLite lets it in between batches anyway. Prints
- * the longest batch, from its start to its commit, and the whole run.
- */
 const MIGRATE_SCRIPT = `
   import { Database } from 'bun:sqlite'
   const { foregroundPacing, runPendingMigrations } = await import(process.env.MIGRATE_MODULE)
@@ -538,11 +509,6 @@ const MIGRATE_SCRIPT = `
   console.log(JSON.stringify({ longestBatchMs, migrationMs }))
 `;
 
-/**
- * Seeds an old-form cache of `messages` messages, runs MIGRATE_SCRIPT on it
- * in a child process and, until it exits, writes a live message in a loop
- * from this one, which waits `busyTimeoutMs` for the lock.
- */
 async function writeNextToMigrate(
   dir: string,
   options: { daemonRunning: boolean; messages: number; busyTimeoutMs: number },
@@ -600,7 +566,6 @@ async function writeNextToMigrate(
     longestBatchMs: number;
     migrationMs: number;
   };
-  // The live message counts too when it came before the start
   const status = statusByName(writer).messages_raw_json_v2!;
   writer.close();
   return { ...timing, refused, duringMigration, status };
@@ -618,39 +583,26 @@ describe("a writer in another process next to tg db migrate", () => {
   });
 
   it("is never refused: it gets in after the batch it ran into", async () => {
-    // 7 batches or more: 700 ms of the write lock. A daemon's write waits
-    // 5 s; this one gives up after 500 ms
     const result = await writeNextToMigrate(dir, {
       daemonRunning: true,
       messages: 70,
       busyTimeoutMs: 500,
     });
     expect(result.longestBatchMs).toBeGreaterThanOrEqual(SLOW_BATCH_MS);
-    // The migration held the lock for 700 ms or more, and no write gave up
-    // after 500 ms: each got in during a pause. Its wait is the rest of the
-    // batch it ran into and the busy handler's sleep over the batch's end,
-    // 50 to 100 ms by then; the margin covers a writer a busy machine keeps
-    // off the CPU for a whole pause.
     expect(result.refused).toBe(0);
     expect(result.duringMigration).toBeGreaterThan(0);
     expect(result.status.state).toBe("done");
     expect(result.status.done).toBe(result.status.total!);
     expect(result.status.done).toBeGreaterThanOrEqual(70);
-    // A child process that starts Bun and runs 7 paced batches: a slow CI
-    // runner needs more than the default 5 s
   }, 20_000);
 
   it("without the daemon, is never refused: it gets in within a second of work", async () => {
-    // 30 batches or more: 3 s of the write lock, longer than the writer's
-    // 2 s busy_timeout (a tg command's is 5 s)
     const result = await writeNextToMigrate(dir, {
       daemonRunning: false,
       messages: 300,
       busyTimeoutMs: 2_000,
     });
     expect(result.migrationMs).toBeGreaterThan(2_000);
-    // Its wait is the rest of a second of batches and the batch that passes
-    // it, 1.1 s at most; the margin is for a busy machine
     expect(result.refused).toBe(0);
     expect(result.duringMigration).toBeGreaterThan(0);
     expect(result.status.state).toBe("done");

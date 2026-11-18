@@ -29,7 +29,6 @@ function throwingClient(failure: () => Error = () => new Error("unexpected API c
   return { call, client: { call } as unknown as Pick<TelegramClient, "call"> };
 }
 
-/** What Telegram answers for a number no account uses */
 const phoneNotOccupied = () => new tl.RpcError(400, "PHONE_NOT_OCCUPIED");
 
 describe("resolvePeer", () => {
@@ -281,7 +280,6 @@ describe("resolvePeer with numeric IDs", () => {
     });
 
     it("takes a positive ID with DM sync state as that user before a cached group", async () => {
-      // User 4242's DM, seen only live: sync state, no users_cache row
       cacheChat("-4242", "group", "Book Club");
       createChatSyncStateService(db).upsert({
         chat_id: 4242,
@@ -301,7 +299,6 @@ describe("resolvePeer with numeric IDs", () => {
     });
 
     it("does not take a bare group row from an older binary for a user", async () => {
-      // A 0.2.0 daemon wrote it after this process migrated the cache
       chatsCache.upsert(legacyChatRow({ kind: "group", id: 4242, title: "Book Club" }));
       const { call, client } = throwingClient();
 
@@ -319,7 +316,6 @@ describe("resolvePeer with numeric IDs", () => {
       "takes a bare %s row %d from an older binary for that chat, with no phone lookup",
       async (kind, id, title) => {
         chatsCache.upsert(legacyChatRow({ kind, id, title }));
-        // 10+ digits also read as a phone number, which no account has
         const { call, client } = throwingClient(phoneNotOccupied);
 
         const peer = await resolve(String(id), client);

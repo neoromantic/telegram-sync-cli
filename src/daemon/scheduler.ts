@@ -1,9 +1,3 @@
-/**
- * Sync scheduler for managing background synchronization jobs
- * Queues the work that is due and hands out jobs in three lanes that take
- * turns: forward catch-up, first pages and history. A fourth lane, sender
- * fetches (#143), gets a slot only when the other three are empty.
- */
 import type { Database } from "bun:sqlite";
 import type { ChatSyncStateService } from "../db/chat-sync-state";
 import type { MessagesCache } from "../db/messages-cache";
@@ -75,14 +69,9 @@ export interface SyncSchedulerOptions {
  * example catch-up after a restart) can't starve the others.
  */
 export const SYNC_LANES = {
-  // A participation check is one search per group, at the lowest priority,
-  // so the chats' own catch-up goes first
   catchup: [SyncJobType.ForwardCatchup, SyncJobType.CheckGroupParticipation],
-  // A refetch (#130) is one small request per chat, at the lowest priority
   firstPage: [SyncJobType.InitialLoad, SyncJobType.RefetchMessages],
   history: [SyncJobType.BackwardHistory, SyncJobType.FullSync],
-  // Senders missing from the cache (#143): never in the cycle, only a slot
-  // the other lanes leave empty
   senders: [SyncJobType.FetchSenders],
 } as const satisfies Record<string, readonly SyncJobType[]>;
 
@@ -94,19 +83,13 @@ export type SyncLane = keyof typeof SYNC_LANES;
  */
 export const SYNC_SLOT_CYCLE: readonly SyncLane[] = ["catchup", "firstPage", "catchup", "history"];
 
-/** Who gets an empty lane's slot */
 const SYNC_LANE_FALLBACK: readonly SyncLane[] = ["catchup", "firstPage", "history", "senders"];
 
 /** How often the scheduler looks for senders missing from the cache */
 export const SENDER_SCAN_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Create sync scheduler
- */
 class SyncSchedulerImpl implements SyncScheduler {
-  /** Position in SYNC_SLOT_CYCLE; in memory, so it restarts with the daemon */
   private slot = 0;
-  /** When it last looked for missing senders; in memory, so a start looks */
   private sendersScannedAt: number | null = null;
   private readonly senderLookups;
   private readonly participation;
@@ -124,20 +107,12 @@ class SyncSchedulerImpl implements SyncScheduler {
     return this.options.chatSyncState;
   }
 
-  /**
-   * The chat's sync state, if it exists, sync is on and the chat takes new
-   * messages: a group only while the account takes part in it
-   */
   private enabledState(chatId: number): ChatSyncStateRow | null {
     const state = this.chatSyncState.get(chatId);
     if (!state?.sync_enabled) return null;
     return this.participation.captures(chatId) ? state : null;
   }
 
-  /**
-   * Delete the pending catch-up, first page and history jobs, retries
-   * included, of the groups the account no longer takes part in
-   */
   private dropJobsOfPausedGroups(): void {
     const chats = new Set(
       this.jobsService
@@ -152,11 +127,6 @@ class SyncSchedulerImpl implements SyncScheduler {
     }
   }
 
-  /**
-   * A job's priority inside its lane is its chat's tier: small chats before
-   * medium groups. A chat turned on by hand gets its first page ahead of
-   * everything, so the user sees it soon.
-   */
   private lanePriority(state: ChatSyncStateRow, jobType: SyncJobType): SyncPriority {
     if (jobType === SyncJobType.InitialLoad && state.sync_mode === "on") {
       return SyncPriority.Realtime;
@@ -182,10 +152,8 @@ class SyncSchedulerImpl implements SyncScheduler {
   queueBackwardHistory(chatId: number): void {
     const state = this.enabledState(chatId);
     if (!state || state.history_complete) return;
-    // Bots and deleted accounts get their first page only (#131)
     if (!isHistoryAllowed(state)) return;
 
-    // The first page sets both cursors, so it comes before any history.
     if (state.forward_cursor === null) {
       this.queueInitialLoad(chatId);
       return;
@@ -218,46 +186,26 @@ class SyncSchedulerImpl implements SyncScheduler {
   }
 
   async initializeForStartup(): Promise<void> {
-    // A crash doesn't count as an attempt.
     this.recoverCrashedJobs();
-    // A restart retries every failed job, and removes the failed rows older
-    // versions left: refreshQueues below queues their chats again.
     this.jobsService.deleteFailed();
-    // Catch-up is queued again below for the chats that are behind; older
-    // versions left one pending for every enabled chat.
     this.jobsService.deletePendingOfType(SyncJobType.ForwardCatchup);
     this.jobsService.deletePendingForInactiveChats();
     this.jobsService.alignPendingPriorities();
     this.refreshQueues();
   }
 
-  /**
-   * Queue the work that is due. Called on start, after a reconnect's dialog
-   * pass and every 30 loop ticks; a chat with nothing to do costs no call.
-   * A chat whose job of a type failed for good gets no new job of that type
-   * until the failed row is deleted.
-   */
   refreshQueues(): void {
-    // A dialog pass may have found that a chat is a bot or a deleted
-    // account, which gets no older history (#131): its pending history jobs
-    // go, its cached messages stay.
     this.jobsService.deletePendingHistoryOfFirstPageOnlyChats();
     this.dropJobsOfPausedGroups();
 
-    // Catch-up only for chats whose newest message is above the cursor or
-    // unknown. Live updates don't move the cursor or the top, so a chat
-    // that is caught up stays that way until a dialog pass sees more.
     for (const chat of this.chatSyncState.getCatchupDue()) {
       this.queueForwardCatchup(chat.chat_id);
     }
 
-    // Every enabled chat without a forward cursor gets its first page, even
-    // if live updates already cached some of its messages.
     for (const chat of this.chatSyncState.getInitialLoadDue()) {
       this.queueInitialLoad(chat.chat_id);
     }
 
-    // History for every enabled chat that had its first page, in any tier.
     for (const chat of this.chatSyncState.getHistoryDue()) {
       this.queueBackwardHistory(chat.chat_id);
     }
@@ -265,11 +213,6 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.queueSenderFetches();
   }
 
-  /**
-   * Senders missing from the cache (#143): listed on start and then once a
-   * day, then one job per chat that has some, in any mode. Their lane runs
-   * only when the other lanes are empty.
-   */
   private queueSenderFetches(): void {
     const now = Date.now();
     if (this.sendersScannedAt === null || now - this.sendersScannedAt >= SENDER_SCAN_INTERVAL_MS) {
@@ -288,16 +231,10 @@ class SyncSchedulerImpl implements SyncScheduler {
     }
   }
 
-  /** The lane's next job that is due; jobs waiting for a retry are skipped */
   private nextInLane(lane: SyncLane): SyncJobRow | null {
     return this.jobsService.getNextPendingOfTypes(SYNC_LANES[lane]);
   }
 
-  /**
-   * The next job: the oldest, highest-priority due job of the lane whose
-   * slot it is, or of the first lane with work if that lane has none due.
-   * Only looks; recordJobRun moves to the next slot.
-   */
   getNextJob(): SyncJobRow | null {
     const lane = SYNC_SLOT_CYCLE[this.slot % SYNC_SLOT_CYCLE.length]!;
     const job = this.nextInLane(lane);

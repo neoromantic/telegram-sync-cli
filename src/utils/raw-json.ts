@@ -1,13 +1,3 @@
-/**
- * The JSON every raw_json column stores:
- * - a byte array (Uint8Array, Buffer included) as a base64 string: plain
- *   JSON.stringify writes a Uint8Array as an object with a key per byte
- * - a bigint and a TL Long (mtcute's `long` objects, `{ low, high,
- *   unsigned }`) as a decimal string (#108)
- * - no `fileReference`: Telegram's file references expire, and a download
- *   fetches the message again for a fresh one (#95)
- * Everything else is written as JSON.stringify writes it.
- */
 import Long from "long";
 
 export function toRawJson(value: unknown): string {
@@ -16,8 +6,6 @@ export function toRawJson(value: unknown): string {
 
 function rawJsonReplacer(this: Record<string, unknown>, key: string, value: unknown): unknown {
   if (key === "fileReference") return undefined;
-  // JSON.stringify calls toJSON before the replacer, so a Buffer arrives as
-  // { type, data }: look at the holder's own value
   const original = this[key];
   if (original instanceof Uint8Array) {
     return original.toBase64();
@@ -33,12 +21,6 @@ function rawJsonReplacer(this: Record<string, unknown>, key: string, value: unkn
 
 type JsonObject = Record<string, unknown>;
 
-/**
- * A byte array as plain JSON.stringify writes it, which tg 0.5.0 and older
- * stored: keys "0".."n-1" in order, each an integer 0..255 (never -0), and
- * nothing else. An empty array (`{}`) can't be told from an empty object
- * and is kept; any other object is not a byte array.
- */
 function bytesOfByteObject(value: JsonObject): Uint8Array | null {
   const keys = Object.keys(value);
   if (keys.length === 0) return null;
@@ -60,7 +42,6 @@ function bytesOfByteObject(value: JsonObject): Uint8Array | null {
   return bytes;
 }
 
-/** A 32-bit word of a `long` object: an integer in [-2^31, 2^31 - 1] */
 function isInt32(value: unknown): value is number {
   return (
     typeof value === "number" &&
@@ -71,11 +52,6 @@ function isInt32(value: unknown): value is number {
   );
 }
 
-/**
- * A TL Long as JSON.stringify writes a `long` object: exactly `low`, `high`
- * and `unsigned`, the words int32 and `unsigned` a boolean. Signed 64-bit
- * unless `unsigned` is true. Any other object is not a Long and is kept.
- */
 function decimalOfLongObject(value: JsonObject): string | null {
   const keys = Object.keys(value);
   if (
@@ -90,11 +66,6 @@ function decimalOfLongObject(value: JsonObject): string | null {
   return (value.unsigned ? BigInt.asUintN(64, bits) : BigInt.asIntN(64, bits)).toString();
 }
 
-/**
- * Rewrite a parsed raw_json value in place into the form toRawJson writes:
- * byte objects to base64, Long objects to decimal strings, fileReference
- * fields dropped. Returns the new value and whether anything changed.
- */
 function reencodeValue(value: unknown): { value: unknown; changed: boolean } {
   if (Array.isArray(value)) {
     let changed = false;

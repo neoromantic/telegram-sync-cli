@@ -1,22 +1,15 @@
-/**
- * One peer ID format in the whole cache (#18): every table that holds a
- * chat holds its marked ID, the format mtcute reads.
- */
 import type { Database } from "bun:sqlite";
 import { expect } from "bun:test";
 import { parseMarkedPeerId } from "@mtcute/bun";
 
-/** What a chats_cache type may be as an mtcute peer type */
 const KINDS_BY_TYPE: Record<string, string[]> = {
   private: ["user"],
-  // 0.3.0 and older stored a community as 'group'
   group: ["chat", "channel"],
   supergroup: ["channel"],
   channel: ["channel"],
   community: ["channel"],
 };
 
-/** Tables whose chat_id is a marked peer ID, chat_sync_state aside */
 const CHAT_ID_TABLES = ["messages_cache", "sync_jobs", "history_ranges"];
 
 function peerType(id: number): string {
@@ -63,8 +56,6 @@ export function assertPeerIdInvariants(db: Database): void {
       }
     }
 
-    // A parsable positive ID is a user, so only the chat's type shows a
-    // bare group or channel ID
     const bare = db
       .query(`
         SELECT DISTINCT t.chat_id AS id,

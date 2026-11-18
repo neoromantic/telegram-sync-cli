@@ -1,15 +1,3 @@
-/**
- * Comprehensive tests for the send command
- *
- * Tests:
- * - Peer resolution by @username
- * - Peer resolution by phone number
- * - Peer resolution by numeric ID
- * - Cache lookups for peer resolution
- * - Message sending with options (--silent, --reply-to)
- * - Error handling (invalid peer, permission errors)
- */
-
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
@@ -35,9 +23,6 @@ import { fakeDialog } from "./helpers/fake-dialogs";
 import { assertPeer, expectLongEqual } from "./helpers/input-peer";
 import { cell, richTlMessage } from "./helpers/rich-message";
 
-// The send command reads the cache and the client through these modules.
-// Account 1 is active; account 2 has its own cache and client, so a test
-// can tell which account a command used.
 let commandCacheDb: Database;
 let secondCacheDb: Database;
 const commandCall = mock(async (_request: unknown): Promise<unknown> => {
@@ -46,7 +31,6 @@ const commandCall = mock(async (_request: unknown): Promise<unknown> => {
 const secondCall = mock(async (_request: unknown): Promise<unknown> => {
   throw new Error("Unexpected API call");
 });
-// The command wraps call() in place, so each test gets fresh clients
 let commandClient = { call: commandCall };
 let secondClient = { call: secondCall };
 const getClientForAccount = mock((accountId: number) =>
@@ -73,13 +57,6 @@ const createUser = (overrides: Partial<UserResult> = {}): UserResult =>
     ...overrides,
   }) as UserResult;
 
-// =============================================================================
-// Test Helpers
-// =============================================================================
-
-/**
- * Create test user data for cache
- */
 function createTestUser(overrides = {}) {
   return {
     user_id: "123456",
@@ -97,9 +74,6 @@ function createTestUser(overrides = {}) {
   };
 }
 
-/**
- * Create test chat data for cache
- */
 function createTestChat(overrides = {}) {
   return {
     chat_id: "-789012",
@@ -118,9 +92,6 @@ function createTestChat(overrides = {}) {
   };
 }
 
-/**
- * Create a mock Telegram client
- */
 function createMockClient(overrides: Partial<MockClient> = {}) {
   const client = {
     call: mock<MockCall>(async () => {
@@ -138,10 +109,6 @@ function createMockClient(overrides: Partial<MockClient> = {}) {
 
   return client;
 }
-
-// =============================================================================
-// Peer Resolution Tests - By Username
-// =============================================================================
 
 describe("Peer Resolution - By Username", () => {
   let db: Database;
@@ -173,7 +140,6 @@ describe("Peer Resolution - By Username", () => {
       expect(result.inputPeer.userId).toBe(111);
       expectLongEqual(result.inputPeer.accessHash, "123456789");
       expect(result.name).toBe("Alice Smith");
-      // API should not be called when found in cache
       expect(mockClient.call).not.toHaveBeenCalled();
     });
 
@@ -254,14 +220,13 @@ describe("Peer Resolution - By Username", () => {
     });
 
     it("should not resolve regular group by username from chats cache", async () => {
-      // Regular groups cannot have usernames, so this tests cache filtering
       chatsCache.upsert(
         createTestChat({
           chat_id: "-666",
           type: "group",
-          username: "regulargroup", // This shouldn't happen in practice
+          username: "regulargroup",
           title: "Regular Group",
-          access_hash: null, // Groups don't have access_hash
+          access_hash: null,
         }),
       );
 
@@ -294,7 +259,6 @@ describe("Peer Resolution - By Username", () => {
 
       await resolvePeer(mockClient, "@regulargroup", usersCache, chatsCache);
 
-      // Should have called API because group in cache has no access_hash
       expect(mockClient.call).toHaveBeenCalled();
     });
   });
@@ -422,17 +386,12 @@ describe("Peer Resolution - By Username", () => {
 
       const result = await resolvePeer(mockClient, "@nohash", usersCache, chatsCache);
 
-      // Should use 0n for missing accessHash
       assertPeer(result.inputPeer, "inputPeerUser");
       expectLongEqual(result.inputPeer.accessHash, 0);
       expect(result.name).toBe("No Hash");
     });
   });
 });
-
-// =============================================================================
-// Peer Resolution Tests - By Phone Number
-// =============================================================================
 
 describe("Peer Resolution - By Phone Number", () => {
   let db: Database;
@@ -512,7 +471,6 @@ describe("Peer Resolution - By Phone Number", () => {
 
       const mockClient = createMockClient();
 
-      // Test with + prefix and various formats - all should normalize to 15551234567
       const result1 = await resolvePeer(mockClient, "+1 (555) 123-4567", usersCache, chatsCache);
       assertPeer(result1.inputPeer, "inputPeerUser");
       expect(result1.inputPeer.userId).toBe(444);
@@ -521,7 +479,6 @@ describe("Peer Resolution - By Phone Number", () => {
       assertPeer(result2.inputPeer, "inputPeerUser");
       expect(result2.inputPeer.userId).toBe(444);
 
-      // Test with raw digits (no + prefix)
       const result3 = await resolvePeer(mockClient, "15551234567", usersCache, chatsCache);
       assertPeer(result3.inputPeer, "inputPeerUser");
       expect(result3.inputPeer.userId).toBe(444);
@@ -606,10 +563,6 @@ describe("Peer Resolution - By Phone Number", () => {
   });
 });
 
-// =============================================================================
-// Peer Resolution Tests - By Numeric ID
-// =============================================================================
-
 describe("Peer Resolution - By Numeric ID", () => {
   let db: Database;
   let usersCache: UsersCache;
@@ -683,7 +636,7 @@ describe("Peer Resolution - By Numeric ID", () => {
           chat_id: "-777888",
           type: "group",
           title: "Group Chat",
-          access_hash: null, // Groups don't have access_hash
+          access_hash: null,
         }),
       );
 
@@ -771,7 +724,6 @@ describe("Peer Resolution - By Numeric ID", () => {
 
   describe("fallback behavior", () => {
     it("should take an unknown positive ID as a user with access hash 0", async () => {
-      // No cache entries: a positive ID is a user, basic group 12345 is -12345
       const mockClient = createMockClient();
       const result = await resolvePeer(mockClient, "12345", usersCache, chatsCache);
 
@@ -791,10 +743,6 @@ describe("Peer Resolution - By Numeric ID", () => {
     });
   });
 });
-
-// =============================================================================
-// Message Sending Tests
-// =============================================================================
 
 describe("Message Sending", () => {
   let db: Database;
@@ -840,7 +788,6 @@ describe("Message Sending", () => {
 
       const { inputPeer } = await resolvePeer(mockClient, "@recipient", usersCache, chatsCache);
 
-      // Build the request as the send command would
       const request: tl.messages.RawSendMessageRequest = {
         _: "messages.sendMessage",
         peer: inputPeer,
@@ -899,7 +846,7 @@ describe("Message Sending", () => {
         message: "Silent message",
         randomId: toLong(123457),
         noWebpage: false,
-        silent: true, // Silent flag enabled
+        silent: true,
       };
 
       await mockClient.call(request);
@@ -1031,10 +978,6 @@ describe("Message Sending", () => {
   });
 });
 
-// =============================================================================
-// Error Handling Tests
-// =============================================================================
-
 describe("Error Handling", () => {
   let db: Database;
   let usersCache: UsersCache;
@@ -1050,7 +993,6 @@ describe("Error Handling", () => {
     it("should throw for invalid identifier format", async () => {
       const mockClient = createMockClient();
 
-      // Not a username (@), not a phone (+/10+ digits), not a valid number
       await expect(resolvePeer(mockClient, "-12.5", usersCache, chatsCache)).rejects.toThrow(
         "Invalid peer identifier",
       );
@@ -1119,7 +1061,7 @@ describe("Error Handling", () => {
         createTestUser({
           user_id: "111",
           username: "noaccess",
-          access_hash: null, // No access_hash
+          access_hash: null,
         }),
       );
 
@@ -1150,7 +1092,6 @@ describe("Error Handling", () => {
 
       const result = await resolvePeer(mockClient, "@noaccess", usersCache, chatsCache);
 
-      // Should have called API because cache entry has no access_hash
       expect(mockClient.call).toHaveBeenCalled();
       assertPeer(result.inputPeer, "inputPeerUser");
       expectLongEqual(result.inputPeer.accessHash, "999");
@@ -1161,7 +1102,7 @@ describe("Error Handling", () => {
         createTestUser({
           user_id: "222",
           phone: "5555555555",
-          access_hash: null, // No access_hash
+          access_hash: null,
         }),
       );
 
@@ -1192,7 +1133,6 @@ describe("Error Handling", () => {
 
       const result = await resolvePeer(mockClient, "+5555555555", usersCache, chatsCache);
 
-      // Should have called API because cache entry has no access_hash
       expect(mockClient.call).toHaveBeenCalled();
       assertPeer(result.inputPeer, "inputPeerUser");
       expectLongEqual(result.inputPeer.accessHash, "888");
@@ -1202,24 +1142,19 @@ describe("Error Handling", () => {
       usersCache.upsert(
         createTestUser({
           user_id: "333333",
-          access_hash: null, // No access_hash
+          access_hash: null,
         }),
       );
 
       const mockClient = createMockClient();
       const result = await resolvePeer(mockClient, "333333", usersCache, chatsCache);
 
-      // A known user stays a user, with hash 0, not basic group 333333
       assertPeer(result.inputPeer, "inputPeerUser");
       expect(result.inputPeer.userId).toBe(333333);
       expectLongEqual(result.inputPeer.accessHash, 0);
     });
   });
 });
-
-// =============================================================================
-// Input Validation Tests
-// =============================================================================
 
 describe("Input Validation", () => {
   describe("identifier type detection", () => {
@@ -1242,7 +1177,7 @@ describe("Input Validation", () => {
     });
 
     it("should not detect short numbers as phone", () => {
-      const identifier = "123456789"; // 9 digits
+      const identifier = "123456789";
       const isPhone = identifier.startsWith("+") || /^\d{10,}$/.test(identifier);
       expect(isPhone).toBe(false);
     });
@@ -1297,10 +1232,6 @@ describe("Input Validation", () => {
   });
 });
 
-// =============================================================================
-// Priority and Edge Cases
-// =============================================================================
-
 describe("Resolution Priority", () => {
   let db: Database;
   let usersCache: UsersCache;
@@ -1313,7 +1244,6 @@ describe("Resolution Priority", () => {
   });
 
   it("should prefer users cache over chats cache for @username", async () => {
-    // Both have same username
     usersCache.upsert(
       createTestUser({
         user_id: "111",
@@ -1333,7 +1263,6 @@ describe("Resolution Priority", () => {
     const mockClient = createMockClient();
     const result = await resolvePeer(mockClient, "@shared", usersCache, chatsCache);
 
-    // Should resolve to user, not channel
     assertPeer(result.inputPeer, "inputPeerUser");
     expect(result.inputPeer.userId).toBe(111);
   });
@@ -1367,7 +1296,7 @@ describe("Resolution Priority", () => {
       createTestUser({
         user_id: "666",
         username: "fallthrough",
-        access_hash: null, // No access hash
+        access_hash: null,
       }),
     );
     chatsCache.upsert(
@@ -1396,7 +1325,6 @@ describe("Resolution Priority", () => {
       }),
     });
 
-    // When user has no access_hash, it should fall through to chats cache
     const result = await resolvePeer(mockClient, "@fallthrough", usersCache, chatsCache);
 
     assertPeer(result.inputPeer, "inputPeerChannel");
@@ -1404,10 +1332,6 @@ describe("Resolution Priority", () => {
     expect(mockClient.call).not.toHaveBeenCalled();
   });
 });
-
-// =============================================================================
-// Send Command
-// =============================================================================
 
 describe("send command", () => {
   beforeEach(() => {
@@ -1438,7 +1362,6 @@ describe("send command", () => {
   const apiActivity = (db: Database) => db.query("SELECT method, success FROM api_activity").all();
 
   it("sends from the account --account selects, with that account's access hash", async () => {
-    // The same user, cached by each account with its own access hash
     createUsersCache(commandCacheDb).upsert(createTestUser({ access_hash: "111" }));
     createUsersCache(secondCacheDb).upsert(createTestUser({ access_hash: "222" }));
     secondCall.mockImplementationOnce(sentUpdates);
@@ -1471,7 +1394,6 @@ describe("send command", () => {
     assertPeer(request.peer, "inputPeerUser");
     expect(request.peer.userId).toBe(123456);
     expectLongEqual(request.peer.accessHash, "222");
-    // The call counts against account 2's rate limits only
     expect(apiActivity(secondCacheDb)).toEqual([{ method: "messages.sendMessage", success: 1 }]);
     expect(apiActivity(commandCacheDb)).toEqual([]);
   });
@@ -1559,7 +1481,6 @@ describe("send command", () => {
     richMessage?: tl.TypeInputRichMessage;
   };
 
-  /** Runs tg send to user 4242 and gives the request and the printed result */
   const sendTo4242 = async (
     message: string,
     format?: "markdown" | "html",

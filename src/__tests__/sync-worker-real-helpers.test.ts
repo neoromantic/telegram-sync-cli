@@ -1,6 +1,3 @@
-/**
- * Tests for sync worker real helpers
- */
 import { describe, expect, it } from "bun:test";
 import { parseRawMessage } from "../daemon/sync-worker-real-helpers";
 import {
@@ -84,7 +81,6 @@ describe("sync-worker-real parseRawMessage", () => {
       ),
     );
 
-    // Telegram leaves fromId out of a channel post: the channel is the sender
     expect(page.map((message) => message?.from_id)).toEqual([
       111, -222, -1000000000333, -1001234567890,
     ]);
@@ -118,7 +114,6 @@ describe("sync-worker-real parseRawMessage", () => {
     expect(result?.message_type).toBe("service");
     expect(result?.has_media).toBe(false);
     expect(result?.text).toBeNull();
-    // No fromId and no peerId: nothing names a sender
     expect(result?.from_id).toBeNull();
   });
 
@@ -149,7 +144,6 @@ describe("sync-worker-real parseRawMessage", () => {
 
     expect(location?.message_type).toBe("location");
     expect(location?.has_media).toBe(true);
-    // mtcute gives live updates no media for these, so they store text
     expect(unsupported?.message_type).toBe("text");
     expect(unsupported?.has_media).toBe(false);
   });

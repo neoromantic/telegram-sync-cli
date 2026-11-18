@@ -1,7 +1,3 @@
-/**
- * Contact management commands with caching
- * Uses UsersCache for stale-while-revalidate pattern
- */
 import type { tl } from "@mtcute/bun";
 import { type ArgsDef, defineCommand } from "citty";
 import { getResolvedCacheConfig } from "../config";
@@ -69,7 +65,6 @@ export const listContactsCommand = defineCommand({
       const usersCache = createUsersCache(cacheDb);
       const cacheConfig = await getResolvedCacheConfig();
 
-      // Check cache first (unless --fresh)
       if (!fresh) {
         const contacts = usersCache.getContacts();
 
@@ -86,7 +81,6 @@ export const listContactsCommand = defineCommand({
         }
       }
 
-      // Fetch from API
       verbose("Fetching contacts from Telegram API...");
       const client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
         context: "cli:contacts.list",
@@ -115,11 +109,9 @@ export const listContactsCommand = defineCommand({
 
       const apiUsers = result.users.filter(isRawUser);
 
-      // The full list: cache it, and unmark the cached contacts it leaves out
       const applied = applyContactsSnapshot(cacheDb, result, Date.now());
       verbose(`Cached ${applied.contacts} contacts, ${applied.unmarked} no longer contacts`);
 
-      // Map to our Contact type
       const allContacts: Contact[] = apiUsers.map(apiUserToContact);
 
       const response = {
@@ -191,7 +183,6 @@ export const searchContactsCommand = defineCommand({
       const usersCache = createUsersCache(cacheDb);
       const cacheConfig = await getResolvedCacheConfig();
 
-      // Check cache first (unless --fresh)
       if (!fresh) {
         const cachedResults = usersCache.search(query, limit);
 
@@ -211,7 +202,6 @@ export const searchContactsCommand = defineCommand({
         }
       }
 
-      // Search via API
       verbose(`Searching Telegram API for "${query}"...`);
       const client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
         context: "cli:contacts.search",
@@ -225,10 +215,8 @@ export const searchContactsCommand = defineCommand({
       };
       const result = await client.call(request);
 
-      // Extract and cache users
       const apiUsers = result.users.filter(isRawUser);
 
-      // Cache results
       const cacheInputs = apiUsers.map(apiUserToCacheInput);
       if (cacheInputs.length > 0) {
         usersCache.upsertMany(cacheInputs);
@@ -285,7 +273,6 @@ export const getContactCommand = defineCommand({
 
       const isUsername = isUsernameIdentifier(identifier);
 
-      // Check cache first (unless --fresh)
       if (!fresh) {
         const cached = isUsername
           ? usersCache.getByUsername(identifier)
@@ -299,7 +286,6 @@ export const getContactCommand = defineCommand({
         }
       }
 
-      // Fetch from API
       verbose(`Fetching user "${identifier}" from Telegram API...`);
       const client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
         context: "cli:contacts.get",
@@ -309,7 +295,6 @@ export const getContactCommand = defineCommand({
       let result: tl.TypeUser[];
 
       if (isUsername) {
-        // Resolve username first
         const request: tl.contacts.RawResolveUsernameRequest = {
           _: "contacts.resolveUsername",
           username: identifier.replace("@", ""),
@@ -322,7 +307,6 @@ export const getContactCommand = defineCommand({
 
         result = resolved.users ?? [];
       } else {
-        // Get by user ID
         const userId = Number.parseInt(identifier, 10);
         const request: tl.users.RawGetUsersRequest = {
           _: "users.getUsers",
@@ -337,7 +321,6 @@ export const getContactCommand = defineCommand({
         error(ErrorCodes.TELEGRAM_ERROR, `User "${identifier}" not found`);
       }
 
-      // Cache the user
       usersCache.upsert(apiUserToCacheInput(user));
       verbose("Cached user data");
 

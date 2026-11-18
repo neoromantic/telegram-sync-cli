@@ -1,17 +1,7 @@
-/**
- * Fresh sender and chat names in the search index (#93). The index takes a
- * message's names from users_cache and chats_cache when the message is
- * written. When a person or a chat is renamed, or their row arrives after
- * their messages, triggers queue a re-index of their messages in
- * search_reindex_queue; the background migration runners (the daemon and
- * `tg db migrate`) drain it in short batches. A one-off migration
- * re-indexes every message of a cache written before this queue existed.
- */
 import type { Database } from "bun:sqlite";
 
 import type { BackgroundMigration, BatchLimits, BatchResult } from "./background-migrations";
 
-/** A chat's title, username and ID, from chats_cache */
 function chatNamesExpr(id: string, onlyIf = ""): string {
   return `
     SELECT trim(
@@ -75,10 +65,6 @@ export const REINDEX_TRIGGERS = [
   "chats_cache_search_au",
 ] as const;
 
-/**
- * Queue a peer's messages, the ones written so far, unless it has none. A
- * peer queued again starts over: its names changed since.
- */
 function queueStatements(
   kind: "sender" | "chat",
   peerId: string,
@@ -110,8 +96,6 @@ export function createSearchReindexSchema(db: Database): void {
   `);
 
   const user = queueStatements("sender", "CAST(new.user_id AS INTEGER)", "from_id");
-  // A chat's messages, and those it posted as itself in any chat: only
-  // channels and groups (negative, marked IDs) post as themselves
   const chatId = "CAST(new.chat_id AS INTEGER)";
   const chat =
     queueStatements("chat", chatId, "chat_id") +
@@ -143,12 +127,6 @@ export function createSearchReindexSchema(db: Database): void {
   `);
 }
 
-/**
- * Prepare a re-index of one message by rowid, with the names cached now.
- * The names are read first and inserted as values: FTS5 writes its pending
- * rows to disk at every statement savepoint, which an INSERT … SELECT opens,
- * so that made a segment per message and twice the time (docs/search.md).
- */
 function prepareMessageReindex(db: Database): (rowid: number) => void {
   const remove = db.query("DELETE FROM message_search WHERE rowid = ?");
   const read = db.query(`
@@ -165,7 +143,6 @@ function prepareMessageReindex(db: Database): (rowid: number) => void {
     INSERT INTO message_search(rowid, text, sender, chat, files)
     VALUES (?, ?, ?, ?, ?)
   `);
-  // The batch read these rowids in its own transaction: each row exists
   return (rowid) => {
     remove.run(rowid);
     insert.run(...(read.values(rowid)[0] as [number, string, string, string, string]));

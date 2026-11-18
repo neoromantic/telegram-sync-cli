@@ -1,14 +1,8 @@
-/**
- * `next` in a success answer: complete `tg` command lines that continue a
- * read, built from a command's parsed arguments so the account and every
- * filter carry over.
- */
 import type { ArgsDef } from "citty";
 
 import type { NextCommand } from "../types";
 import { COMMAND_ACCESS } from "./access";
 
-/** Characters a POSIX shell reads as themselves outside quotes */
 const SHELL_SAFE = /^[\w@%+=:,./-]+$/;
 
 /** `value` as one POSIX shell word: as is when safe, else in single quotes */
@@ -26,7 +20,6 @@ export function shellQuote(value: string): string {
  */
 export function tgCommand(path: string, defs: ArgsDef, values: Record<string, unknown>): string {
   const access = COMMAND_ACCESS[path];
-  // Read-only mode would refuse a write, so next never suggests one
   if (!access || access.write) {
     throw new Error(`tg ${path} can't be suggested as a next command`);
   }

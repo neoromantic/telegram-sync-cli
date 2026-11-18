@@ -5,14 +5,8 @@ import { type AccountsDbInterface, accountsDb } from "../db";
 import type { CacheConfig, CacheRetentionConfig, DurationString } from "../db/types";
 import { getDefaultCacheConfig, getDefaultRetentionConfig, parseDuration } from "../db/types";
 
-/**
- * `positiveDuration` is a duration above 0, such as a retention; `rate` is
- * a number of calls per second above 0 and at most MAX_CALLS_PER_SECOND;
- * `chats` is a list of chats (isChatEntry)
- */
 type ConfigValueType = "number" | "boolean" | "duration" | "positiveDuration" | "rate" | "chats";
 
-/** The fastest `sync.pacing.maxCallsPerSecond` accepts */
 const MAX_CALLS_PER_SECOND = 2;
 
 const TYPE_DESCRIPTIONS: Record<ConfigValueType, string> = {
@@ -65,7 +59,6 @@ const CONFIG_PREFIX_KEYS = new Set<string>([
   "sync.pacing",
 ]);
 
-/** The retention keys and the CacheRetentionConfig field each one sets */
 const RETENTION_KEYS = {
   apiActivity: "cache.retention.apiActivity",
   rateLimits: "cache.retention.rateLimits",
@@ -201,7 +194,6 @@ function isValidRate(value: unknown): value is number {
   );
 }
 
-/** An allowedChats entry: @username, a marked chat or user ID, or me */
 function isChatEntry(value: unknown): boolean {
   if (typeof value !== "string") return false;
   const entry = value.trim();
@@ -380,7 +372,6 @@ export function parseConfigValue(key: ConfigLeafKey, rawValue: string): unknown 
   }
 }
 
-/** A comma-separated list of chats, as `tg config set` and the env var take it */
 function parseChatList(path: string, value: string): string[] {
   const entries = value === "" ? [] : value.split(",").map((entry) => entry.trim());
   const bad = entries.filter((entry) => !isChatEntry(entry));
@@ -493,7 +484,6 @@ export async function getResolvedCacheConfig(
   return resolved;
 }
 
-/** The retention config.json sets, over the defaults */
 function resolveRetention(config: ConfigFile): CacheRetentionConfig {
   const retention = getDefaultRetentionConfig();
   for (const field of Object.keys(RETENTION_KEYS) as Array<keyof CacheRetentionConfig>) {
@@ -503,7 +493,6 @@ function resolveRetention(config: ConfigFile): CacheRetentionConfig {
   return retention;
 }
 
-/** The pacing config.json sets, over the defaults */
 function resolvePacing(config: ConfigFile): SyncPacingConfig {
   const pacing = { ...DEFAULT_SYNC_PACING };
   const file = config.sync?.pacing;
@@ -512,7 +501,6 @@ function resolvePacing(config: ConfigFile): SyncPacingConfig {
   return pacing;
 }
 
-/** The keys the daemon reads; the other commands read the rest */
 const DAEMON_KEY_PREFIXES = ["cache.retention.", "sync.pacing."];
 
 /**

@@ -15,19 +15,13 @@ const DEFAULT_OPTIONS: Required<CsvOptions> = {
   delimiter: ",",
 };
 
-/**
- * Escape a value for CSV output
- * Handles quotes, newlines, and the delimiter character
- */
 function escapeValue(value: unknown, delimiter: string): string {
-  // Handle null/undefined
   if (value === null || value === undefined) {
     return "";
   }
 
   const str = String(value);
 
-  // Check if quoting is needed
   const needsQuoting =
     str.includes(delimiter) || str.includes('"') || str.includes("\n") || str.includes("\r");
 
@@ -35,7 +29,6 @@ function escapeValue(value: unknown, delimiter: string): string {
     return str;
   }
 
-  // Escape quotes by doubling them (RFC 4180)
   const escaped = str.replace(/"/g, '""');
   return `"${escaped}"`;
 }
@@ -51,24 +44,20 @@ export function stringify<T extends Record<string, unknown>>(
   const opts: Required<CsvOptions> = { ...DEFAULT_OPTIONS, ...options };
 
   if (data.length === 0) {
-    // Return just headers if we have columns specified
     if (columns && opts.includeHeader) {
       return columns.map((h) => escapeValue(h, opts.delimiter)).join(opts.delimiter);
     }
     return "";
   }
 
-  // Determine headers from first object if not provided
   const headers = columns ?? Object.keys(data[0]!);
 
   const lines: string[] = [];
 
-  // Add header row
   if (opts.includeHeader) {
     lines.push(headers.map((h) => escapeValue(h, opts.delimiter)).join(opts.delimiter));
   }
 
-  // Add data rows
   for (const row of data) {
     const values = headers.map((header) => {
       const value = row[header];

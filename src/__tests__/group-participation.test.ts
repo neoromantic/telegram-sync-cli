@@ -1,8 +1,3 @@
-/**
- * Group participation: a group adds messages to the cache only while the
- * account sent an ordinary message there in the last 90 days
- * (src/db/group-participation.ts). Made-up data only.
- */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -38,18 +33,13 @@ import { photoMessage } from "./helpers/photo-message";
 
 const SELF = 7000;
 const ALICE = 7101;
-/** Basic group 4101 */
 const BASIC = -4101;
-/** Supergroup 9100000001 */
 const SUPERGROUP = -1_009_100_000_001;
-/** Channel 9100000002 */
 const CHANNEL = -1_009_100_000_002;
-/** A -100… chat the cache knows nothing about */
 const UNTYPED = -1_009_100_000_003;
 const DM = ALICE;
 const W = PARTICIPATION_WINDOW_SECONDS;
 const DAY = 24 * 60 * 60;
-/** A made-up "now", in Unix seconds */
 const NOW = 1_780_000_000;
 
 function createDb(): Database {
@@ -137,7 +127,6 @@ describe("GroupParticipation", () => {
     const p = createGroupParticipation(db);
     p.recordCheck(BASIC, NOW - W + 1, NOW);
     expect(p.status(BASIC, NOW)).toBe("active");
-    // At the boundary the group is already off
     expect(p.status(BASIC, NOW + 1)).toBe("inactive");
     expect(p.lastOwnDate(BASIC)).toBe(NOW - W + 1);
   });
@@ -159,7 +148,6 @@ describe("GroupParticipation", () => {
     const back = NOW + 5 * DAY;
     p.observeOwnMessage(BASIC, back, back);
     expect(gaps(db, BASIC)).toEqual([{ start_date: NOW, end_date: back }]);
-    // History from before the rule may still be cached; the pause may not
     expect(p.canInsert(BASIC, NOW - 10 * DAY, back)).toBe(true);
     expect(p.canInsert(BASIC, NOW + DAY, back)).toBe(false);
     expect(p.canInsert(BASIC, back, back)).toBe(true);
@@ -221,12 +209,10 @@ describe("GroupParticipation", () => {
       message(BASIC, 2, NOW - DAY, { ...own, message_type: "service" }),
       message(SUPERGROUP, 3, NOW - 3 * DAY, {
         is_outgoing: true,
-        // Sent as the group itself: an anonymous admin
         from_id: SUPERGROUP,
       }),
       message(SUPERGROUP, 4, NOW - 2 * DAY),
     ]);
-    // A cache from before the rule
     db.run("DROP TABLE group_participation");
     db.run("DROP TABLE group_capture_gaps");
     initSyncSchema(db);
@@ -300,7 +286,6 @@ describe("MessagesCache under the participation rule", () => {
       message(BASIC, 8, NOW - 2 * DAY, { ...own, message_type: "voice" }),
     ]);
 
-    // The pause ran until the own message; the one before it stays out
     expect(result.inserted).toBe(2);
     expect(cache.get(BASIC, 7)).toBeNull();
     expect(cache.participation.status(BASIC)).toBe("active");
@@ -328,7 +313,6 @@ describe("MessagesCache under the participation rule", () => {
     });
     expect(cache.get(BASIC, 2)?.text).toBe("edited note");
     expect(cache.get(BASIC, 3)).toBeNull();
-    // An edit is no participation
     expect(cache.participation.lastOwnDate(BASIC)).toBe(NOW - DAY);
   });
 
@@ -561,7 +545,6 @@ describe("the daemon under the participation rule", () => {
     const p = createGroupParticipation(db);
     expect(p.lastOwnDate(BASIC)).toBe(NOW - 3 * DAY);
     expect(p.status(BASIC)).toBe("active");
-    // Nothing of the search goes to the cache
     expect(count(db, "SELECT COUNT(*) AS n FROM messages_cache")).toBe(0);
   });
 
@@ -645,7 +628,6 @@ describe("the daemon under the participation rule", () => {
     const p = createGroupParticipation(db);
     p.recordCheck(BASIC, null, NOW - 10 * DAY);
     p.observeOwnMessage(BASIC, NOW - DAY);
-    // A group with a pause has no server count to reach
     expect(readHistoryProgress(db)).toMatchObject({
       chats_pending: 1,
       chats_without_count: 1,
@@ -683,7 +665,6 @@ describe("the daemon under the participation rule", () => {
 
 describe("the CLI under the participation rule", () => {
   it("caches the first page of a channel resolved by username, but not of a supergroup", async () => {
-    // Neither chat is cached yet: resolving the username gives its type
     const read = async (username: string, channelId: number, megagroup: boolean) => {
       const channel = {
         _: "channel",

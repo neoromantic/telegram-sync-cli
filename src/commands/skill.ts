@@ -1,7 +1,3 @@
-/**
- * Skill commands for AI integration
- */
-
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineCommand } from "citty";
@@ -89,7 +85,6 @@ function buildEnvStatus(): SkillEnvStatus {
   };
 }
 
-/** @internal exported for testing */
 export async function tryStat(path: string): Promise<
   | {
       exists: true;
@@ -140,9 +135,7 @@ export async function checkDataDirAccess(dataDir: string): Promise<SkillDataDirS
   if (writable) {
     try {
       await Bun.file(probePath).delete();
-    } catch {
-      // Ignore cleanup errors
-    }
+    } catch {}
   }
 
   const finalStat = await tryStat(dataDir);

@@ -1,7 +1,3 @@
-/**
- * Fresh sender and chat names in the search index (#93): what the triggers
- * queue, and how the queue drains in batches. Made-up data only.
- */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -59,7 +55,6 @@ function open(path = ":memory:"): Database {
   return db;
 }
 
-/** Messages of the user in the chat, written before either row */
 function seedMessages(db: Database): void {
   createMessagesCache(db).upsertBatch(
     Array.from({ length: MESSAGES }, (_, i) => ({
@@ -82,7 +77,6 @@ const channel: CachedChatInput = {
   username: "rosenews",
 };
 
-/** Posts of the channel as itself: 3 in the channel, 1 in the group */
 function seedChannelPosts(db: Database): void {
   createMessagesCache(db).upsertBatch(
     [CHANNEL_ID, CHANNEL_ID, CHANNEL_ID, CHAT_ID].map((chatId, i) => ({
@@ -171,7 +165,6 @@ describe("the re-index queue", () => {
     expect(matches(db, "sender:ann")).toBe(0);
     expect(matches(db, 'chat:"rose society"')).toBe(MESSAGES);
     expect(matches(db, "chat:garden")).toBe(0);
-    // The text is indexed as before
     expect(matches(db, "text:roses")).toBe(MESSAGES);
   });
 
@@ -280,7 +273,6 @@ describe("the one-off re-index of an older cache", () => {
     seedMessages(db);
     createUsersCache(db).upsert(user);
     createChatsCache(db).upsert(chat);
-    // A cache written before the queue existed: names cached, never indexed
     db.run("DELETE FROM search_reindex_queue");
     db.run(`DELETE FROM cache_migrations WHERE name = 'message_search_names'`);
     registerBackgroundMigrations(db);
@@ -294,7 +286,6 @@ describe("the one-off re-index of an older cache", () => {
 });
 
 describe("search disabled by an older SQLite", () => {
-  /** A cache with a pending one-off re-index and a queued sender */
   function cacheWithReindexWork(): Database {
     const db = open();
     seedMessages(db);
@@ -340,7 +331,6 @@ describe("search disabled by an older SQLite", () => {
 });
 
 describe("the index of a cache from before #93", () => {
-  /** A message trigger of 0.10.0: senders only from users_cache */
   const oldTrigger = (name: string, event: string) => `
     CREATE TRIGGER ${name} AFTER ${event} ON messages_cache
     BEGIN
@@ -371,7 +361,6 @@ describe("the index of a cache from before #93", () => {
     db.run("DROP TRIGGER messages_cache_au");
     db.run(oldTrigger("messages_cache_ai", "INSERT"));
     db.run(oldTrigger("messages_cache_au", "UPDATE OF text"));
-    // What 0.9.0 to 0.11.1 set (#141); automerge is FTS5's default, 4
     for (const [option, value] of [
       ["deletemerge", 0],
       ["automerge", 4],

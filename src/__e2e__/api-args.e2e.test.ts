@@ -1,11 +1,3 @@
-/**
- * E2E tests for the request that `tg api` builds from its arguments
- *
- * Each test records a replay fixture for an exact request with a stub client,
- * then runs the CLI in replay mode. The fixture name is a hash of the request,
- * so the CLI finds it only if it builds that request, with no extra keys.
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import type { TelegramClient, tl } from "@mtcute/bun";
@@ -32,7 +24,6 @@ describe("E2E: tg api builds the request from its arguments", () => {
     env.cleanup();
   });
 
-  /** Record the response for exactly this request, as account 1 */
   async function recordFixture(request: Record<string, unknown>, response: unknown): Promise<void> {
     const client = wrapClientCallWithRecordReplay(
       { call: async () => response } as unknown as TelegramClient,
@@ -47,17 +38,12 @@ describe("E2E: tg api builds the request from its arguments", () => {
         ...env.getCliOptions().env,
         TELEGRAM_API_REPLAY: "1",
         TELEGRAM_API_FIXTURES_DIR: fixturesDir,
-        // mtcute's debug log goes to stdout; keep a developer's shell from turning it on
         MTCUTE_LOG_LEVEL: undefined,
         VERBOSE: undefined,
       },
     };
   }
 
-  /**
-   * The JSON envelope on stdout. -v also turns on mtcute's debug log, which
-   * prints to stdout before the JSON when tg api closes its client.
-   */
   function envelope(stdout: string): unknown {
     return JSON.parse(stdout.slice(stdout.indexOf("{\n")));
   }
@@ -66,7 +52,6 @@ describe("E2E: tg api builds the request from its arguments", () => {
     ["--username myuser", ["--username", "myuser"]],
     ["--username=myuser", ["--username=myuser"]],
     ["--json", ["--json", '{"username":"myuser"}']],
-    // tg's global options reach this command undeclared
     ["--username myuser -v", ["--username", "myuser", "-v"]],
     ["--verbose --username myuser", ["--verbose", "--username", "myuser"]],
     ["-f json --username myuser", ["-f", "json", "--username", "myuser"]],
@@ -87,7 +72,6 @@ describe("E2E: tg api builds the request from its arguments", () => {
     async (flag) => {
       await recordFixture({ _: "account.checkUsername", username: "myuser" }, true);
 
-      // Quiet prints nothing on success; a missed fixture fails with exit code 5
       const result = await runCliSuccess(
         ["api", "account.checkUsername", "--username", "myuser", flag],
         replayOptions(),
@@ -268,7 +252,6 @@ describe("E2E: tg api builds the request from its arguments", () => {
     expect((result.json as { error: { code: string } }).error.code).toBe(ErrorCodes.INVALID_ARGS);
   });
 
-  // citty reads `-1.5` as the short options 1, . and 5; none may reach the request
   it.each([
     [
       "--name value",

@@ -1,10 +1,3 @@
-/**
- * E2E tests for `tg messages wait` and `tg messages watch`: another process
- * writes messages into the cache, the way the daemon stores them, while the
- * command runs. The test runner is alive, so a daemon.pid with its PID and
- * daemon rows for it make a running daemon.
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,7 +19,6 @@ const TEAM_CHAT_ID = -1001234567890;
 const BOOK_CLUB_PEER = { _: "peerChat", chatId: 4242 } as const;
 const ALICE_PEER = { _: "peerUser", userId: 10 } as const;
 
-/** The line `--verbose` prints once the command has its start point */
 const READY = "Waiting for messages";
 
 interface WaitData {
@@ -68,8 +60,6 @@ describe("E2E: messages wait and watch", () => {
         fakeDialog({ kind: "group", id: 4242, title: "Book Club" }),
       ].map(dialogToCacheInput),
     );
-    // Team Chat's messages 1-10, without 3 (history not backfilled yet),
-    // and 10 deleted
     store(
       [1, 2, 4, 5, 6, 7, 8, 9, 10].map((id) => ({
         ...message(TEAM_CHAT_PEER, id, `old ${id}`),
@@ -96,7 +86,6 @@ describe("E2E: messages wait and watch", () => {
     return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } };
   }
 
-  /** Start the command and collect its output as it comes */
   function start(args: string[]) {
     const proc = spawnCli(["messages", ...args], {
       env: { ...options().env, VERBOSE: "1" },
@@ -135,7 +124,6 @@ describe("E2E: messages wait and watch", () => {
     const wait = start(["wait", "--timeout", "30"]);
     await wait.ready();
 
-    // History backfill (3) is not new; 11 is
     store([message(TEAM_CHAT_PEER, 3, "old 3"), message(TEAM_CHAT_PEER, 11, "hi")]);
     const storedAt = performance.now();
     const exitCode = await wait.exited();
@@ -206,7 +194,6 @@ describe("E2E: messages wait and watch", () => {
 
     store([message(TEAM_CHAT_PEER, 11, "first")]);
     await Bun.sleep(400);
-    // Another chat's message doesn't count with --chat
     store([message(TEAM_CHAT_PEER, 12, "second"), message(BOOK_CLUB_PEER, 13, "elsewhere")]);
     const lastAt = performance.now();
 
@@ -233,7 +220,6 @@ describe("E2E: messages wait and watch", () => {
 
   it("fails when the live daemon doesn't run the account", async () => {
     startDaemon();
-    // Rows a stopped daemon left: another PID
     createDaemonStatusService(env.openCacheDb(1)).set("daemon_pid", "1");
     const result = await runCli(["messages", "watch"], options());
 

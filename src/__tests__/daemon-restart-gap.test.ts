@@ -1,11 +1,3 @@
-/**
- * Daemon restart with a gap: messages that arrived while the daemon was
- * stopped must all be cached after a restart, even when a live message
- * arrives before the catch-up job runs.
- *
- * Runs the real update handlers, scheduler, sync worker and job loop against
- * a fake Telegram history.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { TelegramClient } from "@mtcute/bun";
@@ -40,7 +32,6 @@ describe("daemon restart with messages missed while stopped", () => {
   let ctx: DaemonContext;
   let rt: AccountRuntime;
 
-  // 150 messages (1001-1150) arrived while the daemon was stopped.
   let history: ReturnType<typeof createFakeHistory>;
 
   beforeEach(() => {
@@ -50,7 +41,6 @@ describe("daemon restart with messages missed while stopped", () => {
     const jobsService = createSyncJobsService(db);
     const rateLimits = createRateLimitsService(db);
 
-    // Before the stop: history fully synced up to message 1000.
     chatSyncState.upsert({
       chat_id: CHAT_ID,
       chat_type: "private",
@@ -75,7 +65,6 @@ describe("daemon restart with messages missed while stopped", () => {
 
     ctx = testDaemonContext();
 
-    // The restart: live updates first, then the scheduler and its worker.
     rt = addAccountRuntime(ctx, 1, db);
     handlers = createUpdateHandlers({
       db,
@@ -127,7 +116,6 @@ describe("daemon restart with messages missed while stopped", () => {
         text: `msg ${messageId}`,
         date: 1_700_000_000 + messageId,
         isOutgoing: false,
-        // A live update always carries its raw message (#130)
         rawMessage: {
           _: "message",
           id: messageId,
@@ -139,7 +127,6 @@ describe("daemon restart with messages missed while stopped", () => {
     );
   }
 
-  /** One pass of the daemon loop's job step, without the inter-job delay. */
   async function runNextJob(): Promise<boolean> {
     if (!scheduler.getNextJob()) return false;
     rt.pacer = createSyncPacer();
@@ -171,7 +158,6 @@ describe("daemon restart with messages missed while stopped", () => {
 
     const state = chatSyncState.get(CHAT_ID);
     expect(state?.forward_cursor).toBe(1151);
-    // Each new message counts once, whether it came live or from catch-up.
     expect(state?.synced_messages).toBe(CURSOR + 151);
     expect(rt.messagesSynced).toBe(151);
   });
@@ -214,7 +200,6 @@ describe("daemon restart with messages missed while stopped", () => {
     await receiveLive(1151);
     await drainJobs();
 
-    // The first page is kept; the rest waits for the flood wait to expire.
     expect(chatSyncState.get(CHAT_ID)?.forward_cursor).toBe(1100);
     expect(missingIds(1001, 1100)).toEqual([]);
 
@@ -234,10 +219,6 @@ describe("daemon restart with messages missed while stopped", () => {
 });
 
 describe("daemon restart with two accounts", () => {
-  /**
-   * Both accounts have a DM with user 4242. Private chat message IDs are
-   * per account, so each cache has its own cursor, top and messages.
-   */
   function seedAccount(ctx: DaemonContext, accountId: number, cursor: number, top: number) {
     const db = createAccountCacheDb();
     const messagesCache = createMessagesCache(db);
@@ -318,7 +299,6 @@ describe("daemon restart with two accounts", () => {
       expect(missing).toEqual([]);
       expect(account.messagesCache.get(CHAT_ID, top + 1)).toBeNull();
     }
-    // Account 2's catch-up started at its own cursor, on its own client
     expect(second.history.requests.map((r) => r.minId)).toEqual([300]);
     expect(first.history.requests[0]?.minId).toBe(CURSOR);
 

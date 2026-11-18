@@ -1,16 +1,3 @@
-/**
- * The account's media cache on disk, `accounts/<id>/media` (filesystem
- * only, no Telegram):
- *
- *   <uniqueFileId>/<name>              the file, one copy per uniqueFileId
- *   <uniqueFileId>/.<name>.part        partial download, resumed next run
- *   <uniqueFileId>/thumb-<type>.jpg    --thumb preview (.webp for stickers)
- *   <uniqueFileId>/.lock               download in progress: holder pid,
- *                                      refreshed while it runs
- *
- * A cached name never starts with a dot, so `.part` and `.lock` files
- * can't be mistaken for a file someone sent.
- */
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -39,7 +26,6 @@ export const PARTIAL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const LOCK_FILE = ".lock";
 const PARTIAL_SUFFIX = ".part";
 const LOCK_POLL_MS = 250;
-/** A lock file this young may still be empty: its holder is writing the pid */
 const LOCK_WRITE_GRACE_MS = 5_000;
 /** How often a running download refreshes its lock's mtime */
 export const LOCK_REFRESH_MS = 10_000;
@@ -50,11 +36,8 @@ export const LOCK_REFRESH_MS = 10_000;
 export const LOCK_STALE_MS = 60_000;
 /** How long a download waits for another process's download of the file */
 export const LOCK_WAIT_MS = 10 * 60 * 1000;
-/** Longest cached name; the extension is kept when it is cut */
 const MAX_NAME_BYTES = 200;
-/** An extension starts at the last dot within this many final characters */
 const MAX_EXTENSION_CHARS = 16;
-/** uniqueFileId is base64url: safe as a folder name */
 const FOLDER_NAME = /^[A-Za-z0-9_-]+$/;
 
 export interface MediaCachePaths {
@@ -98,12 +81,9 @@ export function thumbPaths(
 }
 
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it replaces
 const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f/\\:*?"<>|]/g;
-/** Bidi controls: `report\u202efdp.exe` would show as `reportexe.pdf` */
 const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 
-/** Cut a name to `maxBytes` of UTF-8 without splitting a character */
 function cutToBytes(text: string, maxBytes: number): string {
   const encoder = new TextEncoder();
   let result = "";
@@ -183,9 +163,7 @@ export function touch(path: string): void {
   const now = new Date();
   try {
     utimesSync(path, now, now);
-  } catch {
-    // A read-only cache still serves the file
-  }
+  } catch {}
 }
 
 function errorCode(err: unknown): string | undefined {
@@ -193,7 +171,6 @@ function errorCode(err: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
-/** Whether a process with this pid runs; one of another user counts */
 function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -204,13 +181,10 @@ function processAlive(pid: number): boolean {
 }
 
 interface LockState {
-  /** The holder's pid, or `pending` while a new lock is still empty */
   holder: number | "pending";
-  /** When the holder last refreshed it */
   mtimeMs: number;
 }
 
-/** A lock's holder and age; null for no lock or a broken one */
 function readLock(lockPath: string): LockState | null {
   let content: string;
   let stats: Stats;
@@ -231,7 +205,6 @@ function readLock(lockPath: string): LockState | null {
 
 type IsAlive = (pid: number) => boolean;
 
-/** Whether a lock holds its folder: its holder runs and keeps refreshing it */
 function isLive(lock: LockState | null, isAlive: IsAlive): boolean {
   if (lock === null) return false;
   if (Date.now() - lock.mtimeMs >= LOCK_STALE_MS) return false;
@@ -242,13 +215,6 @@ function lockIsLive(lockPath: string, isAlive: IsAlive): boolean {
   return isLive(readLock(lockPath), isAlive);
 }
 
-/**
- * Remove a stale lock, but never a live one another process took
- * meanwhile: the lock is renamed away first, so only one process gets it,
- * checked again there, and put back when it turned out live. The moved
- * name is a partial download's, so a run that dies in between leaves
- * nothing `tg media clean` misses.
- */
 function removeStaleLock(lockPath: string, isAlive: IsAlive): void {
   const moved = join(
     dirname(lockPath),
@@ -263,9 +229,7 @@ function removeStaleLock(lockPath: string, isAlive: IsAlive): void {
   if (lockIsLive(moved, isAlive)) {
     try {
       linkSync(moved, lockPath);
-    } catch {
-      // A newer lock took its place
-    }
+    } catch {}
   }
   rmSync(moved, { force: true });
 }
@@ -381,7 +345,6 @@ interface CacheEntry {
   mtimeMs: number;
 }
 
-/** The regular files of a folder; one removed meanwhile is skipped */
 function folderFiles(dir: string): CacheEntry[] {
   let names: string[];
   try {
@@ -405,7 +368,6 @@ function folderFiles(dir: string): CacheEntry[] {
   return entries;
 }
 
-/** The `<uniqueFileId>` folders of the media cache; none when it is missing */
 function cacheFolders(mediaDir: string): string[] {
   let names: string[];
   try {
@@ -551,15 +513,12 @@ export function cleanMedia(mediaDir: string, options: CleanOptions): CleanResult
       }
     }
 
-    // Checked again: a download may have taken the dead holder's lock meanwhile
     if (hasLock && !lockIsLive(lockPath, isAlive)) {
       removeStaleLock(lockPath, isAlive);
     }
     try {
       rmdirSync(dir);
-    } catch {
-      // Not empty: something is left in it
-    }
+    } catch {}
   }
 
   return result;

@@ -1,6 +1,3 @@
-/**
- * chat_content_protection: the last online answer per chat. Made-up IDs.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 

@@ -17,7 +17,6 @@ import { allowedChatIds } from "../access";
 import { nextCommand } from "../next";
 import { messageItemReader } from "./helpers";
 
-/** A --since/--until value as Unix seconds; INVALID_ARGS when it is none */
 function parseBound(
   value: string | undefined,
   name: "since" | "until",
@@ -36,11 +35,6 @@ function parseBound(
   return seconds;
 }
 
-/**
- * A --chat or --sender value: an ID as tg prints it, a username (with or
- * without @), or me, the account's own user ID (Saved Messages as a chat).
- * Anything else is INVALID_ARGS, never a filter that matches nothing.
- */
 function parseIdentifier(
   input: string | undefined,
   name: "chat" | "sender",
@@ -196,7 +190,6 @@ export const searchMessagesCommand = defineCommand({
         since,
         until,
       };
-      // One row past the page says whether another page follows
       const rows = search.search(query, {
         ...options,
         limit: limit + 1,

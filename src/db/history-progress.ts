@@ -1,10 +1,3 @@
-/**
- * How far an account's history backfill is (#126): messages cached against
- * the counts Telegram gave on history pages (chat_sync_state.total_messages),
- * for the chats with sync on (a group only while the account takes part in
- * it), and a time left measured from the pace of the last history pages.
- * Database only.
- */
 import type { Database } from "bun:sqlite";
 import { capturesSql } from "./group-participation";
 import { historyDoneSql, SyncJobStatus, SyncJobType } from "./sync-schema";
@@ -15,10 +8,8 @@ export const HISTORY_PACE_WINDOW_MS = 15 * 60 * 1000;
 /** The span the rate of `messages.getHistory` calls is measured over */
 export const HISTORY_CALL_RATE_WINDOW_MS = 5 * 60 * 1000;
 
-/** How many pending chats `largest_pending` lists */
 const LARGEST_PENDING_LIMIT = 5;
 
-/** The jobs that page through a chat's history */
 const HISTORY_JOB_TYPES = [
   SyncJobType.BackwardHistory,
   SyncJobType.InitialLoad,
@@ -86,19 +77,12 @@ interface ChatRow {
   chat_id: number;
   chat_type: string;
   history_complete: number;
-  /** History reached the start, or the chat gets its newest page only */
   history_done: number;
   total_messages: number | null;
   cached: number;
   has_gaps: number;
 }
 
-/**
- * New messages per minute that history jobs cached, from the jobs that
- * completed in the window: the messages of all but the first, over the time
- * from the first to now. A paused backfill slows it down until the window
- * holds less than two jobs and it is null.
- */
 function measurePace(db: Database, now: number): number | null {
   const types = HISTORY_JOB_TYPES.map((type) => `'${type}'`).join(", ");
   const jobs = db
@@ -120,10 +104,6 @@ function measurePace(db: Database, now: number): number | null {
   return (messages / (now - first.completed_at)) * 60_000;
 }
 
-/**
- * `messages.getHistory` calls per second in the window: the calls after the
- * first, over the time from the first to now, so a pause slows it down
- */
 function measureCallRate(db: Database, now: number): number | null {
   const row = db
     .query(
@@ -143,7 +123,6 @@ function measureCallRate(db: Database, now: number): number | null {
 
 export function readHistoryProgress(db: Database, options: { now?: number } = {}): HistoryProgress {
   const now = options.now ?? Date.now();
-  // The primary key (chat_id, message_id) counts each chat's messages
   const rows = db
     .query(
       `SELECT s.chat_id, s.chat_type, s.history_complete,
@@ -160,16 +139,8 @@ export function readHistoryProgress(db: Database, options: { now?: number } = {}
   for (const row of rows) {
     const pendingChat = row.history_done === 0;
     if (pendingChat) progress.chats_pending++;
-    // A bot or deleted account keeps its newest page only (#131): what is
-    // cached is all it gets, whatever Telegram's count
     const newestPageOnly = !pendingChat && row.history_complete === 0;
-    if (
-      row.total_messages === null ||
-      newestPageOnly ||
-      // A group with a pause never caches the pause's messages, so Telegram's
-      // count says nothing about what is left (src/db/group-participation.ts)
-      row.has_gaps === 1
-    ) {
+    if (row.total_messages === null || newestPageOnly || row.has_gaps === 1) {
       if (pendingChat) {
         progress.chats_without_count++;
       } else {
@@ -178,7 +149,6 @@ export function readHistoryProgress(db: Database, options: { now?: number } = {}
       }
       continue;
     }
-    // Messages deleted on the server since they were cached count once
     const cached = Math.min(row.cached, row.total_messages);
     progress.messages_cached += cached;
     progress.messages_known += row.total_messages;

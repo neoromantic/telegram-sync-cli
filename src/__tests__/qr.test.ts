@@ -1,15 +1,9 @@
-/**
- * Terminal QR code tests
- */
-
 import { describe, expect, it } from "bun:test";
 import { encode } from "uqr";
 import { renderQr } from "../utils/qr";
 
-/** A made-up login URL, as long as a real one */
 const URL = `tg://login?token=${"A".repeat(43)}`;
 
-/** Each character holds two module rows: [upper, lower], true for dark */
 const HALVES: Record<string, [boolean, boolean]> = {
   " ": [false, false],
   "▀": [true, false],
@@ -17,7 +11,6 @@ const HALVES: Record<string, [boolean, boolean]> = {
   "█": [true, true],
 };
 
-/** Read the module matrix back from the rendered text */
 function readModules(text: string): boolean[][] {
   const rows: boolean[][] = [];
   for (const line of text.split("\n")) {
@@ -40,18 +33,16 @@ describe("renderQr", () => {
     const { data, size } = encode(URL, { border: 4 });
     const modules = readModules(renderQr(URL));
 
-    // The matrix has an odd size, so the last line's lower half is blank
     expect(modules.length).toBe(size + 1);
     expect(modules.slice(0, size)).toEqual(data);
     expect(modules[size]).not.toContain(true);
 
-    // Four light modules on every side
     expect(modules.slice(0, 4).flat()).not.toContain(true);
     expect(modules.slice(size - 4).flat()).not.toContain(true);
     for (const row of modules) {
       expect([...row.slice(0, 4), ...row.slice(-4)]).not.toContain(true);
     }
-    expect(modules[4]?.slice(4, 11).every((dark) => dark)).toBe(true); // finder
+    expect(modules[4]?.slice(4, 11).every((dark) => dark)).toBe(true);
   });
 
   it("uses two module rows per line", () => {

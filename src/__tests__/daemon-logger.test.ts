@@ -1,6 +1,3 @@
-/**
- * Tests for daemon logger verbosity
- */
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { MemoryStorage, TelegramClient } from "@mtcute/bun";
 import {
@@ -169,7 +166,6 @@ describe("formatClientLog", () => {
 
 describe("routeClientLogs with mtcute's own logger (#128)", () => {
   it("keeps payloads that may hold phones, names or message text and stacks out of the log", async () => {
-    // A real client, never started: its logger formats %j and %e itself
     const client = new TelegramClient({
       apiId: 1,
       apiHash: "example",
@@ -184,7 +180,6 @@ describe("routeClientLogs with mtcute's own logger (#128)", () => {
     try {
       routeClientLogs(client, log, "verbose", "[Account 1]");
 
-      // A late answer to getDialogs, as mtcute warns about it
       client.log.create("session").warn("received rpc_result for unknown message %l: %j", 123, {
         _: "messages.dialogs",
         users: [

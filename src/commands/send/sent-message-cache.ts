@@ -31,8 +31,6 @@ function fromShortSentMessage(
   const chatId = toPeerIdFromInputPeer(request.peer, selfId);
   if (chatId === null) return null;
 
-  // The short response has no message object: rebuild one from the request
-  // and map it the same way the sync worker maps fetched messages
   const parsed = parseRawMessage(
     {
       _: "message",
@@ -106,8 +104,6 @@ export async function cacheSentMessage(
       verbose(`Sent message not cached: no message in ${result._}`);
       return 0;
     }
-    // The own message counts as participation in its group first, so the
-    // group takes it and new messages again, even without a daemon update
     const { written } = createMessagesCache(deps.cacheDb).upsertBatch(inputs);
     verbose(`Cached ${written} sent message(s)`);
     return written;

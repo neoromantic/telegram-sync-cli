@@ -1,9 +1,3 @@
-/**
- * The daemon's mtcute platform keeps session files open until the daemon
- * closes its clients (#56). Each case runs a real mtcute client on a temp
- * session file in a child process, because the signal and the exit are
- * process-wide. No network: prepare() only opens the session file.
- */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,9 +39,7 @@ describe("daemon platform", () => {
   it("a session write after SIGTERM is saved when the client closes", () => {
     const signal = runChild("signal", dir);
     expect(signal.json).toEqual({
-      // mtcute adds no signal listeners of its own
       mtcuteListeners: { SIGTERM: 0, SIGINT: 0 },
-      // The signal isn't sent a second time
       handlerRuns: 1,
       errors: [],
     });

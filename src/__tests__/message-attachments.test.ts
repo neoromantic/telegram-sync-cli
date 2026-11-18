@@ -1,7 +1,3 @@
-/**
- * message_attachments, written with the message it mirrors
- * (src/db/message-attachments.ts, src/db/messages-cache.ts)
- */
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 

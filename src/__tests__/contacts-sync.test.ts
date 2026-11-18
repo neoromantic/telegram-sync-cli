@@ -1,7 +1,3 @@
-/**
- * The contact list in the account's cache (#8): Telegram's hash, the full
- * list that unmarks former contacts, and the sync_state row
- */
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { tl } from "@mtcute/bun";
@@ -151,7 +147,6 @@ describe("applyContactsSnapshot", () => {
     expect(row(db, 1004)?.is_contact).toBe(1);
     expect(row(db, 1004)?.fetched_at).toBe(NOW);
 
-    // The former contact keeps its row, and its fetched_at
     const removed = row(db, 1002);
     expect(removed?.is_contact).toBe(0);
     expect(removed?.raw_contact).toBe(0);
@@ -159,7 +154,6 @@ describe("applyContactsSnapshot", () => {
     expect(removed?.fetched_at).toBe(500);
     expect(removed?.updated_at).toBe(NOW);
 
-    // A cached non-contact is untouched
     const other = row(db, 1003);
     expect(other?.is_contact).toBe(0);
     expect(other?.fetched_at).toBe(700);

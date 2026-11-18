@@ -1,6 +1,3 @@
-/**
- * E2E tests for skill commands
- */
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
 

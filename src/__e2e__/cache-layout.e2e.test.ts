@@ -1,9 +1,3 @@
-/**
- * E2E: the first command after an upgrade from 0.3 or older finds the shared
- * `<dataDir>/cache.db` and moves it to the only account, sets it aside for
- * several, or deletes it when it holds nothing. Shared caches are written
- * from a child process (see seed-in-child.ts). Made-up data only.
- */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
@@ -101,7 +95,6 @@ describe("E2E: upgrading from the shared cache", () => {
         expect(readFileSync(shared).equals(bytes)).toBe(true);
         expect(existsSync(join(env.dataDir, "accounts"))).toBe(false);
 
-        // tg status still works and says what waits
         const status = await runCliSuccess(["status"], options());
         expect((status.json as { data: { storage: unknown } }).data.storage).toEqual({
           cache_bytes: 0,
@@ -126,13 +119,11 @@ describe("E2E: upgrading from the shared cache", () => {
       seedInChild(shared, "legacySharedCache");
       const before = rowCounts(shared);
 
-      // No credentials: the login stops after the move, before any prompt
       const login = await runCli(["auth", "login", "--phone", "+15550000002"], options());
 
       expect(login.exitCode).not.toBe(0);
       expect(existsSync(shared)).toBe(false);
       expect(rowCounts(env.cachePath(1))).toEqual(before);
-      // The second account a finished login adds starts its own cache
       env.seedAccounts([{ phone: "+15550000002" }]);
       expect((await sqlCount("--account", "1")).count).toBe(before.messages_cache);
       expect((await sqlCount("--account", "2")).count).toBe(0);
@@ -186,7 +177,6 @@ describe("E2E: upgrading from the shared cache", () => {
 
     it("says in tg daemon status that an older daemon still holds the shared cache", async () => {
       seedInChild(shared, "legacySharedCache");
-      // The 0.3 daemon left running after the upgrade: its PID is live
       const holder = holdOpen(shared);
       await holder.ready();
       writeFileSync(join(env.dataDir, "daemon.pid"), String(holder.pid));
@@ -258,8 +248,6 @@ describe("E2E: upgrading from the shared cache", () => {
       await holder.release();
     }
 
-    // With no account the next run sets the file aside, so the account a
-    // later login adds starts empty
     await runCliSuccess(["status"], options());
     const parked = join(env.dataDir, "shared-cache.db");
     expect(existsSync(shared)).toBe(false);
@@ -317,7 +305,6 @@ describe("E2E: upgrading from the shared cache", () => {
 
       await runCliSuccess(["accounts", "remove", "--id", "2"], options());
 
-      // Account 1 never gets the rows both accounts wrote
       const parked = join(env.dataDir, "shared-cache.db");
       expect(existsSync(shared)).toBe(false);
       expect(rowCounts(parked)).toEqual(before);
@@ -331,7 +318,6 @@ describe("E2E: upgrading from the shared cache", () => {
       await holder.ready();
 
       try {
-        // Neither needs credentials: the move runs before the network
         for (const args of [
           ["accounts", "remove", "--id", "2"],
           ["auth", "logout", "--account", "2"],
@@ -354,7 +340,6 @@ describe("E2E: upgrading from the shared cache", () => {
 
       await runCliSuccess(["accounts", "remove", "--id", "2"], options());
 
-      // Account 1 never gets the rows both accounts wrote
       const parked = join(env.dataDir, "shared-cache.db");
       expect(existsSync(shared)).toBe(false);
       expect(rowCounts(parked)).toEqual(before);
@@ -405,7 +390,6 @@ describe("E2E: upgrading from the shared cache", () => {
     cache.run(
       "INSERT INTO cache_meta (key, value) VALUES ('account_id', '1'), ('user_id', '9001')",
     );
-    // Logout and login again: the same Telegram user gets a new account ID
     await runCliSuccess(["accounts", "remove", "--id", "1"], options());
     env.seedAccounts([{ phone: "+15550000001", user_id: 9001, is_active: true }]);
     renameSync(join(env.dataDir, "accounts", "1"), join(env.dataDir, "accounts", "2"));

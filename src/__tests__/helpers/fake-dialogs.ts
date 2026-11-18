@@ -1,7 +1,3 @@
-/**
- * Fake mtcute dialogs and a client that lists them, for dialog pass tests.
- * Only the fields the daemon reads are filled in.
- */
 import {
   Chat,
   Dialog,
@@ -225,7 +221,6 @@ export function fakeDialogClient(
         listed++;
         options.onListed?.(listed);
       }
-      // The page after the last dialog
       if (listed === options.waitAfter) await nextPage(callParams);
     };
   }
@@ -254,11 +249,8 @@ export function fakeDialogClient(
 
   return {
     client: client as unknown as TelegramClient,
-    /** Params of every `iterDialogs` call */
     calls,
-    /** Params of every `withParams` call */
     params,
-    /** Call params of every `getJoinedCommunities` call */
     communityCalls,
   };
 }

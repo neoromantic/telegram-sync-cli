@@ -1,7 +1,3 @@
-/**
- * Tests for the ranges of a chat the cache holds without gaps
- * (src/db/history-ranges.ts)
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
@@ -155,7 +151,6 @@ describe("HistoryRanges", () => {
     });
 
     it("covers up to before when a cached message proves nothing new lands below it", () => {
-      // Private chats share one ID sequence per account, so pages have gaps
       cacheMessage(40);
       ranges.add(CHAT_ID, { low: 40, high: 45 });
 
@@ -166,7 +161,6 @@ describe("HistoryRanges", () => {
     });
 
     it("stops at the newest message below before when nothing is cached from it", () => {
-      // A new message could still get an ID between 21 and 40
       ranges.recordPage(CHAT_ID, [21, 17], { before: 40 });
       ranges.recordPage(CHAT_ID, [], { before: 40, reachedStart: true });
 

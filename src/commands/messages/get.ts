@@ -12,7 +12,6 @@ import {
 } from "./helpers";
 import { getMessageWithContext, resolveHistoryChat } from "./history";
 
-/** 2 * 49 + 1 = 99 messages: one getHistory page holds the whole window */
 const MAX_CONTEXT = 49;
 
 export const getMessageCommand = defineCommand({

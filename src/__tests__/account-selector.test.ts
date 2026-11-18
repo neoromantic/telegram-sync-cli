@@ -1,6 +1,3 @@
-/**
- * Account selector tests
- */
 import { describe, expect, it } from "bun:test";
 
 import { createTestDatabase } from "../db";
@@ -71,7 +68,6 @@ describe("resolveAccountSelector", () => {
   });
 });
 
-/** The error a command would exit with */
 function failureOf(run: () => unknown): Error & {
   code?: string;
   details?: Record<string, unknown>;

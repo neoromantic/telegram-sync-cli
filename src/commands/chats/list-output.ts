@@ -1,4 +1,3 @@
-// The CLI imports only types from this file, so zod (a devDependency) never ships
 import { z } from "zod";
 import type { SyncReason } from "../../db/chat-sync-state";
 import { CHAT_TYPE_VALUES } from "./helpers";

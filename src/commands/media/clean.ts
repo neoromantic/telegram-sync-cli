@@ -1,9 +1,3 @@
-/**
- * tg media clean: remove files from the account's media cache. Bare, only
- * partial downloads nobody wrote to for a day go, so it is always safe;
- * complete files need --all, --older-than or --chat. Never writes cache.db
- * and opens no connection, unless an uncached --chat needs resolving.
- */
 import { defineCommand } from "citty";
 
 import { getAccountMediaDir } from "../../db";
@@ -17,7 +11,6 @@ import { parseTimeBound } from "../../utils/time-bounds";
 import { CHAT_ARG_DESCRIPTION, openHistory, reportHistoryError } from "../messages/helpers";
 import { type HistoryChat, resolveHistoryChat } from "../messages/history";
 
-/** --older-than as a ms epoch; INVALID_ARGS when it is none of the forms */
 function parseOlderThan(value: string | undefined, now: number): number | undefined {
   if (value === undefined) return undefined;
   const seconds = parseTimeBound(value, { now });
@@ -85,8 +78,6 @@ export const cleanMediaCommand = defineCommand({
       } catch (err) {
         reportHistoryError(err, "resolve --chat");
       }
-      // Every cached file was downloaded with its message, which wrote the
-      // message's attachment row
       const attachments = createMessageAttachmentsStore(db);
       const chatId = chat.chatId;
       options.uniqueFileIds = new Set(attachments.uniqueFileIdsOfChat(chatId));
@@ -109,9 +100,7 @@ export const cleanMediaCommand = defineCommand({
       ...result,
       filters: {
         all,
-        /** The cutoff --older-than gave */
         olderThan: olderThan === undefined ? null : new Date(olderThan).toISOString(),
-        /** The marked chat ID --chat resolved to */
         chat: chat?.chatId ?? null,
       },
     });

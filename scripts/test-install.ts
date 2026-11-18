@@ -21,25 +21,21 @@ async function runTg(args: string[]): Promise<string> {
 async function testInstall() {
   console.log("Testing bun link installation...\n");
 
-  // Link package
   await $`bun link`.quiet();
 
   try {
-    // Verify command exists and runs
     const helpResult = await runTg(["--help"]);
     if (!helpResult.includes("tg")) {
       throw new Error("tg command not working after link");
     }
     console.log("  ✓ tg --help");
 
-    // Verify version
     const version = await runTg(["--version"]);
     if (!version.includes(pkg.version)) {
       throw new Error(`Version mismatch: expected ${pkg.version}, got ${version.trim()}`);
     }
     console.log(`  ✓ tg --version (${version.trim()})`);
 
-    // Test subcommands
     const commands = ["auth", "accounts", "contacts", "api"];
     for (const cmd of commands) {
       await runTg([cmd, "--help"]);

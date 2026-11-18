@@ -1,22 +1,3 @@
-/**
- * Usage stats for tg: which commands run, how often, and which errors they
- * hit. client.ts is devkit's client and is never edited here; this file
- * decides what tg passes to it. What is sent and how to turn it off:
- * https://usage.sergeybaus.com and the README's "Usage stats".
- *
- * - The feature is the command path from the dispatcher (`chats list`),
- *   never an argument. `tg telemetry` records nothing.
- * - An error is sent as its type: the error code, or Telegram's RPC error
- *   (`FLOOD_WAIT`). Messages can name chats, users or a query, so only the
- *   local errors passed to reportLocalError (config file, cache database) add
- *   their message, without account numbers or a data directory the user set;
- *   the client scrubs it of the home directory and user name.
- * - A source checkout sends nothing unless TELEGRAM_SYNC_CLI_TELEMETRY is on.
- * - A command never waits for them: as it exits, it hands its events to a
- *   detached copy of tg that sends them (background.ts). The daemon, which
- *   runs for days, and debug mode send from their own process, and their
- *   exit waits up to 500 ms for the events in flight.
- */
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, normalize, resolve } from "node:path";
@@ -43,9 +24,7 @@ export const DETAILS_URL = "https://usage.sergeybaus.com";
 /** Where a source checkout with usage stats on sends them, for tests */
 export const ENDPOINT_ENV = `${ENV_PREFIX}_TELEMETRY_ENDPOINT`;
 const FLUSH_MS = 500;
-/** How often a running daemon checks in; the client sends once a UTC day */
 const HEARTBEAT_MS = 60 * 60 * 1000;
-/** The command group that manages usage stats, and records none */
 const OWN_COMMAND = "telemetry";
 
 /** The parts of a citty command that the walks below read */
@@ -67,9 +46,7 @@ export class ExitPending extends Error {
 }
 
 let root: CommandNode | undefined;
-/** The client of a daemon or a debug run while it may send, else null */
 let tracker: Telemetry | null = null;
-/** A command's events until its exit hands them over, else null */
 let handoff: Handoff | null = null;
 let stateFile = "";
 let exiting = false;
@@ -93,7 +70,6 @@ export function commandPaths(cmd: CommandNode, prefix: string[] = []): string[] 
 
 const camel = (name: string) => name.replace(/-(\w)/g, (_, c: string) => c.toUpperCase());
 
-/** Where the subcommand's name is in `args`, as citty finds it */
 function subCommandIndex(args: string[], defs: unknown): number {
   const valueFlags = new Set<string>();
   for (const [key, def] of Object.entries(defs ?? {})) {
@@ -149,15 +125,12 @@ export function detectChannel(
     let real = execPath;
     try {
       real = realpathSync(execPath);
-    } catch {
-      // keep the path as given
-    }
+    } catch {}
     return /[\\/]Cellar[\\/]/.test(real) ? "homebrew" : "binary";
   }
   return /[\\/]node_modules[\\/]/.test(modulePath) ? "npm" : "source";
 }
 
-/** TELEGRAM_SYNC_CLI_TELEMETRY turns usage stats on (debug only prints them) */
 function optedIn(env: Env): boolean {
   const value = (env[`${ENV_PREFIX}_TELEMETRY`] ?? "").trim().toLowerCase();
   return ["1", "on", "true", "debug"].includes(value);
@@ -190,8 +163,6 @@ export function createTgTelemetry(
     offCommand: OFF_COMMAND,
     env,
     tty: options.tty,
-    // A checkout runs the maintainer's and contributors' tg: no endpoint
-    // unless usage stats are on, then the default or a test server's
     ...(channel === "source" && {
       endpoint: optedIn(env) ? env[ENDPOINT_ENV] || undefined : "",
     }),
@@ -256,7 +227,6 @@ export function startTelemetry(
     if (!status.enabled) return;
     if (!options.quiet && t.showNotice()) return;
     if (mode !== "daemon" && !status.debug) {
-      // A notice not shown yet (no terminal, -q) means nothing to send
       if (t.noticeText()) return;
       const known = commandPaths(root).includes(feature);
       handoff = {
@@ -266,7 +236,6 @@ export function startTelemetry(
       };
       if (feature) handoff.calls.push(["feature", known ? feature : "other"]);
       stateFile = status.stateFile;
-      // Every way out, process.exit or the end of the event loop
       process.once("exit", () => handOff(env));
       return;
     }
@@ -279,9 +248,7 @@ export function startTelemetry(
         t.feature(feature);
       }, HEARTBEAT_MS).unref();
     }
-  } catch {
-    // Usage stats never fail tg
-  }
+  } catch {}
 }
 
 /**
@@ -319,7 +286,6 @@ function report(err: ErrorReport): void {
   else handoff?.calls.push(["error", err]);
 }
 
-/** Hands a command's events to a copy of tg that sends them, once */
 function handOff(env: Env): void {
   const events = handoff;
   handoff = null;
@@ -327,9 +293,7 @@ function handOff(env: Env): void {
     if (events && !sentToday(stateFile, events, env)) {
       sendInBackground(events, env);
     }
-  } catch {
-    // Usage stats never fail tg
-  }
+  } catch {}
 }
 
 /** The failure error() prints, as its type */
@@ -358,7 +322,6 @@ const quoteRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export function withoutDataDir(message: string, env: Env = process.env): string {
   const dir = env.TELEGRAM_SYNC_CLI_DATA_DIR;
   if (!dir) return message;
-  // As given, as join() writes it and absolute; longest first
   const forms = [dir, normalize(dir), resolve(dir)]
     .map((p) => p.replace(/(?<=.)[\\/]+$/, ""))
     .filter((p) => p.length > 1 && p !== "..")
@@ -412,8 +375,6 @@ export function exitAfterFlush(code: number): Promise<never> {
   exiting = true;
   process.exitCode = code;
   if (!tracker) process.exit(code);
-  // process.exit used to end the run here. Until it does, an error thrown
-  // after this point (ExitPending from a callback, say) changes nothing.
   const hold = () => {};
   process.on("uncaughtException", hold);
   process.on("unhandledRejection", hold);
@@ -444,12 +405,10 @@ export function reportDaemonExit(code: number, name: string | undefined): void {
   report(`DAEMON_${snake.toUpperCase()}`);
 }
 
-/** @internal for tests: the events this run would hand over */
 export function pendingHandoff(): Handoff | null {
   return handoff;
 }
 
-/** @internal for tests: forget this process's run */
 export function resetTelemetryForTests(): void {
   root = undefined;
   tracker = null;

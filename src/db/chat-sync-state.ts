@@ -1,7 +1,3 @@
-/**
- * Chat sync state service
- * Manages per-chat synchronization state with dual cursors
- */
 import type { Database } from "bun:sqlite";
 import type { GroupParticipation } from "./group-participation";
 import {
@@ -115,7 +111,6 @@ export function syncReason(
 ): SyncReason {
   if (state.sync_mode === "on") return "on_by_hand";
   if (state.sync_mode === "off") return "off_by_hand";
-  // Rows of older versions have no reason until the next dialog pass
   return (
     state.sync_policy ??
     determineSyncPolicy(state.chat_type as SyncChatType, state.member_count).reason
@@ -286,8 +281,6 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
     `)
       .as(ChatSyncStateRow),
 
-    // A top raised during the fetch (by a dialog pass) is newer than the
-    // page, so it stays and the chat stays due.
     recordCatchupPage: db.prepare(`
       UPDATE chat_sync_state
       SET forward_cursor = $cursor,

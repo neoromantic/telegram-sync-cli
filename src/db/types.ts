@@ -1,14 +1,4 @@
 /**
- * Type definitions for the caching system
- *
- * Based on docs/caching.md and docs/database-schema.md
- */
-
-// =============================================================================
-// Cache Configuration
-// =============================================================================
-
-/**
  * Cache staleness configuration in milliseconds
  */
 export interface CacheStalenessConfig {
@@ -53,7 +43,6 @@ export interface CacheConfig {
   retention: CacheRetentionConfig;
 }
 
-// Duration constants in milliseconds
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
@@ -76,12 +65,12 @@ export function getDefaultRetentionConfig(): CacheRetentionConfig {
 export function getDefaultCacheConfig(): CacheConfig {
   return {
     staleness: {
-      peers: WEEK, // 7 days
-      dialogs: HOUR, // 1 hour
-      fullInfo: WEEK, // 7 days
+      peers: WEEK,
+      dialogs: HOUR,
+      fullInfo: WEEK,
     },
     backgroundRefresh: true,
-    maxCacheAge: 30 * DAY, // 30 days
+    maxCacheAge: 30 * DAY,
     retention: getDefaultRetentionConfig(),
   };
 }

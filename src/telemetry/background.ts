@@ -1,9 +1,3 @@
-/**
- * Usage stats in the background. A command keeps its events, and as it
- * exits it hands them to a detached copy of tg (send.ts) that sends them and
- * exits: the command never waits for the network. The copy starts only when
- * there is something to send.
- */
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -28,11 +22,6 @@ export interface Handoff {
 
 type Env = Record<string, string | undefined>;
 
-/**
- * The variables by which the client tells that an AI agent runs tg: a copy
- * of detectAgent's in client.ts (devkit's templates/telemetry/), kept in step
- * with it by hand
- */
 const AGENT_VARS = [
   "AI_AGENT",
   "CLAUDECODE",
@@ -109,7 +98,6 @@ export function sendInBackground(handoff: Handoff, env: Env = process.env) {
     : [process.execPath, "--no-env-file", join(import.meta.dir, "send.ts")];
   Bun.spawn(command, {
     env: senderEnv(handoff, env),
-    // Not the user's folder: Windows keeps a process's folder from deletion
     cwd: tmpdir(),
     stdio: ["ignore", "ignore", "ignore"],
     detached: true,

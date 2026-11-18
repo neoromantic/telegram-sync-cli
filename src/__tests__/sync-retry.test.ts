@@ -1,7 +1,3 @@
-/**
- * Tests for the sync job retry policy: the backoff and which errors are
- * permanent
- */
 import { describe, expect, it } from "bun:test";
 import { tl } from "@mtcute/bun";
 import { isPermanentSyncError, retryDelayMs, SYNC_RETRY_CONFIG } from "../daemon/sync-retry";

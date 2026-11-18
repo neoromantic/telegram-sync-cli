@@ -1,8 +1,3 @@
-/**
- * Tests for unread messages and marking them read
- * (src/commands/messages/read-state.ts), the unread state in chats_cache and
- * the daemon updates that keep it current
- */
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { TelegramClient, tl } from "@mtcute/bun";
@@ -116,11 +111,6 @@ function cacheMessages(
   if (extra.deleted) messages.markDeleted(chatId, extra.deleted);
 }
 
-/**
- * A client that marks chats read and returns each chat's dialog: after a
- * read up to N, the messages above N stay unread; after a read of
- * everything, none
- */
 function createReadClient(topMessage: number, unreadAbove: (n: number) => number) {
   const requests: Array<{ _: string } & Record<string, unknown>> = [];
   let readMaxId: number | null = null;
@@ -332,7 +322,6 @@ describe("readUnread", () => {
 
   it("says how many unread messages the cache lacks, without asking Telegram", async () => {
     const news = PEERS.channel as HistoryChat;
-    // Only the live message is cached
     cacheMessages(db, NEWS_ID, [120]);
 
     const result = await readUnread(
@@ -364,7 +353,6 @@ describe("readUnread", () => {
     expect(request.minId).toBe(100);
     expect(request.limit).toBe(5);
     expect(result.chats[0]?.items.map((item) => item.messageId)).toEqual([105, 104, 103, 102, 101]);
-    // 101-105 and the live 120 are cached now
     expect(result.chats[0]).toMatchObject({ missing: 14, source: "api" });
     expect(result.source).toBe("api");
   });
@@ -406,7 +394,6 @@ describe("chats_cache unread state", () => {
         }),
       ),
     );
-    // A lookup knows nothing about unread messages
     chats.upsert(chatInput(ALICE_ID, "private", { title: "Alice" }));
 
     expect(chats.getById(String(ALICE_ID))).toMatchObject({
@@ -550,7 +537,6 @@ describe("daemon updates keep the unread state current", () => {
 
     expect(update({ _: "peerUser", userId: SELF_ID })?.chatId).toBe(SELF_ID);
     expect(update({ _: "peerChat", chatId: BOOK_CLUB_RAW_ID })?.chatId).toBe(BOOK_CLUB_ID);
-    // A read within one forum topic says nothing about the whole chat
     expect(update({ _: "peerUser", userId: ALICE_ID }, 3)).toBeNull();
     expect(readInboxFromUpdate({ _: "updateConfig" })).toBeNull();
   });

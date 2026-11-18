@@ -1,14 +1,5 @@
-/**
- * Messages search service using FTS5
- */
 import type { Database } from "bun:sqlite";
 
-/**
- * What makes a query FTS5 syntax rather than plain words: `"`, `*`, `:`,
- * parentheses, `^` at the start of a word, `+` standing between phrases, or
- * an operator in capitals. A `+` or `^` inside a word (`C++`, `2^10`) is
- * punctuation.
- */
 const FTS5_SYNTAX =
   /["*:()]|(?<!\S)\^(?=\S)|(?<![^\s"])\+(?![^\s"])|(?<![\p{L}\p{N}_])(?:AND|OR|NOT|NEAR)(?![\p{L}\p{N}_])/u;
 
@@ -17,7 +8,6 @@ export function hasFts5Syntax(query: string): boolean {
   return FTS5_SYNTAX.test(query);
 }
 
-/** A string as one FTS5 phrase, inner double quotes doubled */
 function quotePhrase(text: string): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
@@ -162,7 +152,6 @@ export interface MessagesSearchService {
   count(query: string, options?: MessageSearchOptions): number;
 }
 
-/** The WHERE conditions of a search besides the match, and their parameters */
 function searchFilter(options: MessageSearchOptions): {
   conditions: string[];
   params: Array<string | number>;
@@ -212,34 +201,12 @@ function searchFilter(options: MessageSearchOptions): {
   return { conditions, params };
 }
 
-/**
- * The walk below runs when a query has at least T = sqrt(WALK_THRESHOLD * P
- * * N) matches, for a page of P (limit + offset) of N messages, and goes
- * through at most P * N / T messages, as many as a page needs at that share
- * of matches. Sorting costs about 1 µs a match and the walk a few µs a
- * message (made-up caches of 1M messages, #149), so a walk through the
- * whole window costs about a fifth of the least the sort can cost
- * (docs/search.md).
- */
 const WALK_THRESHOLD = 20;
 
-/**
- * The walk stops and sorts once it has taken this share of the least the
- * sort can take: about 1 µs for each of at least T matches. So a walk that
- * finds too few matches adds at most about a quarter to the sort, even on
- * an index that still holds many deleted entries, which answers in
- * milliseconds instead of microseconds.
- */
 const WALK_BUDGET_US_PER_MATCH = 0.25;
 
-/** Messages in the walk's first chunk; later chunks are what the budget left pays for */
 const FIRST_CHUNK = 4;
 
-/**
- * One question to the index covers a run of rowids at most this far apart:
- * it costs as much as reading tens of entries of a word. History pages give
- * a chat's newest messages nearby rowids, and live messages too
- */
 const ROWID_RUN_GAP = 32;
 
 /** Lower WALK_THRESHOLD, and the clock of the walk's budget, for tests */
@@ -248,20 +215,13 @@ export interface NewestFirstTuning {
   now?: () => number;
 }
 
-/** Newest first; messages sent in the same second in the order they were cached */
 const NEWEST_FIRST = "m.date DESC, m.rowid";
 
-/** The FROM of a search of the messages with the rowids of a JSON array */
 const ROWIDS_FROM = "FROM json_each(?) AS j CROSS JOIN messages_cache m ON m.rowid = j.value";
 
-/** The FROM of a search that reads every match from the index */
 const MATCHES_FROM =
   "FROM message_search JOIN messages_cache m ON message_search MATCH ? AND m.rowid = message_search.rowid";
 
-/**
- * One page of the messages that `from` joins as `m`, with the filters,
- * sorted by `order`
- */
 function sortedPage(
   db: Database,
   from: string,
@@ -310,11 +270,8 @@ export function searchNewestFirst(
     rows: sortedPage(db, MATCHES_FROM, match, options, NEWEST_FIRST),
     way: "sort" as const,
   });
-  // A prefix stands for every word it starts, so asking the index about a
-  // few messages reads all of them
   if (match.includes("*")) return sorted();
 
-  // max(rowid) is about the number of messages, and instant
   const { maxRowid } = db.query("SELECT max(rowid) AS maxRowid FROM messages_cache").get() as {
     maxRowid: number | null;
   };
@@ -324,10 +281,6 @@ export function searchNewestFirst(
     Math.ceil(Math.sqrt((tuning.walkThreshold ?? WALK_THRESHOLD) * pageTimesMessages)),
   );
 
-  // Reading matches from the index alone costs a fraction of sorting them,
-  // and fewer than enough are all of them. The sort asks the index again,
-  // which for one word costs about as much as counting; for a phrase or
-  // several words it costs more than handing the sort the rowids read here
   const oneWord = /^"[^"\s]+"$/.test(match);
   const { matches, rowids } = db
     .query(
@@ -362,11 +315,6 @@ export function searchNewestFirst(
   }
   const where = range.length ? `WHERE ${range.join(" AND ")}` : "";
 
-  // A chunk: the messages from `walked` on in the order of an index that,
-  // scanned forward, gives them newest first and, within a second, in rowid
-  // order. The chunks one after another are a prefix of the order of the
-  // page, even when one ends inside a second, so a full page found there is
-  // the right one
   const chunkRowids = db.query(
     `SELECT rowid FROM messages_cache INDEXED BY ${index} ${where}
      ORDER BY date DESC, rowid LIMIT ? OFFSET ?`,
@@ -374,7 +322,6 @@ export function searchNewestFirst(
   const matchesBetween = db.query(
     "SELECT rowid FROM message_search WHERE message_search MATCH ? AND rowid BETWEEN ? AND ?",
   );
-  /** The rowids among `rowids` that match, one question to the index per run of nearby rowids */
   const matching = (rowids: number[]): Set<number> => {
     const runs: Array<[number, number]> = [];
     for (const rowid of [...rowids].sort((a, b) => a - b)) {
@@ -404,7 +351,6 @@ export function searchNewestFirst(
     walked += size;
     const hits = matching(rowids);
     const matched = rowids.filter((rowid) => hits.has(rowid));
-    // The matches in the order of the chunk, which sorting keeps
     if (matched.length > 0) {
       found.push(
         ...sortedPage(
@@ -416,7 +362,6 @@ export function searchNewestFirst(
         ),
       );
     }
-    // A range shorter than the window was gone through whole
     if (found.length === wanted || rowids.length < size) {
       return { rows: found.slice(offset), way: "messages" };
     }
@@ -436,7 +381,6 @@ export function createMessagesSearch(db: Database): MessagesSearchService {
       if (options.sort !== "relevance") {
         return searchNewestFirst(db, query, options).rows;
       }
-      // bm25 rank: lower is a better match
       return sortedPage(
         db,
         MATCHES_FROM,
@@ -448,7 +392,6 @@ export function createMessagesSearch(db: Database): MessagesSearchService {
 
     count(query: string, options: MessageSearchOptions = {}): number {
       const { conditions, params } = searchFilter(options);
-      // Only the joins a filter reads: each message has one chat and one sender
       const row = db
         .query(
           `SELECT COUNT(*) AS n

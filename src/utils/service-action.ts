@@ -1,7 +1,3 @@
-/**
- * What a service message did (a call, a pin, a group change), read from its
- * raw TL message the way extractAttachment reads a file.
- */
 /** A call between two users */
 export interface PhoneCallAction {
   type: "phone_call";
@@ -84,7 +80,6 @@ function ids(value: unknown): number[] {
   return Array.isArray(value) ? value.filter((id): id is number => num(id) !== null) : [];
 }
 
-/** `messageActionChatEditTitle` with prefix `messageAction` → `chat_edit_title` */
 function snakeName(tlName: string, prefix: string): string {
   return tlName
     .slice(prefix.length)
@@ -145,7 +140,6 @@ export function extractServiceAction(input: unknown): MessageAction | null {
     case "messageActionChatJoinedByLink":
       return { type: "chat_joined_by_link", inviterId: num(action.inviterId) };
     case "messageActionPinMessage":
-      // The pinned message is the one the service message replies to
       return {
         type: "pin_message",
         messageId: num(asObject(message.replyTo)?.replyToMsgId),

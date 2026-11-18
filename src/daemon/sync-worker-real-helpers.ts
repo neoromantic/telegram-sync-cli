@@ -49,8 +49,6 @@ export function parseRawMessage(msg: unknown, chatId: number): MessageInput | nu
   }
 
   const { messageType, hasMedia } = resolveRawMessageType(m);
-  // A channel or group that posts as itself gets its marked ID, like chats.
-  // Without fromId the chat is the sender, as live updates store it
   const fromId = toSenderIdFromRawMessage(m as { fromId?: RawPeerField; peerId?: RawPeerField });
   const replyToId = extractReplyToId(m);
   const forwardFromId = extractForwardFromId(m);
@@ -122,8 +120,6 @@ export async function fetchMessagesRaw(
   },
   signal?: AbortSignal,
 ): Promise<{ messages: unknown[]; count?: number; users: tl.TypeUser[] }> {
-  // mtcute's flood waiter never wakes on a signal that is already aborted,
-  // so a stored FLOOD_WAIT would sleep in full
   signal?.throwIfAborted();
   const request: tl.messages.RawGetHistoryRequest = {
     _: "messages.getHistory",
@@ -141,7 +137,6 @@ export async function fetchMessagesRaw(
     : await client.call(request);
   const messages = "messages" in result ? result.messages : [];
   const count = "count" in result ? result.count : undefined;
-  // The senders of the page, for callers that cache them
   const users = "users" in result ? result.users : [];
 
   return { messages, count, users };

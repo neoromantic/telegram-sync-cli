@@ -1,9 +1,3 @@
-/**
- * The daemon's start and stop with fake clients (#64): a stop while a
- * request of the startup dialog pass or of a sync job waits out a FLOOD_WAIT
- * ends that wait at once, so the daemon stops well inside `tg daemon stop`'s
- * 10 s timeout. The real dialog pass, scheduler, job loop and shutdown run.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
@@ -36,9 +30,7 @@ mock.module("../db", () =>
   }),
 );
 
-/** The client each account connects with */
 const clients = new Map<number, TelegramClient>();
-/** How many sync jobs were still running when the clients were closed */
 let jobsInFlightAtDisconnect: number | null = null;
 mock.module("../daemon/daemon-accounts", () => ({
   connectAccount: async (
@@ -73,10 +65,6 @@ const pidPath = join(tempDir, "daemon.pid");
 
 const CHAT = 1001;
 
-/**
- * A fake account client: the dialog pass lists `dialogs` (with the pass's
- * options), and `call` answers the sync jobs' requests
- */
 function fakeClient(
   dialogs: FakeDialogInput[],
   options: Parameters<typeof fakeDialogClient>[1],
@@ -84,7 +72,6 @@ function fakeClient(
 ) {
   const pass = fakeDialogClient(dialogs, options);
   const callMock = mock(call);
-  // withParams copies the client, so its copies get the call too
   Object.assign(pass.client, { call: callMock });
   return { client: pass.client, pass, call: callMock };
 }
@@ -121,7 +108,6 @@ describe("daemon stop during a FLOOD_WAIT", () => {
     const fake = fakeClient(
       [{ kind: "user", id: CHAT, topMessage: 10 }],
       {
-        // The page after the first dialog waits out a FLOOD_WAIT
         waitAfter: 1,
         onWait: () => {
           stoppedAt = performance.now();
@@ -167,7 +153,6 @@ describe("daemon stop during a FLOOD_WAIT", () => {
       job_type: SyncJobType.InitialLoad,
       priority: SyncPriority.High,
     });
-    // Two earlier tries failed; the job is due now
     cache.run(
       `UPDATE sync_jobs SET attempts = 2, error_message = 'connection reset',
          next_run_at = 0 WHERE id = ?`,
@@ -176,25 +161,18 @@ describe("daemon stop during a FLOOD_WAIT", () => {
     const daemon = createDaemon({ pidPath, verbosity: "verbose" }, accounts());
     let stoppedAt = 0;
     let jobRequests = 0;
-    const fake = fakeClient(
-      [{ kind: "user", id: CHAT, topMessage: 10 }],
-      {},
-      // The contacts check finds the list unchanged. The job's aborted
-      // request rejects a moment later, so the job is still running when
-      // the shutdown starts
-      (request, params) => {
-        if ((request as { _: string })._ === CONTACTS_METHOD) {
-          return Promise.resolve({ _: "contacts.contactsNotModified" });
-        }
-        jobRequests++;
-        return waitLikeFloodWait(params, {
-          onWait: () => {
-            stoppedAt = performance.now();
-            daemon.stop();
-          },
-        }).catch((err) => new Promise((_resolve, reject) => setTimeout(() => reject(err), 5)));
-      },
-    );
+    const fake = fakeClient([{ kind: "user", id: CHAT, topMessage: 10 }], {}, (request, params) => {
+      if ((request as { _: string })._ === CONTACTS_METHOD) {
+        return Promise.resolve({ _: "contacts.contactsNotModified" });
+      }
+      jobRequests++;
+      return waitLikeFloodWait(params, {
+        onWait: () => {
+          stoppedAt = performance.now();
+          daemon.stop();
+        },
+      }).catch((err) => new Promise((_resolve, reject) => setTimeout(() => reject(err), 5)));
+    });
     clients.set(1, fake.client);
 
     const exitCode = await daemon.start();
@@ -217,7 +195,6 @@ describe("daemon stop during a FLOOD_WAIT", () => {
       started_at: null,
     });
     expect(jobs.countJobs().running).toBe(0);
-    // The shutdown waited for the job before it closed the clients
     expect(jobsInFlightAtDisconnect).toBe(0);
     expect(createDaemonStatusService(cache).getAll()).toMatchObject({
       daemon_status: "stopped",

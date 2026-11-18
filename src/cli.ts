@@ -1,6 +1,3 @@
-/**
- * The tg command tree, apart from src/index.ts so tests can walk it
- */
 import { defineCommand } from "citty";
 import { accountsCommand } from "./commands/accounts";
 import { apiCommand } from "./commands/api";
@@ -47,7 +44,6 @@ export const main = defineCommand({
     },
   },
   async setup({ args, rawArgs }) {
-    // Set output format
     const format = args.format as OutputFormat;
     if (format === "json" || format === "pretty" || format === "quiet") {
       setOutputFormat(format);
@@ -57,23 +53,15 @@ export const main = defineCommand({
       setOutputFormat("quiet");
     }
 
-    // Set verbose flag
     if (args.verbose) {
       process.env.VERBOSE = "1";
     }
 
-    // The usage stats notice once, then app_started and the command path
     startTelemetry(rawArgs, { quiet: getOutputFormat() === "quiet" });
 
-    // As citty does, skip the value of -f/--format: in `tg -f json skill`
-    // the subcommand is skill, not json
     const subCommand = rawArgs.find(
       (arg, i) => !arg.startsWith("-") && rawArgs[i - 1] !== "-f" && rawArgs[i - 1] !== "--format",
     );
-    // tg config has to repair an invalid file. tg skill and tg telemetry
-    // read no key, and tg daemon only cache.retention.*, leniently: a
-    // supervised daemon must not stop over a typo there, silently under its
-    // own -q (which sets ours)
     if (
       subCommand === "config" ||
       subCommand === "skill" ||
@@ -104,7 +92,6 @@ export const main = defineCommand({
       throw err;
     }
   },
-  // Waits for usage stats in flight before the exit
   cleanup: endRun,
   subCommands: {
     auth: authCommand,

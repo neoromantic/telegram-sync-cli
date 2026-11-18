@@ -1,10 +1,3 @@
-/**
- * E2E tests for help commands
- *
- * Tests --help, --version, subcommand help, and invalid commands.
- * These tests don't require any API access or database seeding.
- */
-
 import { describe, expect, it } from "bun:test";
 import packageJson from "../../package.json" with { type: "json" };
 import { runCli, runCliSuccess } from "./helpers/cli";
@@ -23,7 +16,6 @@ describe("E2E: Help Commands", () => {
     it("should show help when no command given", async () => {
       const result = await runCli([]);
 
-      // citty shows help when no command is given
       expect(result.stdout).toContain("tg");
     });
   });
@@ -73,7 +65,6 @@ describe("E2E: Help Commands", () => {
     it("should fail for nonexistent command", async () => {
       const result = await runCli(["nonexistent"]);
 
-      // citty returns non-zero for unknown commands
       expect(result.exitCode).not.toBe(0);
     });
 

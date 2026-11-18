@@ -1,11 +1,3 @@
-/**
- * Sync system database schema
- * Extends the base cache schema with tables for:
- * - messages_cache: Cached messages from synchronized chats
- * - chat_sync_state: Per-chat sync state with dual cursors
- * - sync_jobs: Job queue for background sync
- * - daemon_status: Daemon status key-value store
- */
 import type { Database } from "bun:sqlite";
 import { registerBackgroundMigrations } from "./background-migrations";
 import { createGroupParticipationSchema } from "./group-participation";
@@ -24,10 +16,6 @@ import { createSenderLookupsSchema } from "./sender-lookups";
 const SEARCH_INDEX_VERSION = 1;
 const MESSAGE_SEARCH_COLUMNS = ["text", "sender", "chat", "files"] as const;
 
-/**
- * The triggers that keep message_search in sync: on messages_cache, and on
- * users_cache and chats_cache for the names (src/db/search-reindex.ts)
- */
 const SEARCH_TRIGGERS = [
   "messages_cache_ai",
   "messages_cache_ad",
@@ -35,7 +23,6 @@ const SEARCH_TRIGGERS = [
   ...REINDEX_TRIGGERS,
 ] as const;
 
-/** The first SQLite with FTS5's contentless_delete option */
 const CONTENTLESS_SEARCH_MIN_VERSION = [3, 43, 0] as const;
 
 /**
@@ -94,14 +81,7 @@ function setSearchIndexVersion(db: Database, version: number): void {
   });
 }
 
-/**
- * The search index and the triggers that keep it in sync. A contentless
- * table keeps only the index, not a copy of every message's text, sender
- * and chat: search joins messages_cache by rowid for those, and
- * contentless_delete lets the triggers delete and replace rows.
- */
 function createMessageSearchSchema(db: Database, contentless: boolean): void {
-  // Message search index (FTS5)
   db.run(`
     CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
       text,
@@ -116,7 +96,6 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
   configureSearchMerges(db, contentless);
   createSearchMetaTable(db);
 
-  // Search triggers (keep FTS index in sync)
   createSearchInsertTrigger(db);
   db.run(`
     CREATE TRIGGER IF NOT EXISTS messages_cache_ad
@@ -147,11 +126,6 @@ function createSearchInsertTrigger(db: Database): void {
   `);
 }
 
-/**
- * Re-index a message only when a column the index reads from it changes:
- * UPDATE OF alone fires whenever the column is in the SET list, and an
- * upsert sets every column
- */
 function createSearchUpdateTrigger(db: Database): void {
   db.run(`
     CREATE TRIGGER IF NOT EXISTS messages_cache_au
@@ -173,12 +147,6 @@ function createSearchUpdateTrigger(db: Database): void {
   `);
 }
 
-/**
- * What an older cache needs. From 0.5.0 and older: its update trigger
- * re-indexes a message on every write, and it has an index on fetched_at
- * that no query reads. Before #93: its message triggers index a channel
- * that posts as itself under its ID, not its name.
- */
 function messagesCacheWritesWork(db: Database): {
   insertTrigger: boolean;
   updateTrigger: boolean;
@@ -202,13 +170,6 @@ function messagesCacheWritesWork(db: Database): {
   };
 }
 
-/**
- * Give an older cache the message triggers of this version (the update one
- * re-indexes only changed messages, both read channel names) and drop its
- * fetched_at index. One-time work, so it runs
- * under the write lock and is checked again there; a cache that needs
- * nothing is only read.
- */
 function upgradeMessagesCacheWrites(db: Database): void {
   const pending = messagesCacheWritesWork(db);
   if (!pending.insertTrigger && !pending.updateTrigger && !pending.index) {
@@ -274,10 +235,6 @@ function getMessageSearchColumns(db: Database): string[] {
   }
 }
 
-/**
- * What the search index needs: nothing, its rows again, or a new table. A
- * regular table where a contentless one is wanted needs a new table.
- */
 function searchIndexWork(db: Database, contentless: boolean): "none" | "rows" | "schema" {
   const result = db
     .query(`SELECT value FROM search_meta WHERE key = 'search_index_version'`)
@@ -291,22 +248,9 @@ function searchIndexWork(db: Database, contentless: boolean): "none" | "rows" | 
   return storedVersion === SEARCH_INDEX_VERSION ? "none" : "rows";
 }
 
-/**
- * Bring the search index up to date. Processes that open a new cache at
- * once all find it unbuilt, and one that read the table while another was
- * creating it can find no columns. So the work runs under the write lock
- * and is checked again there: one process builds the index while the
- * others wait and then find nothing left, and none drops a table another
- * one is filling. An up-to-date index is only read, so opening the cache
- * never waits for the lock.
- */
 function ensureMessageSearchIndex(db: Database, contentless: boolean): void {
   if (searchIndexWork(db, contentless) === "none") return;
 
-  // A rebuild reads every message, which on a large cache read cold from
-  // disk can take longer than the 5-second busy_timeout another process
-  // waits for the lock with; so the build waits up to a minute, like an
-  // index build
   withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
     db.transaction(() => {
       const work = searchIndexWork(db, contentless);
@@ -320,14 +264,6 @@ function ensureMessageSearchIndex(db: Database, contentless: boolean): void {
   });
 }
 
-/**
- * A SQLite older than 3.43 can't open a contentless table with deletes,
- * which a newer tg created: its triggers would fail every message write,
- * and so would dropping or inspecting the table. So drop only the triggers
- * and mark the index stale. Messages are still cached; search fails with
- * SQLite's error until a newer SQLite opens the cache, which recreates the
- * triggers and rebuilds the index. Returns whether the index is disabled.
- */
 function disableUnsupportedSearch(db: Database, contentless: boolean): boolean {
   if (contentless || !isContentlessSearch(db)) return false;
 
@@ -351,11 +287,6 @@ function disableUnsupportedSearch(db: Database, contentless: boolean): boolean {
   return true;
 }
 
-/**
- * Add a column that an older version's table lacks. The CLI and the daemon
- * can both run this on the first start of a new version, so a column the
- * other one just added is fine.
- */
 function ensureColumn(db: Database, table: string, column: string, definition: string): void {
   const columns = db.query(`PRAGMA table_info(${table})`).all() as Array<{
     name: string;
@@ -387,15 +318,6 @@ export function withBusyTimeout<T>(db: Database, timeoutMs: number, work: () => 
   }
 }
 
-/**
- * Create an index an older cache lacks. Building it reads the whole table,
- * which on a large cache read cold from disk can take longer than the
- * 5-second busy_timeout, and another process that opens the cache meanwhile
- * (the daemon next to a command) waits for the same write lock. So the build
- * waits up to a minute; a process that waited finds the index there and
- * creates nothing. A cache that has the index is only read, so opening it
- * never waits for the lock.
- */
 function ensureIndex(db: Database, name: string, definition: string): void {
   const exists = db
     .query(`SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?`)
@@ -484,7 +406,6 @@ export interface SyncSchemaOptions {
 export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): void {
   const contentless = options.contentlessSearch ?? supportsContentlessSearch(db);
 
-  // Messages cache table - stores synced messages
   db.run(`
     CREATE TABLE IF NOT EXISTS messages_cache (
       chat_id         INTEGER NOT NULL,
@@ -510,7 +431,6 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
     )
   `);
 
-  // Messages cache indexes
   db.run(`
     CREATE INDEX IF NOT EXISTS idx_messages_cache_date
     ON messages_cache(chat_id, date DESC)
@@ -531,16 +451,12 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
     CREATE INDEX IF NOT EXISTS idx_messages_cache_pinned
     ON messages_cache(chat_id) WHERE is_pinned = 1
   `);
-  // A delete without chat context names only message IDs (#7)
   ensureIndex(db, "idx_messages_cache_message_id", "messages_cache(message_id)");
-  // Every chat's messages newest first: the newest page of a common search
-  // query goes through it instead of sorting every match (#118)
   ensureIndex(db, "idx_messages_cache_newest", "messages_cache(date DESC)");
 
   createMessageAttachmentsSchema(db);
   createChatContentProtectionSchema(db);
 
-  // Checked first: an older SQLite can't even inspect a contentless table
   if (!disableUnsupportedSearch(db, contentless)) {
     createMessageSearchSchema(db, contentless);
     ensureMessageSearchIndex(db, contentless);
@@ -548,8 +464,6 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
   }
   upgradeMessagesCacheWrites(db);
 
-  // History ranges - the message ID ranges of a chat cached without gaps
-  // (src/db/history-ranges.ts); ranges of one chat never touch or overlap
   db.run(`
     CREATE TABLE IF NOT EXISTS history_ranges (
       chat_id     INTEGER NOT NULL,
@@ -560,7 +474,6 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
     )
   `);
 
-  // Chat sync state table - tracks sync progress per chat
   db.run(`
     CREATE TABLE IF NOT EXISTS chat_sync_state (
       chat_id           INTEGER PRIMARY KEY,
@@ -583,16 +496,12 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
     )
   `);
 
-  // Columns added after 0.1.4
   ensureColumn(db, "chat_sync_state", "top_message_id", "INTEGER");
   ensureColumn(db, "chat_sync_state", "sync_mode", "TEXT NOT NULL DEFAULT 'auto'");
-  // Added in 0.10: why the policy turns the chat on or off (#131)
   ensureColumn(db, "chat_sync_state", "sync_policy", "TEXT");
-  // Added in 0.13: unread state from the dialog list and live updates (#25)
   ensureColumn(db, "chats_cache", "unread_count", "INTEGER");
   ensureColumn(db, "chats_cache", "read_inbox_max_id", "INTEGER");
 
-  // Chat sync state indexes
   db.run(`
     CREATE INDEX IF NOT EXISTS idx_chat_sync_state_enabled
     ON chat_sync_state(sync_enabled, sync_priority) WHERE sync_enabled = 1
@@ -606,7 +515,6 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
     ON chat_sync_state(chat_id) WHERE history_complete = 0 AND sync_enabled = 1
   `);
 
-  // Sync jobs table - job queue for background sync
   db.run(`
     CREATE TABLE IF NOT EXISTS sync_jobs (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -626,11 +534,9 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
     )
   `);
 
-  // Columns added after 0.1.4
   ensureColumn(db, "sync_jobs", "attempts", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "sync_jobs", "next_run_at", "INTEGER NOT NULL DEFAULT 0");
 
-  // Sync jobs indexes
   db.run(`
     CREATE INDEX IF NOT EXISTS idx_sync_jobs_priority
     ON sync_jobs(priority, created_at) WHERE status = 'pending'
@@ -648,7 +554,6 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
     ON sync_jobs(chat_id)
   `);
 
-  // Chats the background pass queued a refetch for, each once (#130)
   db.run(`
     CREATE TABLE IF NOT EXISTS refetch_chats (
       chat_id    INTEGER PRIMARY KEY,
@@ -656,10 +561,8 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
     )
   `);
 
-  // Senders missing from users_cache and the message to ask for (#143)
   createSenderLookupsSchema(db);
 
-  // Daemon status table - key-value store for daemon state
   db.run(`
     CREATE TABLE IF NOT EXISTS daemon_status (
       key         TEXT PRIMARY KEY,
@@ -668,19 +571,12 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): v
     )
   `);
 
-  // Caches from 0.2.0 and older keep groups and channels in chats_cache
-  // under bare IDs (#18)
   migratePeerIds(db, rebuildMessageSearchIndex);
 
-  // Which groups the account takes part in, and their pauses
-  // (src/db/group-participation.ts)
   createGroupParticipationSchema(db);
 
-  // Rewrites of every row run later, in batches (src/db/background-migrations.ts)
   registerBackgroundMigrations(db);
 }
-
-// Row class types for typed queries
 
 /** Message cache row class */
 export class MessageCacheRow {

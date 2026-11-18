@@ -80,7 +80,6 @@ export const unreadMessagesCommand = defineCommand({
       if (args.chat) {
         const chat = await resolveHistoryChat(client, args.chat, deps);
         const row = chatsCache.getById(String(chat.chatId));
-        // Cache-first: Telegram is asked only for a state the cache lacks
         const state =
           (!fresh && cachedState(row)) || (await fetchUnreadState(client, cacheDb, chat));
         targets = [
@@ -91,7 +90,6 @@ export const unreadMessagesCommand = defineCommand({
           },
         ];
       } else {
-        // The dialog list has every chat's unread state
         if (fresh || !chatsCache.hasUnreadState()) {
           const dialogsClient = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
             context: CONTEXT,
@@ -100,7 +98,6 @@ export const unreadMessagesCommand = defineCommand({
           await fetchChatsFromApi(dialogsClient, cacheDb);
         }
         const allowed = await allowedChatIds(account.id);
-        // LIMIT -1: every chat with unread messages, of allowedChats if set
         targets = chatsCache
           .list({ unread: true, limit: -1 })
           .filter((row) => allowed === null || allowed.has(Number(row.chat_id)))

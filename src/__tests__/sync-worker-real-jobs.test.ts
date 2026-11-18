@@ -1,6 +1,3 @@
-/**
- * Tests for sync worker real job handlers
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { type RpcCallOptions, type TelegramClient, tl } from "@mtcute/bun";
@@ -61,7 +58,6 @@ describe("sync-worker real jobs", () => {
     db.close();
   });
 
-  /** The ranges a chat's pages recorded, oldest first */
   function storedRanges(chatId: number) {
     return db
       .query("SELECT low, high FROM history_ranges WHERE chat_id = ? ORDER BY low")
@@ -100,7 +96,6 @@ describe("sync-worker real jobs", () => {
   });
 
   it("returns error when input peer is missing (forward catchup)", async () => {
-    // A channel can't be reached without the access hash chats_cache holds
     const job = ctx.jobsService.create({
       chat_id: -1000000000123,
       job_type: SyncJobType.ForwardCatchup,
@@ -192,8 +187,6 @@ describe("sync-worker real jobs", () => {
       sync_priority: SyncPriority.High,
       sync_enabled: true,
     });
-    // Pages that tg messages list and get cached: the start of the chat, one
-    // message in the middle and the newest two
     for (const id of [1, 2, 3, 20, 29, 30]) {
       ctx.messagesCache.upsert({
         chat_id: chatId,
@@ -218,7 +211,6 @@ describe("sync-worker real jobs", () => {
     const first = await processBackwardHistoryReal(ctx, firstJob);
 
     expect(history.requests[0]).toMatchObject({ offsetId: 0, limit: 5 });
-    // 29 and 30 were cached already, so only 26-28 count
     expect(first).toMatchObject({
       success: true,
       messagesFetched: 3,
@@ -236,9 +228,7 @@ describe("sync-worker real jobs", () => {
 
     expect(ctx.chatSyncState.get(chatId)?.history_complete).toBe(1);
     expect(ctx.messagesCache.countByChatId(chatId)).toBe(30);
-    // The pages join into one range, which the CLI pages it cached don't break
     expect(storedRanges(chatId)).toEqual([{ low: 1, high: 30 }]);
-    // Every gap is filled, and only the 24 messages that weren't cached count
     expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(24);
   });
 
@@ -440,7 +430,6 @@ describe("sync-worker real jobs", () => {
             chat_type: "private",
             sync_priority: SyncPriority.High,
             sync_enabled: true,
-            // An initial load skips a chat that already has a forward cursor
             forward_cursor: jobType === SyncJobType.InitialLoad ? undefined : 5,
           });
           const call = throwing(err);
@@ -523,7 +512,6 @@ describe("sync-worker real jobs", () => {
         expect(failedRows()).toEqual([]);
         expect(ctx.jobsService.getNextPending()).toBeNull();
 
-        // After the wait the same job runs and completes
         Date.now = () => NOW + 600_000;
         ctx.client = {
           call: mock(async () => ({ messages: [rawMessage(99)] })),
@@ -578,7 +566,6 @@ describe("sync-worker real jobs", () => {
       it(`drops a job whose chat was turned off while it ran, on ${label}`, async () => {
         ctx.client = {
           call: mock(async () => {
-            // tg chats sync --off runs while the call is in flight
             ctx.chatSyncState.setSyncMode(CHAT, "off");
             ctx.jobsService.cancelPendingForChat(CHAT);
             throw err;
@@ -601,7 +588,6 @@ describe("sync-worker real jobs", () => {
     }
 
     describe("a daemon stop", () => {
-      /** A chat due for its first page */
       const NEW_CHAT = 302;
 
       beforeEach(() => {
@@ -613,10 +599,6 @@ describe("sync-worker real jobs", () => {
         });
       });
 
-      /**
-       * A worker on the daemon's stop signal whose request waits out a
-       * FLOOD_WAIT; `call` replaces the request
-       */
       function stoppingWorker(
         call?: (stop: () => void) => (...args: unknown[]) => Promise<unknown>,
       ) {
@@ -643,7 +625,6 @@ describe("sync-worker real jobs", () => {
         return { worker, request, signal: shutdown.signal };
       }
 
-      /** What a job may change in its chat */
       const chatData = (chatId: number) => ({
         state: ctx.chatSyncState.get(chatId),
         ranges: storedRanges(chatId),
@@ -1365,7 +1346,6 @@ describe("sync-worker real jobs", () => {
     });
 
     it("settles in one call when nothing is above the cursor", async () => {
-      // The dialog's newest message was deleted before catch-up ran
       ctx.chatSyncState.raiseTopMessageId(chatId, 1001);
       const history = createFakeHistory(range(1, 1000));
       ctx.client = history.client;
@@ -1384,7 +1364,6 @@ describe("sync-worker real jobs", () => {
       const history = createFakeHistory(range(1, 1020));
       ctx.client = {
         call: async (request: Parameters<TelegramClient["call"]>[0]) => {
-          // A dialog pass sees message 1021 while the page is in flight
           history.add(1021);
           ctx.chatSyncState.raiseTopMessageId(chatId, 1021);
           return history.client.call(request);
@@ -1399,7 +1378,6 @@ describe("sync-worker real jobs", () => {
 
       ctx.client = {
         call: async (request: Parameters<TelegramClient["call"]>[0]) => {
-          // This time the new message arrives after the page was fetched
           const page = await history.client.call(request);
           history.add(1022);
           ctx.chatSyncState.raiseTopMessageId(chatId, 1022);
@@ -1455,7 +1433,6 @@ describe("sync-worker real jobs", () => {
     }
 
     it("counts only messages that were not cached yet", async () => {
-      // Two messages arrived live before the first page
       for (const id of [249, 250]) {
         ctx.messagesCache.upsert({
           chat_id: chatId,
@@ -1533,7 +1510,6 @@ describe("sync-worker real jobs", () => {
     });
 
     it("reopens history when a chat marked complete has a full page now", async () => {
-      // An empty chat from an older version: complete, but no cursor
       ctx.chatSyncState.markHistoryComplete(chatId);
       ctx.client = createFakeHistory(range(1, 150)).client;
 
@@ -1554,7 +1530,6 @@ describe("sync-worker real jobs", () => {
     });
 
     it("keeps a higher top, so the chat is caught up next", async () => {
-      // The dialog pass saw message 260; the page only got up to 250
       ctx.chatSyncState.raiseTopMessageId(chatId, 260);
       ctx.client = createFakeHistory(range(1, 250)).client;
 
@@ -1654,7 +1629,6 @@ describe("sync-worker real jobs", () => {
     });
 
     it("counts only messages that were not cached yet", async () => {
-      // Live updates cached two of the page's messages
       for (const id of [150, 200]) {
         ctx.messagesCache.upsert({
           chat_id: chatId,
@@ -1679,7 +1653,6 @@ describe("sync-worker real jobs", () => {
       expect(job?.messages_fetched).toBe(98);
     });
 
-    /** A chat as an older version left it: no backward cursor */
     function seedLegacy(forwardCursor: number, backwardCursor: number | null) {
       ctx.chatSyncState.delete(chatId);
       ctx.chatSyncState.upsert({
@@ -1693,8 +1666,6 @@ describe("sync-worker real jobs", () => {
     }
 
     it("pages down from the forward cursor when there is no backward cursor", async () => {
-      // 0.1.4 cached message 50 live and moved the cursor to 300 by
-      // catch-up; 51-200 were never fetched
       seedLegacy(300, null);
       for (const id of [50, ...range(201, 300)]) {
         ctx.messagesCache.upsert({
@@ -1721,7 +1692,6 @@ describe("sync-worker real jobs", () => {
     });
 
     it("ignores a backward cursor above the forward cursor", async () => {
-      // An older first page of only empty messages left these cursors
       seedLegacy(0, Number.MAX_SAFE_INTEGER);
       const history = createFakeHistory(range(1, 5));
       ctx.client = history.client;
@@ -1735,7 +1705,6 @@ describe("sync-worker real jobs", () => {
   });
 
   describe("what a page says besides its messages", () => {
-    // A basic group: its InputPeer needs no access hash
     const chatId = -4242;
     const ALICE_ID = 5550101;
     const BOB_ID = 5550102;
@@ -1817,7 +1786,6 @@ describe("sync-worker real jobs", () => {
           access_hash: "111",
         });
       }
-      // Carol without an access hash; Alice complete, without phone or contact flag
       const sparseCarol: tl.RawUser = {
         _: "user",
         id: CAROL_ID,
@@ -1869,7 +1837,6 @@ describe("sync-worker real jobs", () => {
       await run(SyncJobType.BackwardHistory);
       expect(ctx.chatSyncState.get(chatId)?.total_messages).toBe(312);
 
-      // Catch-up pages above the cursor: the count may cover only them
       await run(SyncJobType.ForwardCatchup);
       expect(history.requests.at(-1)?.minId).toBe(300);
       expect(ctx.chatSyncState.get(chatId)?.total_messages).toBe(312);

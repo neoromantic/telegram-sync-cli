@@ -1,7 +1,3 @@
-/**
- * The media cache on disk: names, paths, cache hits, the download lock,
- * usage and clean. Temp dirs and made-up files only.
- */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   existsSync,
@@ -69,7 +65,6 @@ afterEach(() => {
   rmSync(mediaDir, { recursive: true, force: true });
 });
 
-/** Write a file with `size` bytes and its mtime `ageMs` before NOW */
 function place(path: string, size: number, ageMs = 0): string {
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, Buffer.alloc(size, 7));
@@ -78,10 +73,8 @@ function place(path: string, size: number, ageMs = 0): string {
   return path;
 }
 
-/** A pid no process has: the check is injected */
 const DEAD_PID = 999_999;
 
-/** A download lock that `pid` holds, last refreshed `ageMs` ago */
 function writeLock(folder: string, pid: number, ageMs = 0): string {
   mkdirSync(join(mediaDir, folder), { recursive: true });
   const path = join(mediaDir, folder, ".lock");
@@ -289,7 +282,6 @@ describe("acquireDownloadLock", () => {
   it("never removes a live lock another process took over meanwhile", async () => {
     const lock = writeLock("u1", DEAD_PID);
     let tookOver = false;
-    // Another process replaces the dead lock right after this one read it
     const isAlive = (pid: number) => {
       if (pid === DEAD_PID && !tookOver) {
         tookOver = true;
@@ -330,7 +322,6 @@ describe("readMediaUsage", () => {
     place(join(mediaDir, "u1", "thumb-m.jpg"), 3);
     place(join(mediaDir, "u2", ".video.mp4.part"), 7);
     writeLock("u2", process.pid);
-    // A file named like a partial download, without the dot, is complete
     place(join(mediaDir, "u3", "backup.part"), 5);
 
     expect(readMediaUsage(mediaDir)).toEqual({
@@ -420,7 +411,6 @@ describe("cleanMedia", () => {
     });
     expect(existsSync(shared)).toBe(true);
     expect(existsSync(other)).toBe(true);
-    // Asked once per folder
     expect(asked.sort()).toEqual(["mine", "shared"]);
   });
 

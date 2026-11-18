@@ -1,10 +1,3 @@
-/**
- * E2E tests for fresh names in the search index (#93): after a rename, or a
- * sender cached after their messages, `tg db migrate` re-indexes the older
- * messages and `tg messages search` finds them by the new names. Made-up
- * data, no Telegram credentials.
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { chatRow } from "../__tests__/helpers/cache-db";
 import { takePartIn } from "../__tests__/helpers/participation";

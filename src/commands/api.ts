@@ -1,9 +1,3 @@
-/**
- * Generic API command - call any Telegram API method
- *
- * This enables full access to Telegram's API without manually
- * mapping every method to a CLI command.
- */
 import { MtInvalidPeerTypeError, type TelegramClient, type tl } from "@mtcute/bun";
 import { randomLong, toInputChannel, toInputUser } from "@mtcute/bun/utils.js";
 import { defineCommand } from "citty";
@@ -28,7 +22,6 @@ import {
   resolvePeer,
 } from "./send/peer-resolver";
 
-/** Telegram's own failures, which can pass on a retry: 500 INTERNAL and the -503 timeout */
 const TRANSIENT_TELEGRAM_CODES: ReadonlySet<unknown> = new Set([500, -503]);
 
 /**
@@ -73,7 +66,6 @@ export const apiCommand = defineCommand({
   async run({ args, rawArgs }) {
     const method = args.method as string;
 
-    // Validate method name format
     if (!method.includes(".")) {
       error(
         ErrorCodes.INVALID_ARGS,
@@ -81,7 +73,6 @@ export const apiCommand = defineCommand({
       );
     }
 
-    // Rate limits and the chats the arguments name are in the account's cache
     const { account, db } = openAccountCache(args.account);
     let client: TelegramClient | undefined;
 
@@ -92,9 +83,6 @@ export const apiCommand = defineCommand({
       });
       client = apiClient;
 
-      // Build request parameters
-      // Remove tg's own options (this command's and the global ones, which
-      // citty passes here undeclared), keep the rest as API params
       const cliOnlyArgs = [
         "method",
         "json",
@@ -116,13 +104,10 @@ export const apiCommand = defineCommand({
       const spaced = spacedFlagValues(rawArgs, method, args as Record<string, unknown>);
 
       for (const [key, value] of Object.entries(args)) {
-        // citty reads a negative number as short options named after its
-        // digits, and no TL field starts with a digit
         if (cliOnlyArgs.includes(key) || /^[\d.]/.test(key)) continue;
         apiArgs[key] = spaced.get(key) ?? value;
       }
 
-      // Merge with JSON input if provided
       const params = mergeArgs(apiArgs, args.json as string | undefined);
 
       const usersCache = createUsersCache(db);
@@ -135,7 +120,6 @@ export const apiCommand = defineCommand({
       const result = await client.call(request);
       await closeClient(client);
 
-      // Output result
       if (args.raw) {
         raw(JSON.stringify(result, replacer, 2));
       } else {
@@ -156,7 +140,6 @@ export const apiCommand = defineCommand({
       }
       const message = err instanceof Error ? err.message : "Unknown error";
 
-      // Try to extract Telegram error code
       const code = ErrorCodes.TELEGRAM_ERROR;
       const details: Record<string, unknown> = { method };
 
@@ -192,7 +175,6 @@ interface TlEntry {
 
 type ResolveInputPeer = (identifier: string) => Promise<tl.TypeInputPeer>;
 
-/** The input type a chat argument takes, from the InputPeer tg resolves */
 const PEER_INPUTS: Record<string, (peer: tl.TypeInputPeer, identifier: string) => unknown> = {
   InputPeer: (peer) => peer,
   InputUser: toInputUser,
@@ -218,7 +200,6 @@ export async function buildApiRequest(
   const request: Record<string, unknown> = { _: method, ...params };
   for (const arg of entry?.arguments ?? []) {
     if (arg.type === "#") continue;
-    // The schema names arguments in snake_case, mtcute in camelCase
     const key = arg.name.replace(/_(\w)/g, (_, c: string) => c.toUpperCase());
     const value = request[key];
     const { predicate, isVector } = arg.typeModifiers ?? {};
@@ -256,18 +237,10 @@ function zeroValue({ name, type }: TlArgument): unknown {
   return undefined;
 }
 
-/**
- * Close the client before the output exits. mtcute's connection would keep
- * the process alive, and destroy() saves the session. The result stands
- * even if closing fails.
- */
 async function closeClient(client: TelegramClient | undefined): Promise<void> {
   await client?.destroy().catch(() => {});
 }
 
-/**
- * Custom JSON replacer to handle BigInt values
- */
 function replacer(_key: string, value: unknown): unknown {
   if (typeof value === "bigint") {
     return value.toString();

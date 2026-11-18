@@ -1,6 +1,3 @@
-/**
- * Contacts command tests
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 
@@ -8,22 +5,16 @@ import { createUsersCache } from "../db/users-cache";
 import { createAccountCacheDb } from "./helpers/cache-db";
 import { mockDbModule } from "./helpers/db-mock";
 
-// Note: We no longer mock the output module to avoid interfering with other tests.
-// The output module handles test mode properly (throws instead of process.exit)
-
-// Mock client for Telegram API calls
 const createMockClient = () => ({
   call: mock(() => Promise.resolve({})),
   getMe: mock(() => Promise.resolve({ id: 123, firstName: "Test" })),
 });
 
-// Mock the Telegram service
 let mockClient = createMockClient();
 mock.module("../services/telegram", () => ({
   getClientForAccount: mock(() => mockClient),
 }));
 
-// Each account reads the test cache
 let testCacheDb: Database;
 mock.module("../db", () => mockDbModule({ cacheFor: () => testCacheDb }));
 

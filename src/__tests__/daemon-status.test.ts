@@ -1,6 +1,3 @@
-/**
- * Tests for daemon status service
- */
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
@@ -57,7 +54,6 @@ describe("DaemonStatusService", () => {
     });
 
     it("does nothing for non-existent key", () => {
-      // Should not throw
       service.delete("nonexistent");
     });
   });
@@ -93,7 +89,6 @@ describe("DaemonStatusService", () => {
       });
 
       it("drops the previous run's connection and queue until the first tick", () => {
-        // What a daemon that crashed left behind
         service.setDaemonRunning(1111, "0.4.0");
         service.writeTick({
           connectionStatus: "connected",
@@ -130,8 +125,6 @@ describe("DaemonStatusService", () => {
       });
 
       it("writes nothing if one of its keys fails to write", () => {
-        // The last write fails: the version and PID before it must roll back,
-        // so a reader never sees a half-started daemon
         db.run(
           "CREATE TRIGGER fail_start BEFORE INSERT ON daemon_status WHEN NEW.key = 'daemon_status' BEGIN SELECT RAISE(ABORT, 'boom'); END",
         );
@@ -166,7 +159,6 @@ describe("DaemonStatusService", () => {
 
       it("keeps the running state if one of its keys fails to write", () => {
         service.setDaemonRunning(111, "0.3.1");
-        // The final 'stopped' write fails: the deletes before it must roll back
         db.run(
           "CREATE TRIGGER fail_stop BEFORE INSERT ON daemon_status WHEN NEW.value = 'stopped' BEGIN SELECT RAISE(ABORT, 'boom'); END",
         );
@@ -308,8 +300,6 @@ describe("DaemonStatusService", () => {
       });
 
       it("ignores a version left by another PID's daemon", () => {
-        // A daemon that recorded its version died without cleanup, then an
-        // older daemon started: it writes only these three keys
         service.setDaemonRunning(111, "0.3.1");
         service.set("daemon_pid", "222");
         service.set("daemon_started_at", Date.now().toString());
@@ -350,7 +340,6 @@ describe("summarizeDaemonStatus", () => {
           startedAt: 1_500,
           lastUpdate: 8_000,
         }),
-        // A daemon that died without marking itself stopped
         info({
           pid: 1111,
           version: "0.0.1",

@@ -1,6 +1,3 @@
-/**
- * Daemon types and interfaces
- */
 import type {
   ConnectionState,
   DeleteMessageUpdate,
@@ -69,8 +66,8 @@ export interface ReconnectConfig {
  * Default reconnection configuration
  */
 export const DEFAULT_RECONNECT_CONFIG: ReconnectConfig = {
-  initialDelayMs: 5000, // 5 seconds
-  maxDelayMs: 300000, // 5 minutes
+  initialDelayMs: 5000,
+  maxDelayMs: 300000,
   maxAttempts: 10,
   backoffMultiplier: 2,
 };

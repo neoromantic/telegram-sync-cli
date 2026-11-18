@@ -1,7 +1,3 @@
-/**
- * Telegram service tests
- */
-
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { HttpProxyTcpTransport, SocksProxyTcpTransport, type TelegramClient } from "@mtcute/bun";
 import { ConfigError } from "../config";
@@ -14,7 +10,6 @@ import {
   validateConfig,
 } from "../services/telegram";
 
-// Set test environment
 process.env.BUN_ENV = "test";
 
 describe("Telegram Service", () => {

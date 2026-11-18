@@ -19,10 +19,6 @@ import { formatPace, PACING_CLEAN_RUN_CALLS } from "./sync-pacing";
 import { retryDelayMs, SYNC_RETRY_CONFIG } from "./sync-retry";
 import { createRealSyncWorker, type RealJobResult, type RealSyncWorker } from "./sync-worker-real";
 
-/**
- * A sync worker on the account's own cache, rate limits and client. The
- * daemon's stop signal ends the request its job waits on.
- */
 function createAccountSyncWorker(
   cacheDb: Database,
   client: TelegramClient,
@@ -42,7 +38,6 @@ function createAccountSyncWorker(
   });
 }
 
-/** Accounts in ID order, so job starts and logs are stable */
 function runtimesInOrder(ctx: DaemonContext): AccountRuntime[] {
   return [...ctx.runtime.accounts.values()].sort((a, b) => a.accountId - b.accountId);
 }
@@ -121,14 +116,6 @@ export function rebuildSyncWorker(
   return refreshDialogsAfterReconnect(ctx, accountId, client, trigger);
 }
 
-/**
- * The account's next job, or null when it can't run one now: while it is
- * not connected, while its worker can't call Telegram (a FLOOD_WAIT), or
- * before its pace lets the next job start (#133). Each account runs only the
- * jobs in its own cache. An account whose cache fails to answer (a corrupt
- * page, a lock held past busy_timeout) is logged and waits one interval;
- * the other accounts pick their own jobs.
- */
 function pickJob(
   ctx: DaemonContext,
   rt: AccountRuntime,
@@ -141,7 +128,6 @@ function pickJob(
   if (accountState?.status !== "connected" || !accountState.client) return null;
 
   try {
-    // All read the account's cache: sync_jobs, rate_limits, sync_jobs
     pacer.setHistoryDue(scheduler.hasHistoryDue());
     if (!pacer.isDue(now)) return null;
     if (!worker.canMakeApiCall()) return null;
@@ -154,7 +140,6 @@ function pickJob(
   }
 }
 
-/** Log a job that didn't succeed, by what happened to its row */
 function logJobOutcome(
   ctx: DaemonContext,
   accountId: number,
@@ -185,7 +170,6 @@ function logJobOutcome(
       return;
     }
     case "stopped":
-      // The stop cut its request short; no fault of the job
       ctx.logger.debug(`${tag} Job ${job.id} left pending: the daemon is stopping`);
       return;
     case "cancelled":
@@ -240,8 +224,6 @@ async function runJob(
         }
       }
 
-      // History starts right after the first page instead of waiting for
-      // the next refresh.
       if (job.job_type === SyncJobType.InitialLoad && result.historyComplete === false) {
         scheduler.queueBackwardHistory(job.chat_id);
       }
@@ -251,7 +233,6 @@ async function runJob(
   } catch (err) {
     ctx.logger.error(`${tag} Job ${job.id} error: ${formatError(err)}`);
   } finally {
-    // The job used its lane's slot, whatever the outcome
     scheduler.recordJobRun(job);
   }
 }
@@ -279,7 +260,6 @@ export function startDueJobs(ctx: DaemonContext): Promise<void>[] {
     if (!picked) continue;
 
     const { worker, job } = picked;
-    // Intervals count from the start, so a slow page doesn't stretch them
     rt.pacer.recordStart(now);
     const p = runJob(ctx, rt, worker, job)
       .catch((err) => {

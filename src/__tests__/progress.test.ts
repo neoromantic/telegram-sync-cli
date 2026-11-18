@@ -1,6 +1,3 @@
-/**
- * Transfer progress: one rewritten stderr line for a TTY, nothing otherwise
- */
 import { afterEach, describe, expect, it } from "bun:test";
 
 import { setOutputFormat } from "../utils/output";

@@ -27,7 +27,6 @@ export const meCommand = defineCommand({
     },
   },
   async run({ args }) {
-    // The account knows its user_id, so a cached read needs no network call
     const { account, db: cacheDb } = openAccountCache(args.account);
     const accountId = account.id;
 
@@ -36,18 +35,14 @@ export const meCommand = defineCommand({
       const usersCache = createUsersCache(cacheDb);
       const cacheConfig = await getResolvedCacheConfig();
 
-      // Helper to fetch from API and update cache
       const fetchAndUpdateCache = async () => {
-        // Lazy import to avoid loading mtcute for cache-only reads
         const { getClientForAccount } = await import("../../services/telegram");
         const client = getClientForAccount(accountId);
 
         const me = await client.getMe();
 
-        // Update cache
         usersCache.upsert(apiUserToCacheInput(me.raw));
 
-        // Update account with user_id if missing
         if (!account.user_id) {
           accountsDb.update(account.id, { user_id: me.id });
         }
@@ -55,17 +50,14 @@ export const meCommand = defineCommand({
         return me;
       };
 
-      // Try cache first (no network call!)
       if (!fresh && account.user_id) {
         const cached = usersCache.getById(String(account.user_id));
         if (cached) {
           const stale = isCacheStale(cached.fetched_at, cacheConfig.staleness.peers);
 
-          // If stale, trigger background refresh (don't await)
           if (stale) {
             verbose("Cache is stale, triggering background refresh...");
             fetchAndUpdateCache().catch((err) => {
-              // Log error but don't fail - we already returned cached data
               verbose(`Background refresh failed: ${err.message}`);
             });
           }
@@ -80,7 +72,6 @@ export const meCommand = defineCommand({
         }
       }
 
-      // Cache miss or --fresh: need to call the API synchronously
       verbose("Fetching current user info from API...");
 
       let result: Awaited<ReturnType<typeof fetchAndUpdateCache>>;

@@ -1,14 +1,3 @@
-/**
- * A real mtcute client on a session file in <dir>, with the daemon's
- * platform, for daemon-platform.test.ts. prepare() opens the session file
- * and needs no network. Run as `bun --no-env-file <this file> <mode> <dir>`:
- *
- * - signal: SIGTERM arrives, then a session write and destroy()
- * - exit: a queued session write, then process.exit(1) without destroy()
- * - read: reopen the session file and print what it holds
- *
- * Each mode prints one line of JSON.
- */
 import { join } from "node:path";
 import { TelegramClient } from "@mtcute/bun";
 import { daemonPlatform } from "../../daemon/daemon-platform";
@@ -36,7 +25,6 @@ async function attempt(errors: string[], label: string, fn: () => unknown) {
 }
 
 if (mode === "signal") {
-  // Signal listeners mtcute added, before the daemon adds its own
   const mtcuteListeners = {
     SIGTERM: process.listenerCount("SIGTERM"),
     SIGINT: process.listenerCount("SIGINT"),
@@ -50,7 +38,6 @@ if (mode === "signal") {
   });
   process.kill(process.pid, "SIGTERM");
   await signalled;
-  // A signal sent again would arrive in this time
   await Bun.sleep(50);
 
   const errors: string[] = [];

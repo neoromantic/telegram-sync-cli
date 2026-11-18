@@ -1,7 +1,3 @@
-/**
- * The text of a rich message in rich Markdown (src/utils/rich-message.ts).
- * Made-up content only.
- */
 import { describe, expect, it } from "bun:test";
 import { Long, type tl } from "@mtcute/bun";
 
@@ -20,10 +16,6 @@ import {
 
 const peerId = { _: "peerUser" as const, userId: 1001 };
 
-/**
- * The text of a message with these blocks, read back from raw_json as the
- * cache stores it; the object form mtcute hands over must read the same
- */
 function render(blocks: tl.TypePageBlock[], extra: Partial<tl.RawRichMessage> = {}): string | null {
   const message = richTlMessage(peerId, 7, blocks, extra);
   const cached = richMessageText(toRawJson(message));
@@ -222,7 +214,6 @@ describe("richMessageText: blocks", () => {
         { _: "pageBlockMath", source: "\\frac{1}{2}" },
       ]),
     ).toBe('```python\nprint("hi")\n```\n\n---\n\n$$\\frac{1}{2}$$');
-    // A fence longer than any run of backticks in the code
     expect(
       render([
         {
@@ -656,7 +647,6 @@ describe("richMessageText: input", () => {
     expect(richMessageText('not json "richMessage"')).toBeNull();
     expect(richMessageText(null)).toBeNull();
     expect(richMessageText({ richMessage: { _: "somethingElse" } })).toBeNull();
-    // Nothing to show: the message keeps its own (empty) text
     expect(render([])).toBeNull();
   });
 });

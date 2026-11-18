@@ -97,11 +97,6 @@ export const listMessagesCommand = defineCommand({
   },
 });
 
-/**
- * The next page in the direction the command read: newer with --after,
- * else older. Only after a full page: a short one reached the first
- * message (paging back) or the newest one Telegram has (paging forward).
- */
 function nextPage(
   args: Record<string, unknown>,
   { items, limit, after, nextBefore, nextAfter }: ListHistoryResult,
@@ -117,7 +112,6 @@ function nextPage(
       ),
     ];
   }
-  // Message IDs start at 1: nothing is older than message 1
   if (nextBefore === null || nextBefore <= 1) return [];
   return [
     nextCommand(

@@ -1,7 +1,3 @@
-/**
- * Daemon status service
- * Key-value store for daemon state tracking
- */
 import type { Database } from "bun:sqlite";
 import { DaemonStatusRow } from "./sync-schema";
 
@@ -77,7 +73,6 @@ export interface DaemonStatusService {
   /** Get all key-value pairs */
   getAll(): Record<string, string>;
 
-  // Convenience methods
   /**
    * Mark daemon as running with given PID and version: the account is
    * `connecting`, and the previous run's error and job counts are gone
@@ -131,7 +126,6 @@ export function summarizeDaemonStatus(infos: DaemonInfo[], livePid: number | nul
   return {
     connectedAccounts: live.filter((info) => info.connectionStatus === "connected").length,
     totalAccounts: live.length,
-    // Every live row is the same daemon's
     version: live.find((info) => info.version !== null)?.version ?? null,
     messagesSynced: live.reduce((sum, info) => sum + info.messagesSynced, 0),
     startedAt: startTimes.length > 0 ? Math.min(...startTimes) : null,
@@ -247,9 +241,6 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
 
     setDaemonRunning(pid: number, version: string): void {
       const now = Date.now();
-      // One transaction, so a reader never sees the new daemon_pid without
-      // its version. daemon_version_pid ties the version to this daemon: an
-      // older one that starts later rewrites only daemon_pid.
       db.transaction(() => {
         service.set("daemon_version", version);
         service.set("daemon_version_pid", pid.toString());
@@ -257,8 +248,6 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         service.set("daemon_started_at", now.toString());
         service.set("daemon_status", "running");
         service.set("messages_synced", "0");
-        // The previous run's connection and queue say nothing about this
-        // one: the account is connecting until the daemon's first tick
         service.set("connection_status", "connecting");
         service.delete("last_error");
         service.delete("pending_jobs");
@@ -311,16 +300,12 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
     },
 
     getDaemonInfo(): DaemonInfo {
-      // One query reads every key from one snapshot (WAL), so a daemon that
-      // is starting or stopping is never seen half written. The
-      // connected_accounts and total_accounts rows of 0.3 are ignored.
       const values = service.getAll();
       const read = (key: string) => values[key] ?? null;
       const pid = read("daemon_pid");
       return {
         status: read("daemon_status") === "running" ? "running" : "stopped",
         pid: parseNumber(pid),
-        // Only the daemon that wrote daemon_pid vouches for the version
         version: pid !== null && read("daemon_version_pid") === pid ? read("daemon_version") : null,
         startedAt: parseNumber(read("daemon_started_at")),
         lastUpdate: parseNumber(read("last_update")),

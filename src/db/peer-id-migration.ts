@@ -1,26 +1,3 @@
-/**
- * Moves a cache from 0.2.0 or older to marked peer IDs everywhere (#18).
- * Those versions stored groups and channels in chats_cache under their bare
- * IDs, while messages_cache and the sync tables used marked IDs, so the two
- * never joined.
- *
- * `PRAGMA user_version` records the one-time steps that ran:
- * - 1: chats_cache is re-keyed and the search index rebuilt, so its `chat`
- *   column holds group and channel titles
- * - 2: messages_cache.from_id and forward_from_id of a group or channel
- *   sender get its marked ID; history pages stored the bare one
- * - 3: a message Telegram sent without fromId (an incoming private message,
- *   a channel post, Saved Messages) gets its chat as the sender, as live
- *   updates store it; history pages stored NULL (#44)
- *
- * The re-key itself runs on every open that finds a bare group or channel
- * row, so it also repairs rows that an older binary still running writes
- * after the upgrade. Steps 2 and 3 run once, because finding those senders
- * means reading every message's raw_json: the ones an older binary caches
- * later keep the old sender until the message is fetched again. Everything
- * runs in one write transaction: a failure rolls all of it back,
- * user_version included, and the next open retries.
- */
 import type { Database } from "bun:sqlite";
 
 import {
@@ -35,14 +12,8 @@ import type { ChatType } from "./types";
 /** user_version once every step has run */
 export const PEER_ID_USER_VERSION = 3;
 
-/**
- * How long to wait for another process's write lock. The CLI and the daemon
- * may open a 0.2.0 cache at once, and one of them waits out the other's
- * migration, which rebuilds the search index.
- */
 const MIGRATION_BUSY_TIMEOUT_MS = 60_000;
 
-/** Group and channel rows under a positive ID, the 0.2.0 format */
 const BARE_CHAT_ROWS = `
   FROM chats_cache
   WHERE type IN ('group', 'supergroup', 'channel')
@@ -71,10 +42,6 @@ function needsMigration(db: Database): boolean {
   return userVersion(db) < PEER_ID_USER_VERSION || hasBareChatRows(db);
 }
 
-/**
- * The marked ID that a row's raw_json names: a dialog's peer, or a raw chat
- * object. Null when raw_json names none, such as '{}' or malformed JSON.
- */
 function markedIdFromRawJson(rawJson: string): number | null {
   let raw: unknown;
   try {
@@ -89,12 +56,6 @@ function markedIdFromRawJson(rawJson: string): number | null {
   return toPeerIdFromRawChat(raw);
 }
 
-/**
- * The marked ID for a bare row. raw_json knows the kind of chat for sure: a
- * community is stored as 'group' but has a channel ID. It counts only when
- * it names a group or channel with the same bare ID; otherwise the row's
- * type decides.
- */
 function markedIdOf(row: BareChatRow): number {
   const bareId = Number(row.chat_id);
   const fromRaw = markedIdFromRawJson(row.raw_json);
@@ -104,11 +65,6 @@ function markedIdOf(row: BareChatRow): number {
   return toMarkedPeerId(bareId, row.type);
 }
 
-/**
- * Move every bare group and channel row to its marked ID. When the chat is
- * cached under the marked ID too, the row fetched later wins, keeps the
- * other's access hash if it has none, and the other is deleted.
- */
 function rekeyBareChats(db: Database): void {
   const rows = db
     .query(`SELECT chat_id, type, access_hash, fetched_at, raw_json ${BARE_CHAT_ROWS}`)
@@ -155,15 +111,10 @@ function rekeyBareChats(db: Database): void {
 
 type RawPeer = Parameters<typeof toPeerIdFromRawPeer>[0];
 
-/** The `_` of the raw peer at `path` in raw_json; NULL for malformed JSON */
 function rawPeerType(path: string): string {
   return `CASE WHEN json_valid(raw_json) THEN json_extract(raw_json, '${path}._') END`;
 }
 
-/**
- * The marked ID for a stored sender or forward source, when it is the bare
- * ID of the group or channel that raw_json names; otherwise the stored value
- */
 function markedSenderId(stored: number | null, peer: RawPeer): number | null {
   if (stored === null || stored <= 0) return stored;
   const marked = toPeerIdFromRawPeer(peer);
@@ -173,11 +124,6 @@ function markedSenderId(stored: number | null, peer: RawPeer): number | null {
   return marked;
 }
 
-/**
- * Give group and channel senders and forward sources their marked IDs. The
- * update trigger re-indexes each changed row, so a channel no longer gets the
- * name of the user whose ID equals its bare one.
- */
 function markSenderIds(db: Database): void {
   const rows = db
     .query(`
@@ -217,17 +163,6 @@ function markSenderIds(db: Database): void {
   }
 }
 
-/**
- * Give a message that raw_json shows without fromId its chat as the sender,
- * by the rule live updates follow. The update trigger re-indexes each changed
- * row, so search finds it under the sender's name. A row whose raw_json is
- * '{}' or malformed names no chat and keeps NULL.
- *
- * It can match most of a cache (private chats get full history), so it reads
- * only the two peers, not the whole raw_json, to keep memory small. json_quote
- * makes from_peer JSON text even for a missing ('null') or scalar fromId, so
- * JSON.parse can't throw and roll the migration back.
- */
 function fillMissingSenders(db: Database): void {
   const rows = db
     .query(`
@@ -265,7 +200,6 @@ export function migratePeerIds(db: Database, rebuildSearchIndex: (db: Database) 
   db.run(`PRAGMA busy_timeout = ${MIGRATION_BUSY_TIMEOUT_MS}`);
   try {
     db.transaction(() => {
-      // Another process may have migrated while this one waited for the lock
       if (!needsMigration(db)) return;
       const version = userVersion(db);
 

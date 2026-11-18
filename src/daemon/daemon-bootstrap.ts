@@ -71,7 +71,6 @@ export async function syncAccountDialogs(
   ctx: DaemonContext,
   accountId: number,
   client: TelegramClient,
-  /** A pass after a reconnect logs one summary line of its own */
   options: { quiet?: boolean } = {},
 ): Promise<DialogPassResult> {
   const info = (message: string) =>
@@ -119,7 +118,6 @@ export async function syncAccountDialogs(
     return newest ? parseRawMessage(newest, chatId) : null;
   };
 
-  /** Keep the dialog's newest message: the chat gets no catch-up. */
   const keepNewestMessage = (dialog: Dialog, chatId: number) => {
     const input = newestMessage(dialog, chatId);
     if (!input) return;
@@ -138,7 +136,6 @@ export async function syncAccountDialogs(
       if (usersBatch.length >= DIALOG_BOOTSTRAP_BATCH_SIZE) flushUsers();
     }
 
-    // chats_cache and chat_sync_state share the marked peer ID
     const chatId = Number(chatInput.chat_id);
     visited.add(chatId);
 
@@ -153,15 +150,12 @@ export async function syncAccountDialogs(
     const existing = chatSyncState.get(chatId);
     if (dialog.isArchived) {
       archivedCount++;
-      // Without a sync state it doesn't sync, so it is off too
       if (!existing) {
         keepNewestMessage(dialog, chatId);
         return;
       }
     }
 
-    // Dialogs often leave the member count out; the stored one keeps a
-    // chat from flipping on or off between starts.
     const syncType = chatInput.type as SyncChatType;
     const memberCount = chatInput.member_count ?? existing?.member_count ?? null;
     const policy = determineSyncPolicy(syncType, memberCount, rawUserPolicy(dialog.peer.raw));
@@ -180,23 +174,17 @@ export async function syncAccountDialogs(
       chatSyncState.raiseTopMessageId(chatId, topMessage);
     }
 
-    // The upsert keeps an explicit on or off; auto follows the policy
     const mode = existing?.sync_mode ?? "auto";
     const syncOn = mode === "on" || (mode === "auto" && policy.enabled);
     if (!syncOn) keepNewestMessage(dialog, chatId);
   };
 
-  // The stop signal ends a page request at once, a FLOOD_WAIT it waits out
-  // included (#64)
   const pages = client.withParams({
     abortSignal: ctx.runtime.shutdown.signal,
   });
 
   try {
     for await (const dialog of pages.iterDialogs({ archived: "keep" })) {
-      // Leaving the loop fetches no further page. The stop signal is a
-      // macrotask, so it can't land between this check and the next page's
-      // request: no page starts with the signal already aborted.
       if (ctx.state.shutdownRequested) {
         stopped = true;
         break;
@@ -206,8 +194,6 @@ export async function syncAccountDialogs(
     complete = !stopped;
   } catch (err) {
     if (ctx.state.shutdownRequested) {
-      // A page that fails while the daemon stops is no fault of the account;
-      // one the stop cut short is the stop itself, not worth a line
       stopped = true;
       if (!isDaemonStopError(err)) {
         ctx.logger.debug(
@@ -221,7 +207,6 @@ export async function syncAccountDialogs(
     }
   }
 
-  // Keep what the pass listed before an error, too.
   flushChats();
   flushUsers();
   flushMessages();
@@ -229,8 +214,6 @@ export async function syncAccountDialogs(
   let communitiesCount = 0;
   if (!stopped && !ctx.state.shutdownRequested) {
     try {
-      // The dialogs are saved and the next pass retries, so the request
-      // never sleeps out a FLOOD_WAIT that would hold up the start of sync
       const rows = await fetchJoinedCommunities(
         client.withParams({
           abortSignal: ctx.runtime.shutdown.signal,
@@ -250,8 +233,6 @@ export async function syncAccountDialogs(
         );
       }
     }
-    // A stop during the request ends the pass like one during a page: it
-    // marks nothing and refreshes no queues
     if (ctx.state.shutdownRequested) {
       stopped = true;
       complete = false;
@@ -274,10 +255,6 @@ export async function syncAccountDialogs(
   return { visited, complete, stopped };
 }
 
-/**
- * One participation check per group the pass listed, unless one is queued
- * (src/db/group-participation.ts).
- */
 function queueParticipationChecks(cacheDb: Database, groups: number[]): void {
   const jobs = createSyncJobsService(cacheDb);
   cacheDb.transaction(() => {
@@ -429,8 +406,6 @@ export async function refreshDialogsAfterReconnect(
       quiet: true,
     });
     if (stopped) return true;
-    // The pass covers this account's own cache, so a complete one marks the
-    // chats it didn't list caught up, as on start
     const chatSyncState = createChatSyncStateService(rt.db);
     markUnvisitedChats(chatSyncState, visited, complete, true);
     rt.scheduler?.refreshQueues();

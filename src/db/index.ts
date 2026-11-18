@@ -1,7 +1,3 @@
-/**
- * Database module using bun:sqlite
- * Supports both file-based (production) and in-memory (testing) databases
- */
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -22,15 +18,10 @@ import { checkCacheOwner } from "./cache-meta";
 import { enableWal, initCacheSchema } from "./schema";
 import { initSyncSchema } from "./sync-schema";
 
-/**
- * Get the data directory path
- * Supports TELEGRAM_SYNC_CLI_DATA_DIR env var for testing isolation
- */
 function resolveDataDir(): string {
   return process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? join(homedir(), ".telegram-sync-cli");
 }
 
-// Database location: ~/.telegram-sync-cli/data.db (or TELEGRAM_SYNC_CLI_DATA_DIR if set)
 const DATA_DIR = resolveDataDir();
 const DB_PATH = join(DATA_DIR, "data.db");
 
@@ -38,8 +29,6 @@ const DB_PATH = join(DATA_DIR, "data.db");
  * Initialize database schema
  */
 function initSchema(db: Database): void {
-  // Several tg processes write data.db, and the move of a shared cache holds
-  // its write lock (cache-layout.ts): wait for it instead of failing at once
   db.run("PRAGMA busy_timeout = 5000");
   enableWal(db);
 
@@ -58,28 +47,17 @@ function initSchema(db: Database): void {
     )
   `);
 
-  // Migration: add user_id column if it doesn't exist (for existing databases)
-  // Note: SQLite doesn't allow UNIQUE constraint in ALTER TABLE, so we add the column
-  // without it and create a unique index separately
   try {
     db.run("ALTER TABLE accounts ADD COLUMN user_id INTEGER");
-  } catch {
-    // Column already exists, ignore
-  }
+  } catch {}
 
-  // Migration: add username column if it doesn't exist
   try {
     db.run("ALTER TABLE accounts ADD COLUMN username TEXT");
-  } catch {
-    // Column already exists, ignore
-  }
+  } catch {}
 
-  // Migration: add label column if it doesn't exist
   try {
     db.run("ALTER TABLE accounts ADD COLUMN label TEXT");
-  } catch {
-    // Column already exists, ignore
-  }
+  } catch {}
 
   db.run("CREATE INDEX IF NOT EXISTS idx_accounts_phone ON accounts(phone)");
   db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id)");
@@ -87,7 +65,6 @@ function initSchema(db: Database): void {
   db.run("CREATE INDEX IF NOT EXISTS idx_accounts_label ON accounts(label)");
   db.run("CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts(is_active)");
 
-  // Migration: extract user_id from "user:xxx" phone values and resolve duplicates
   migrateAndResolveDuplicates(db);
 }
 
@@ -95,7 +72,6 @@ function initSchema(db: Database): void {
  * Extract user_id from "user:xxx" phone patterns and resolve duplicate accounts
  */
 function migrateAndResolveDuplicates(db: Database): void {
-  // Step 1: Extract user_id from phone values like "user:12345"
   const accountsWithUserPhone = db
     .query("SELECT id, phone FROM accounts WHERE phone LIKE 'user:%' AND user_id IS NULL")
     .all() as Array<{ id: number; phone: string }>;
@@ -103,28 +79,19 @@ function migrateAndResolveDuplicates(db: Database): void {
   for (const acc of accountsWithUserPhone) {
     const userId = parseInt(acc.phone.replace("user:", ""), 10);
     if (!Number.isNaN(userId)) {
-      // Check if this user_id already exists in another account
       const existing = db.query("SELECT id FROM accounts WHERE user_id = ?").get(userId) as {
         id: number;
       } | null;
 
       if (existing) {
-        // Duplicate found! Keep the existing account (with real phone number),
-        // delete the QR-based account (user:xxx phone)
         db.query("DELETE FROM accounts WHERE id = ?").run(acc.id);
       } else {
-        // No duplicate, just update the user_id
         db.query("UPDATE accounts SET user_id = ? WHERE id = ?").run(userId, acc.id);
       }
     }
   }
-
-  // Step 2: Handle accounts with the same name but no user_id
-  // This is a heuristic for accounts that might be the same user
-  // We don't auto-merge these since name matching is not reliable
 }
 
-/** Account row class for typed queries */
 class AccountRow {
   id!: number;
   phone!: string;
@@ -246,46 +213,38 @@ export function createAccountsDb(db: Database): AccountsDbInterface {
   const statements = createStatements(db);
 
   return {
-    /** Get all accounts */
     getAll(): Account[] {
       return statements.getAllAccounts.all();
     },
 
-    /** Get account by ID */
     getById(id: number): Account | null {
       return statements.getAccountById.get({ $id: id }) ?? null;
     },
 
-    /** Get account by phone number */
     getByPhone(phone: string): Account | null {
       return statements.getAccountByPhone.get({ $phone: phone }) ?? null;
     },
 
-    /** Get account by Telegram user ID */
     getByUserId(userId: number): Account | null {
       return statements.getAccountByUserId.get({ $user_id: userId }) ?? null;
     },
 
-    /** Get account by Telegram username */
     getByUsername(username: string): Account | null {
       const normalized = normalizeUsernameValue(username);
       if (!normalized) return null;
       return statements.getAccountByUsername.get({ $username: normalized }) ?? null;
     },
 
-    /** Get accounts by custom label */
     getAllByLabel(label: string): Account[] {
       const normalized = normalizeLabelValue(label);
       if (!normalized) return [];
       return statements.getAccountsByLabel.all({ $label: normalized });
     },
 
-    /** Get the currently active account */
     getActive(): Account | null {
       return statements.getActiveAccount.get() ?? null;
     },
 
-    /** Create a new account */
     create(data: {
       phone: string;
       user_id?: number;
@@ -308,7 +267,6 @@ export function createAccountsDb(db: Database): AccountsDbInterface {
       return result;
     },
 
-    /** Update account */
     update(
       id: number,
       data: {
@@ -340,23 +298,19 @@ export function createAccountsDb(db: Database): AccountsDbInterface {
       );
     },
 
-    /** Update just the session data */
     updateSession(id: number, session_data: string): void {
       statements.updateSessionData.run({ $id: id, $session_data: session_data });
     },
 
-    /** Set an account as active (deactivates all others) */
     setActive(id: number): void {
       statements.setActiveAccount.run({ $id: id });
     },
 
-    /** Delete an account */
     delete(id: number): boolean {
       const result = statements.deleteAccount.run({ $id: id });
       return result.changes > 0;
     },
 
-    /** Count total accounts */
     count(): number {
       const result = statements.countAccounts.get() as { count: number } | null;
       return result?.count ?? 0;
@@ -376,16 +330,13 @@ export function createTestDatabase(): {
   return { db, accountsDb: createAccountsDb(db) };
 }
 
-// Ensure data directory exists for production
 if (!existsSync(DATA_DIR)) {
   mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Production database instance
 const db = new Database(DB_PATH);
 initSchema(db);
 
-// Production accountsDb instance
 export const accountsDb = createAccountsDb(db);
 
 const cacheLayout = createCacheLayoutGuard(() => ({
@@ -427,7 +378,6 @@ export function getLegacyCachePath(): string {
   return legacyCachePath(DATA_DIR);
 }
 
-// One connection per account's cache, opened on first use
 const accountCaches = new Map<number, Database>();
 
 function openAccountCacheFile(accountId: number): Database {
@@ -449,7 +399,6 @@ function openAccountCacheFile(accountId: number): Database {
       },
     });
   } catch (err) {
-    // A failed migration rolled back; the next call opens and retries it
     cache.close();
     throw err;
   }
@@ -498,9 +447,7 @@ export function closeAccountCacheDbs(): void {
   for (const cache of accountCaches.values()) {
     try {
       cache.close();
-    } catch {
-      // Already closed
-    }
+    } catch {}
   }
   accountCaches.clear();
 }
@@ -532,7 +479,6 @@ export {
   isCacheUnavailableError,
   listSharedCaches,
 } from "./cache-layout";
-// Re-export sync schema types and functions
 export {
   ChatSyncStateRow,
   DaemonStatusRow,

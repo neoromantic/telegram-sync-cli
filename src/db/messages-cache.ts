@@ -1,7 +1,3 @@
-/**
- * Messages cache service
- * Provides typed access to the messages_cache table
- */
 import type { Database } from "bun:sqlite";
 import { extractAttachment } from "../utils/attachment";
 import { richMessageText } from "../utils/rich-message";
@@ -112,11 +108,6 @@ export interface MessagesCache {
   countByChatId(chatId: number): number;
 }
 
-/**
- * The columns a fetched message overwrites. A message fetched again with all
- * of them unchanged leaves its row, and so its search index row, alone:
- * fetched_at and updated_at keep the last write that changed something.
- */
 const UPSERT_COLUMNS = [
   "from_id",
   "reply_to_id",
@@ -138,7 +129,6 @@ const UPSERT_COLUMNS = [
  * Create a messages cache service
  */
 export function createMessagesCache(db: Database): MessagesCache {
-  // Prepare statements for performance
   const stmts = {
     upsert: db.prepare(`
       INSERT INTO messages_cache (
@@ -213,9 +203,6 @@ export function createMessagesCache(db: Database): MessagesCache {
 
   const attachments = createMessageAttachmentsStore(db);
 
-  // The message and its attachment row change together. Each statement
-  // writes only what changed, so a message fetched again unchanged writes
-  // nothing.
   function writeMessage(message: MessageInput): void {
     const now = Date.now();
     stmts.upsert.run({
@@ -224,7 +211,6 @@ export function createMessagesCache(db: Database): MessagesCache {
       $from_id: message.from_id ?? null,
       $reply_to_id: message.reply_to_id ?? null,
       $forward_from_id: message.forward_from_id ?? null,
-      // A rich message has no text of its own: search indexes its blocks
       $text: message.text || richMessageText(message.raw_json) || (message.text ?? null),
       $message_type: message.message_type,
       $has_media: message.has_media ? 1 : 0,
@@ -239,7 +225,6 @@ export function createMessagesCache(db: Database): MessagesCache {
       $raw_json: message.raw_json,
       $updated_at: now,
     });
-    // A message without media has no file: skip parsing its raw_json
     attachments.sync(
       message.chat_id,
       message.message_id,
@@ -249,9 +234,6 @@ export function createMessagesCache(db: Database): MessagesCache {
 
   const participation = createGroupParticipation(db);
 
-  // Inside a caller's transaction this runs as a savepoint. It reads before
-  // it writes, so it takes the write lock first: a deferred transaction
-  // would fail at once if another process wrote after its read.
   const upsertMany = db.transaction((messages: MessageInput[]): CacheWriteResult => {
     const now = nowSeconds();
     const own = messages
@@ -311,9 +293,6 @@ export function createMessagesCache(db: Database): MessagesCache {
         const rows = stmts.findChatIdsByMessageId.all({
           $message_id: messageId,
         }) as Array<{ chat_id: number }>;
-        // Each channel and supergroup numbers its own messages, so its rows
-        // say nothing about a delete without chat context. The primary key
-        // makes the chat IDs unique.
         const candidates = rows.map((row) => row.chat_id).filter(sharesAccountMessageIds);
 
         if (candidates.length > 1) {

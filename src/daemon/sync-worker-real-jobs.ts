@@ -32,18 +32,8 @@ import {
 import type { RealJobResult, RealSyncWorkerContext } from "./sync-worker-real-types";
 import { processJobWithHandlers } from "./sync-worker-utils";
 
-/**
- * The group stopped taking new messages during the fetch or the write
- * (src/db/group-participation.ts): the job ends without moving a cursor and
- * without a retry, so the page is read again once the group takes messages.
- */
 const PAUSED: RealJobResult = { success: true, messagesFetched: 0 };
 
-/**
- * Fetch one history page for a job, and cache what it says besides its
- * messages: the senders, before the job writes the messages, so the search
- * index has their names, and the chat's message count on the server.
- */
 async function fetchJobPage(
   ctx: RealSyncWorkerContext,
   chatId: number,
@@ -81,7 +71,6 @@ export async function processForwardCatchupReal(
   if ("result" in peer) return peer.result;
 
   const state = ctx.chatSyncState.get(chatId);
-  // 0 is a real cursor: the first page of an empty chat leaves it there.
   const cursor = state?.forward_cursor ?? null;
   const floor = cursor ?? 0;
   const topBefore = state?.top_message_id ?? null;
@@ -95,14 +84,12 @@ export async function processForwardCatchupReal(
     );
 
     if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
-    // Guard against a server that returns messages at or below the cursor.
     const above = messages.filter((message) => rawMessageId(message) > floor);
 
     if (above.length === 0) {
       if (cursor === null) {
         ctx.chatSyncState.updateLastSync(chatId, "forward");
       } else {
-        // Nothing above the cursor: the chat is caught up.
         ctx.chatSyncState.recordCatchupPage(chatId, {
           forward_cursor: cursor,
           new_messages: 0,
@@ -113,17 +100,13 @@ export async function processForwardCatchupReal(
       return { success: true, messagesFetched: 0, hasMore: false };
     }
 
-    // Empty messages hold no data, but the cursor still moves past them.
     const top = Math.max(...above.map(rawMessageId));
     const inputs = createMessageInputs(above, chatId);
 
-    // Live updates already counted the messages they cached.
     const write = ctx.messagesCache.upsertBatch(inputs);
     if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
     const newCount = write.inserted;
 
-    // The cursor moves past the messages of a group's pauses, but a page
-    // with any of them skipped records no range: the cache lacks them
     if (write.skipped === 0) {
       ctx.historyRanges.recordPage(
         chatId,
@@ -171,21 +154,11 @@ export async function processBackwardHistoryReal(
     return { success: true, messagesFetched: 0, historyComplete: true };
   }
 
-  // Older versions left a forward cursor without a backward one (0.1.4's
-  // catch-up, and every live message before it), or one above it (a first
-  // page of only empty messages). The oldest cached message then says
-  // nothing about what is cached below the forward cursor, so history pages
-  // down from just above it.
   const forwardCursor = state?.forward_cursor ?? null;
   let backwardCursor = state?.backward_cursor ?? null;
   if (forwardCursor !== null && (backwardCursor === null || backwardCursor > forwardCursor + 1)) {
     backwardCursor = forwardCursor + 1;
   }
-  // Without either cursor, backfill starts at the newest page. The oldest
-  // cached message marks no progress: tg send and tg messages list and get
-  // cache messages anywhere in a chat, and starting below such a page would
-  // skip the gap above it, or reach the start early and mark history
-  // complete.
   backwardCursor ??= 0;
 
   try {
@@ -194,7 +167,6 @@ export async function processBackwardHistoryReal(
       limit: ctx.config.batchSize,
     });
 
-    // The newest messages below the cursor, or the newest page without one
     const bounds = {
       before: backwardCursor || undefined,
       reachedStart: messages.length < ctx.config.batchSize,
@@ -208,12 +180,10 @@ export async function processBackwardHistoryReal(
       return { success: true, messagesFetched: 0, historyComplete: true };
     }
 
-    // Empty messages hold no data, but the cursor still moves past them.
     const ids = messages.map(rawMessageId).filter((id) => id > 0);
     const minId = ids.length > 0 ? Math.min(...ids) : backwardCursor;
     const inputs = createMessageInputs(messages, chatId);
 
-    // The first page, live updates and pages the CLI cached may hold some
     const write = ctx.messagesCache.upsertBatch(inputs);
     if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
     const newCount = write.inserted;
@@ -231,8 +201,6 @@ export async function processBackwardHistoryReal(
       cursor_end: minId,
     });
 
-    // A page without message IDs can't move the cursor, so fetching the
-    // next one would fetch the same page again.
     const historyComplete =
       ids.length === 0 || minId <= 1 || messages.length < ctx.config.batchSize;
     if (historyComplete) {
@@ -272,8 +240,6 @@ export async function processInitialLoadReal(
     };
   }
 
-  // A chat with a forward cursor already had its first page; moving the
-  // cursor to the newest message now could skip messages below it.
   const state = ctx.chatSyncState.get(chatId);
   if (state && state.forward_cursor !== null) {
     return { success: true, messagesFetched: 0 };
@@ -287,7 +253,6 @@ export async function processInitialLoadReal(
       limit: ctx.config.batchSize,
     });
 
-    // Empty messages hold no data, but they still count for the cursors.
     const ids = messages.map(rawMessageId).filter((id) => id > 0);
 
     if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
@@ -310,7 +275,6 @@ export async function processInitialLoadReal(
     const minId = Math.min(...ids);
     const inputs = createMessageInputs(messages, chatId);
 
-    // Live updates already counted the messages they cached.
     const write = ctx.messagesCache.upsertBatch(inputs);
     if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
     const newCount = write.inserted;
@@ -385,7 +349,6 @@ export async function processRefetchMessagesReal(
       )
       .map((message) => parseRawMessage(message, chatId))
       .filter((input) => input !== null);
-    // Only rows cached already: a refetch repairs them and adds none
     const { written } = ctx.messagesCache.upsertBatch(inputs);
 
     const last = Math.max(...ids);
@@ -453,7 +416,6 @@ export async function processFetchSendersReal(
   }
 }
 
-/** Search results a participation check asks for */
 const PARTICIPATION_SEARCH_LIMIT = 10;
 
 /**
@@ -484,7 +446,6 @@ export async function processCheckGroupParticipationReal(
       maxDate: 0,
       offsetId: 0,
       addOffset: 0,
-      // A few, in case the newest is a service message
       limit: PARTICIPATION_SEARCH_LIMIT,
       maxId: 0,
       minId: 0,
@@ -532,8 +493,6 @@ export async function processJobReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
 ): Promise<RealJobResult> {
-  // A group the account stopped taking part in after the job was queued:
-  // the job ends without a request
   const handlers =
     !CHAT_INDEPENDENT_JOB_TYPES.includes(job.job_type) &&
     !ctx.messagesCache.participation.captures(job.chat_id)

@@ -1,8 +1,3 @@
-/**
- * E2E tests for unread messages: tg chats list --unread, tg messages unread
- * (from the cache) and tg messages read (with a fake Telegram client)
- */
-
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
@@ -33,7 +28,6 @@ function message(
   id: number,
   out = false,
 ) {
-  // Outgoing messages carry the own user as the sender
   const from = out ? { fromId: { _: "peerUser", userId: 999 } } : {};
   return parseRawMessage(
     {
@@ -49,11 +43,6 @@ function message(
   ) as NonNullable<ReturnType<typeof parseRawMessage>>;
 }
 
-/**
- * Alice: 3 unread, all cached; Team Chat: 5 unread, 2 cached (a large
- * group the daemon doesn't sync); Example News: read; Book Club: 1 unread
- * but older than the others
- */
 function seed(db: Database): void {
   createUsersCache(db).upsert({
     user_id: "10",
@@ -179,10 +168,8 @@ describe("E2E: unread messages", () => {
         missing: chat.missing,
       })),
     ).toEqual([
-      // The oldest unread ones first; the outgoing 13 is not unread
       { id: ALICE_ID, ids: [14, 12], unreadCount: 3, missing: 0 },
       { id: TEAM_ID, ids: [25, 24], unreadCount: 5, missing: 3 },
-      // Nothing of the group is cached
       { id: BOOK_CLUB_ID, ids: [], unreadCount: 1, missing: 1 },
     ]);
     expect(unread.chats[0]).toMatchObject({

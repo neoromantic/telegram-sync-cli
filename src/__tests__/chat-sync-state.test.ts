@@ -1,6 +1,3 @@
-/**
- * Tests for chat sync state service
- */
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
@@ -101,7 +98,6 @@ describe("ChatSyncStateService", () => {
       });
     });
 
-    // What the dialog pass writes for the channel from the policy
     const passUpsert = (enabled: boolean, memberCount?: number) =>
       service.upsert({
         chat_id: CHANNEL,
@@ -244,7 +240,6 @@ describe("ChatSyncStateService", () => {
 
     it("keeps a top that rose during the fetch", () => {
       service.raiseTopMessageId(100, 1150);
-      // A dialog pass saw a newer message while the page was in flight
       service.raiseTopMessageId(100, 1160);
       service.recordCatchupPage(100, {
         forward_cursor: 1150,

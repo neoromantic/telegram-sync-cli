@@ -1,8 +1,3 @@
-/**
- * The request `tg api` builds from its arguments: chats given as strings or
- * numbers become the input type the method's TL schema wants, longs become
- * Longs, and required counters left out get their zero value.
- */
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { MtInvalidPeerTypeError, type TelegramClient } from "@mtcute/bun";

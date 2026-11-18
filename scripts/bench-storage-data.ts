@@ -1,21 +1,10 @@
-/**
- * Made-up Telegram data for the storage benchmark (scripts/bench-storage.ts):
- * users, chats and raw TL messages shaped as mtcute's reader gives them
- * (every flag a boolean, Long IDs, byte fields as Uint8Array). Every value
- * comes from the seed, and each message from (seed, chat, index) alone, so
- * any page can be generated again byte for byte. No real people, chats or
- * data: names and words are built from syllables, links use example.com.
- */
 import { Long } from "@mtcute/bun";
 
 /** The account's own user ID */
 export const SELF_ID = 5_550_000;
 
-/** The newest message is one day before this Unix time (Sept. 2026) */
 const END_DATE = 1_790_000_000;
 const FIVE_YEARS = 5 * 365 * 24 * 3600;
-
-// ── Deterministic randomness ────────────────────────────────────────────
 
 /** mulberry32: a small, fast 32-bit PRNG */
 export function rng(seed: number): () => number {
@@ -29,7 +18,6 @@ export function rng(seed: number): () => number {
   };
 }
 
-/** A 32-bit hash of a few integers, to seed one message's PRNG */
 function hash(...parts: number[]): number {
   let h = 2_166_136_261;
   for (const part of parts) {
@@ -59,7 +47,6 @@ function long(r: Rand): Long {
   return Long.fromBits(Math.floor(r() * 4_294_967_296) | 0, Math.floor(r() * 2_147_483_648) | 0);
 }
 
-/** Cumulative weights of a Zipf distribution over `n` ranks */
 function zipfCdf(n: number, s: number): Float64Array {
   const cdf = new Float64Array(n);
   let sum = 0;
@@ -81,8 +68,6 @@ function sampleCdf(cdf: Float64Array, u: number): number {
   }
   return lo;
 }
-
-// ── Vocabulary ──────────────────────────────────────────────────────────
 
 const LATIN = [
   "ka",
@@ -148,7 +133,6 @@ const CYRILLIC = [
   "тум",
   "хор",
 ] as const;
-/** Endings a Cyrillic stem takes, so `stem*` finds several word forms */
 const ENDINGS = ["", "а", "ы", "у", "ом", "ой", "ами", "ах"] as const;
 const EMOJI = ["👍", "❤", "🔥", "😂", "🎉", "🤔"] as const;
 
@@ -178,8 +162,6 @@ export function buildVocabulary(seed: number, size: number): Word[] {
 function capitalize(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1);
 }
-
-// ── Users and chats ─────────────────────────────────────────────────────
 
 export type ChatKind = "private" | "group" | "supergroup" | "channel";
 
@@ -293,7 +275,6 @@ export function buildDataset(seed: number, messages: number, vocabularySize = 30
   sizes[0] = (sizes[0] as number) + messages - sizes.reduce((a, b) => a + b, 0);
 
   const r = rng(hash(seed, 3));
-  // Private chats and basic groups share the account's message ID counter
   let sharedId = 1;
   let privateUser = 0;
   const chats: BenchChat[] = sizes.map((size, index) => {
@@ -433,8 +414,6 @@ export function messageIdAt(chat: BenchChat, i: number): number {
   return chat.firstId + i + Math.floor(i / 37);
 }
 
-// ── Messages ────────────────────────────────────────────────────────────
-
 function peerOf(chat: BenchChat) {
   if (chat.kind === "private") return { _: "peerUser", userId: chat.peerId };
   if (chat.kind === "group") return { _: "peerChat", chatId: chat.peerId };
@@ -450,7 +429,6 @@ function words(r: Rand, data: Dataset, count: number): string {
   return out.join(" ");
 }
 
-/** 3–40 words, most messages short */
 function messageText(r: Rand, data: Dataset): string {
   return words(r, data, 3 + Math.floor(37 * r() ** 2));
 }
@@ -545,7 +523,6 @@ function mediaDocument(doc: unknown, flags: { video?: boolean; voice?: boolean }
 
 type MediaKind = "photo" | "video" | "voice" | "document" | "sticker" | "webpage";
 
-/** ~10% photos, then videos, voice messages, files, stickers and link previews */
 function mediaKind(r: Rand, chat: BenchChat): MediaKind | null {
   const roll = r();
   if (roll < 0.1) return "photo";
@@ -708,7 +685,6 @@ export function generateMessage(
   const peerId = peerOf(chat);
   const isChannel = chat.kind === "channel";
   const outgoing = !isChannel && r() < (chat.kind === "private" ? 0.4 : 0.08);
-  // The most active members write most of the messages
   const sender = outgoing
     ? SELF_ID
     : (chat.members[Math.floor(chat.members.length * r() ** 2)] as number);

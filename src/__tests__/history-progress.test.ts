@@ -1,7 +1,3 @@
-/**
- * History progress for tg status (#126): messages cached against Telegram's
- * counts, and a time left from the measured pace. Made-up data only.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
@@ -56,7 +52,6 @@ function seedChat(
   );
 }
 
-/** A history page the daemon finished at `completedAt` */
 function seedPage(completedAt: number, messages: number, jobType = SyncJobType.BackwardHistory) {
   db.run(
     `INSERT INTO sync_jobs (chat_id, job_type, status, messages_fetched, completed_at)
@@ -86,7 +81,6 @@ describe("readHistoryProgress", () => {
       new_messages: 3,
     });
 
-    // 202 still waits for its first page
     expect(readHistoryProgress(db, { now: NOW })).toMatchObject({
       chats_pending: 1,
       messages_cached: 3,
@@ -98,10 +92,8 @@ describe("readHistoryProgress", () => {
   it("sums messages cached of the counts, for the chats with sync on", () => {
     seedChat(101, { total: 10, cached: 4 });
     seedChat(102, { total: 5, cached: 5, complete: true });
-    // Deleted on the server after it was cached: counted once
     seedChat(-4242, { total: 3, cached: 6, complete: true });
     seedChat(103, { total: null, cached: 2 });
-    // Complete without a count: an older version synced it
     seedChat(105, { total: null, cached: 7, complete: true });
     seedChat(104, { total: 50, cached: 0, enabled: false });
 
@@ -139,13 +131,11 @@ describe("readHistoryProgress", () => {
     seedPage(NOW - 10 * MINUTE, 100);
     seedPage(NOW - 6 * MINUTE, 100);
     seedPage(NOW - 2 * MINUTE, 100, SyncJobType.InitialLoad);
-    // Not history pages, or too old
     seedPage(NOW - MINUTE, 500, SyncJobType.ForwardCatchup);
     seedPage(NOW - HISTORY_PACE_WINDOW_MS - 1, 900);
 
     const progress = readHistoryProgress(db, { now: NOW });
 
-    // 200 messages after the first page, in the 10 minutes since it
     expect(progress.messages_per_minute).toBe(20);
     expect(progress.eta_seconds).toBe(2000 * 3);
   });
@@ -178,14 +168,12 @@ describe("readHistoryProgress", () => {
          VALUES (?, ?, 1, 200)`,
         [timestamp, method],
       );
-    // 61 calls a second apart, the last a second ago; others don't count
     for (let i = 0; i <= 60; i++) call(NOW - 61_000 + i * 1000);
     call(NOW - 30_000, "messages.getDialogs");
     call(NOW - 6 * MINUTE);
 
     const progress = readHistoryProgress(db, { now: NOW });
 
-    // 60 calls after the first, over the 61 s since it
     expect(progress.calls_per_second).toBe(0.98);
   });
 

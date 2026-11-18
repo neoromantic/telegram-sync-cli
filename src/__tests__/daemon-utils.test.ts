@@ -1,6 +1,3 @@
-/**
- * Tests for daemon utility helpers
- */
 import { describe, expect, it } from "bun:test";
 import { formatError, getErrorMessage } from "../daemon/daemon-utils";
 

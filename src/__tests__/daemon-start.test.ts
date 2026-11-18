@@ -1,6 +1,3 @@
-/**
- * Daemon start failure paths without module mocks
- */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";

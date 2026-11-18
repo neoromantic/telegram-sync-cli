@@ -1,10 +1,3 @@
-/**
- * E2E: a bare ID from 0.2.0 that names both a cached basic group and a
- * cached channel. Every command that reads a chat ID fails the same way:
- * INVALID_ARGS (exit 3) with the input under the command's own key and both
- * marked IDs in `candidates`, without asking Telegram.
- */
-
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 import { fakeDialog } from "../__tests__/helpers/fake-dialogs";

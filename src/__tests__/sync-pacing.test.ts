@@ -1,14 +1,8 @@
-/**
- * The adaptive pace of an account's sync jobs (#133), on an injected clock:
- * speed-up after clean runs, back-off on a FLOOD_WAIT, the cap, the calm
- * interval. No real waits.
- */
 import { describe, expect, it } from "bun:test";
 import { createSyncPacer, PACING_CLEAN_RUN_CALLS, type SyncPacer } from "../daemon/sync-pacing";
 
 const T0 = 1_760_000_000_000;
 
-/** Run `calls` clean jobs, each one as soon as the pace allows */
 function runClean(pacer: SyncPacer, calls: number, start = T0): number {
   let now = start;
   for (let i = 0; i < calls; i++) {
@@ -104,7 +98,6 @@ describe("SyncPacer", () => {
 
     expect(pace).toBeCloseTo(0.45, 2);
     expect(rate(pacer)).toBeCloseTo(0.45, 2);
-    // The wait, then one interval at the new pace
     const resume = now + 200 + 12_000 + Math.ceil(1000 / 0.45);
     expect(pacer.nextStartAt()).toBe(resume);
     expect(pacer.isDue(resume - 1)).toBe(false);
@@ -170,7 +163,6 @@ describe("SyncPacer", () => {
     pacer.setHistoryDue(false);
     expect(pacer.nextStartAt()).toBe(now + 5000);
     expect(pacer.snapshot().mode).toBe("calm");
-    // Calm calls don't speed history up
     runClean(pacer, PACING_CLEAN_RUN_CALLS * 2, now);
 
     pacer.setHistoryDue(true);

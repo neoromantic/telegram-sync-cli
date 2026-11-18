@@ -1,6 +1,3 @@
-/**
- * Unit tests for daemon account helpers (no getCacheDb dependency)
- */
 import { describe, expect, it, mock } from "bun:test";
 import type {
   DeleteMessageUpdate,
@@ -294,7 +291,6 @@ describe("signal/cleanup helpers", () => {
     const ctx = testDaemonContext();
     const handlers = new Map<string, () => void>();
     const originalOn = process.on;
-    // Capture the handlers without installing a real listener
     process.on = ((signal: string, handler: () => void) => {
       handlers.set(signal, handler);
       return process;
@@ -339,7 +335,6 @@ describe("signal/cleanup helpers", () => {
 });
 
 describe("daemonNetworkMiddlewares", () => {
-  /** Run the middlewares over a final step, as mtcute's network manager does */
   function compose(
     middlewares: RpcCallMiddleware[],
     final: (ctx: RpcCallMiddlewareContext) => Promise<unknown>,
@@ -379,7 +374,6 @@ describe("daemonNetworkMiddlewares", () => {
     expect(ctx.logger.info).toHaveBeenCalledWith(
       "[Account 1] messages.getHistory: FLOOD_WAIT, waiting 300s",
     );
-    // The wait ended without a retry
     expect(sent).toEqual(["messages.getHistory"]);
   });
 
@@ -393,7 +387,6 @@ describe("daemonNetworkMiddlewares", () => {
       manager,
     });
 
-    /** A context whose account 1 has a cache */
     function withCache() {
       const ctx = testDaemonContext();
       const db = createAccountCacheDb();
@@ -408,7 +401,6 @@ describe("daemonNetworkMiddlewares", () => {
       }));
       const before = Date.now();
 
-      // iterDialogs pages, getJoinedCommunities, getMe (start, reconnect, health check)
       for (const method of [
         "messages.getDialogs",
         "messages.getDialogs",
@@ -437,7 +429,6 @@ describe("daemonNetworkMiddlewares", () => {
         "communities.getJoinedCommunities": 1,
         "users.getUsers": 1,
       });
-      // recordCall counts each request in its rate window too
       expect(
         db
           .query("SELECT SUM(call_count) AS calls FROM rate_limits WHERE method = ?")
@@ -487,7 +478,6 @@ describe("daemonNetworkMiddlewares", () => {
       const rt = ctx.runtime.accounts.get(1)!;
       rt.pacer = createSyncPacer();
       rt.pacer.setHistoryDue(true);
-      // Longer than the daemon's 5 minutes: returned, not slept through
       const call = compose(daemonNetworkMiddlewares(ctx, 1), async () => ({
         _: "mt_rpc_error",
         errorCode: 420,

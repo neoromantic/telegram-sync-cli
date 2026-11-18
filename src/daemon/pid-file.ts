@@ -1,7 +1,3 @@
-/**
- * PID file management for daemon
- * Prevents multiple daemon instances and enables lifecycle management
- */
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 /**
@@ -36,12 +32,8 @@ export interface PidFile {
   getPath(): string;
 }
 
-/**
- * Check if a process exists
- */
 function processExists(pid: number): boolean {
   try {
-    // Signal 0 doesn't actually send a signal, just checks if process exists
     process.kill(pid, 0);
     return true;
   } catch {

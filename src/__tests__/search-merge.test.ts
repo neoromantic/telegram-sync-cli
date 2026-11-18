@@ -1,8 +1,3 @@
-/**
- * The search index merges in the background, not inside writes (#149,
- * #142): writes pile up segments, a merge batch merges them and drops the
- * entries of deleted and re-indexed messages, and answers stay the same.
- */
 import type { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 
@@ -12,7 +7,6 @@ import { createAccountCacheDb } from "./helpers/cache-db";
 
 const WORDS = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"];
 
-/** Messages `from` to `to`, each write transaction `perWrite` of them */
 function writeMessages(db: Database, to: number, perWrite: number, from = 1): void {
   const insert = db.query(`
     INSERT INTO messages_cache (chat_id, message_id, from_id, text, date, fetched_at, raw_json)
@@ -27,7 +21,6 @@ function writeMessages(db: Database, to: number, perWrite: number, from = 1): vo
   }
 }
 
-/** Segments of the index: rows of message_search_data name theirs in the upper bits */
 function segments(db: Database): number {
   return (
     db
@@ -63,7 +56,6 @@ function mergeAll(db: Database): number {
 describe("search index merges", () => {
   it("leave writes alone: segments pile up until a merge", () => {
     const db = createAccountCacheDb();
-    // A segment per message: FTS5 itself merges only a level of 16 (crisismerge)
     writeMessages(db, 400, 10);
     expect(segments(db)).toBeGreaterThan(8);
 
@@ -73,7 +65,6 @@ describe("search index merges", () => {
     expect(WORDS.map((word) => matches(db, word))).toEqual(before);
   });
 
-  /** Re-index the messages from `from` to `to`, as search-reindex.ts does: delete, then insert */
   function reindex(db: Database, from: number, to: number): void {
     const rows = db
       .query("SELECT rowid, text FROM messages_cache WHERE rowid BETWEEN ? AND ?")
@@ -92,7 +83,6 @@ describe("search index merges", () => {
     }
   }
 
-  /** Pages of deleted entries: their segment IDs are 65,536 up */
   function deletedPages(db: Database): number {
     return (
       db.query("SELECT COUNT(*) AS n FROM message_search_data WHERE (id >> 37) >= 65536").get() as {
@@ -123,12 +113,10 @@ describe("search index merges", () => {
     const db = createAccountCacheDb();
     writeMessages(db, 400, 400);
     mergeAll(db);
-    // 5% of the entries deleted: under a tenth
     reindex(db, 1, 20);
     mergeAll(db);
     expect(deletedPages(db)).toBeGreaterThan(0);
 
-    // 60 of the 460 entries now
     reindex(db, 21, 60);
     mergeAll(db);
     expect(deletedPages(db)).toBe(0);
@@ -166,7 +154,6 @@ describe("search index merges", () => {
     const db = createAccountCacheDb();
     writeMessages(db, 2_000, 20);
     let clock = 0;
-    // Each step takes 10 ms on this clock
     const now = () => {
       clock += 10;
       return clock;
@@ -182,7 +169,6 @@ describe("search index merges", () => {
 
   it("merge only levels of four between the batches of a re-index, then the rest", () => {
     const db = createAccountCacheDb();
-    // FTS5 writes a segment per message: each insert is its own statement
     writeMessages(db, 3, 3);
     expect(segments(db)).toBe(3);
 

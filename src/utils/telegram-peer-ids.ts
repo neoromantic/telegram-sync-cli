@@ -1,17 +1,9 @@
-/**
- * Peer IDs, the only place that converts them. Every cache table stores
- * marked peer IDs, the format mtcute uses: a user keeps its ID, basic group
- * N is -N and channel or supergroup N is -100…N (-1000000000000 - N).
- * Telegram's raw peers carry bare IDs, which are converted here on the way
- * in and back to bare IDs only for an InputPeer.
- */
 import type { tl } from "@mtcute/bun";
 
 import { toLong } from "./long";
 
 export const CHANNEL_PEER_ID_OFFSET = 1_000_000_000_000;
 
-/** The lowest marked basic group ID; anything lower is a channel */
 const MIN_MARKED_CHAT_ID = -999_999_999_999;
 
 type RawPeerLike = {
@@ -36,7 +28,6 @@ function markChannel(channelId: number): number {
   return -CHANNEL_PEER_ID_OFFSET - channelId;
 }
 
-/** What a marked ID names, or null for 0, -1000000000000 and non-integers */
 function peerKind(peerId: number): PeerKind | null {
   if (!Number.isSafeInteger(peerId)) return null;
   if (peerId > 0) return "user";

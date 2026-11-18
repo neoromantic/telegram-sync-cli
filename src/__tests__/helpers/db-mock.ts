@@ -1,8 +1,3 @@
-/**
- * A stand-in for `src/db` in unit tests that `mock.module('../db', …)`:
- * accounts in memory, and each account's cache from a callback, so a test
- * can give every account its own in-memory database.
- */
 import type { Database } from "bun:sqlite";
 import {
   accountMediaPath,

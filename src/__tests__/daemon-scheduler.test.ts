@@ -1,7 +1,3 @@
-/**
- * Tests for daemon scheduler logic (no module mocks). Each account has its
- * own runtime: its cache, scheduler and sync worker.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { TelegramClient, tl } from "@mtcute/bun";
@@ -69,7 +65,6 @@ const createWorkerStub = (overrides: Partial<RealSyncWorker> = {}): RealSyncWork
   return worker;
 };
 
-/** Mark the account connected with a client */
 function connect(
   ctx: DaemonContext,
   accountId: number,
@@ -84,7 +79,6 @@ function connect(
   });
 }
 
-/** A connected account with a scheduler and a worker (stubs by default) */
 function runAccount(
   ctx: DaemonContext,
   accountId: number,
@@ -117,7 +111,6 @@ function jobOf(jobType: SyncJobType, overrides: Partial<SyncJobRow> = {}) {
   } satisfies SyncJobRow;
 }
 
-/** Replace Date.now with a clock the test moves */
 function useClock(start = 1_760_000_000_000) {
   const originalNow = Date.now;
   let now = start;
@@ -304,8 +297,6 @@ describe("rebuildSyncWorker dialog pass", () => {
     });
     chatSyncState.setSyncMode(channelId, "on");
     chatSyncState.markHistoryComplete(channelId);
-    // An earlier pass that failed left 1003's newest message unknown, in
-    // both accounts' caches
     const otherState = createChatSyncStateService(otherDb);
     chatSyncState.markTopUnknown([1003]);
     otherState.markTopUnknown([1003]);
@@ -318,15 +309,12 @@ describe("rebuildSyncWorker dialog pass", () => {
 
     await rebuildSyncWorker(ctx, 1, fake.client);
 
-    // Left, deleted or migrated: caught up at its cursor, no checking page
     expect(chatSyncState.get(1003)).toMatchObject({
       top_message_id: 1000,
       forward_cursor: 1000,
     });
-    // Turned on with tg chats sync: maybe a channel no dialog list shows
     expect(chatSyncState.get(channelId)?.top_message_id).toBeNull();
     expect(pendingCatchups()).toEqual([channelId, 1002]);
-    // The other account's pass is its own
     expect(otherState.get(1003)?.top_message_id).toBeNull();
   });
 
@@ -375,7 +363,6 @@ describe("rebuildSyncWorker dialog pass", () => {
   });
 
   it("logs a pass that throws and lets the next reconnect run one", async () => {
-    // Nothing awaits the pass in the daemon, so a throw must not escape
     const ctx = testDaemonContext();
     addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSchedulerStub({
@@ -414,12 +401,10 @@ describe("rebuildSyncWorker dialog pass", () => {
 
     await rebuildSyncWorker(ctx, 1, fake.client);
 
-    // Neither caught up nor unknown: their sync state stays as it was
     for (const userId of [1002, 1003]) {
       expect(chatSyncState.get(userId)?.top_message_id).toBe(1000);
     }
     expect(refreshQueues).not.toHaveBeenCalled();
-    // Nothing above debug: a pass after a reconnect logs only its summary
     expect(ctx.logger.info).not.toHaveBeenCalled();
     expect(ctx.logger.warn).not.toHaveBeenCalled();
     expect(ctx.logger.error).not.toHaveBeenCalled();
@@ -448,7 +433,6 @@ describe("rebuildSyncWorker dialog pass", () => {
 
     expect(performance.now() - started).toBeLessThan(1000);
     expect(fake.params).toEqual([{ abortSignal: ctx.runtime.shutdown.signal }]);
-    // Neither caught up nor unknown: their sync state stays as it was
     for (const userId of [1002, 1003]) {
       expect(chatSyncState.get(userId)?.top_message_id).toBe(1000);
     }
@@ -467,7 +451,6 @@ describe("rebuildSyncWorker dialog pass", () => {
     addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSchedulerStub({ refreshQueues }),
     });
-    // Closing the client on a stop aborts the page the pass is waiting for
     const fake = fakeDialogClient(
       [
         { kind: "user", id: 1001, topMessage: 1000 },
@@ -484,7 +467,6 @@ describe("rebuildSyncWorker dialog pass", () => {
 
     await rebuildSyncWorker(ctx, 1, fake.client);
 
-    // Not unknown: their sync state stays as it was
     for (const userId of [1002, 1003]) {
       expect(chatSyncState.get(userId)?.top_message_id).toBe(1000);
     }
@@ -505,7 +487,6 @@ describe("rebuildSyncWorker dialog pass", () => {
     addAccountRuntime(ctx, 1, cacheDb, {
       scheduler: createSchedulerStub({ refreshQueues }),
     });
-    // The shutdown closes the account caches while the pass still runs
     const fake = fakeDialogClient(
       [
         { kind: "user", id: 1001, topMessage: 1000 },
@@ -554,7 +535,6 @@ describe("rebuildSyncWorker dialog pass", () => {
 
     expect(first.calls).toHaveLength(1);
     expect(second.calls).toHaveLength(0);
-    // The worker still moves to the newest client
     expect(ctx.runtime.accounts.get(1)?.worker?.client).toBe(second.client);
     expect(pendingCatchups()).toEqual([1002]);
   });
@@ -619,7 +599,6 @@ describe("processJobs", () => {
   it("moves to the next lane slot only after a job ran", async () => {
     const job = jobOf(SyncJobType.ForwardCatchup);
 
-    // No worker: the job doesn't run and keeps its slot
     const idle = testDaemonContext();
     const idleScheduler = createSchedulerStub({ getNextJob: () => job });
     connect(idle, 1);
@@ -629,7 +608,6 @@ describe("processJobs", () => {
     await processJobs(idle);
     expect(idleScheduler.recordJobRun).not.toHaveBeenCalled();
 
-    // A worker that is rate limited doesn't run it either
     const blocked = testDaemonContext();
     const blockedScheduler = createSchedulerStub({ getNextJob: () => job });
     runAccount(blocked, 1, {
@@ -639,7 +617,6 @@ describe("processJobs", () => {
     await processJobs(blocked);
     expect(blockedScheduler.recordJobRun).not.toHaveBeenCalled();
 
-    // A job that ran uses the slot, even if it threw
     const ctx = testDaemonContext();
     const scheduler = createSchedulerStub({ getNextJob: () => job });
     runAccount(ctx, 1, {
@@ -751,8 +728,6 @@ describe("processJobs", () => {
       expect(permanent.warn).toHaveLength(1);
       expect(permanent.warn[0]).toContain("failed for good (permanent error)");
       expect(permanent.warn[0]).toContain("CHANNEL_PRIVATE");
-      // Bare tg chats sync would turn an auto chat on; tg status prints the
-      // command with the chat's mode
       expect(permanent.warn[0]).toContain("tg status shows the tg chats sync command");
       expect(exhausted.warn).toHaveLength(1);
       expect(exhausted.warn[0]).toContain("(after 5 attempts): connection reset");
@@ -831,7 +806,6 @@ describe("processJobs", () => {
       clock.restore();
     }
 
-    // Both at 0 s, both again 3 s after their own last job
     expect(ran).toEqual([
       [1, 0],
       [2, 0],
@@ -876,7 +850,6 @@ describe("processJobs", () => {
         /^\[Account 1\] Failed to pick a job: .*database disk image is malformed/,
       ),
     );
-    // The failing account waits out its own delay instead of every tick
     expect(failingGetNextJob).toHaveBeenCalledTimes(1);
   });
 
@@ -908,12 +881,10 @@ describe("processJobs", () => {
 });
 
 describe("history pacing (#133)", () => {
-  /** An account whose jobs record their start on the test's clock */
   function pacedAccount(
     ctx: DaemonContext,
     options: {
       historyDue: () => boolean;
-      /** How long each job takes, by its index */
       jobMs?: (index: number) => number;
       clock: ReturnType<typeof useClock>;
     },
@@ -945,7 +916,6 @@ describe("history pacing (#133)", () => {
     });
 
     try {
-      // Every 100 ms of the clock the jobs move too
       while (Date.now() < 4000) {
         await processJobs(ctx);
         clock.advance(100);
@@ -954,15 +924,12 @@ describe("history pacing (#133)", () => {
       clock.restore();
     }
 
-    // Due 1429 ms after each start, found on the next 100 ms poll: the
-    // 300 ms each page took doesn't stretch it
     expect(starts).toEqual([0, 1500, 3000]);
   });
 
   it("starts the next job as soon as a job that outlasted its interval ends", async () => {
     const ctx = testDaemonContext();
     const clock = useClock(0);
-    // The first job sleeps a FLOOD_WAIT of 5 s inside its call
     const { starts } = pacedAccount(ctx, {
       historyDue: () => true,
       jobMs: (index) => (index === 0 ? 5000 : 0),
@@ -1010,7 +977,6 @@ describe("history pacing (#133)", () => {
 
     try {
       await processJobs(ctx);
-      // The client got a FLOOD_WAIT of 10 s at 0 (a call outside the jobs)
       rt.pacer.recordFloodWait(0, 10);
       clock.advance(10_000 + 2857);
       await processJobs(ctx);
@@ -1020,7 +986,6 @@ describe("history pacing (#133)", () => {
       clock.restore();
     }
 
-    // 0.35 calls/s after the halving: 2858 ms, rounded up
     expect(starts).toEqual([0, 12_858]);
   });
 });
@@ -1037,7 +1002,6 @@ describe("processJobs with two accounts", () => {
     for (const db of dbs) db.close();
   });
 
-  /** A client that records the getHistory peers it is asked for */
   function recordingClient() {
     const peers: tl.TypeInputPeer[] = [];
     const client = asTelegramClient({
@@ -1049,10 +1013,6 @@ describe("processJobs with two accounts", () => {
     return { client, peers };
   }
 
-  /**
-   * An account whose cache knows Alice's DM with the account's own access
-   * hash, and is due for its first page
-   */
   function seedAccount(ctx: DaemonContext, accountId: number, options: { withChat: boolean }) {
     const db = createAccountCacheDb();
     dbs.push(db);
@@ -1102,7 +1062,6 @@ describe("processJobs with two accounts", () => {
     const first = seedAccount(ctx, 1, { withChat: true });
     const second = seedAccount(ctx, 2, { withChat: true });
     await initializeScheduler(ctx);
-    // Account 1 drops its connection: its worker goes with the client
     const firstState = ctx.state.accounts.get(1)!;
     firstState.status = "reconnecting";
     firstState.client = undefined;
@@ -1120,7 +1079,6 @@ describe("processJobs with two accounts", () => {
 
     expect(pendingJobs(first.db)).toHaveLength(1);
     expect(first.peers).toEqual([]);
-    // Account 2 never ran account 1's job: every peer carries its own hash
     expect(second.peers.map((peer) => (peer as tl.RawInputPeerUser).accessHash.toString())).toEqual(
       ["222"],
     );
@@ -1130,7 +1088,6 @@ describe("processJobs with two accounts", () => {
     const ctx = testDaemonContext();
     const first = seedAccount(ctx, 1, { withChat: true });
     const second = seedAccount(ctx, 2, { withChat: true });
-    // Every write fails, as with a cache that stays locked past busy_timeout
     first.db.run("PRAGMA query_only = ON");
 
     await initializeScheduler(ctx);
@@ -1138,7 +1095,6 @@ describe("processJobs with two accounts", () => {
     expect(ctx.logger.error).toHaveBeenCalledWith(
       expect.stringContaining("[Account 1] Failed to initialize scheduler"),
     );
-    // Account 1 keeps its scheduler and worker and runs once it can write
     expect(first.rt.scheduler).not.toBeNull();
     expect(first.rt.worker).not.toBeNull();
     expect(second.rt.scheduler).not.toBeNull();
@@ -1188,13 +1144,11 @@ describe("processJobs with two accounts", () => {
 
   it("finishes account 2's jobs while account 1's job sleeps in a FLOOD_WAIT (#60)", async () => {
     const ctx = testDaemonContext();
-    // Account 1: one DM due, whose request waits like mtcute's flood waiter
     const first = seedAccount(ctx, 1, { withChat: true });
     const call = mock((_request: unknown, params?: { abortSignal?: AbortSignal }) =>
       waitLikeFloodWait(params, { guardMs: 1000 }),
     );
     connect(ctx, 1, asTelegramClient({ call } as Partial<TelegramClient>));
-    // Account 2: two DMs due, served by a fake history
     const BOB = 5002;
     const CAROL = 5003;
     const secondDb = createAccountCacheDb();
@@ -1222,7 +1176,6 @@ describe("processJobs with two accounts", () => {
       expect(firstStarts).toHaveLength(2);
       await firstStarts[1];
       clock.advance(3000);
-      // Account 1's job still runs: only account 2 starts its next one
       const nextStarts = startDueJobs(ctx);
       expect(nextStarts).toHaveLength(1);
       await nextStarts[0];
@@ -1254,7 +1207,6 @@ describe("a daemon stop during a sync job", () => {
 
   beforeEach(() => {
     db = createAccountCacheDb();
-    // A private chat due for its first page
     createChatSyncStateService(db).upsert({
       chat_id: CHAT,
       chat_type: "private",
@@ -1298,7 +1250,6 @@ describe("a daemon stop during a sync job", () => {
       `[Account 1] Job ${queued!.id} left pending: the daemon is stopping`,
     );
 
-    // The next start, on the same cache
     const restarted = testDaemonContext();
     const history = createFakeHistory(range(1, 5));
     connect(restarted, 1, history.client);
@@ -1328,7 +1279,6 @@ describe("a daemon stop during a sync job", () => {
       job_type: SyncJobType.InitialLoad,
     });
 
-    // The reconnect's client, which every later job on the account runs on
     const fresh = fakeDialogClient([]);
     const call = mock((_request: unknown, params?: { abortSignal?: AbortSignal }) =>
       waitLikeFloodWait(params, { onWait: () => requestShutdown(ctx) }),
@@ -1351,7 +1301,6 @@ describe("a daemon stop during a sync job", () => {
   });
 });
 
-/** An api_activity row `ageDays` old; the default ten is past the 7-day default retention */
 function addOldActivity(db: Database, ageDays = 10) {
   const timestamp = Math.floor(Date.now() / 1000) - ageDays * 24 * 3600;
   db.query(
@@ -1365,7 +1314,6 @@ const activityRows = (db: Database) =>
 describe("cleanupOldJobs", () => {
   it("prunes every account, with a scheduler or not, by the daemon's configured retention", () => {
     const ctx = testDaemonContext();
-    // One day: the 7-day default would keep the 2-day-old rows
     ctx.retention = {
       ...getDefaultRetentionConfig(),
       apiActivity: 24 * 60 * 60 * 1000,

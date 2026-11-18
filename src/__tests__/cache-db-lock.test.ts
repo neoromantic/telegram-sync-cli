@@ -1,8 +1,3 @@
-/**
- * The CLI and the daemon write the same cache database. A write that
- * arrives while the other process holds the write lock must wait for it,
- * not fail with "database is locked".
- */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -22,7 +17,6 @@ const SCHEMA_MODULE = join(import.meta.dir, "../db/schema.ts");
 const SYNC_SCHEMA_MODULE = join(import.meta.dir, "../db/sync-schema.ts");
 const DB_MODULE = join(import.meta.dir, "../db/index.ts");
 
-/** Another process: takes the write lock, holds it for `holdMs`, commits */
 const HOLD_LOCK = `
   import { Database } from 'bun:sqlite'
   const db = new Database(process.env.LOCK_DB_PATH)
@@ -33,7 +27,6 @@ const HOLD_LOCK = `
   db.run('COMMIT')
 `;
 
-/** Another process: opens the cache database the way the CLI does */
 const INIT_SCHEMA = `
   import { Database } from 'bun:sqlite'
   const { initCacheSchema } = await import(process.env.SCHEMA_MODULE)
@@ -44,11 +37,6 @@ const INIT_SCHEMA = `
   db.close()
 `;
 
-/**
- * Another process: getAccountCacheDb on a cache whose migration fails once,
- * as when the disk is full. The failed open must not stick: the next call
- * opens the file again and migrates it.
- */
 const RETRY_OPEN = `
   import { Database } from 'bun:sqlite'
   const { accountsDb, getAccountCacheDb } = await import(process.env.DB_MODULE)
@@ -66,7 +54,6 @@ const RETRY_OPEN = `
   console.log('second open: ' + db.query('PRAGMA user_version').get().user_version)
 `;
 
-/** A tg command: opens the only account's cache, moving a shared one first */
 const OPEN_ACCOUNT_CACHE = `
   const { getAccountCacheDb } = await import(process.env.DB_MODULE)
   try {
@@ -78,7 +65,6 @@ const OPEN_ACCOUNT_CACHE = `
   }
 `;
 
-/** An older tg: keeps the shared cache open, idle, until told to stop */
 const HOLD_OPEN = `
   import { Database } from 'bun:sqlite'
   const db = new Database(process.env.LOCK_DB_PATH)
@@ -88,14 +74,12 @@ const HOLD_OPEN = `
   db.close()
 `;
 
-/** A cache.db as 0.3 left it at the root of the data dir */
 function seedSharedCache(path: string): void {
   rmSync(path, { force: true });
   for (const suffix of ["-wal", "-shm"]) rmSync(path + suffix, { force: true });
   seedInChild(path, "legacySharedCache");
 }
 
-/** data.db with `count` made-up accounts, the first one active */
 function seedAccounts(dir: string, count: number): void {
   const data = new Database(join(dir, "data.db"));
   data.run("PRAGMA journal_mode = WAL");
@@ -122,7 +106,6 @@ function seedAccounts(dir: string, count: number): void {
   data.close();
 }
 
-/** Every cache database under the data dir (no sidecars), relative to it */
 function listCacheFiles(dir: string): string[] {
   return (readdirSync(dir, { recursive: true }) as string[])
     .filter((name) => /cache[^/]*\.db$/.test(name))
@@ -173,7 +156,6 @@ describe("cache database lock", () => {
 
     const write = "INSERT INTO daemon_status (key, value) VALUES ('cli', '1')";
 
-    // SQLite's default is not to wait at all
     const raw = new Database(path);
     raw.run("PRAGMA busy_timeout = 0");
     expect(() => raw.run(write)).toThrow("database is locked");
@@ -196,9 +178,6 @@ describe("cache database lock", () => {
     });
     await waitForLine(holder.stdout, "locked");
 
-    // The holder commits while the command waits. A transaction that read
-    // before it asked for the write lock would now fail with
-    // SQLITE_BUSY_SNAPSHOT, which busy_timeout doesn't cover.
     const db = new Database(path);
     initCacheSchema(db);
     const chat = {
@@ -236,9 +215,6 @@ describe("cache database lock", () => {
     });
     await waitForLine(holder.stdout, "locked");
 
-    // Every tg command opens the cache this way (getAccountCacheDb); with
-    // nothing to migrate or stamp it must not queue behind a daemon write
-    // batch
     const db = new Database(path);
     const started = performance.now();
     initCacheSchema(db);
@@ -252,9 +228,6 @@ describe("cache database lock", () => {
   }, 20_000);
 
   it("lets several processes switch a new or folded cache to WAL at once", async () => {
-    // A new file, and one in DELETE mode as the shared-cache move leaves
-    // it. SQLite fails all but one switch to WAL at once, without waiting
-    // for busy_timeout, so the others must try again
     for (const kind of ["new", "folded"] as const) {
       for (let round = 0; round < 3; round++) {
         const file = join(dir, `${kind}-${round}.db`);
@@ -290,8 +263,6 @@ describe("cache database lock", () => {
   }, 60_000);
 
   it("lets several processes rebuild an outdated search index at once", async () => {
-    // An index from before the files column: every opener must drop it,
-    // create it again and fill it from messages_cache
     const outdated = new Database(path);
     for (let id = 1; id <= 50; id++) {
       outdated.run(
@@ -309,10 +280,6 @@ describe("cache database lock", () => {
     );
     outdated.close();
 
-    // They all find it outdated and queue for the lock: one rebuilds it
-    // while the others wait, then find nothing left. Before, each one
-    // dropped and created the table and its triggers statement by
-    // statement, so one could drop the table another one was filling
     const holder = spawnBun(HOLD_LOCK, {
       LOCK_DB_PATH: path,
       LOCK_HOLD_MS: "1500",
@@ -359,9 +326,6 @@ describe("cache database lock", () => {
     seedLegacyCache(legacy);
     legacy.close();
 
-    // Another writer holds the lock while they start, so they all find
-    // work to do and queue for the lock: one migrates while the others wait
-    // for it, then find nothing left
     const holder = spawnBun(HOLD_LOCK, {
       LOCK_DB_PATH: path,
       LOCK_HOLD_MS: "2000",
@@ -382,8 +346,6 @@ describe("cache database lock", () => {
     );
 
     expect(results).toEqual(results.map(() => ({ code: 0, stderr: "" })));
-    // A process that exits closes its connection, which may checkpoint the
-    // WAL under an exclusive lock: read once every other process is gone
     expect(await holder.exited).toBe(0);
 
     const migrated = new Database(path);
@@ -407,8 +369,6 @@ describe("cache database lock", () => {
     cache.run("DROP INDEX idx_messages_cache_message_id");
     cache.close();
 
-    // Another process holds the lock longer than busy_timeout, as one that
-    // builds the index on a large cache read cold from disk can
     const holder = spawnBun(HOLD_LOCK, {
       LOCK_DB_PATH: path,
       LOCK_HOLD_MS: "6000",
@@ -511,7 +471,6 @@ describe("cache database lock", () => {
   }, 30_000);
 
   it("lets several processes migrate a 0.1.4 database at once", async () => {
-    // Turn the database back into what 0.1.4 left
     const db = new Database(path);
     db.run("DROP INDEX idx_sync_jobs_lane");
     db.run("DROP INDEX idx_messages_cache_message_id");

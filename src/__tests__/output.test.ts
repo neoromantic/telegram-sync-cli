@@ -1,7 +1,3 @@
-/**
- * Output utilities tests
- */
-
 import type { Mock } from "bun:test";
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { type ErrorCode, ErrorCodes } from "../types";
@@ -15,7 +11,6 @@ import {
   verbose,
 } from "../utils/output";
 
-// Set test environment to prevent process.exit
 process.env.BUN_ENV = "test";
 
 describe("Output Utilities", () => {
@@ -125,9 +120,7 @@ describe("Output Utilities", () => {
           endpoint: "/test",
           status: 500,
         });
-      } catch (_e) {
-        // Expected
-      }
+      } catch (_e) {}
 
       const output = JSON.parse(errorSpy.mock.calls[0]?.[0] as string);
       expect(output.error.details).toEqual({ endpoint: "/test", status: 500 });

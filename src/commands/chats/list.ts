@@ -61,7 +61,6 @@ export async function fetchChatsFromApi(
 
   let communities: CachedChatInput[] = [];
   try {
-    // Best effort: a FLOOD_WAIT fails it at once instead of holding up the list
     communities = await fetchJoinedCommunities(client.withParams({ floodSleepThreshold: 0 }));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -153,7 +152,6 @@ export const listChatsCommand = defineCommand({
       const cacheConfig = await getResolvedCacheConfig();
 
       if (!fresh) {
-        // With allowedChats, every cached chat is a candidate (-1: no limit)
         const cachedChats = chatsCache
           .list({
             limit: allowed === null ? 1000 : -1,
@@ -163,8 +161,6 @@ export const listChatsCommand = defineCommand({
           })
           .filter(isAllowed);
 
-        // With --unread, a cache that knows unread counts answers even when
-        // no chat has unread messages
         if (cachedChats.length > 0 || (unread && chatsCache.hasUnreadState())) {
           const response: ChatsListOutput = buildCachePaginatedResponse(cachedChats, toItem, {
             offset,

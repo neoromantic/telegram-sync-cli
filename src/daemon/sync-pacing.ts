@@ -1,16 +1,3 @@
-/**
- * How fast an account's sync jobs start (#133). Each job makes one
- * `messages.getHistory` call, so the interval between job starts is the
- * account's call rate.
- *
- * While history is due (a first pass, or a backfill `tg chats sync` turned
- * on), the account runs at an adaptive pace: it starts at 0.7 calls/s,
- * speeds up by 0.05 calls/s after every 30 calls without a FLOOD_WAIT, up
- * to `maxCallsPerSecond`, and halves the pace on a FLOOD_WAIT, waiting it
- * out first. With no history due it starts a job at most every
- * `calmIntervalMs`. Intervals count from each job's start, so a slow page
- * doesn't stretch them. In memory: a restart starts at 0.7 again.
- */
 import type { DaemonPacing } from "../db/daemon-status";
 
 /** The pacing config.json sets (`sync.pacing.*`), read at daemon start */
@@ -40,21 +27,17 @@ export const PACING_CLEAN_RUN_CALLS = 30;
 
 export type SyncPacingMode = DaemonPacing["mode"];
 
-/** The interval of a history pace, rounded up to whole ms */
 function historyIntervalMs(callsPerSecond: number): number {
   return Math.ceil(1000 / callsPerSecond);
 }
 
 export class SyncPacer {
   private readonly maxRate: number;
-  /** The floor of the halving; never above the cap */
   private readonly minRate: number;
   private readonly calmIntervalMs: number;
-  /** The pace while history is due, in calls per second */
   private rate: number;
   private mode: SyncPacingMode = "calm";
   private lastStartAt: number | null = null;
-  /** No job starts before this: the end of a FLOOD_WAIT and one interval */
   private notBefore = 0;
   private cleanCalls = 0;
   private floodWaits = 0;

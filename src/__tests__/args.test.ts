@@ -1,7 +1,3 @@
-/**
- * Tests for reading `tg api` method arguments written as `--name value`,
- * and every value of a repeated flag (`tg send --file`)
- */
 import { describe, expect, it } from "bun:test";
 import { type ArgsDef, parseArgs } from "citty";
 
@@ -9,7 +5,6 @@ import { apiCommand } from "../commands/api";
 import { sendCommand } from "../commands/send";
 import { flagValues, spacedFlagValues } from "../utils/args";
 
-/** The values spacedFlagValues pairs for `tg api <argv>`, from citty's own parse */
 function spaced(...argv: string[]): Record<string, string> {
   const args = parseArgs(argv, apiCommand.args as ArgsDef) as Record<string, unknown>;
   return Object.fromEntries(spacedFlagValues(argv, args.method as string, args));
@@ -67,8 +62,6 @@ describe("spacedFlagValues", () => {
   });
 
   it("stops at --", () => {
-    // citty reads the --username before -- as true, so only the break stops
-    // the pairing with the value after --
     expect(spaced("account.checkUsername", "--username", "--", "--username", "myuser")).toEqual({});
   });
 });

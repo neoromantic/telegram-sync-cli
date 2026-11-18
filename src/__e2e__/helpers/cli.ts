@@ -1,9 +1,3 @@
-/**
- * CLI execution helper for E2E tests
- *
- * Provides utilities to run the CLI binary and capture output/exit codes.
- */
-
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -41,7 +35,6 @@ export const NO_CREDENTIALS = {
   TELEGRAM_API_HASH: undefined,
 };
 
-/** Path to the CLI entry point */
 const CLI_PATH = `${import.meta.dir}/../../index.ts`;
 
 /**
@@ -51,11 +44,9 @@ const CLI_PATH = `${import.meta.dir}/../../index.ts`;
 export function spawnCli(args: string[], options: Omit<CliOptions, "timeout"> = {}) {
   const { env = {}, cwd, entry = CLI_PATH } = options;
 
-  // --no-env-file: never pick up a developer's .env from the working directory
   return Bun.spawn(["bun", "--no-env-file", "run", entry, ...args], {
     env: {
       ...process.env,
-      // Don't throw on errors - let the CLI handle them and exit with codes
       BUN_ENV: undefined,
       NODE_ENV: undefined,
       ...env,
@@ -76,7 +67,6 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
 
   const proc = spawnCli(args, options);
 
-  // Set up timeout
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       proc.kill();
@@ -84,7 +74,6 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
     }, timeout);
   });
 
-  // Wait for process to complete or timeout
   const exitCode = await Promise.race([proc.exited, timeoutPromise]);
 
   const duration = performance.now() - startTime;
@@ -92,17 +81,13 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
   const stdout = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
 
-  // Try to parse stdout as JSON, fall back to stderr (error output)
   let json: unknown;
   try {
     json = JSON.parse(stdout.trim());
   } catch {
-    // stdout not valid JSON, try stderr (error responses go there)
     try {
       json = JSON.parse(stderr.trim());
-    } catch {
-      // Neither is valid JSON, that's fine
-    }
+    } catch {}
   }
 
   return {
@@ -200,9 +185,7 @@ export async function runShellCommand(
   let json: unknown;
   try {
     json = JSON.parse(stdout || stderr);
-  } catch {
-    // Not JSON
-  }
+  } catch {}
   return {
     stdout,
     stderr,

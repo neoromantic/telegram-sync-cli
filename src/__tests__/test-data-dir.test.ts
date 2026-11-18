@@ -1,8 +1,3 @@
-/**
- * test-setup.ts must point the data dir at a temp dir before any module
- * reads it: src/db/index opens data.db as it loads, and some tests clear
- * tables in the file-backed cache database.
- */
 import { describe, expect, it } from "bun:test";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";

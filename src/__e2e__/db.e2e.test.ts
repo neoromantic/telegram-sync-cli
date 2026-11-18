@@ -1,8 +1,3 @@
-/**
- * E2E tests for tg db vacuum: pruning and compacting an account's cache,
- * without Telegram credentials. Made-up data only.
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -43,10 +38,6 @@ describe("E2E: db vacuum", () => {
     env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
   });
 
-  /**
-   * Account 1's cache with made-up messages, a third of them deleted, and
-   * one API activity row far past its retention
-   */
   function seedCache() {
     const db = env.openCacheDb(1);
     db.run(

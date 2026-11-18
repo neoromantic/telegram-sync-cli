@@ -38,7 +38,6 @@ export interface JobResultLike {
   outcome?: JobOutcome;
 }
 
-/** The outcome of a job that was deleted, or that wasn't running when it ended */
 function droppedOutcome(state: "cancelled" | "not_running", job: SyncJobRow): JobOutcome {
   if (state === "not_running") {
     console.warn(`[sync-worker] Job ${job.id} was not running when it ended`);
@@ -64,8 +63,6 @@ export function finalizeJobResult(
     return { state: "completed", attempts: job.attempts, nextRunAt: null };
   }
 
-  // A stop is no failure and no delay: the job is pending as it was, so the
-  // next start runs it again
   if (result.stopped) {
     const retried = jobsService.retryLater(job.id, {
       error: job.error_message,
@@ -79,8 +76,6 @@ export function finalizeJobResult(
 
   const now = Date.now();
 
-  // A FLOOD_WAIT is a delay, not a failure: the job waits and keeps its
-  // attempts.
   if (result.rateLimited) {
     const seconds = Math.max(1, result.waitSeconds ?? 0);
     const runAt = now + seconds * 1000;
@@ -97,7 +92,6 @@ export function finalizeJobResult(
   const error = result.error ?? "Job ended without a result";
   const failures = job.attempts + 1;
 
-  // Every path drops the job of a chat that was turned off while it ran.
   if (result.permanent || failures >= SYNC_RETRY_CONFIG.maxAttempts) {
     const failed = jobsService.failOrDrop(job.id, error);
     return failed === "failed"

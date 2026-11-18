@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 
 import { parseTimeBound } from "../utils/time-bounds";
 
-/** A fixed clock: 2026-10-15 12:00 local time */
 const NOW = new Date(2026, 9, 15, 12, 0, 0).getTime();
 const seconds = (date: Date) => date.getTime() / 1000;
 

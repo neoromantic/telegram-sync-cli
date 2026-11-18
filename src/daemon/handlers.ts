@@ -1,7 +1,3 @@
-/**
- * Update handlers for processing Telegram events
- * Handles new messages, edits, deletions, and other updates
- */
 import type { Database } from "bun:sqlite";
 import type { tl } from "@mtcute/bun";
 import { rawPeerToCacheInput } from "../commands/chats/helpers";
@@ -157,13 +153,9 @@ interface HandlerDeps {
   chatsCache?: ChatsCache;
   logger: DaemonLogger;
   onMessagesSynced?: (count: number) => void;
-  /** A message without its raw form was logged already */
   loggedEmptyRaw: boolean;
 }
 
-/**
- * Default no-op logger for when logging is not needed
- */
 const noopLogger: DaemonLogger = {
   info: () => {},
   debug: () => {},
@@ -171,11 +163,6 @@ const noopLogger: DaemonLogger = {
   error: () => {},
 };
 
-/**
- * A live update always carries its raw message, so raw_json is never '{}'
- * (#130). If one ever comes without, the row gets '{}' and a refetch job
- * fills it in later; the first such message is logged.
- */
 function liveMessageInput(deps: HandlerDeps, data: NewMessageData) {
   const input = toMessageInput(data);
   if (data.rawMessage) return input;
@@ -229,16 +216,6 @@ function ensureSyncState(
   }
 }
 
-/**
- * Only dialog passes and some CLI commands fill chats_cache, so a chat new
- * to this run (a new DM, say) has no row there. Without one the sync jobs
- * can't build an InputPeer with its access hash, and its first page would
- * fail until the next dialog pass.
- *
- * Every dialog pass lists every chat, so such a chat is most likely new:
- * its unread state starts right below this message, which then counts as
- * unread if it is incoming. The next dialog pass sets the real state.
- */
 function ensureChatCached(chatsCache: ChatsCache | undefined, data: NewMessageData): void {
   const { chatId, rawChat } = data;
   if (!chatsCache || !rawChat) return;
@@ -258,9 +235,6 @@ async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
   ensureSyncState(deps.chatSyncState, data.chatId, data.chatType, data.memberCount, data.rawChat);
   ensureChatCached(deps.chatsCache, data);
 
-  // A group the account doesn't take part in keeps its chat and sync state
-  // up to date, but not the message (src/db/group-participation.ts); an
-  // own message counts as participation before it is written
   const { inserted } = deps.messagesCache.upsert(liveMessageInput(deps, data));
   deps.chatsCache?.noteLiveMessage(String(data.chatId), {
     id: data.messageId,
@@ -269,9 +243,6 @@ async function handleNewMessageImpl(deps: HandlerDeps, data: NewMessageData) {
   });
   if (inserted === 0) return;
 
-  // The forward cursor means "every message up to here is cached", so live
-  // updates leave it to the sync jobs: messages that arrived while the
-  // daemon was stopped may sit between the cursor and this one.
   deps.chatSyncState.incrementSyncedMessages(data.chatId, inserted);
   deps.chatSyncState.updateLastSync(data.chatId, "forward");
   deps.onMessagesSynced?.(inserted);

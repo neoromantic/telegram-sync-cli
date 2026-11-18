@@ -1,8 +1,3 @@
-/**
- * E2E tests for the arguments of `tg send --file`: every mistake is
- * INVALID_ARGS (exit 3) before an account cache or Telegram is needed,
- * so they run without credentials. Made-up files only.
- */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

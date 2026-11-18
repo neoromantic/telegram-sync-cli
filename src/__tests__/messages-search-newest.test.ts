@@ -1,9 +1,3 @@
-/**
- * The newest page of a common query (#118) goes through messages in date
- * order instead of sorting every match. It must return the same rows in the
- * same order as sorting every match by date, then rowid. The cache is too
- * small to walk at the default threshold, so most checks pass a lower one.
- */
 import { beforeAll, describe, expect, it } from "bun:test";
 import {
   createMessagesSearch,
@@ -15,7 +9,6 @@ import {
 import { buildChatSearchExpr, buildSenderSearchExpr } from "../db/search-reindex";
 import { createAccountCacheDb } from "./helpers/cache-db";
 
-/** A seeded PRNG, so a failure repeats */
 function mulberry32(seed: number): () => number {
   let a = seed;
   return () => {
@@ -27,14 +20,11 @@ function mulberry32(seed: number): () => number {
 }
 
 const MESSAGES = 12_000;
-// The newest messages, all sent in one second: more than a window holds
 const SAME_SECOND = 3_000;
 const BASE_DATE = 1_700_000_000;
-/** The walk's clock stands still, so no walk runs out of time */
 const FROZEN = { now: () => 0 };
 const WALK = { ...FROZEN, walkThreshold: 10 };
 const CHATS = [-1001000000001, -1001000000002, -200, 300, 301, 302];
-// Most messages in the first chats; the last one has a few dozen
 const CHAT_WEIGHTS = [0.45, 0.25, 0.15, 0.1, 0.045, 0.005];
 const SENDERS = Array.from({ length: 20 }, (_, i) => 1000 + i);
 
@@ -59,7 +49,6 @@ function messageText(): string {
   return text.join(" ");
 }
 
-/** Like messageText, with a word only the oldest messages have */
 function oldMessageText(page: number): string {
   return page >= 105 ? `${messageText()} ancient` : messageText();
 }
@@ -81,8 +70,6 @@ describe("search newest first (#118)", () => {
       ).run(String(userId), `user${userId}`);
     }
 
-    // Like history sync: pages newest first, so rowids don't follow dates.
-    // About four messages a second, so many share a date.
     const insert = db.query(
       `INSERT INTO messages_cache
          (chat_id, message_id, from_id, text, is_deleted, date, fetched_at, raw_json)
@@ -93,7 +80,6 @@ describe("search newest first (#118)", () => {
         const top = BASE_DATE + 3000 - page * 25;
         for (let i = 0; i < 100; i++) {
           const id = page * 100 + i + 1;
-          // The rarest sender posts about one message in 2,000
           const sender = random() < 0.0005 ? SENDERS[19] : pick(SENDERS.slice(0, 19));
           insert.run(
             pickChat(),
@@ -118,7 +104,6 @@ describe("search newest first (#118)", () => {
     })();
   });
 
-  /** Every match sorted by date, then rowid: the order a page must keep */
   function sortedMatches(query: string, options: MessageSearchOptions): string[] {
     const conditions = ["message_search MATCH ?"];
     const params: Array<string | number> = [toFts5Query(query, { phrase: options.phrase })];
@@ -174,7 +159,6 @@ describe("search newest first (#118)", () => {
     return options;
   }
 
-  /** Random queries and filters: each way gives the page of sortedMatches */
   function checkRandomQueries(runs: number): Record<NewestFirstWay, number> {
     const search = createMessagesSearch(db);
     const ways = { messages: 0, sort: 0 };
@@ -215,13 +199,11 @@ describe("search newest first (#118)", () => {
 
   it("returns the same page as sorting every match, for random queries and filters", () => {
     const ways = checkRandomQueries(200);
-    // Both ways ran
     expect(ways.messages).toBeGreaterThan(30);
     expect(ways.sort).toBeGreaterThan(30);
   }, 60_000);
 
   it("goes through the messages for a common word and sorts the matches of a rare one", () => {
-    // At the default threshold, a word in 60% of 15,000 messages, not 10%
     expect(searchNewestFirst(db, "common", {}, FROZEN).way).toBe("messages");
     expect(searchNewestFirst(db, "often", {}, FROZEN).way).toBe("sort");
     expect(searchNewestFirst(db, "common", { chatId: CHATS[0] }, WALK).way).toBe("messages");
@@ -248,14 +230,11 @@ describe("search newest first (#118)", () => {
   });
 
   it("falls back to sorting when the window has too few matches", () => {
-    // The rarest sender has a handful of messages, most of them older than
-    // the window of the newest messages
     const options = { senderId: SENDERS[19] };
     const { rows, way } = searchNewestFirst(db, "common", options, WALK);
     expect(way).toBe("sort");
     expect(keys(rows)).toEqual(sortedMatches("common", options).slice(0, 50));
 
-    // Every match older than the newest second, which fills the window
     const old = searchNewestFirst(db, "ancient", {}, { ...FROZEN, walkThreshold: 1 });
     expect(old.way).toBe("sort");
     expect(keys(old.rows)).toEqual(sortedMatches("ancient", {}).slice(0, 50));
@@ -268,7 +247,6 @@ describe("search newest first (#118)", () => {
   });
 
   it("sorts once the walk has taken its time budget", () => {
-    // Each chunk takes a second on this clock
     let clock = 0;
     const slow = { ...WALK, now: () => (clock += 1_000) };
     for (const query of ["common", "often"]) {
@@ -279,7 +257,6 @@ describe("search newest first (#118)", () => {
   });
 
   it("returns the same pages from an index that keeps the old entries of every message", () => {
-    // A re-index of every message with no merge after it, as #149 found
     const bytes = () =>
       (db.query("SELECT SUM(LENGTH(block)) AS n FROM message_search_data").get() as { n: number })
         .n;

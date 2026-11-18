@@ -1,7 +1,3 @@
-/**
- * E2E tests for tg chats sync: cache-only, no Telegram credentials
- */
-
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
@@ -16,7 +12,6 @@ import { SyncJobType, SyncPriority } from "../db/sync-schema";
 import { runCliFailure, runCliSuccess } from "./helpers/cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
 const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
 
 const NO_CREDENTIALS = {
@@ -24,7 +19,6 @@ const NO_CREDENTIALS = {
   TELEGRAM_API_HASH: undefined,
 };
 
-/** Bare IDs, as 0.2.0 printed them, and the marked IDs tg prints now */
 const CHANNEL_ID = 1234567890;
 const CHANNEL_PEER_ID = -1001234567890;
 const GROUP_ID = 4001;
@@ -96,7 +90,6 @@ describe("E2E: chats sync", () => {
     return createChatSyncStateService(cacheDb).get(chatId);
   }
 
-  /** The ID `tg chats list` shows for the channel */
   async function listedId(): Promise<string> {
     const list = await runCliSuccess(["chats", "list"], options());
     const items = (list.json as { data: { items: Array<{ id: number; username: string }> } }).data
@@ -158,7 +151,6 @@ describe("E2E: chats sync", () => {
       priority: SyncPriority.Realtime,
     });
 
-    // The bare ID from 0.2.0 names the same group
     const result = await sync(String(GROUP_ID), "--off");
 
     expect(result.data).toMatchObject({
@@ -210,7 +202,6 @@ describe("E2E: chats sync", () => {
         expect(result.data.clearedFailedJobs).toBe(2);
         expect(result.data.changed).toBe(before.length === 0 || args.length > 0);
         expect(failedOf(CHANNEL_PEER_ID)).toEqual([]);
-        // Another chat's failed jobs stay
         expect(failedOf(GROUP_PEER_ID)).toHaveLength(1);
       });
     }
@@ -233,7 +224,6 @@ describe("E2E: chats sync", () => {
       sync_enabled: 0,
       sync_priority: SyncPriority.Low,
     });
-    // A group syncs only once the account is known to take part in it
     expect(group.data).toMatchObject({
       mode: "auto",
       syncEnabled: false,
@@ -286,7 +276,6 @@ describe("E2E: chats sync", () => {
     expect(syncOf(GROUP_PEER_ID)).toEqual([false, "group_participation_unknown"]);
     expect(syncOf(CHANNEL_PEER_ID)).toEqual([true, "on_by_hand"]);
 
-    // An own message of the last 90 days lets the group sync by its policy
     takePartIn(cacheDb, GROUP_PEER_ID);
     const again = await runCliSuccess(["chats", "list"], options());
     const group = (
@@ -300,7 +289,6 @@ describe("E2E: chats sync", () => {
     });
     expect(group?.lastOwnMessageAt).toBeGreaterThan(Date.now() - 60_000);
 
-    // Turned on by hand, a bot gets its history; --off wins over the policy
     expect((await sync("5001")).data.syncReason).toBe("on_by_hand");
     expect((await sync("5001", "--off")).data.syncReason).toBe("off_by_hand");
     expect((await sync("5001", "--auto")).data).toMatchObject({
@@ -326,7 +314,6 @@ describe("E2E: chats sync", () => {
       type: "supergroup",
       title: null,
       mode: "on",
-      // Turned on, a group still syncs only while the account takes part
       syncEnabled: false,
       syncReason: "group_participation_unknown",
     });
@@ -339,7 +326,6 @@ describe("E2E: chats sync", () => {
         options(),
       );
 
-      // Pretty output is the data without the envelope
       expect(result.json).toMatchObject({
         id: CHANNEL_PEER_ID,
         title: "Example News",
@@ -349,7 +335,6 @@ describe("E2E: chats sync", () => {
     });
   }
 
-  /** User 4001's DM, seen only live: sync state, no chats_cache row */
   function seedDmSyncState() {
     createChatSyncStateService(cacheDb).upsert({
       chat_id: GROUP_ID,
@@ -377,7 +362,6 @@ describe("E2E: chats sync", () => {
   it("names the same DM in tg messages list --chat as in tg chats sync", async () => {
     seedDmSyncState();
 
-    // Nothing lies below message 1, so the cache answers without Telegram
     const list = await runCliSuccess(
       ["messages", "list", "--chat", String(GROUP_ID), "--before", "1"],
       options(),
@@ -530,7 +514,6 @@ describe("E2E: chats sync", () => {
       n: 0,
     });
 
-    // Off matches the default policy, so it still works
     const off = await sync(String(communityId), "--off");
     expect(off.data).toMatchObject({ type: "community", syncEnabled: false });
   });
@@ -540,7 +523,6 @@ describe("E2E: chats sync", () => {
     createChatsCache(cacheDb).upsertMany([
       rawChatToCacheInput(fakeRawCommunity({ id: 5555555555, accessHash: "777" })),
     ]);
-    // As 0.4 left it: turned on, with a job that failed
     const states = createChatSyncStateService(cacheDb);
     states.upsert({
       chat_id: communityId,

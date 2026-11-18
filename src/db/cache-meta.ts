@@ -1,9 +1,3 @@
-/**
- * The owner stamp of an account's cache file, in `cache_meta`. A file that
- * another account (or another Telegram user) stamped is never opened for
- * this one, so a directory moved by hand or a data.db that was recreated
- * and reused an ID can't mix two accounts' data.
- */
 import type { Database } from "bun:sqlite";
 import { CacheUnavailableError } from "./cache-layout";
 
@@ -53,7 +47,6 @@ function ownership(meta: CacheMeta, owner: CacheOwner, options: CacheOwnerOption
   if (meta.account_id === null || meta.account_id === String(owner.id)) {
     return "own";
   }
-  // Another account ID: only one that no longer is this Telegram user's
   const stampedId = Number(meta.account_id);
   const sameUser =
     meta.user_id !== null && owner.user_id !== null && meta.user_id === String(owner.user_id);
@@ -96,7 +89,6 @@ export function checkCacheOwner(
   if (found === "own" && missingStamps(meta, owner).length === 0) return;
 
   const stamp = db.transaction(() => {
-    // Read again under the write lock: another process may have stamped it
     const current = readCacheMeta(db);
     const now = ownership(current, owner, options);
     if (now === "foreign") {

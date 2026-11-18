@@ -59,7 +59,6 @@ export function resolveFloodWaitResult(
     return null;
   }
 
-  // FLOOD_WAIT_0 still asks for a pause: wait at least a second.
   const seconds = Math.max(1, floodWaitSeconds);
   handleFloodWait(ctx, seconds);
   return {

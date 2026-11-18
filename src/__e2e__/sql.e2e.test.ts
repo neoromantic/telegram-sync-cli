@@ -1,10 +1,3 @@
-/**
- * E2E tests for the sql command
- *
- * Runs read-only queries through the real CLI argument parser, which unit
- * tests of the run() function bypass.
- */
-
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
@@ -19,7 +12,6 @@ import { extractAttachment } from "../utils/attachment";
 import { runCliFailure, runCliSuccess } from "./helpers/cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
 
-/** "Messages per chat, with titles" in docs/sql.md */
 const MESSAGES_PER_CHAT =
   "SELECT m.chat_id, c.title, c.type, COUNT(*) AS messages FROM messages_cache m LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT) GROUP BY m.chat_id ORDER BY messages DESC, m.chat_id LIMIT 10";
 
@@ -143,7 +135,6 @@ describe("E2E: SQL Command", () => {
   });
 
   it("runs the docs example that lists messages per chat with titles on a cache from 0.2.0", async () => {
-    // The shared cache of 0.3 and older moves to the only account first
     const legacyPath = join(env.dataDir, "cache.db");
     seedInChild(legacyPath, "legacySharedCache");
 
@@ -386,7 +377,6 @@ describe("E2E: SQL Command", () => {
     }
 
     beforeEach(async () => {
-      // The first command creates and migrates the cache
       await runCliSuccess(["sql", "SELECT 1"], env.getCliOptions());
     });
 

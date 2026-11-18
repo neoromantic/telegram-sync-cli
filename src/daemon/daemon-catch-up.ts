@@ -1,14 +1,3 @@
-/**
- * Catch-up after mtcute reconnects on its own or the computer wakes (#124).
- *
- * mtcute reconnects by itself after a network drop or a sleep, so the
- * health check's `getMe()` succeeds and the daemon's own reconnect never
- * runs. The daemon watches each client's connection state and the wall
- * clock between its loop ticks instead: after the account was offline
- * longer than a few seconds, or after a wake, it runs the dialog pass and
- * catch-up on the client it has. Catch-up is never polling: it runs on
- * start, after a reconnect and after a wake.
- */
 import type { ConnectionState } from "@mtcute/bun";
 import type { CatchUpReason } from "../db/daemon-status";
 import { refreshDialogsAfterReconnect } from "./daemon-bootstrap";
@@ -62,7 +51,6 @@ function requestCatchUp(
       : Math.max(now + CATCH_UP_SETTLE_MS, watch.lastCatchUpAt + CATCH_UP_MIN_INTERVAL_MS);
   const previous = watch.pending;
   watch.pending = {
-    // A wake explains the outage better than the reconnect that follows it
     reason: previous?.reason === "wake" ? "wake" : reason,
     offlineMs: Math.max(previous?.offlineMs ?? 0, offlineMs),
     dueAt: notBefore,
@@ -144,8 +132,6 @@ export function runDueCatchUps(ctx: DaemonContext, now: number): Promise<boolean
   for (const accountState of ctx.state.accounts.values()) {
     const { accountId } = accountState;
     const rt = ctx.runtime.accounts.get(accountId);
-    // An account that didn't connect at start has no scheduler to queue
-    // the catch-up; a pass already running covers this one
     if (!rt?.scheduler || ctx.runtime.dialogPassesInFlight.has(accountId)) {
       continue;
     }

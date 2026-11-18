@@ -1,6 +1,3 @@
-/**
- * Tests for CSV formatting helpers
- */
 import { describe, expect, it } from "bun:test";
 import { stringify, stringifyTable } from "../utils/csv";
 

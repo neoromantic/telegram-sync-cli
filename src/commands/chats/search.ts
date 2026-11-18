@@ -44,7 +44,6 @@ export const searchChatsCommand = defineCommand({
       const chatsCache = createChatsCache(cacheDb);
       const cacheConfig = await getResolvedCacheConfig();
 
-      // With allowedChats, search every chat (-1: no limit), then keep the allowed
       const results =
         allowed === null
           ? chatsCache.search(query, limit)

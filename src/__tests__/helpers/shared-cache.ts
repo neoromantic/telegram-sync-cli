@@ -1,7 +1,3 @@
-/**
- * The shared cache of 0.3 and older in the cache-layout tests: its row
- * counts, and an older tg that keeps it open
- */
 import { Database } from "bun:sqlite";
 
 /** Rows of the tables that make a shared cache worth keeping */

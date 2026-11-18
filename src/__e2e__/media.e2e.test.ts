@@ -1,7 +1,3 @@
-/**
- * E2E tests for tg media: the media cache under accounts/<id>/media, read
- * and cleaned offline, without Telegram credentials. Made-up files only.
- */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   existsSync,
@@ -57,7 +53,6 @@ describe("E2E: media clean", () => {
     env.cleanup();
   });
 
-  /** A cached file of `size` bytes last used `ageMs` ago */
   function place(folder: string, name: string, size: number, ageMs = 0) {
     const path = join(mediaDir, folder, name);
     mkdirSync(join(mediaDir, folder), { recursive: true });
@@ -132,7 +127,6 @@ describe("E2E: media clean", () => {
     const self = { _: "peerUser" as const, userId: SELF_ID };
     const photo = photoMessage(self, 1);
     const pdf = pdfDocumentMessage(self, 2);
-    // The same photo forwarded to another chat
     const forwarded = photoMessage({ _: "peerUser", userId: OTHER_CHAT_ID }, 7);
     createMessagesCache(env.openCacheDb(1)).upsertBatch([
       parseRawMessage(photo, SELF_ID)!,
@@ -230,7 +224,6 @@ describe("E2E: media download", () => {
     createMessagesCache(env.openCacheDb(1)).upsert(parseRawMessage(raw, chatId)!);
   }
 
-  /** A cached photo in Saved Messages, and its file in the media cache */
   function cachedPhoto(id = 1, extra: Record<string, unknown> = {}) {
     const photo = {
       ...photoMessage({ _: "peerUser", userId: SELF_ID }, id),

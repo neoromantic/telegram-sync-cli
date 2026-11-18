@@ -1,8 +1,3 @@
-/**
- * Read-only mode and the chat allowlist: every command of the tree is
- * classified, and the checks before a command refuse what they should.
- * The chat checks with a seeded cache are in access.e2e.test.ts.
- */
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 
 import { main } from "../cli";
@@ -17,7 +12,6 @@ import { ALLOWED_CHATS_ENV, READ_ONLY_ENV } from "../config";
 
 const PATHS = runnableCommands(main).map(({ path }) => path);
 
-/** The code checkAccess fails with, or null when it lets the command run */
 async function refusal(path: string, args: Record<string, unknown> = {}): Promise<string | null> {
   const access = COMMAND_ACCESS[path];
   if (!access) throw new Error(`tg ${path} is unclassified`);
@@ -32,7 +26,6 @@ async function refusal(path: string, args: Record<string, unknown> = {}): Promis
 let errorSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
-  // error() prints each refusal
   errorSpy = spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -69,7 +62,6 @@ describe("read-only mode", () => {
     const refused: string[] = [];
     for (const path of PATHS) {
       const write = COMMAND_ACCESS[path]?.write;
-      // tg api: a method that is not a read
       const args = { method: "messages.sendMessage" };
       const code = await refusal(path, args);
       expect(`${path}: ${code}`).toBe(`${path}: ${write ? "READ_ONLY" : null}`);

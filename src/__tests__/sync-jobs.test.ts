@@ -1,6 +1,3 @@
-/**
- * Tests for sync jobs service
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createChatSyncStateService } from "../db/chat-sync-state";
@@ -22,7 +19,6 @@ describe("SyncJobsService", () => {
     Date.now = realNow;
   });
 
-  /** Make a pending job wait until `runAt` */
   function waitUntil(id: number, runAt: number) {
     db.run("UPDATE sync_jobs SET next_run_at = ? WHERE id = ?", [runAt, id]);
   }
@@ -116,7 +112,7 @@ describe("SyncJobsService", () => {
 
       const next = service.getNextPending();
       expect(next).not.toBeNull();
-      expect(next?.chat_id).toBe(200); // Realtime priority
+      expect(next?.chat_id).toBe(200);
     });
 
     it("returns oldest job when same priority (FIFO)", () => {
@@ -132,7 +128,7 @@ describe("SyncJobsService", () => {
       });
 
       const next = service.getNextPending();
-      expect(next?.chat_id).toBe(100); // First created
+      expect(next?.chat_id).toBe(100);
     });
 
     it("skips running jobs", () => {
@@ -377,7 +373,6 @@ describe("SyncJobsService", () => {
     });
 
     it("takes the chat's priority now, after a mode change while it ran", () => {
-      // An auto supergroup of 50 members: its first page is queued at P2
       createChatSyncStateService(db).upsert({
         chat_id: -1001234567890,
         chat_type: "supergroup",
@@ -392,7 +387,6 @@ describe("SyncJobsService", () => {
       });
       service.markRunning(job.id);
 
-      // tg chats sync --on while the job runs
       createChatSyncStateService(db).setSyncMode(-1001234567890, "on");
       service.retryLater(job.id, {
         error: "connection reset",
@@ -719,11 +713,11 @@ describe("SyncJobsService", () => {
         priority: SyncPriority.High,
       });
 
-      service.markRunning(job1.id); // This one is running, should not be cancelled
+      service.markRunning(job1.id);
 
       const cancelled = service.cancelPendingForChat(100);
 
-      expect(cancelled).toBe(1); // Only job2 was pending
+      expect(cancelled).toBe(1);
       expect(service.getById(job1.id)?.status).toBe(SyncJobStatus.Running);
       expect(service.getById(job2.id)).toBeNull();
       expect(service.getById(job3.id)).not.toBeNull();
@@ -748,17 +742,13 @@ describe("SyncJobsService", () => {
         priority: SyncPriority.Medium,
       });
 
-      // Mark some jobs as running (simulating daemon crash mid-execution)
       service.markRunning(job1.id);
       service.markRunning(job2.id);
-      // job3 stays pending
 
-      // Recover crashed jobs
       const recovered = service.recoverCrashedJobs();
 
-      expect(recovered).toBe(2); // Two jobs were running
+      expect(recovered).toBe(2);
 
-      // Verify recovered jobs are now pending with error message
       const recoveredJob1 = service.getById(job1.id);
       expect(recoveredJob1?.status).toBe(SyncJobStatus.Pending);
       expect(recoveredJob1?.error_message).toBe("Daemon crashed during execution");
@@ -767,7 +757,6 @@ describe("SyncJobsService", () => {
       expect(recoveredJob2?.status).toBe(SyncJobStatus.Pending);
       expect(recoveredJob2?.error_message).toBe("Daemon crashed during execution");
 
-      // Job that was pending should still be pending
       const pendingJob = service.getById(job3.id);
       expect(pendingJob?.status).toBe(SyncJobStatus.Pending);
       expect(pendingJob?.error_message).toBeNull();
@@ -794,13 +783,10 @@ describe("SyncJobsService", () => {
 
       service.markRunning(job.id);
 
-      // Before recovery, getNextPending should return null (no pending jobs)
       expect(service.getNextPending()).toBeNull();
 
-      // Recover crashed jobs
       service.recoverCrashedJobs();
 
-      // Now getNextPending should return the recovered job
       const nextJob = service.getNextPending();
       expect(nextJob).not.toBeNull();
       expect(nextJob?.id).toBe(job.id);

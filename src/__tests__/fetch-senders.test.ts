@@ -1,9 +1,3 @@
-/**
- * Senders missing from the cache (#143): the daemon lists them once a day,
- * asks Telegram for one message of each by ID at the lowest priority, and
- * caches the senders the reply carries, which re-indexes their messages.
- * Made-up data only.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
@@ -25,11 +19,8 @@ import { toLong } from "../utils/long";
 import { chatRow, createAccountCacheDb } from "./helpers/cache-db";
 import { takePartIn } from "./helpers/participation";
 
-/** A supergroup whose access hash is cached */
 const GROUP = -1_000_000_003_003;
-/** A basic group: messages.getMessages needs no hash */
 const BASIC = -77;
-/** A channel without a cached access hash: Telegram can't be asked */
 const NO_HASH = -1_000_000_004_004;
 
 const ALICIA = 7001;
@@ -72,7 +63,6 @@ function user(id: number, firstName: string): tl.RawUser {
   } as tl.RawUser;
 }
 
-/** A client whose getMessages answers with `users`, or throws `error` */
 function answer(users: tl.TypeUser[], error?: Error) {
   ctx.client = {
     call: mock(async (request: Record<string, unknown>) => {
@@ -135,10 +125,9 @@ beforeEach(() => {
       }),
     );
   }
-  // An older cache: history synced without its senders (#126)
   for (const id of [10, 11, 12]) seed(GROUP, id, ALICIA);
   seed(GROUP, 13, BORIS);
-  seed(GROUP, 14, GROUP); // the group posting as itself: not a user
+  seed(GROUP, 14, GROUP);
   seed(BASIC, 500, CARMEN);
   seed(BASIC, 501, CARMEN, { is_deleted: true });
   seed(NO_HASH, 3, DMITRI);
@@ -160,8 +149,6 @@ describe("senders missing from the cache (#143)", () => {
     expect(ctx.senderLookups.countMissing()).toBe(3);
     expect(ctx.senderLookups.scan(Date.now())).toBe(2);
 
-    // Boris is cached and the group is no user; Dmitri's only chat has no
-    // access hash, and Carmen's newest message is deleted
     expect(lookupRows()).toEqual([
       { sender_id: ALICIA, chat_id: GROUP, message_id: 12, asked_at: null },
       { sender_id: CARMEN, chat_id: BASIC, message_id: 500, asked_at: null },
@@ -219,7 +206,6 @@ describe("senders missing from the cache (#143)", () => {
       first_name: "Alicia",
       access_hash: String(900 + ALICIA),
     });
-    // The users_cache row queued a re-index of her messages (#93)
     runPendingMigrations(db);
     expect(
       search
@@ -322,7 +308,6 @@ describe("senders missing from the cache (#143)", () => {
 
 describe("scheduling sender fetches (#143)", () => {
   it("queues one job per chat in any mode, run only when the other lanes are empty", () => {
-    // Neither chat syncs: sender fetches don't depend on the mode
     const history = ctx.jobsService.create({
       chat_id: GROUP,
       job_type: SyncJobType.BackwardHistory,
@@ -347,10 +332,8 @@ describe("scheduling sender fetches (#143)", () => {
     ctx.jobsService.markRunning(history.id);
     ctx.jobsService.markCompleted(history.id);
     expect(sched.getNextJob()?.job_type).toBe(SyncJobType.FetchSenders);
-    // Sender fetches run at the calm pace, not the history pace (#133)
     expect(sched.hasHistoryDue()).toBe(false);
 
-    // Turning a chat off, or a start's cleanup, keeps them
     ctx.jobsService.cancelPendingForChat(GROUP);
     ctx.jobsService.deletePendingForInactiveChats();
     expect(

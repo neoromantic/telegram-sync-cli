@@ -1,8 +1,3 @@
-/**
- * Rich messages (page blocks instead of a text) as mtcute gives them, with
- * made-up content. The shape follows what Telegram returns for a message
- * sent with rich Markdown.
- */
 import { Long, type tl } from "@mtcute/bun";
 
 export const plain = (text: string): tl.RawTextPlain => ({

@@ -1,6 +1,3 @@
-/**
- * Tests for daemon shutdown timeout behavior
- */
 import { describe, expect, it } from "bun:test";
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from "../daemon/types";
 
@@ -13,14 +10,14 @@ describe("DEFAULT_SHUTDOWN_TIMEOUT_MS", () => {
 describe("shutdown timeout behavior", () => {
   it("Promise.race resolves when cleanup completes before timeout", async () => {
     const cleanupWork = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10)); // Fast cleanup
+      await new Promise((resolve) => setTimeout(resolve, 10));
       return "cleanup done";
     };
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
         reject(new Error("Shutdown timeout exceeded"));
-      }, 100); // 100ms timeout
+      }, 100);
     });
 
     const result = await Promise.race([cleanupWork(), timeoutPromise]);
@@ -29,14 +26,14 @@ describe("shutdown timeout behavior", () => {
 
   it("Promise.race rejects when timeout occurs before cleanup", async () => {
     const cleanupWork = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 200)); // Slow cleanup
+      await new Promise((resolve) => setTimeout(resolve, 200));
       return "cleanup done";
     };
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
         reject(new Error("Shutdown timeout exceeded"));
-      }, 50); // 50ms timeout - shorter than cleanup
+      }, 50);
     });
 
     let error: Error | null = null;

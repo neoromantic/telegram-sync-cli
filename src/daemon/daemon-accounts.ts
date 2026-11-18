@@ -117,7 +117,6 @@ export function setupEventHandlers(ctx: DaemonContext, accountState: AccountConn
     return;
   }
 
-  // Updates land only in the cache of the account that received them
   const cacheDb = rt.db;
   const messagesCache = createMessagesCache(cacheDb);
   const chatSyncState = createChatSyncStateService(cacheDb);
@@ -148,7 +147,6 @@ export function setupEventHandlers(ctx: DaemonContext, accountState: AccountConn
       const data: NewMessageData = {
         chatId: msg.chat.id,
         chatType,
-        // Basic groups always carry it; supergroups often don't.
         memberCount: msg.chat.type === "chat" ? msg.chat.membersCount : undefined,
         messageId: msg.id,
         fromId: msg.sender?.id,
@@ -286,11 +284,8 @@ export function removeEventHandlers(
   ctx.logger.debug(`[Account ${accountId}] Event handlers removed`);
 }
 
-/** The method of every sync job's one call */
 const SYNC_PAGE_METHOD = "messages.getHistory";
 
-// The daemon runs in the background, so it waits out FLOOD_WAITs of up to
-// five minutes instead of failing the request (mtcute's default is 10s).
 const DAEMON_FLOOD_WAIT_MAX_MS = 5 * 60 * 1000;
 
 /**
@@ -309,8 +304,6 @@ export function daemonNetworkMiddlewares(ctx: DaemonContext, accountId: number) 
       "daemon",
       (method, seconds) => {
         const pacer = ctx.runtime.accounts.get(accountId)?.pacer;
-        // Only the sync jobs' own method: the dialog pass at start often
-        // gets a FLOOD_WAIT on messages.getDialogs, before any history
         if (!pacer || method !== SYNC_PAGE_METHOD) return;
         const pace = pacer.recordFloodWait(Date.now(), seconds);
         ctx.logger.info(
@@ -351,7 +344,6 @@ function createDaemonClient(
     apiId: telegramConfig.apiId,
     apiHash: telegramConfig.apiHash,
     storage: sessionPath,
-    // Session files stay open until the daemon closes the client (#56)
     platform: daemonPlatform,
     ...(telegramConfig.transport && { transport: telegramConfig.transport }),
     network: { middlewares: daemonNetworkMiddlewares(ctx, accountId) },
@@ -384,7 +376,6 @@ export async function connectAccount(
     ctx.logger.debug(`Connecting account ${label()}`);
 
     const client = createDaemonClient(ctx, accountId, sessionPath);
-    // Track it right away, so a failed connect below closes it too.
     accountState.client = client;
 
     await client.start({
@@ -444,7 +435,6 @@ export async function connectAccount(
     ctx.logger.debug(`[Account ${accountId}] Starting updates...`);
     await client.startUpdatesLoop();
     ctx.logger.info(`[Account ${accountId}] Real-time updates active`);
-    // Changes made while the daemon was down aren't replayed (#8)
     requestContactsCheckNow(ctx, accountId, Date.now());
 
     return true;
@@ -461,10 +451,6 @@ export async function connectAccount(
   }
 }
 
-/**
- * Stop running an account that a duplicate merge removed. Its cache files
- * stay where they are; its status rows say it stopped.
- */
 function dropAccountRuntime(ctx: DaemonContext, accountId: number): void {
   const rt = ctx.runtime.accounts.get(accountId);
   if (!rt) return;
@@ -497,15 +483,6 @@ export function scheduleReconnect(ctx: DaemonContext, accountState: AccountConne
   );
 }
 
-/**
- * Detach the account's client: drop the sync worker bound to it, close it,
- * then remove its handlers. The client leaves the account state before it is
- * closed, so each client is closed once.
- *
- * The handlers stay on until destroy() returns: the updates loop can still
- * dispatch the batch it was handling when destroy() stopped it, and save its
- * state, so a message in that batch must still reach the cache.
- */
 async function releaseClient(
   ctx: DaemonContext,
   accountState: AccountConnectionState,
@@ -539,7 +516,6 @@ export async function attemptReconnect(
   accountState.status = "reconnecting";
   accountState.nextReconnectAt = undefined;
 
-  // Close the old client before opening a new one on the same session file.
   await releaseClient(ctx, accountState, "reconnecting");
 
   try {
@@ -547,7 +523,6 @@ export async function attemptReconnect(
     ctx.logger.debug(`Reconnecting account ${accountLabel(accountState)}`);
 
     const client = createDaemonClient(ctx, accountState.accountId, sessionPath);
-    // Track it right away, so a failed attempt below closes it too.
     accountState.client = client;
 
     await client.start({
@@ -566,8 +541,6 @@ export async function attemptReconnect(
     accountState.username = me.username;
     ctx.logger.info(`Reconnected account ${accountLabel(accountState)}`);
 
-    // The pass below covers the whole outage: a catch-up the old client's
-    // states asked for is dropped, and the new client starts online
     const now = Date.now();
     const offlineSince = accountState.watch?.offlineSince;
     accountState.watch = { online: true, lastCatchUpAt: now };
@@ -584,7 +557,6 @@ export async function attemptReconnect(
       reason: "new_client",
       offlineMs: offlineSince === undefined ? null : now - offlineSince,
     });
-    // Changes made while it was reconnecting aren't replayed (#8)
     requestContactsCheckNow(ctx, accountState.accountId, Date.now());
     ctx.logger.info(`[Account ${accountState.accountId}] Real-time updates active`);
 

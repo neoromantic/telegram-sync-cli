@@ -1,6 +1,3 @@
-/**
- * E2E tests for daemon commands
- */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,7 +40,6 @@ describe("daemon commands", () => {
     });
 
     it("shows running when PID file exists with live process", async () => {
-      // Create a PID file with the current process (which is alive)
       const pidPath = join(testDir, "daemon.pid");
       writeFileSync(pidPath, process.pid.toString());
 
@@ -56,7 +52,6 @@ describe("daemon commands", () => {
     });
 
     it("shows stopped when PID file has dead process", async () => {
-      // Create a PID file with a non-existent process
       const pidPath = join(testDir, "daemon.pid");
       writeFileSync(pidPath, "999999999");
 

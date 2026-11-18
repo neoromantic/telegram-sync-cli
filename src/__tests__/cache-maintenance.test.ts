@@ -1,7 +1,3 @@
-/**
- * Cache maintenance: pruning the bookkeeping tables. Each test runs on its
- * own temporary cache file with an injected clock. Made-up data only.
- */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -74,7 +70,6 @@ function addJob(status: string, completedAt: number | null): number {
   return row.id;
 }
 
-/** Made-up messages in two chats */
 function seedMessages(n: number, startId = 1) {
   createMessagesCache(db).upsertBatch(
     Array.from({ length: n }, (_, i) => ({
@@ -109,9 +104,9 @@ describe("pruneCache", () => {
   });
 
   it("turns the seconds older versions wrote into ms before it prunes", () => {
-    addActivity(NOW_SEC - 8 * 24 * 3600); // seconds, past the retention
-    addActivity(NOW_SEC - 3600); // seconds, an hour ago
-    addActivity(NOW - 60_000); // ms, a minute ago
+    addActivity(NOW_SEC - 8 * 24 * 3600);
+    addActivity(NOW_SEC - 3600);
+    addActivity(NOW - 60_000);
 
     const result = pruneCache(db, getDefaultRetentionConfig(), { now: NOW });
 
@@ -121,7 +116,6 @@ describe("pruneCache", () => {
     }>;
     expect(left.map((row) => row.timestamp)).toEqual([(NOW_SEC - 3600) * 1000, NOW - 60_000]);
 
-    // A second pass changes nothing
     pruneCache(db, getDefaultRetentionConfig(), { now: NOW });
     expect(count("api_activity")).toBe(2);
   });
@@ -226,14 +220,12 @@ describe("readCacheSize", () => {
 const pragma = (cache: Database, name: string) =>
   Object.values(cache.query(`PRAGMA ${name}`).get() as object)[0];
 
-/** Turn the test's cache into one of an older version: auto_vacuum off */
 function makeLegacyCache() {
   db.run("PRAGMA auto_vacuum = NONE");
   db.run("VACUUM");
   expect(pragma(db, "auto_vacuum")).toBe(0);
 }
 
-/** Seed made-up messages, then delete a third of them (test only) */
 function seedAndDeleteAThird() {
   seedMessages(3000);
   db.run("DELETE FROM messages_cache WHERE message_id % 3 = 0");

@@ -1,8 +1,3 @@
-/**
- * Daemon start with one cache per account: an account whose cache doesn't
- * open is left out, a shared cache that can't move stops the start, and
- * every account that ran is marked stopped on the way out
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
@@ -44,7 +39,6 @@ mock.module("../db", () => ({
 }));
 
 const connected: number[] = [];
-/** Accounts that connect; by default none does, so the start ends there */
 const connecting = new Set<number>();
 mock.module("../daemon/daemon-accounts", () => ({
   connectAccount: async (
@@ -54,7 +48,6 @@ mock.module("../daemon/daemon-accounts", () => ({
     name: string | null,
   ) => {
     connected.push(accountId);
-    // As the real one: a failed connect leaves the account in error
     const ok = connecting.has(accountId);
     ctx.state.accounts.set(accountId, {
       accountId,
@@ -71,7 +64,6 @@ mock.module("../daemon/daemon-accounts", () => ({
   scheduleReconnect: () => {},
 }));
 
-/** Runs as the dialog pass, after the connections */
 let onDialogPass: (() => void) | null = null;
 mock.module("../daemon/daemon-bootstrap", () => ({
   bootstrapDialogs: async () => onDialogPass?.(),
@@ -147,7 +139,6 @@ describe("daemon start with a cache per account", () => {
   });
 
   it("writes each account's connection before the dialog pass", async () => {
-    // Account 1's rows from a run that crashed: connected, a full queue
     const previous = createDaemonStatusService(caches.get(1)!);
     previous.setDaemonRunning(1111, "0.3.9");
     previous.writeTick({

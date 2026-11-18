@@ -1,10 +1,3 @@
-/**
- * E2E tests for lazy Telegram API credentials
- *
- * Only commands that actually talk to Telegram may require TELEGRAM_API_ID /
- * TELEGRAM_API_HASH. Help, version and offline commands must work without them.
- */
-
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import packageJson from "../../package.json" with { type: "json" };
 import { NO_CREDENTIALS, runCliFailure, runCliSuccess } from "./helpers/cli";

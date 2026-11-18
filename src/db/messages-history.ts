@@ -1,7 +1,3 @@
-/**
- * Chat history reads over messages_cache, in message ID order. Rows have the
- * same columns and joins as search results, so both print the same items.
- */
 import type { Database } from "bun:sqlite";
 
 import { MESSAGE_ROW_COLUMNS, MESSAGE_ROW_JOINS, type MessageSearchRow } from "./messages-search";
@@ -52,7 +48,6 @@ export function createMessagesHistory(db: Database): MessagesHistory {
       }
       params.push(limit);
 
-      // The primary key (chat_id, message_id) serves both directions
       const order = after !== undefined ? "ASC" : "DESC";
       const rows = db
         .query(`

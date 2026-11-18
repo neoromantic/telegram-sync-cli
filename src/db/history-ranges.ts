@@ -1,14 +1,3 @@
-/**
- * The parts of each chat that the cache holds without gaps. A
- * `messages.getHistory` page is a run of consecutive messages, so each page
- * the daemon or the CLI caches records the message ID range it covers, and
- * touching or overlapping ranges merge. Every message Telegram had in a
- * range when it was recorded is in messages_cache. Live updates and sent
- * messages record nothing: nothing says what sits next to them.
- *
- * A range never reaches above the newest message known to exist, because
- * new messages get higher IDs and could land there.
- */
 import type { Database } from "bun:sqlite";
 
 export interface HistoryRange {
@@ -83,7 +72,6 @@ export function createHistoryRanges(db: Database): HistoryRanges {
     });
   });
 
-  /** A cached message at or above `id` proves that no new one lands below it */
   const hasMessageFrom = (chatId: number, id: number) =>
     stmts.hasMessageFrom.get({ $chat_id: chatId, $id: id }) !== null;
 

@@ -1,6 +1,3 @@
-/**
- * Authentication commands tests
- */
 import type { Mock } from "bun:test";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -19,7 +16,6 @@ import { syncActiveAccountFromConfig } from "../config";
 import { type AccountsDbInterface, createTestDatabase } from "../db";
 import type { Account } from "../types";
 
-// Set test environment
 process.env.BUN_ENV = "test";
 
 const PHONE = "+15550000002";
@@ -91,13 +87,11 @@ describe("Authentication Commands", () => {
     accountsDb = testDb.accountsDb;
     mockClients = new Map();
 
-    // Create mock dependencies
     deps = {
       accountsDb,
       createClient: mock((accountId: number) => {
         const client = createMockClient({
           signInQr: mock((options: SignInQrOptions) => {
-            // Simulate QR code flow
             if (options.onUrlUpdated) {
               options.onUrlUpdated("tg://login?token=abc", new Date());
             }
@@ -160,7 +154,6 @@ describe("Authentication Commands", () => {
       accountsDb.create({ phone: "+1111111111", is_active: true });
       accountsDb.create({ phone: "+2222222222", is_active: false });
 
-      // Re-login to existing account should set it as active
       await loginWithPhone("+2222222222", deps);
 
       const active = accountsDb.getActive();
@@ -232,7 +225,6 @@ describe("Authentication Commands", () => {
     });
 
     it("merges duplicate user_id accounts and keeps existing", async () => {
-      // Use a lightweight in-memory accounts DB to avoid unique constraint conflicts
       const accounts = new Map<number, Account>();
       let nextId = 1;
       type CreateAccountInput = Parameters<AccountsDbInterface["create"]>[0];
@@ -372,7 +364,6 @@ describe("Authentication Commands", () => {
       const result = await loginWithQr(undefined, deps);
 
       expect(result.success).toBe(true);
-      // After successful login, account phone is updated to user:userId
       const accounts = accountsDb.getAll();
       expect(accounts[0]?.phone).toBe("user:456");
     });
@@ -422,13 +413,6 @@ describe("Authentication Commands", () => {
     });
   });
 
-  /**
-   * The command after a login has to use the account it logged in to (#62):
-   * in data.db, and in config.json when activeAccount is set there, as every
-   * start applies it. Account 1 is active at the start of each test; the
-   * phone login signs in user 123 and the QR login user 456, so both add
-   * account 2. The tests use tg's own hook on a data dir of their own.
-   */
   describe("the account a login makes active", () => {
     const isRoot = process.getuid?.() === 0;
     const logins = [
@@ -449,7 +433,6 @@ describe("Authentication Commands", () => {
         .filter((account) => account.is_active === 1)
         .map((account) => account.id);
 
-    /** What the next command's start does: apply activeAccount, if set */
     const nextCommandStart = () => syncActiveAccountFromConfig(accountsDb);
 
     const failLogins = () => {
@@ -560,12 +543,9 @@ describe("Authentication Commands", () => {
             path: configPath(),
             account_id: 2,
           });
-          // Removing the key alone would leave account 1 active, so the
-          // switch follows either step
           expect(JSON.parse(printed ?? "").error.suggestion).toBe(
             "Make config.json writable or remove activeAccount from it, then run tg accounts switch --id 2",
           );
-          // config.json first: data.db keeps account 1 active as well
           expect(readConfig()).toBe(text);
           expect(activeIds()).toEqual([1]);
         },

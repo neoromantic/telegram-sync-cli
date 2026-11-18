@@ -1,8 +1,3 @@
-/**
- * E2E: two accounts, each with its own cache (#17). Both caches hold a
- * message with ID 7 and different text; every cache command reads only the
- * account that --account selects, or the active one. Made-up data only.
- */
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -37,9 +32,7 @@ const BETA = {
   label: "work",
 };
 
-/** Account 1: Alice, a contact with a private chat */
 const ALICE_ID = 101;
-/** Account 2: Bob, a contact, and the basic group Book Club */
 const BOB_ID = 202;
 const BOOK_CLUB_ID = -4242;
 const MESSAGE_ID = 7;
@@ -77,10 +70,6 @@ function seedMessage(db: Database, chatId: number, text: string) {
   createHistoryRanges(db).add(chatId, { low: 1, high: MESSAGE_ID });
 }
 
-/**
- * Account 1's cache: the account's own user, Alice, their chat, "lunch at
- * noon" and a failed job
- */
 function seedAlpha(db: Database) {
   seedUser(db, ALPHA.user_id, "Alpha", "Test", { contact: false });
   seedUser(db, ALICE_ID, "Alice", "Able");
@@ -95,7 +84,6 @@ function seedAlpha(db: Database) {
   );
 }
 
-/** Account 2's cache: the account's own user, Bob, Book Club and "lunch at one" */
 function seedBeta(db: Database) {
   seedUser(db, BETA.user_id, "Beta", "Test", { contact: false });
   seedUser(db, BOB_ID, "Bob", "Baker");
@@ -136,18 +124,12 @@ async function run(env: TestEnvironment, args: string[]) {
   return (result.json as { data: Record<string, unknown> }).data;
 }
 
-/**
- * A lookup that the other account's cache can't answer: its data, or null
- * when it fails (a cache miss goes to Telegram, and there are no
- * credentials)
- */
 async function lookup(env: TestEnvironment, args: string[]) {
   const result = await runCli(args, cliOptions(env));
   if (result.exitCode !== 0) return null;
   return (JSON.parse(result.stdout) as { data: Record<string, unknown> }).data;
 }
 
-/** What each cache command returns, reduced to what tells the accounts apart */
 async function snapshot(env: TestEnvironment, selector: string[]) {
   const chats = await run(env, ["chats", "list", ...selector]);
   const club = await run(env, ["chats", "search", "--query", "Book", ...selector]);
@@ -159,7 +141,6 @@ async function snapshot(env: TestEnvironment, selector: string[]) {
     "SELECT chat_id, message_id, text FROM messages_cache ORDER BY chat_id",
     ...selector,
   ]);
-  // Account 2's chat and contact, by ID: only its cache has them
   const club2 = await lookup(env, ["chats", "get", "--id", String(BOOK_CLUB_ID), ...selector]);
   const bob = await lookup(env, ["contacts", "get", "--id", String(BOB_ID), ...selector]);
   const bobSearch = await lookup(env, ["contacts", "search", "--query", "Bob", ...selector]);
@@ -248,8 +229,6 @@ describe("E2E: two accounts, each with its own cache", () => {
     env.cleanup();
   });
 
-  // A snapshot and a message read start tg 12 times in a row: up to 4.5 s on a
-  // busy self-hosted runner, too close to the default 5 s
   for (const selector of ["2", "@beta_test", "work"]) {
     it(`reads only account 2 with --account ${selector}`, async () => {
       const flag = ["--account", selector];
@@ -303,7 +282,6 @@ describe("E2E: two accounts, each with its own cache", () => {
 
   it("names the account in the pretty retry command", async () => {
     const result = await runCliSuccess(["status", "--format", "pretty"], cliOptions(env));
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
     const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
 
     expect(output).toContain(`chat:${ALICE_ID} acct:1`);
@@ -341,11 +319,6 @@ async function chatTitles(env: TestEnvironment) {
   return (data.items as Array<{ title: string }>).map((chat) => chat.title);
 }
 
-/**
- * The active accounts in data.db, read without the CLI: every CLI start
- * applies activeAccount from config.json first and would hide what an
- * earlier command wrote
- */
 function activeIds(env: TestEnvironment) {
   const db = new Database(join(env.dataDir, "data.db"), { readonly: true });
   try {
@@ -355,11 +328,6 @@ function activeIds(env: TestEnvironment) {
   }
 }
 
-/**
- * Every start applies activeAccount from config.json, so a switch has to
- * last across later commands with and without the key (#61). Account 1 is
- * active in data.db at the start of each test.
- */
 describe("E2E: switching accounts", () => {
   const isRoot = process.getuid?.() === 0;
 
@@ -484,7 +452,6 @@ describe("E2E: switching accounts", () => {
       expect(result.exitCode).toBe(1);
       expect(result.error.code).toBe("GENERAL_ERROR");
       expect(result.error.details).toEqual(expect.objectContaining({ path: configPath(env) }));
-      // Before any other command: its start would apply activeAccount: 1
       expect(activeIds(env)).toEqual([{ id: 1 }]);
       expect(await chatTitles(env)).toEqual(["Alice Able"]);
       expect(readConfig(env)).toBe(text);
@@ -520,8 +487,6 @@ describe("E2E: tg chats sync with two accounts", () => {
   });
 
   it("rejects a chat that is only in the other account's cache", async () => {
-    // Book Club is in account 2's chats_cache, which --account 2 syncs
-    // above; without --account, account 1 is active and doesn't know it
     const result = await failure(env, ["chats", "sync", String(BOOK_CLUB_ID)]);
 
     expect(result.exitCode).toBe(3);
@@ -589,7 +554,6 @@ describe("E2E: which account a command uses", () => {
         },
       });
 
-      // tg status needs no account, and creates no cache for one without
       const status = await run(env, ["status"]);
       expect(status.progress).toMatchObject({ messages_cached: 1 });
       expect(existsSync(env.cachePath(2))).toBe(false);
@@ -605,8 +569,6 @@ describe("E2E: status per account", () => {
 
   beforeAll(() => {
     env = createTwoAccounts("multi-account-status");
-    // A live daemon wrote both accounts' rows; this test process stands in
-    // for it, so daemon.pid names a live PID
     writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));
     const tick = (accountId: number, connection: string, synced: number) => {
       const status = createDaemonStatusService(env.openCacheDb(accountId));
@@ -769,7 +731,6 @@ describe("E2E: status per account", () => {
 
   it("prints a line per account in pretty output", async () => {
     const result = await runCliSuccess(["status", "--format", "pretty"], cliOptions(env));
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
     const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
 
     expect(output).toMatch(/connected · 0 queued · 1 failed · history 0\/0 · 1 msgs/);
@@ -782,11 +743,9 @@ describe("E2E: status per account", () => {
       ["status", "--account", "work", "--format", "pretty"],
       cliOptions(env),
     );
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
     const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
 
     expect(output).toContain(`Only account #2 ${BETA.phone} [work];`);
-    // The account's own line still prints under the overall total
     expect(output).toMatch(/Total\s+2/);
     expect(output).toContain(`#2 ${BETA.phone}`);
     expect(output).toMatch(/reconnecting · 0 queued · history 0\/0 · 1 msgs/);
@@ -800,7 +759,6 @@ describe("E2E: status totals over two accounts", () => {
   beforeAll(() => {
     env = createTwoAccounts("multi-account-status-totals");
     const now = Date.now();
-    // Calls of the last minute, as api_activity logs them
     const calls = (accountId: number, method: string, count: number) => {
       const db = env.openCacheDb(accountId);
       for (let i = 0; i < count; i++) {
@@ -894,7 +852,6 @@ describe("E2E: status totals over two accounts", () => {
     };
 
     expect(progress.chats_enabled).toBe(6);
-    // History still to go first, then by messages synced, then by account
     expect(
       progress.sample_chats.map(({ account_id, chat_id, synced_messages }) => [
         account_id,
@@ -925,17 +882,14 @@ describe("E2E: status totals over two accounts", () => {
 
   it("tags flood waits and sample chats with acct:<id> in pretty output", async () => {
     const result = await runCliSuccess(["status", "--format", "pretty"], cliOptions(env));
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI colors
     const output = result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
 
     expect(output).toMatch(/messages\.getHistory acct:2 → \d+s remaining/);
     expect(output).not.toContain("messages.getHistory acct:1");
-    // The overall top 5 lines, in order, each with its account
     expect(output).toMatch(
       /group chat:-4242 acct:2 → 80 msgs → backfill\n.*private chat:101 acct:1 → 50 msgs/,
     );
     expect(output).toMatch(/private chat:103 acct:1 → 90 msgs → complete/);
-    // Top Methods sums both accounts' calls
     expect(output).toMatch(/getHistory 5\n/);
   });
 });

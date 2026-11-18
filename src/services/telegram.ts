@@ -1,7 +1,3 @@
-/**
- * Global setTimeout patch to prevent crashes from invalid/negative timeouts
- * This must be applied before importing mtcute or any other library that uses timers
- */
 const timeoutPatchKey = Symbol.for("tgcli.timeoutPatch");
 if (!(globalThis as Record<symbol, boolean>)[timeoutPatchKey]) {
   const originalSetTimeout = globalThis.setTimeout;
@@ -16,11 +12,6 @@ if (!(globalThis as Record<symbol, boolean>)[timeoutPatchKey]) {
   (globalThis as Record<symbol, boolean>)[timeoutPatchKey] = true;
 }
 
-/**
- * Telegram clients: config, the client factory and one cached client per
- * account, each with its own session file
- */
-
 import { join } from "node:path";
 import {
   type FloodWaiterOptions,
@@ -33,7 +24,6 @@ import { ConfigError } from "../config";
 import { getDataDir } from "../db";
 import { wrapClientCallWithRecordReplay } from "../utils/telegram-record-replay";
 
-// Store active clients by account ID
 const clients = new Map<number, TelegramClient>();
 
 /**
@@ -48,24 +38,16 @@ export interface TelegramConfig {
   floodWaiter?: FloodWaiterOptions;
 }
 
-/**
- * Default FloodWaiter options
- * - maxRetries: 5 attempts before giving up
- * - maxWait: 60 seconds max wait time (higher than default 10s for CLI use)
- * - store: true to remember wait times across requests
- */
 const DEFAULT_FLOOD_WAITER_OPTIONS: FloodWaiterOptions = {
   maxRetries: 5,
-  maxWait: 60000, // 60 seconds - CLI users can wait longer
+  maxWait: 60000,
   store: true,
   onBeforeWait: (ctx, seconds) => {
-    // Log flood wait unless it's a common method that often triggers it
     const method = ctx.request._;
     const quietMethods = [
       "messages.getDialogs",
       "messages.getHistory",
       "contacts.getContacts",
-      // File transfers sleep through short waits part by part
       "upload.getFile",
       "upload.saveFilePart",
       "upload.saveBigFilePart",
@@ -80,12 +62,9 @@ const DEFAULT_FLOOD_WAITER_OPTIONS: FloodWaiterOptions = {
  * Get default configuration from environment
  */
 export function getDefaultConfig(): TelegramConfig {
-  // Read lazily so commands that never talk to Telegram (help, version,
-  // cache queries, config) work without credentials.
   const config: TelegramConfig = {
     apiId: parseInt(process.env.TELEGRAM_API_ID ?? "0", 10),
     apiHash: process.env.TELEGRAM_API_HASH ?? "",
-    // Verbose/debug mode - set via VERBOSE=1 or MTCUTE_LOG_LEVEL env var
     logLevel: parseInt(
       process.env.MTCUTE_LOG_LEVEL ?? (process.env.VERBOSE === "1" ? "5" : "2"),
       10,
@@ -170,7 +149,6 @@ export function createDefaultClientFactory(
   config: TelegramConfig,
   dataDir?: string,
 ): ClientFactory {
-  // Build middleware stack
   const floodWaiterOpts = config.floodWaiter ?? DEFAULT_FLOOD_WAITER_OPTIONS;
   const middlewares = [networkMiddlewares.floodWaiter(floodWaiterOpts)];
 
@@ -204,8 +182,6 @@ export async function isAuthorized(client: TelegramClient): Promise<boolean> {
   }
 }
 
-// Default client factory, created on first use so credentials are only
-// required by commands that actually connect to Telegram
 let defaultFactory: ClientFactory | null = null;
 
 function getDefaultFactory(): ClientFactory {

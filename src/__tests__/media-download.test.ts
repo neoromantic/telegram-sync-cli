@@ -1,9 +1,3 @@
-/**
- * The core of `tg media download` (src/commands/media/download-media.ts):
- * cache hits without a client, the online path with a fake Telegram client
- * and an injected transfer, resume, errors and content protection. Made-up
- * messages and files in temp dirs only.
- */
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
@@ -81,7 +75,6 @@ const ACCOUNT: Account = {
   updated_at: "2026-10-01 00:00:00",
 };
 
-/** The team channel as getMessages sends it with a message */
 function teamChannel(noforwards = false) {
   return {
     _: "channel" as const,
@@ -118,7 +111,6 @@ beforeEach(() => {
       member_count: 30,
       access_hash: "7000000000000000005",
       fetched_at: NOW,
-      // A dialog row: no chat flags
       raw_json: JSON.stringify({ _: "dialog", unreadCount: 0 }),
     }),
   );
@@ -129,10 +121,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// --- Fakes ---
-
 interface FakeTelegram {
-  /** The message getMessages answers, per call */
   message: () => unknown;
   chats?: unknown[];
   fullUser?: { noforwardsMyEnabled?: boolean; noforwardsPeerEnabled?: boolean };
@@ -187,7 +176,6 @@ interface TransferRun {
   params: DownloadParams;
 }
 
-/** An injected transfer: `produce` yields the chunks of each run */
 function fakeTransfer(produce: (run: TransferRun, index: number) => AsyncGenerator<Uint8Array>) {
   const runs: TransferRun[] = [];
   const download = async function* (
@@ -202,7 +190,6 @@ function fakeTransfer(produce: (run: TransferRun, index: number) => AsyncGenerat
   return { download: download as unknown as DownloadFn, runs };
 }
 
-/** Chunks of the part size, as mtcute yields them */
 async function* chunksOf(bytes: Uint8Array) {
   for (let at = 0; at < bytes.length; at += PART_BYTES) {
     yield bytes.subarray(at, at + PART_BYTES);
@@ -288,7 +275,6 @@ async function mediaError(promise: Promise<unknown>): Promise<MediaError> {
   return err as MediaError;
 }
 
-/** A made-up 1 MB video with a file name */
 function videoMessage(peer: typeof SELF | typeof TEAM, id: number) {
   return documentMessage(peer, id, {
     id: "6000000000000000021",
@@ -303,8 +289,6 @@ function videoMessage(peer: typeof SELF | typeof TEAM, id: number) {
 
 const pdf = pdfDocumentMessage(SELF, 5);
 const PDF_SIZE = 120_000;
-
-// --- Cache hits ---
 
 describe("downloadMedia from the cache", () => {
   it("serves a cached file without a client and marks it used", async () => {
@@ -473,21 +457,17 @@ describe("downloadMedia: content protection known to the cache", () => {
     const hit = await downloadMedia(deps(), request(String(TEAM_CHAT_ID), 8));
     expect(hit).toMatchObject({ cached: true, path: file });
 
-    // The chat object fetched after that check has the flag again
     setRawChat(true, NOW + 60_000);
     const err = await mediaError(downloadMedia(deps(), request(String(TEAM_CHAT_ID), 8)));
     expect(err.details).toMatchObject({ reason: "chat" });
   });
 });
 
-// --- Online ---
-
 describe("downloadMedia from Telegram", () => {
   it("downloads a file, caches the message and renames the partial download", async () => {
     const telegram = fakeTelegram({ message: () => pdf });
     const bytes = fakeBytes(PDF_SIZE, 5);
     const transfer = fakeTransfer(async function* (run) {
-      // The transfer runs on the facade that sleeps through short waits only
       await run.client.call({ _: "upload.getFile" } as never);
       yield* chunksOf(bytes);
     });
@@ -516,7 +496,6 @@ describe("downloadMedia from Telegram", () => {
     expect(existsSync(paths.part)).toBe(false);
     expect(existsSync(paths.lock)).toBe(false);
 
-    // Saved Messages: no private-chat check
     expect(telegram.methods()).toEqual(["messages.getMessages", "upload.getFile"]);
     expect(telegram.calls[1]?.options?.floodSleepThreshold).toBe(MEDIA_FLOOD_SLEEP_MS);
     expect(transfer.runs).toHaveLength(1);
@@ -528,7 +507,6 @@ describe("downloadMedia from Telegram", () => {
       stallTimeout: STALL_TIMEOUT_MS,
     });
 
-    // The fetched message is cached with its attachment row
     expect(createMessagesCache(db).get(SELF_ID, 5)?.message_type).toBe("document");
     expect(createMessageAttachmentsStore(db).get(SELF_ID, 5)).toMatchObject({
       kind: "document",
@@ -687,7 +665,6 @@ describe("downloadMedia from Telegram", () => {
       const transfer = fakeTransfer(async function* () {
         yield fakeBytes(1);
       });
-      // --fresh: an earlier case cached its protected message
       const err = await mediaError(
         downloadMedia(
           deps({
@@ -777,7 +754,6 @@ describe("downloadMedia: protection found online, then offline", () => {
         reason: testCase.reason,
       });
 
-      // Offline: no client, the file stays where it is
       const offline = await mediaError(downloadMedia(deps(), request(testCase.chat, 8)));
       expect(offline.code).toBe(ErrorCodes.CONTENT_PROTECTED);
       expect(offline.details).toMatchObject({ reason: testCase.reason });

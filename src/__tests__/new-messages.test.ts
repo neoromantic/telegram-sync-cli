@@ -15,9 +15,7 @@ const OTHER = 42;
 
 describe("createNewMessagesFeed", () => {
   let dir: string;
-  /** The daemon's connection, which writes */
   let writer: Database;
-  /** The command's connection: data_version sees only other connections */
   let reader: Database;
 
   beforeEach(() => {
@@ -60,18 +58,14 @@ describe("createNewMessagesFeed", () => {
     expect(feed.initial).toEqual([]);
     expect(feed.poll()).toEqual([]);
 
-    // Backfill below the newest cached message, then a new one
     store(CHAT, [15, 21]);
     expect(ids(feed.poll())).toEqual([[CHAT, 21]]);
 
-    // A chat new to the cache: its first live message counts, the history
-    // page stored after it doesn't
     store(OTHER, [500]);
     expect(ids(feed.poll())).toEqual([[OTHER, 500]]);
     store(OTHER, [400, 450]);
     expect(feed.poll()).toEqual([]);
 
-    // An edit keeps the row: not new
     createMessagesCache(writer).updateText(CHAT, 21, "edited", 1_700_000_100);
     expect(feed.poll()).toEqual([]);
   });

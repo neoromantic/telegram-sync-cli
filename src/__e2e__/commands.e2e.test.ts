@@ -1,10 +1,3 @@
-/**
- * E2E tests for contacts and chats commands
- *
- * Tests contacts list, search, get and chats list, search, get commands
- * using an isolated database environment with seeded cache data.
- */
-
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
@@ -15,9 +8,6 @@ import { NO_CREDENTIALS, runCliFailure, runCliSuccess } from "./helpers/cli";
 
 const E2E_TEST_BASE = join(tmpdir(), "telegram-sync-cli-e2e-tests");
 
-/**
- * Extended test environment that includes cache database
- */
 interface ExtendedTestEnvironment {
   dataDir: string;
   initDatabase(): Database;
@@ -61,9 +51,6 @@ interface ExtendedTestEnvironment {
   getCliOptions(): { env: Record<string, string> };
 }
 
-/**
- * Initialize accounts schema
- */
 function initAccountsSchema(db: Database): void {
   db.run("PRAGMA journal_mode = WAL");
 
@@ -89,13 +76,9 @@ function initAccountsSchema(db: Database): void {
   db.run("CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts(is_active)");
 }
 
-/**
- * Initialize cache schema
- */
 function initCacheSchema(db: Database): void {
   db.run("PRAGMA journal_mode = WAL");
 
-  // Users cache table
   db.run(`
     CREATE TABLE IF NOT EXISTS users_cache (
       user_id TEXT PRIMARY KEY,
@@ -115,7 +98,6 @@ function initCacheSchema(db: Database): void {
     )
   `);
 
-  // Users cache indexes
   db.run(
     "CREATE INDEX IF NOT EXISTS idx_users_cache_username ON users_cache(username) WHERE username IS NOT NULL",
   );
@@ -124,7 +106,6 @@ function initCacheSchema(db: Database): void {
   );
   db.run("CREATE INDEX IF NOT EXISTS idx_users_cache_fetched_at ON users_cache(fetched_at)");
 
-  // Chats cache table
   db.run(`
     CREATE TABLE IF NOT EXISTS chats_cache (
       chat_id TEXT PRIMARY KEY,
@@ -144,7 +125,6 @@ function initCacheSchema(db: Database): void {
     )
   `);
 
-  // Chats cache indexes
   db.run(
     "CREATE INDEX IF NOT EXISTS idx_chats_cache_username ON chats_cache(username) WHERE username IS NOT NULL",
   );
@@ -155,9 +135,6 @@ function initCacheSchema(db: Database): void {
   );
 }
 
-/**
- * Create an extended test environment with cache support
- */
 function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironment {
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 8);
@@ -178,7 +155,6 @@ function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironmen
       return db;
     },
 
-    // The first account's cache; tg creates the tables this one lacks
     initCacheDatabase(): Database {
       const accountDir = join(dataDir, "accounts", "1");
       mkdirSync(accountDir, { recursive: true, mode: 0o700 });
@@ -308,10 +284,6 @@ function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironmen
   };
 }
 
-// ============================================================================
-// Contacts Commands Tests
-// ============================================================================
-
 describe("E2E: Contacts Commands", () => {
   let env: ExtendedTestEnvironment;
 
@@ -319,7 +291,6 @@ describe("E2E: Contacts Commands", () => {
     env = createExtendedTestEnvironment("contacts");
     env.initDatabase();
     env.initCacheDatabase();
-    // Seed an active account (required for most commands)
     env.seedAccounts([{ phone: "+1111111111", name: "Test Account", is_active: true }]);
   });
 
@@ -329,13 +300,7 @@ describe("E2E: Contacts Commands", () => {
 
   describe("contacts list", () => {
     it("should try to fetch from API when no contacts in cache", async () => {
-      // When no cached contacts exist, the command tries to fetch from API
-      // Since we don't have a real Telegram client, it fails with TELEGRAM_ERROR
-      const result = await runCliFailure(
-        ["contacts", "list"],
-        5, // TELEGRAM_ERROR exit code
-        env.getCliOptions(),
-      );
+      const result = await runCliFailure(["contacts", "list"], 5, env.getCliOptions());
 
       const response = result.json as {
         success: boolean;
@@ -350,7 +315,6 @@ describe("E2E: Contacts Commands", () => {
     });
 
     it("should return cached contacts", async () => {
-      // Seed contacts in cache
       env.seedUsers([
         {
           user_id: "100",
@@ -399,7 +363,6 @@ describe("E2E: Contacts Commands", () => {
       expect(response.data.total).toBe(3);
       expect(response.data.source).toBe("cache");
 
-      // Check first contact
       const alice = response.data.items.find((c) => c.username === "alice");
       expect(alice).toBeDefined();
       expect(alice?.firstName).toBe("Alice");
@@ -407,7 +370,6 @@ describe("E2E: Contacts Commands", () => {
     });
 
     it("should respect limit and offset parameters", async () => {
-      // Seed 5 contacts
       env.seedUsers([
         { user_id: "100", first_name: "Contact1", is_contact: 1 },
         { user_id: "101", first_name: "Contact2", is_contact: 1 },
@@ -416,7 +378,6 @@ describe("E2E: Contacts Commands", () => {
         { user_id: "104", first_name: "Contact5", is_contact: 1 },
       ]);
 
-      // Request with limit 2 and offset 1
       const result = await runCliSuccess(
         ["contacts", "list", "--limit", "2", "--offset", "1"],
         env.getCliOptions(),
@@ -554,11 +515,9 @@ describe("E2E: Contacts Commands", () => {
     });
 
     it("should try to fetch from API when no matching results in cache", async () => {
-      // When no matching results exist in cache, the command tries to fetch from API
-      // Since we don't have a real Telegram client, it fails with TELEGRAM_ERROR
       const result = await runCliFailure(
         ["contacts", "search", "--query", "nonexistent"],
-        5, // TELEGRAM_ERROR exit code
+        5,
         env.getCliOptions(),
       );
 
@@ -676,10 +635,6 @@ describe("E2E: Contacts Commands", () => {
   });
 });
 
-// ============================================================================
-// Chats Commands Tests
-// ============================================================================
-
 describe("E2E: Chats Commands", () => {
   let env: ExtendedTestEnvironment;
 
@@ -687,7 +642,6 @@ describe("E2E: Chats Commands", () => {
     env = createExtendedTestEnvironment("chats");
     env.initDatabase();
     env.initCacheDatabase();
-    // Seed an active account
     env.seedAccounts([{ phone: "+1111111111", name: "Test Account", is_active: true }]);
   });
 
@@ -697,13 +651,7 @@ describe("E2E: Chats Commands", () => {
 
   describe("chats list", () => {
     it("should try to fetch from API when no chats in cache", async () => {
-      // When no cached chats exist, the command tries to fetch from API
-      // Since we don't have a real Telegram client, it fails with TELEGRAM_ERROR
-      const result = await runCliFailure(
-        ["chats", "list"],
-        5, // TELEGRAM_ERROR exit code
-        env.getCliOptions(),
-      );
+      const result = await runCliFailure(["chats", "list"], 5, env.getCliOptions());
 
       const response = result.json as {
         success: boolean;
@@ -768,7 +716,6 @@ describe("E2E: Chats Commands", () => {
       expect(response.data.total).toBe(3);
       expect(response.data.source).toBe("cache");
 
-      // Should be sorted by last_message_at descending
       expect(response.data.items[0]?.title).toBe("Alice");
       expect(response.data.items[1]?.title).toBe("Friends Group");
       expect(response.data.items[2]?.title).toBe("News Channel");
@@ -917,7 +864,7 @@ describe("E2E: Chats Commands", () => {
     it("should fail for invalid chat type", async () => {
       const result = await runCliFailure(
         ["chats", "list", "--type", "invalid"],
-        undefined, // Any non-zero exit code
+        undefined,
         env.getCliOptions(),
       );
 
@@ -991,7 +938,6 @@ describe("E2E: Chats Commands", () => {
       expect(response.data.limit).toBe(2);
       expect(response.data.hasMore).toBe(true);
 
-      // Should get Chat3 and Chat4 (offset 2, sorted by last_message_at desc)
       expect(response.data.items[0]?.title).toBe("Chat3");
       expect(response.data.items[1]?.title).toBe("Chat4");
     });
@@ -1088,7 +1034,6 @@ describe("E2E: Chats Commands", () => {
     });
 
     it("should respect limit parameter", async () => {
-      // Seed more chats with similar names
       env.seedChats([
         { chat_id: "-500", type: "group", title: "Test Group 1" },
         { chat_id: "-501", type: "group", title: "Test Group 2" },
@@ -1177,7 +1122,6 @@ describe("E2E: Chats Commands", () => {
     });
 
     it("should take a bare ID the cache knows as a user as that user, not the channel", async () => {
-      // User 12345, with no private chat cached
       env.seedUsers([{ user_id: "12345", first_name: "Alice" }]);
 
       const result = await runCliFailure(["chats", "get", "--id", "12345"], 3, {
@@ -1218,7 +1162,6 @@ describe("E2E: Chats Commands", () => {
       db.run("DELETE FROM accounts");
       db.close();
 
-      // Each account has its own cache, so with none there is no cache
       const result = await runCliFailure(["chats", "get", "--id=-1009999999999"], 2, {
         env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
       });
@@ -1282,10 +1225,6 @@ describe("E2E: Chats Commands", () => {
   });
 });
 
-// ============================================================================
-// Cross-command Integration Tests
-// ============================================================================
-
 describe("E2E: Cross-command Integration", () => {
   let env: ExtendedTestEnvironment;
 
@@ -1301,7 +1240,6 @@ describe("E2E: Cross-command Integration", () => {
   });
 
   it("should handle user as both contact and private chat", async () => {
-    // Seed user in users_cache (contact)
     env.seedUsers([
       {
         user_id: "12345",
@@ -1312,7 +1250,6 @@ describe("E2E: Cross-command Integration", () => {
       },
     ]);
 
-    // Seed same user as private chat
     env.seedChats([
       {
         chat_id: "12345",
@@ -1322,7 +1259,6 @@ describe("E2E: Cross-command Integration", () => {
       },
     ]);
 
-    // Get via contacts
     const contactResult = await runCliSuccess(
       ["contacts", "get", "--id", "@testuser"],
       env.getCliOptions(),
@@ -1337,7 +1273,6 @@ describe("E2E: Cross-command Integration", () => {
     expect(contactResponse.data.id).toBe(12345);
     expect(contactResponse.data.firstName).toBe("Test");
 
-    // Get via chats
     const chatResult = await runCliSuccess(
       ["chats", "get", "--id", "@testuser"],
       env.getCliOptions(),
@@ -1362,7 +1297,6 @@ describe("E2E: Cross-command Integration", () => {
       { chat_id: "-1000000000005", type: "channel", title: "Channel 1" },
     ]);
 
-    // Count all chats
     const allResult = await runCliSuccess(["chats", "list"], env.getCliOptions());
 
     const allResponse = allResult.json as {
@@ -1371,7 +1305,6 @@ describe("E2E: Cross-command Integration", () => {
     };
     expect(allResponse.data.total).toBe(5);
 
-    // Count by type
     const privateResult = await runCliSuccess(
       ["chats", "list", "--type", "private"],
       env.getCliOptions(),

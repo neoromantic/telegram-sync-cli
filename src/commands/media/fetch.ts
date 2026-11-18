@@ -1,8 +1,3 @@
-/**
- * One message fetched from Telegram by ID for `tg media download`: a fresh
- * file reference, the chat object for the protection check, and the cached
- * row brought up to date
- */
 import type { Database } from "bun:sqlite";
 import type { TelegramClient, tl } from "@mtcute/bun";
 
@@ -69,9 +64,6 @@ export function cacheFetchedMessage(
   if (!input) return;
   const usersCache = createUsersCache(cacheDb);
   const messagesCache = createMessagesCache(cacheDb);
-  // A group the account doesn't take part in keeps a message it lacks out
-  // of the cache (src/db/group-participation.ts). The write reads before it
-  // writes, so the transaction takes the write lock first.
   cacheDb
     .transaction(() => {
       for (const user of users) {

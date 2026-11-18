@@ -1,7 +1,3 @@
-/**
- * What a service message did, read from its raw TL message
- * (src/utils/service-action.ts)
- */
 import { describe, expect, it } from "bun:test";
 import { Long, type tl } from "@mtcute/bun";
 
@@ -24,7 +20,6 @@ function service(
   };
 }
 
-/** The action as the cache reads it back: raw_json, then parsed */
 function cached(message: tl.RawMessageService) {
   return extractServiceAction(toRawJson(message));
 }
@@ -44,7 +39,6 @@ describe("extractServiceAction", () => {
       duration: 1834,
       reason: "hangup",
     });
-    // The object form mtcute hands over reads the same
     expect(extractServiceAction(message)).toEqual(cached(message));
   });
 
