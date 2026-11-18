@@ -83,7 +83,29 @@ function handleSendError(recipient: string, message: string): never {
     )
   }
 
+  const richError = message.match(/RICH_MESSAGE_[A-Z_]+/)?.[0]
+  if (richError) {
+    error(
+      ErrorCodes.TELEGRAM_ERROR,
+      `Telegram refused the rich message: ${richError}`,
+      { telegramError: richError },
+      'A rich message takes up to 32768 characters, 500 blocks, 16 levels of nesting, 50 media and 20 table columns',
+    )
+  }
+
   error(ErrorCodes.TELEGRAM_ERROR, `Failed to send message: ${message}`)
+}
+
+/** How Telegram reads --message: as a rich message it parses itself */
+type RichFormat = 'markdown' | 'html'
+
+function richMessage(
+  text: string,
+  format: RichFormat,
+): tl.TypeInputRichMessage {
+  return format === 'markdown'
+    ? { _: 'inputRichMessageMarkdown', markdown: text }
+    : { _: 'inputRichMessageHTML', html: text }
 }
 
 function sendMessageRequest(
@@ -91,17 +113,21 @@ function sendMessageRequest(
   text: string,
   silent: boolean,
   replyTo: number | undefined,
+  format: RichFormat | null,
 ): tl.messages.RawSendMessageRequest {
   const request: tl.messages.RawSendMessageRequest = {
     _: 'messages.sendMessage',
     peer,
-    message: text,
+    // A rich message carries its content in richMessage and has no text
+    message: format ? '' : text,
     randomId: toLong(
       BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
     ),
     noWebpage: false,
     silent,
   }
+
+  if (format) request.richMessage = richMessage(text, format)
 
   if (replyTo) {
     request.replyTo = {
@@ -114,7 +140,7 @@ function sendMessageRequest(
 
 /** What to send: text, or one file with an optional caption */
 type SendContent =
-  | { file: null; text: string }
+  | { file: null; text: string; format: RichFormat | null }
   | { file: string; caption: string; forceDocument: boolean }
 
 /** Exits with INVALID_ARGS unless path names a readable, non-empty regular file */
@@ -142,9 +168,16 @@ function readSendContent(
     file?: string
     caption?: string
     'force-document'?: boolean
+    markdown?: boolean
+    html?: boolean
   },
   rawArgs: string[],
 ): SendContent {
+  if (args.markdown && args.html) {
+    error(ErrorCodes.INVALID_ARGS, 'Use --markdown or --html, not both')
+  }
+  const format = args.markdown ? 'markdown' : args.html ? 'html' : null
+
   const files = flagValues(rawArgs, 'file')
   if (files.length > 1) {
     error(
@@ -168,7 +201,14 @@ function readSendContent(
     if (args.message.trim() === '') {
       error(ErrorCodes.INVALID_ARGS, 'Message text cannot be empty')
     }
-    return { file: null, text: args.message }
+    return { file: null, text: args.message, format }
+  }
+
+  if (format) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      `--${format} formats --message: a caption is plain text`,
+    )
   }
 
   if (args.message !== undefined) {
@@ -218,6 +258,17 @@ export const sendCommand = defineCommand({
       type: 'boolean',
       default: false,
       description: 'Send an image as a file (document), not as a photo',
+    },
+    markdown: {
+      type: 'boolean',
+      default: false,
+      description:
+        'Send --message as a rich message written in Markdown: headings, tables, lists, quotes, code, formulas',
+    },
+    html: {
+      type: 'boolean',
+      default: false,
+      description: 'Send --message as a rich message written in HTML',
     },
     account: {
       type: 'string',
@@ -271,7 +322,13 @@ export const sendCommand = defineCommand({
       if (content.file === null) {
         verbose(`Sending message to ${name}...`)
         result = await client.call(
-          sendMessageRequest(inputPeer, content.text, silent, replyTo),
+          sendMessageRequest(
+            inputPeer,
+            content.text,
+            silent,
+            replyTo,
+            content.format,
+          ),
         )
       } else {
         const fileName = basename(content.file)
@@ -317,6 +374,7 @@ export const sendCommand = defineCommand({
         timestamp: timestamp ? timestamp * 1000 : Date.now(),
         replyTo: replyTo ?? null,
         silent,
+        format: content.file === null ? content.format : null,
         ...fileOutput,
       })
     } catch (err) {

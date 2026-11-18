@@ -1783,4 +1783,122 @@ describe('send command', () => {
     expect(request.peer.userId).toBe(4242)
     expectLongEqual(request.peer.accessHash, 0)
   })
+
+  type SendRun = (input: { args: Record<string, unknown> }) => Promise<void>
+  type SentRequest = {
+    message: string
+    richMessage?: tl.TypeInputRichMessage
+  }
+
+  /** Runs tg send to user 4242 and gives the request and the printed result */
+  const sendTo4242 = async (args: Record<string, unknown>) => {
+    commandCall.mockImplementationOnce(sentUpdates)
+    const { sendCommand } = await import('../commands/send')
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+    let printed: string
+    try {
+      await (sendCommand.run as SendRun)({
+        args: { to: '4242', silent: false, _: [], ...args },
+      })
+      printed = String(logSpy.mock.calls[0]?.[0])
+    } finally {
+      logSpy.mockRestore()
+    }
+    return {
+      request: commandCall.mock.calls[0]?.[0] as SentRequest,
+      data: JSON.parse(printed).data as { format: string | null },
+    }
+  }
+
+  const table = '# Prices\n\n| Item | Price |\n|:-----|------:|\n| Tea | 3 |'
+
+  it('sends --markdown as a rich message Telegram parses, with no text', async () => {
+    const { request, data } = await sendTo4242({
+      message: table,
+      markdown: true,
+    })
+
+    expect(request.message).toBe('')
+    expect(request.richMessage).toEqual({
+      _: 'inputRichMessageMarkdown',
+      markdown: table,
+    })
+    expect(data.format).toBe('markdown')
+  })
+
+  it('sends --html as a rich message', async () => {
+    const html = '<h1>Prices</h1><table><tr><td>Tea</td><td>3</td></tr></table>'
+    const { request, data } = await sendTo4242({ message: html, html: true })
+
+    expect(request.message).toBe('')
+    expect(request.richMessage).toEqual({ _: 'inputRichMessageHTML', html })
+    expect(data.format).toBe('html')
+  })
+
+  it('sends a message without --markdown or --html as plain text', async () => {
+    const { request, data } = await sendTo4242({ message: '**not bold**' })
+
+    expect(request.message).toBe('**not bold**')
+    expect(request.richMessage).toBeUndefined()
+    expect(data.format).toBeNull()
+  })
+
+  it.each([
+    [
+      '--markdown with --html',
+      { message: 'hi', markdown: true, html: true },
+      'Use --markdown or --html, not both',
+    ],
+    [
+      '--markdown with --file',
+      { file: 'report.pdf', caption: '**Q3**', markdown: true },
+      '--markdown formats --message: a caption is plain text',
+    ],
+    [
+      '--html with --file',
+      { file: 'report.pdf', html: true },
+      '--html formats --message: a caption is plain text',
+    ],
+  ])('rejects %s before any connection', async (_label, args, message) => {
+    const { sendCommand } = await import('../commands/send')
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      await expect(
+        (sendCommand.run as SendRun)({
+          args: { to: '4242', silent: false, _: [], ...args },
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_ARGS', message })
+    } finally {
+      errorSpy.mockRestore()
+    }
+    expect(commandCall).not.toHaveBeenCalled()
+  })
+
+  it("names Telegram's reason when it refuses a rich message", async () => {
+    commandCall.mockImplementationOnce(async () => {
+      throw new Error(
+        'Telegram API error 400: RICH_MESSAGE_TABLE_COLS_TOO_MANY',
+      )
+    })
+    const { sendCommand } = await import('../commands/send')
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      await expect(
+        (sendCommand.run as SendRun)({
+          args: { to: '4242', message: table, markdown: true, _: [] },
+        }),
+      ).rejects.toMatchObject({
+        code: 'TELEGRAM_ERROR',
+        message:
+          'Telegram refused the rich message: RICH_MESSAGE_TABLE_COLS_TOO_MANY',
+        details: { telegramError: 'RICH_MESSAGE_TABLE_COLS_TOO_MANY' },
+      })
+      const printed = JSON.parse(String(errorSpy.mock.calls[0]?.[0]))
+      expect(printed.error.suggestion).toContain('20 table columns')
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
 })
