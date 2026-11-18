@@ -21,7 +21,7 @@ import { photoMessage } from '../__tests__/helpers/photo-message'
 import {
   defaultModelPath,
   installSuggestion,
-} from '../commands/media/transcriber'
+} from '../commands/media/local-provider'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
@@ -141,7 +141,13 @@ describe('E2E: media transcribe', () => {
   function note(
     id: number,
     content: string,
-    options: { round?: boolean; fileId?: string; extra?: object } = {},
+    options: {
+      round?: boolean
+      fileId?: string
+      extra?: object
+      /** False: the message is cached, its file isn't */
+      file?: boolean
+    } = {},
   ) {
     const size = Buffer.byteLength(content)
     const raw = documentMessage(
@@ -169,6 +175,7 @@ describe('E2E: media transcribe', () => {
     createMessagesCache(env.openCacheDb(1)).upsert(
       parseRawMessage(raw, SELF_ID)!,
     )
+    if (options.file === false) return
     const { file } = mediaPaths(mediaDir, extractAttachment(raw)!)
     mkdirSync(join(file, '..'), { recursive: true })
     writeFileSync(file, content)
@@ -412,7 +419,12 @@ describe('E2E: media transcribe', () => {
       error: {
         code: 'INVALID_ARGS',
         message: 'whisper.cpp needs a model file: transcribe.model is not set',
-        details: { runner: join(binDir, 'whisper-cli'), model: null },
+        details: {
+          chatId: SELF_ID,
+          messageId: 1,
+          runner: join(binDir, 'whisper-cli'),
+          model: null,
+        },
         suggestion: `Run whisper.cpp with a model: download the 574 MB model and point tg at it: curl -L --create-dirs -o ${model} ${MODEL_URL} && tg config set transcribe.model ${model}`,
         retryable: false,
       },
@@ -472,10 +484,11 @@ describe('E2E: media transcribe', () => {
     install('ffmpeg', FAKE_FFMPEG)
     install('whisper', FAKE_OPENAI_RUNNER)
     note(1, 'Hello.')
+    note(2, 'Not downloaded yet.', { file: false })
     const tmp = join(env.dataDir, 'tmp')
     mkdirSync(tmp)
 
-    // Message 2 isn't cached, and fetching it needs credentials
+    // Message 2's file isn't cached, and downloading it needs credentials
     const result = await tg(
       ['media', 'transcribe', '--chat', 'me', '--id', '1', '--id', '2'],
       { TMPDIR: tmp },
@@ -528,6 +541,8 @@ describe('E2E: media transcribe', () => {
         code: 'TRANSCRIBER_NOT_FOUND',
         message: 'No speech-to-text program found on PATH',
         details: {
+          chatId: SELF_ID,
+          messageId: 1,
           searched: [
             'whisper-cli',
             'mlx_whisper',

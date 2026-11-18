@@ -4,13 +4,15 @@
  */
 import type { Database } from 'bun:sqlite'
 
+import type { TranscriptSource } from '../types'
+
 export interface MessageTranscriptRow {
   chat_id: number
   message_id: number
   unique_file_id: string
   text: string
   language: string | null
-  source: 'local'
+  source: TranscriptSource
   runner: string | null
   model: string | null
   transcribed_at: number

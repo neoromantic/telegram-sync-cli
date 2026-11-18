@@ -1,5 +1,6 @@
 /**
- * The runner tg media transcribe finds, and the two JSON shapes it reads.
+ * The local provider: the program tg media transcribe finds, what it
+ * declares, and the two JSON shapes it reads.
  * The fixtures are real output of each program for made-up clips, with long
  * fields (systeminfo, tokens) shortened.
  */
@@ -10,11 +11,11 @@ import { join } from 'node:path'
 
 import {
   defaultModelPath,
-  findTranscriber,
   installSuggestion,
+  openLocalProvider,
   parseOpenAiWhisperJson,
   parseWhisperCppJson,
-} from '../commands/media/transcriber'
+} from '../commands/media/local-provider'
 
 const MODEL = '/cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin'
 
@@ -117,49 +118,72 @@ describe('parseOpenAiWhisperJson', () => {
   })
 })
 
-describe('findTranscriber', () => {
+describe('openLocalProvider', () => {
   const on =
     (...found: string[]) =>
     (name: string) =>
       found.includes(name) ? `/bin/${name}` : null
 
-  it('takes the first runner on PATH, with its default model', () => {
-    expect(
-      findTranscriber({}, MODEL, on('whisper', 'mlx_whisper', 'ffmpeg')),
-    ).toEqual({
-      runner: {
-        name: 'mlx_whisper',
-        path: '/bin/mlx_whisper',
-        shape: 'openai-whisper',
+  /** The provider's declaration, or the setup problem's message */
+  function open(config: object, which: (name: string) => string | null) {
+    const setup = openLocalProvider(config, MODEL, which)
+    return setup.ready
+      ? { declaration: setup.provider.declaration, ffmpeg: setup.ffmpeg }
+      : { problem: setup.problem }
+  }
+
+  it('takes the first program on PATH, with its default model, and declares it local and free', () => {
+    expect(open({}, on('whisper', 'mlx_whisper', 'ffmpeg'))).toEqual({
+      declaration: {
+        id: 'local',
+        engine: 'mlx_whisper',
         model: 'mlx-community/whisper-large-v3-turbo',
-        modelName: 'mlx-community/whisper-large-v3-turbo',
+        sendsTo: null,
+        cost: 'free',
+        input: { kind: 'audio', formats: ['wav16k'] },
+        // mlx_whisper takes one file per run
+        batchSize: 1,
+        concurrency: 1,
+        maxDurationSeconds: null,
       },
       ffmpeg: '/bin/ffmpeg',
     })
-    expect(
-      findTranscriber({ model: 'small' }, MODEL, on('whisper', 'ffmpeg')),
-    ).toMatchObject({ runner: { name: 'whisper', model: 'small' } })
+    expect(open({ model: 'small' }, on('whisper', 'ffmpeg'))).toMatchObject({
+      declaration: {
+        engine: 'whisper',
+        model: 'small',
+        batchSize: Number.POSITIVE_INFINITY,
+      },
+    })
   })
 
   it('reports what is missing', () => {
-    expect(findTranscriber({}, MODEL, on('whisper'))).toEqual({
-      missing: true,
-      searched: [
-        'whisper-cli',
-        'mlx_whisper',
-        'whisper-ctranslate2',
-        'whisper',
-      ],
-      runner: '/bin/whisper',
-      ffmpeg: null,
+    expect(open({}, on('whisper'))).toMatchObject({
+      problem: {
+        code: 'TRANSCRIBER_NOT_FOUND',
+        message: 'No ffmpeg found on PATH',
+        details: {
+          searched: [
+            'whisper-cli',
+            'mlx_whisper',
+            'whisper-ctranslate2',
+            'whisper',
+          ],
+          runner: '/bin/whisper',
+          ffmpeg: null,
+        },
+      },
+    })
+    expect(open({}, on())).toMatchObject({
+      problem: {
+        message: 'No speech-to-text program and no ffmpeg found on PATH',
+      },
     })
     expect(
-      findTranscriber(
-        { command: 'my-whisper' },
-        MODEL,
-        on('whisper', 'ffmpeg'),
-      ),
-    ).toMatchObject({ missing: true, searched: ['my-whisper'], runner: null })
+      open({ command: 'my-whisper' }, on('whisper', 'ffmpeg')),
+    ).toMatchObject({
+      problem: { details: { searched: ['my-whisper'], runner: null } },
+    })
   })
 
   it('runs whisper.cpp only with a model file that exists', () => {
@@ -167,15 +191,21 @@ describe('findTranscriber', () => {
     try {
       const model = join(dir, 'ggml-example.bin')
       const which = on('whisper-cli', 'ffmpeg')
-      expect(() => findTranscriber({}, MODEL, which)).toThrow(
-        'whisper.cpp needs a model file',
-      )
-      expect(() => findTranscriber({ model }, MODEL, which)).toThrow(
-        'not found or not readable',
-      )
+      expect(open({}, which)).toMatchObject({
+        problem: {
+          code: 'INVALID_ARGS',
+          message:
+            'whisper.cpp needs a model file: transcribe.model is not set',
+        },
+      })
+      expect(open({ model }, which)).toMatchObject({
+        problem: {
+          message: expect.stringContaining('not found or not readable'),
+        },
+      })
       writeFileSync(model, 'x')
-      expect(findTranscriber({ model }, MODEL, which)).toMatchObject({
-        runner: { shape: 'whisper.cpp', model, modelName: 'ggml-example.bin' },
+      expect(open({ model }, which)).toMatchObject({
+        declaration: { engine: 'whisper-cli', model: 'ggml-example.bin' },
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })

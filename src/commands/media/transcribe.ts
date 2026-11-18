@@ -1,29 +1,20 @@
 /**
  * tg media transcribe: the text of voice notes and video notes, from a
- * speech-to-text program on this machine. Each file comes through `tg media
- * download`'s path (cache-first, content protection refused); transcripts
- * are stored in message_transcripts and shown by `tg messages`.
+ * transcription provider (today a speech-to-text program on this machine).
+ * The pipeline (transcription-pipeline.ts) checks, reuses, fetches and
+ * stores; transcripts are shown by `tg messages`.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { defineCommand } from 'citty'
 
-import { loadConfig } from '../../config'
+import { loadConfig, type TranscribeConfigFile } from '../../config'
 import { getAccountMediaDir } from '../../db'
-import {
-  createMessageTranscriptsStore,
-  type MessageTranscriptRow,
-} from '../../db/message-transcripts'
-import { createMessagesCache } from '../../db/messages-cache'
 import { getClientForAccount } from '../../services/telegram'
 import { exitAfterFlush } from '../../telemetry'
-import { ErrorCodes } from '../../types'
+import type { TranscriptSource } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { flagValues } from '../../utils/args'
-import { extractAttachment } from '../../utils/attachment'
-import { error, getOutputFormat, info, success } from '../../utils/output'
+import { getOutputFormat, info, success } from '../../utils/output'
 import { createProgress } from '../../utils/progress'
 import { wrapClientCallWithRateLimits } from '../../utils/telegram-rate-limits'
 import {
@@ -32,85 +23,24 @@ import {
   openHistory,
   parseIntegerArg,
 } from '../messages/helpers'
-import { resolveHistoryChat } from '../messages/history'
-import { downloadMedia } from './download-media'
 import { MediaError, reportMediaError } from './errors'
+import { openLocalProvider } from './local-provider'
 import {
-  convertToWav,
-  defaultModelPath,
-  findTranscriber,
-  installSuggestion,
-  type Runner,
-  runTranscriber,
-  SILENCE_MAX_VOLUME_DB,
-} from './transcriber'
+  type TranscribeOutcome,
+  transcribeMessages,
+} from './transcription-pipeline'
+import type { ProviderSetup } from './transcription-provider'
 
 const CONTEXT = 'cli:media.transcribe'
-const SPEECH_KINDS = new Set(['voice', 'round'])
+/** Exit code of a run stopped by SIGINT or SIGTERM, as `tg media download` */
+const INTERRUPTED_EXIT_CODE = 130
 
-export interface TranscribeResult {
-  chatId: number
-  messageId: number
-  text: string
-  language: string | null
-  source: 'local'
-  /** The program that made it; null for silent audio */
-  runner: string | null
-  model: string | null
-  cached: boolean
-}
-
-function toResult(
-  row: MessageTranscriptRow,
-  cached: boolean,
-): TranscribeResult {
-  return {
-    chatId: row.chat_id,
-    messageId: row.message_id,
-    text: row.text,
-    language: row.language,
-    source: row.source,
-    runner: row.runner,
-    model: row.model,
-    cached,
-  }
-}
-
-function notSpeech(chatId: number, messageId: number, kind: string | null) {
-  return new MediaError(
-    ErrorCodes.MEDIA_UNSUPPORTED,
-    `Message ${messageId} in chat ${chatId} is not a voice note or video note`,
-    { chatId, messageId, kind, reason: 'not_speech' },
-  )
-}
-
-/** The runner and ffmpeg, or the whole run fails: nothing can be transcribed */
-function requireTranscriber(config: Parameters<typeof findTranscriber>[0]) {
-  const suggestedModel = defaultModelPath()
-  let found: ReturnType<typeof findTranscriber>
-  try {
-    found = findTranscriber(config, suggestedModel)
-  } catch (err) {
-    reportMediaError(err)
-  }
-  if ('missing' in found) {
-    const what = [
-      !found.runner && 'No speech-to-text program',
-      !found.ffmpeg && (found.runner ? 'No ffmpeg' : 'no ffmpeg'),
-    ]
-      .filter(Boolean)
-      .join(' and ')
-    error(
-      ErrorCodes.TRANSCRIBER_NOT_FOUND,
-      `${what} found on PATH`,
-      { searched: found.searched, runner: found.runner, ffmpeg: found.ffmpeg },
-      installSuggestion(
-        { runner: !found.runner, ffmpeg: !found.ffmpeg },
-        suggestedModel,
-      ),
-    )
-  }
-  return found
+/** Every provider tg can run, by the id stored as a transcript's source */
+const PROVIDERS: Record<
+  TranscriptSource,
+  (config: TranscribeConfigFile) => ProviderSetup
+> = {
+  local: (config) => openLocalProvider(config),
 }
 
 export const transcribeMediaCommand = defineCommand({
@@ -154,193 +84,67 @@ export const transcribeMediaCommand = defineCommand({
         ),
       ),
     ]
-    const force = args.force ?? false
     const { account } = openAccountCache(args.account)
-    const history = openHistory(account.id, CONTEXT)
-    const store = createMessageTranscriptsStore(history.cacheDb)
-    const messages = createMessagesCache(history.cacheDb)
-    const now = Date.now
 
-    let config: Awaited<ReturnType<typeof loadConfig>>['config']
-    let chatId: number
+    // SIGINT/SIGTERM stop downloads, ffmpeg and the provider; temp audio is removed
+    const controller = new AbortController()
+    const stop = () => {
+      if (controller.signal.aborted) process.exit(INTERRUPTED_EXIT_CODE)
+      controller.abort()
+    }
+    process.on('SIGINT', stop)
+    process.on('SIGTERM', stop)
+
+    let outcomes: TranscribeOutcome[]
     try {
-      config = (await loadConfig({ strict: true })).config
-      chatId = (await resolveHistoryChat(history.client, args.chat, history))
-        .chatId
-    } catch (err) {
-      reportMediaError(err)
-    }
-    const language =
-      args.language?.trim() || config.transcribe?.language || null
-
-    const results = new Map<number, TranscribeResult | MediaError>()
-    /** A transcript of the same file, copied to this message */
-    const reuse = (messageId: number, uniqueFileId: string): boolean => {
-      const row = force ? null : store.getByFile(uniqueFileId)
-      if (!row) return false
-      const copy = { ...row, chat_id: chatId, message_id: messageId }
-      store.save(copy)
-      results.set(messageId, toResult(copy, true))
-      return true
-    }
-
-    const pending: number[] = []
-    for (const messageId of messageIds) {
-      const stored = force ? null : store.get(chatId, messageId)
-      if (stored) {
-        results.set(messageId, toResult(stored, true))
-        continue
-      }
-      const row = messages.get(chatId, messageId)
-      const attachment = row ? extractAttachment(row.raw_json) : null
-      if (attachment && !SPEECH_KINDS.has(attachment.kind)) {
-        results.set(messageId, notSpeech(chatId, messageId, attachment.kind))
-        continue
-      }
-      if (attachment && reuse(messageId, attachment.uniqueFileId)) continue
-      pending.push(messageId)
-    }
-
-    if (pending.length > 0) {
-      const { runner, ffmpeg } = requireTranscriber(config.transcribe ?? {})
-      const tmp = await mkdtemp(join(tmpdir(), 'tg-transcribe-'))
-      // Reported only once the converted audio is gone: error() exits at once
-      try {
-        try {
-          await transcribe(pending, runner, ffmpeg, tmp)
-        } finally {
-          await rm(tmp, { recursive: true, force: true })
-        }
-      } catch (err) {
-        reportMediaError(err)
-      }
-    }
-
-    async function transcribe(
-      ids: number[],
-      runner: Runner,
-      ffmpeg: string,
-      tmp: string,
-    ): Promise<void> {
+      const { config } = await loadConfig({ strict: true })
+      const transcribe = config.transcribe ?? {}
+      const history = openHistory(account.id, CONTEXT)
       const getClient = () =>
         wrapClientCallWithRateLimits(getClientForAccount(account.id), {
           context: CONTEXT,
           accountId: account.id,
         })
-      const toRun: Array<{ messageId: number; wav: string; fileId: string }> =
-        []
-      for (const [index, messageId] of ids.entries()) {
-        try {
-          const file = await downloadMedia(
-            {
-              cacheDb: history.cacheDb,
-              mediaDir: getAccountMediaDir(account.id),
-              getClient,
-              history,
-              progress: (fileName) => createProgress(fileName),
-            },
-            { chat: args.chat, messageId, thumb: false, fresh: false },
-          )
-          if (!SPEECH_KINDS.has(file.kind)) {
-            throw notSpeech(chatId, messageId, file.kind)
-          }
-          if (reuse(messageId, file.uniqueFileId)) continue
-          const { wav, maxVolumeDb } = await convertToWav(
-            ffmpeg,
-            file.path,
-            join(tmp, `${index}.wav`),
-          )
-          if (maxVolumeDb < SILENCE_MAX_VOLUME_DB) {
-            const row: MessageTranscriptRow = {
-              chat_id: chatId,
-              message_id: messageId,
-              unique_file_id: file.uniqueFileId,
-              text: '',
-              language: null,
-              source: 'local',
-              runner: null,
-              model: null,
-              transcribed_at: now(),
-            }
-            store.save(row)
-            results.set(messageId, toResult(row, false))
-            continue
-          }
-          toRun.push({ messageId, wav, fileId: file.uniqueFileId })
-        } catch (err) {
-          if (!(err instanceof MediaError)) throw err
-          results.set(messageId, withMessage(err, chatId, messageId))
-        }
-      }
-      if (toRun.length === 0) return
-
-      // Progress for a person watching; agents read runner and model in the result
-      if (process.stderr.isTTY)
-        info(
-          `Transcribing ${toRun.length} file${toRun.length === 1 ? '' : 's'} with ${runner.name} (${runner.modelName})`,
-        )
-      const transcripts = await runTranscriber(
-        runner,
-        toRun.map((item) => item.wav),
-        tmp,
-        language,
+      outcomes = await transcribeMessages(
+        {
+          download: {
+            cacheDb: history.cacheDb,
+            mediaDir: getAccountMediaDir(account.id),
+            getClient,
+            history,
+            signal: controller.signal,
+            progress: (fileName) => createProgress(fileName),
+          },
+          setup: PROVIDERS.local(transcribe),
+          language: args.language?.trim() || transcribe.language || null,
+          force: args.force ?? false,
+        },
+        args.chat,
+        messageIds,
       )
-      for (const [i, item] of toRun.entries()) {
-        const transcript = transcripts[i]!
-        if (transcript instanceof MediaError) {
-          results.set(
-            item.messageId,
-            withMessage(transcript, chatId, item.messageId),
-          )
-          continue
-        }
-        const row: MessageTranscriptRow = {
-          chat_id: chatId,
-          message_id: item.messageId,
-          unique_file_id: item.fileId,
-          text: transcript.text,
-          language: transcript.language,
-          source: 'local',
-          runner: runner.name,
-          model: runner.modelName,
-          transcribed_at: now(),
-        }
-        store.save(row)
-        results.set(item.messageId, toResult(row, false))
+    } catch (err) {
+      if (controller.signal.aborted) {
+        info('Transcription interrupted; transcripts made so far are stored')
+        return exitAfterFlush(INTERRUPTED_EXIT_CODE)
       }
+      reportMediaError(err)
     }
 
-    const ordered = messageIds.map((id) => results.get(id)!)
-    if (ordered.length === 1) {
-      const [only] = ordered
+    if (outcomes.length === 1) {
+      const [only] = outcomes
       if (only instanceof MediaError) reportMediaError(only)
       success(only)
       return
     }
-    printBatch(ordered)
+    printBatch(outcomes)
   },
 })
-
-/** chatId and messageId in a failure's details, so a batch line says which */
-function withMessage(
-  err: MediaError,
-  chatId: number,
-  messageId: number,
-): MediaError {
-  return new MediaError(
-    err.code,
-    err.message,
-    { chatId, messageId, ...err.details },
-    err.suggestion,
-    err.retryable,
-  )
-}
 
 /**
  * Several messages: one JSON line each, in the order of --id; exit 1 when
  * any failed
  */
-function printBatch(results: Array<TranscribeResult | MediaError>): void {
+function printBatch(results: TranscribeOutcome[]): void {
   let failed = 0
   for (const result of results) {
     const line =

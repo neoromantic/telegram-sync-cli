@@ -272,15 +272,15 @@ function lockTimeout(err: DownloadLockTimeoutError): MediaError {
 }
 
 /**
- * The file from the cache alone: the cached message, its protection as
- * the cache knows it, and the complete file. Null when the message or the
- * file isn't cached; NO_MEDIA or CONTENT_PROTECTED as the cache tells.
+ * The cached message's attachment once it may be read: its file (or
+ * preview) and the protection the cache knows. Null when the message isn't
+ * cached; NO_MEDIA or CONTENT_PROTECTED as the cache tells.
  */
-function readFromCache(
-  deps: DownloadDeps,
+function readCachedTarget(
+  deps: Pick<DownloadDeps, 'cacheDb' | 'history'>,
   chat: HistoryChat,
-  request: DownloadRequest,
-): DownloadResult | null {
+  request: Pick<DownloadRequest, 'messageId' | 'thumb'>,
+): { info: AttachmentInfo; thumb: MediaThumb | null } | null {
   const { chatId } = chat
   const { messageId } = request
   const row = createMessagesCache(deps.cacheDb).get(chatId, messageId)
@@ -311,14 +311,45 @@ function readFromCache(
       'pass --fresh to check again',
     )
   }
+  return { info, thumb }
+}
 
+/**
+ * The cached message's attachment, checked as `tg media download` checks
+ * it offline. Null when the message isn't cached.
+ */
+export function readCachedAttachment(
+  deps: Pick<DownloadDeps, 'cacheDb' | 'history'>,
+  chat: HistoryChat,
+  messageId: number,
+): AttachmentInfo | null {
+  return readCachedTarget(deps, chat, { messageId, thumb: false })?.info ?? null
+}
+
+/**
+ * The file from the cache alone: the cached message, its protection as
+ * the cache knows it, and the complete file. Null when the message or the
+ * file isn't cached.
+ */
+function readFromCache(
+  deps: DownloadDeps,
+  chat: HistoryChat,
+  request: DownloadRequest,
+): DownloadResult | null {
+  const cachedTarget = readCachedTarget(deps, chat, request)
+  if (!cachedTarget) return null
+  const { info, thumb } = cachedTarget
   const target = downloadTarget(deps.mediaDir, info, thumb)
   const file = findCachedFile(target.paths.file, target.expectedSize)
   if (!file) return null
   touch(file.path)
   return toResult(
     target,
-    { chatId, messageId, groupedId: info.groupedId },
+    {
+      chatId: chat.chatId,
+      messageId: request.messageId,
+      groupedId: info.groupedId,
+    },
     file,
     { cached: true, resumedFrom: null },
   )
@@ -555,6 +586,91 @@ async function streamToCache({
 }
 
 /**
+ * The message fetched from Telegram, cached, and its attachment checked
+ * online: NO_MEDIA, or CONTENT_PROTECTED for the message or its chat (the
+ * chat's answer is recorded either way)
+ */
+async function fetchCheckedTarget(
+  deps: Pick<DownloadDeps, 'cacheDb' | 'history' | 'now' | 'signal'>,
+  chat: HistoryChat,
+  request: Pick<DownloadRequest, 'messageId' | 'thumb'>,
+  client: TelegramClient,
+): Promise<{
+  message: FetchedRawMessage
+  info: AttachmentInfo
+  thumb: MediaThumb | null
+}> {
+  const { chatId } = chat
+  const { messageId } = request
+  const now = deps.now ?? Date.now
+  const protection = createChatProtectionStore(deps.cacheDb)
+  const { message, chats, users } = await fetchMessageById(
+    client,
+    chat,
+    messageId,
+    deps.signal,
+  )
+  cacheFetchedMessage(deps.cacheDb, chatId, message, users)
+
+  const info = extractAttachment(message)
+  if (!info) {
+    throw noMedia(chatId, messageId, resolveRawMessageType(message).messageType)
+  }
+  const thumb = request.thumb ? pickThumb(message) : null
+  if (request.thumb && !thumb) throw noThumbnail(chatId, messageId)
+
+  const verdict = await checkOnlineProtection(
+    client,
+    chat,
+    message,
+    chats,
+    deps.signal,
+  )
+  // A negative answer too: protection turned off clears the block
+  if (verdict.chat) protection.record(chatId, verdict.chat, now())
+  if (verdict.message.protected) {
+    throw contentProtected(chatId, messageId, verdict.message.reason)
+  }
+  if (verdict.chat?.protected && verdict.chat.reason) {
+    throw contentProtected(chatId, messageId, verdict.chat.reason)
+  }
+  if (!verdict.chat) {
+    // Telegram sent no chat object: the protection last known holds
+    const known = knownChatProtection(
+      deps.history.chatsCache.getById(String(chatId)),
+      protection.get(chatId),
+    )
+    if (known.protected) {
+      throw contentProtected(chatId, messageId, known.reason)
+    }
+  }
+  return { message, info, thumb }
+}
+
+/**
+ * The message's attachment once it may be read, without its file: the
+ * cached message checked offline, else the message fetched and checked
+ * online. The eligibility `tg media download` applies, for callers that
+ * may not need the file.
+ */
+export async function checkedAttachment(
+  deps: DownloadDeps,
+  chat: HistoryChat,
+  messageId: number,
+): Promise<AttachmentInfo> {
+  const cached = readCachedAttachment(deps, chat, messageId)
+  if (cached) return cached
+  try {
+    const request = { messageId, thumb: false }
+    return (await fetchCheckedTarget(deps, chat, request, deps.getClient()))
+      .info
+  } catch (err) {
+    if (deps.signal?.aborted) throw new DownloadInterruptedError(null, null)
+    throw err
+  }
+}
+
+/**
  * The file through Telegram: fetch the message again, refuse protected
  * content, then serve the cached file or download it under the folder's
  * lock. A file reference Telegram rejects is refreshed once.
@@ -566,58 +682,18 @@ async function downloadOnline(
 ): Promise<DownloadResult> {
   const { chatId } = chat
   const { messageId } = request
-  const now = deps.now ?? Date.now
   const stallTimeoutMs = deps.stallTimeoutMs ?? STALL_TIMEOUT_MS
   const rateLimits = () =>
     deps.rateLimits ?? createRateLimitsService(deps.cacheDb)
-  const protection = createChatProtectionStore(deps.cacheDb)
   const client = deps.getClient()
 
   for (let attempt = 1; ; attempt++) {
-    const { message, chats, users } = await fetchMessageById(
-      client,
+    const { message, info, thumb } = await fetchCheckedTarget(
+      deps,
       chat,
-      messageId,
-      deps.signal,
-    )
-    cacheFetchedMessage(deps.cacheDb, chatId, message, users)
-
-    const info = extractAttachment(message)
-    if (!info) {
-      throw noMedia(
-        chatId,
-        messageId,
-        resolveRawMessageType(message).messageType,
-      )
-    }
-    const thumb = request.thumb ? pickThumb(message) : null
-    if (request.thumb && !thumb) throw noThumbnail(chatId, messageId)
-
-    const verdict = await checkOnlineProtection(
+      request,
       client,
-      chat,
-      message,
-      chats,
-      deps.signal,
     )
-    // A negative answer too: protection turned off clears the block
-    if (verdict.chat) protection.record(chatId, verdict.chat, now())
-    if (verdict.message.protected) {
-      throw contentProtected(chatId, messageId, verdict.message.reason)
-    }
-    if (verdict.chat?.protected && verdict.chat.reason) {
-      throw contentProtected(chatId, messageId, verdict.chat.reason)
-    }
-    if (!verdict.chat) {
-      // Telegram sent no chat object: the protection last known holds
-      const known = knownChatProtection(
-        deps.history.chatsCache.getById(String(chatId)),
-        protection.get(chatId),
-      )
-      if (known.protected) {
-        throw contentProtected(chatId, messageId, known.reason)
-      }
-    }
 
     const target = downloadTarget(deps.mediaDir, info, thumb)
     const ref = { chatId, messageId, groupedId: info.groupedId }

@@ -73,11 +73,14 @@ export interface PaginatedResult<T> {
   hasMore: boolean
 }
 
+/** The provider that made a transcript: `local`, a program on this machine */
+export type TranscriptSource = 'local'
+
 /** The stored text of a voice or video note, from `tg media transcribe` */
 export interface MessageTranscript {
   text: string
   language: string | null
-  source: 'local'
+  source: TranscriptSource
   model: string | null
 }
 

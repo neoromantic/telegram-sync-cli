@@ -1,18 +1,25 @@
 /**
- * The local speech-to-text program `tg media transcribe` runs: found on
- * PATH or named in config.json, never bundled or downloaded. Audio goes
- * through ffmpeg to 16 kHz mono WAV first, so every runner reads one format.
+ * The local providers: a speech-to-text program on this machine, found on
+ * PATH or named in config.json, never bundled or downloaded. whisper.cpp and
+ * the openai-whisper-compatible CLIs read 16 kHz mono WAV, which the
+ * pipeline prepares; nothing leaves the machine.
  */
 import { accessSync, constants, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import type { TranscribeConfigFile } from '../../config'
 import { ErrorCodes } from '../../types'
+import { tail } from './audio'
 import { MediaError } from './errors'
+import type {
+  ProviderResult,
+  ProviderSetup,
+  TranscriptionProvider,
+} from './transcription-provider'
 
 /** Searched on PATH, in this order, when transcribe.command isn't set */
-export const RUNNER_NAMES = [
+const RUNNER_NAMES = [
   'whisper-cli',
   'mlx_whisper',
   'whisper-ctranslate2',
@@ -23,9 +30,9 @@ export const RUNNER_NAMES = [
  * whisper.cpp writes `<input>.json` with `transcription` segments; the
  * openai-whisper-compatible CLIs write `<stem>.json` with `text`
  */
-export type RunnerShape = 'whisper.cpp' | 'openai-whisper'
+type RunnerShape = 'whisper.cpp' | 'openai-whisper'
 
-export interface Runner {
+interface Runner {
   /** The program's name, without .exe */
   name: string
   path: string
@@ -36,9 +43,6 @@ export interface Runner {
   modelName: string
 }
 
-/** Below this peak the audio is digital silence, which Whisper fills with invented phrases */
-export const SILENCE_MAX_VOLUME_DB = -60
-
 const DEFAULT_MODELS: Record<string, string> = {
   mlx_whisper: 'mlx-community/whisper-large-v3-turbo',
 }
@@ -48,7 +52,7 @@ function programName(path: string): string {
   return basename(path).replace(/\.exe$/i, '')
 }
 
-export type FindResult =
+type FindResult =
   | { runner: Runner; ffmpeg: string }
   | {
       missing: true
@@ -56,9 +60,10 @@ export type FindResult =
       runner: string | null
       ffmpeg: string | null
     }
+  | { invalid: MediaError }
 
 /** The whisper.cpp model the errors suggest: large-v3-turbo, quantized */
-export const WHISPER_CPP_MODEL = {
+const WHISPER_CPP_MODEL = {
   file: 'ggml-large-v3-turbo-q5_0.bin',
   url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin',
   size: '574 MB',
@@ -100,10 +105,10 @@ function readable(path: string): boolean {
 }
 
 /**
- * The runner and ffmpeg. INVALID_ARGS (thrown as MediaError) when the
- * runner is whisper.cpp and transcribe.model names no readable model file.
+ * The runner and ffmpeg, or what is missing; INVALID_ARGS when the runner
+ * is whisper.cpp and transcribe.model names no readable model file
  */
-export function findTranscriber(
+function findTranscriber(
   config: TranscribeConfigFile,
   suggestedModel: string,
   which: (name: string) => string | null = (name) => Bun.which(name),
@@ -126,20 +131,24 @@ export function findTranscriber(
   if (shape === 'whisper.cpp') {
     const model = config.model
     if (!model) {
-      throw new MediaError(
-        ErrorCodes.INVALID_ARGS,
-        'whisper.cpp needs a model file: transcribe.model is not set',
-        { runner: path, model: null },
-        `Run whisper.cpp with a model: ${modelCommands(suggestedModel)}`,
-      )
+      return {
+        invalid: new MediaError(
+          ErrorCodes.INVALID_ARGS,
+          'whisper.cpp needs a model file: transcribe.model is not set',
+          { runner: path, model: null },
+          `Run whisper.cpp with a model: ${modelCommands(suggestedModel)}`,
+        ),
+      }
     }
     if (!readable(model)) {
-      throw new MediaError(
-        ErrorCodes.INVALID_ARGS,
-        `whisper.cpp model file not found or not readable: ${model}`,
-        { runner: path, model },
-        `Download the ${WHISPER_CPP_MODEL.size} model to that path: ${downloadCommand(model)}`,
-      )
+      return {
+        invalid: new MediaError(
+          ErrorCodes.INVALID_ARGS,
+          `whisper.cpp model file not found or not readable: ${model}`,
+          { runner: path, model },
+          `Download the ${WHISPER_CPP_MODEL.size} model to that path: ${downloadCommand(model)}`,
+        ),
+      }
     }
     return {
       runner: { name, path, shape, model, modelName: basename(model) },
@@ -174,66 +183,7 @@ export function installSuggestion(
   return whisperCpp
 }
 
-export interface Converted {
-  wav: string
-  /** Peak level in dB; -Infinity for all-zero audio */
-  maxVolumeDb: number
-}
-
-/** The last lines of a program's stderr, for an error's details */
-function tail(text: string, lines = 20): string {
-  return text.trimEnd().split('\n').slice(-lines).join('\n').slice(-2000)
-}
-
-/**
- * Convert to 16 kHz mono WAV and read the peak level in the same pass.
- * Telegram's voice notes are OGG/Opus and video notes MP4, which
- * whisper.cpp can't read.
- */
-export async function convertToWav(
-  ffmpeg: string,
-  input: string,
-  wav: string,
-): Promise<Converted> {
-  const proc = Bun.spawn(
-    [
-      ffmpeg,
-      '-nostdin',
-      '-hide_banner',
-      '-nostats',
-      '-y',
-      '-i',
-      input,
-      '-vn',
-      '-ac',
-      '1',
-      '-ar',
-      '16000',
-      '-af',
-      'volumedetect',
-      wav,
-    ],
-    { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' },
-  )
-  const [stderr, exitCode] = await Promise.all([
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  const peak = stderr.match(/max_volume:\s*(-?[\d.]+|-inf)\s*dB/)
-  if (exitCode !== 0 || !peak) {
-    throw new MediaError(
-      ErrorCodes.GENERAL_ERROR,
-      'ffmpeg could not convert the audio',
-      { program: ffmpeg, exitCode, stderr: tail(stderr) },
-    )
-  }
-  return {
-    wav,
-    maxVolumeDb: peak[1] === '-inf' ? -Infinity : Number(peak[1]),
-  }
-}
-
-export interface Transcript {
+interface Transcript {
   text: string
   language: string | null
 }
@@ -309,49 +259,119 @@ function outputPath(runner: Runner, wav: string, outDir: string): string {
 }
 
 /**
- * Run the runner over the WAV files, loading the model once, and read each
- * one's transcript. A file it produced no readable output for is a
- * MediaError in its place; the others still count.
+ * Run the program over the WAV files, loading the model once, and read
+ * each one's transcript. A file it produced no readable output for fails
+ * alone. Aborting `signal` kills the program.
  */
-export async function runTranscriber(
+async function runProgram(
   runner: Runner,
   wavs: string[],
-  outDir: string,
   language: string | null,
-): Promise<Array<Transcript | MediaError>> {
-  // mlx_whisper writes every result of one run under the first file's name
-  const batches = runner.name === 'mlx_whisper' ? wavs.map((w) => [w]) : [wavs]
-  const results: Array<Transcript | MediaError> = []
-  for (const batch of batches) {
-    const proc = Bun.spawn(runnerArgs(runner, batch, outDir, language), {
-      stdin: 'ignore',
-      stdout: 'ignore',
-      stderr: 'pipe',
-    })
-    const [stderr, exitCode] = await Promise.all([
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ])
-    for (const wav of batch) {
-      const file = Bun.file(outputPath(runner, wav, outDir))
-      try {
-        const json: unknown = await file.json()
-        results.push(
-          runner.shape === 'whisper.cpp'
-            ? parseWhisperCppJson(json)
-            : parseOpenAiWhisperJson(json),
-        )
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err)
-        results.push(
-          new MediaError(
-            ErrorCodes.GENERAL_ERROR,
-            `${runner.name} produced no transcript: ${reason}`,
-            { runner: runner.path, exitCode, stderr: tail(stderr) },
-          ),
-        )
-      }
+  signal: AbortSignal,
+): Promise<ProviderResult[]> {
+  // The WAVs share the pipeline's temp directory, which is removed after
+  const outDir = dirname(wavs[0]!)
+  const proc = Bun.spawn(runnerArgs(runner, wavs, outDir, language), {
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'pipe',
+    signal,
+  })
+  const [stderr, exitCode] = await Promise.all([
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  signal.throwIfAborted()
+  const results: ProviderResult[] = []
+  for (const wav of wavs) {
+    const file = Bun.file(outputPath(runner, wav, outDir))
+    try {
+      const json: unknown = await file.json()
+      const transcript =
+        runner.shape === 'whisper.cpp'
+          ? parseWhisperCppJson(json)
+          : parseOpenAiWhisperJson(json)
+      results.push({ status: 'done', ...transcript, model: runner.modelName })
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      results.push({
+        status: 'failed',
+        failure: 'rejected',
+        error: new MediaError(
+          ErrorCodes.GENERAL_ERROR,
+          `${runner.name} produced no transcript: ${reason}`,
+          { runner: runner.path, exitCode, stderr: tail(stderr) },
+        ),
+      })
     }
   }
   return results
+}
+
+function localProvider(runner: Runner): TranscriptionProvider {
+  return {
+    declaration: {
+      id: 'local',
+      engine: runner.name,
+      model: runner.modelName,
+      sendsTo: null,
+      cost: 'free',
+      input: { kind: 'audio', formats: ['wav16k'] },
+      // mlx_whisper writes every result of one run under the first file's name
+      batchSize: runner.name === 'mlx_whisper' ? 1 : Number.POSITIVE_INFINITY,
+      concurrency: 1,
+      maxDurationSeconds: null,
+    },
+    transcribe(requests, { language, signal }) {
+      const wavs = requests.map((request) => {
+        if (request.audio?.format !== 'wav16k') {
+          throw new Error('The local provider reads 16 kHz WAV only')
+        }
+        return request.audio.path
+      })
+      return runProgram(runner, wavs, language, signal)
+    },
+  }
+}
+
+function notFound(
+  found: Extract<FindResult, { missing: true }>,
+  suggestedModel: string,
+): MediaError {
+  const what = [
+    !found.runner && 'No speech-to-text program',
+    !found.ffmpeg && (found.runner ? 'No ffmpeg' : 'no ffmpeg'),
+  ]
+    .filter(Boolean)
+    .join(' and ')
+  return new MediaError(
+    ErrorCodes.TRANSCRIBER_NOT_FOUND,
+    `${what} found on PATH`,
+    { searched: found.searched, runner: found.runner, ffmpeg: found.ffmpeg },
+    installSuggestion(
+      { runner: !found.runner, ffmpeg: !found.ffmpeg },
+      suggestedModel,
+    ),
+  )
+}
+
+/**
+ * The local provider for transcribe.command, or the first program on PATH,
+ * with ffmpeg for its WAV input; otherwise the problem and its fix
+ */
+export function openLocalProvider(
+  config: TranscribeConfigFile,
+  suggestedModel = defaultModelPath(),
+  which: (name: string) => string | null = (name) => Bun.which(name),
+): ProviderSetup {
+  const found = findTranscriber(config, suggestedModel, which)
+  if ('invalid' in found) return { ready: false, problem: found.invalid }
+  if ('missing' in found) {
+    return { ready: false, problem: notFound(found, suggestedModel) }
+  }
+  return {
+    ready: true,
+    provider: localProvider(found.runner),
+    ffmpeg: found.ffmpeg,
+  }
 }
