@@ -2,18 +2,13 @@
  * Tests for the daemon's dialog pass: what it writes to chats_cache and
  * chat_sync_state.
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { TelegramClient } from '@mtcute/bun'
 import { fetchJoinedCommunities } from '../commands/chats/helpers'
 import { daemonNetworkMiddlewares } from '../daemon/daemon-accounts'
-import {
-  createDaemonRuntime,
-  type DaemonContext,
-  requestShutdown,
-} from '../daemon/daemon-context'
+import { type DaemonContext, requestShutdown } from '../daemon/daemon-context'
 import { createSyncScheduler } from '../daemon/scheduler'
-import type { AccountsDbInterface } from '../db'
 import {
   type ChatSyncStateService,
   createChatSyncStateService,
@@ -21,14 +16,11 @@ import {
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
-import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { SyncJobType, SyncPriority } from '../db/sync-schema'
 import { toLong } from '../utils/long'
-import {
-  addAccountRuntime,
-  createAccountCacheDb,
-} from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
 import {
   type FakeDialogInput,
   fakeDialogClient,
@@ -37,38 +29,6 @@ import {
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 let testCacheDb: Database
-
-function createContext(): DaemonContext {
-  return {
-    dataDir: '/tmp/tgcli',
-    pidPath: '/tmp/tgcli/daemon.pid',
-    verbosity: 'normal',
-    reconnectConfig: {
-      initialDelayMs: 1000,
-      maxDelayMs: 4000,
-      maxAttempts: 3,
-      backoffMultiplier: 2,
-    },
-    shutdownTimeoutMs: 1_000_000,
-    logger: {
-      info: mock(() => {}),
-      debug: mock(() => {}),
-      warn: mock(() => {}),
-      error: mock(() => {}),
-    },
-    pidFile: {
-      acquire: () => {},
-      release: () => {},
-      read: () => null,
-      isRunning: () => false,
-      sendSignal: () => false,
-      getPath: () => '/tmp/tgcli/daemon.pid',
-    },
-    state: { running: true, accounts: new Map(), shutdownRequested: false },
-    accountsDb: {} as AccountsDbInterface,
-    runtime: createDaemonRuntime(),
-  }
-}
 
 function connect(
   ctx: DaemonContext,
@@ -89,11 +49,9 @@ describe('bootstrapDialogs', () => {
   let ctx: DaemonContext
 
   beforeEach(() => {
-    testCacheDb = new Database(':memory:')
-    initCacheSchema(testCacheDb)
-    initSyncSchema(testCacheDb)
+    testCacheDb = createAccountCacheDb()
     chatSyncState = createChatSyncStateService(testCacheDb)
-    ctx = createContext()
+    ctx = testDaemonContext()
   })
 
   afterEach(() => {
@@ -168,11 +126,9 @@ describe('bootstrapDialogs', () => {
   it('gives bots and deleted accounts the newest page only, keeping what is cached (#131)', async () => {
     // A bot an older version synced in full, with a history job pending
     seedSynced(1001, 50, 50)
-    chatSyncState.resetSyncState(1001, {
-      forward_cursor: false,
-      backward_cursor: false,
-      synced_messages: false,
-    })
+    testCacheDb.run(
+      'UPDATE chat_sync_state SET history_complete = 0 WHERE chat_id = 1001',
+    )
     const jobs = createSyncJobsService(testCacheDb)
     jobs.create({
       chat_id: 1001,
@@ -190,11 +146,9 @@ describe('bootstrapDialogs', () => {
     })
     // A bot turned on by hand keeps its full history
     seedSynced(1004, 20, 20)
-    chatSyncState.resetSyncState(1004, {
-      forward_cursor: false,
-      backward_cursor: false,
-      synced_messages: false,
-    })
+    testCacheDb.run(
+      'UPDATE chat_sync_state SET history_complete = 0 WHERE chat_id = 1004',
+    )
     chatSyncState.setSyncMode(1004, 'on')
 
     await runPass([
@@ -295,6 +249,53 @@ describe('bootstrapDialogs', () => {
       createMessagesCache(testCacheDb).get(-1_000_000_002_005, 15)?.text,
     ).toBe('Archived post')
     expect(chatSyncState.get(-1_000_000_002_005)).toBeNull()
+  })
+
+  it('queues one participation check per group, archived ones too, and counts an own newest message (group participation)', async () => {
+    const now = Math.floor(Date.now() / 1000)
+    const dialogs: FakeDialogInput[] = [
+      {
+        kind: 'group',
+        id: 4301,
+        membersCount: 5,
+        lastMessage: { id: 9, date: now - 60, fromSelf: 7000 },
+      },
+      {
+        kind: 'supergroup',
+        id: 4302,
+        archived: true,
+        lastMessage: { id: 4, text: 'Archived group note', date: now },
+      },
+      { kind: 'channel', id: 4303, lastMessage: { id: 2 } },
+      { kind: 'user', id: 4304 },
+    ]
+    await runPass(dialogs)
+
+    const jobs = createSyncJobsService(testCacheDb)
+    const checks = () =>
+      jobs
+        .getPendingJobs()
+        .filter((job) => job.job_type === SyncJobType.CheckGroupParticipation)
+        .map((job) => [job.chat_id, job.priority])
+    expect(checks()).toEqual([
+      [-4301, SyncPriority.Background],
+      [-1_000_000_004_302, SyncPriority.Background],
+    ])
+    const participation = createMessagesCache(testCacheDb).participation
+    expect(participation.status(-4301)).toBe('active')
+    expect(participation.status(-1_000_000_004_302)).toBe('unknown')
+    // An archived group without participation keeps no newest message
+    expect(
+      createMessagesCache(testCacheDb).get(-1_000_000_004_302, 4),
+    ).toBeNull()
+    expect(chatSyncState.get(-1_000_000_004_302)).toBeNull()
+
+    // A second pass queues none twice
+    const { refreshDialogsAfterReconnect } = await import(
+      '../daemon/daemon-bootstrap'
+    )
+    await refreshDialogsAfterReconnect(ctx, 1, fakeDialogClient(dialogs).client)
+    expect(checks()).toHaveLength(2)
   })
 
   it('lists archived dialogs too', async () => {
@@ -889,9 +890,10 @@ describe('bootstrapDialogs', () => {
         'communities.getJoinedCommunities',
         'users.getUsers',
       ])
-      const rateLimits = createRateLimitsService(testCacheDb)
-      expect(rateLimits.getActivity()).toHaveLength(3)
-      expect(rateLimits.getStatus()).toMatchObject({
+      expect(
+        testCacheDb.query('SELECT COUNT(*) AS n FROM api_activity').get(),
+      ).toEqual({ n: 3 })
+      expect(createRateLimitsService(testCacheDb).getStatus()).toMatchObject({
         totalCalls: 3,
         callsByMethod: {
           'messages.getDialogs': 1,

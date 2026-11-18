@@ -23,14 +23,13 @@ import {
   SyncPriority,
   supportsContentlessSearch,
 } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 describe('sync schema', () => {
   let db: Database
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
   })
 
   describe('messages_cache table', () => {
@@ -648,9 +647,7 @@ describe('migration from 0.1.4', () => {
     expect(schemaOf(db)).toEqual(schema)
     expect(jobsOf(db)).toEqual(jobs)
 
-    const fresh = new Database(':memory:')
-    initCacheSchema(fresh)
-    initSyncSchema(fresh)
+    const fresh = createAccountCacheDb()
     expect(columnsOf(db, 'sync_jobs')).toEqual(columnsOf(fresh, 'sync_jobs'))
     expect(columnsOf(db, 'sync_jobs').slice(-2)).toEqual([
       'attempts',

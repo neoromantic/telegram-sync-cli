@@ -143,6 +143,10 @@ CLI mode (tg <cmd>)            Daemon mode (tg daemon start)
   strings (`toRawJson` in `src/utils/raw-json.ts`).
 - Every cache table stores a chat under its marked peer ID (user ID, `-N` for basic groups,
   `-100…` for supergroups and channels). Convert IDs only in `src/utils/telegram-peer-ids.ts`.
+- A group adds new messages only while the account sent an ordinary message there in the last
+  90 days, in every path and mode; cached messages stay, DMs and channels are exempt. Every
+  message write goes through `MessagesCache`, which applies the rule
+  (`src/db/group-participation.ts`); never write `messages_cache` around it.
 
 Sync uses two cursors per chat: forward (every message up to it is cached; only sync jobs
 move it, never live updates) and backward (history backfill). Catch-up runs only for chats
@@ -151,9 +155,10 @@ above the forward cursor, never as polling. Priorities: real-time first; DMs
 and groups under 20 members get full history, but bots and deleted accounts get only the newest
 100 messages and catch-up; groups of 20–100 get the newest 100 messages,
 then history after the small chats; groups of unknown size or over 100 members and channels
-get catch-up and history only on request (`tg chats sync`). Every message that arrives live is
-cached, in any chat; Telegram may push few posts of channels, so each dialog pass also caches
-the newest message of every chat with sync off. Details: [docs/sync-strategy.md](docs/sync-strategy.md).
+get catch-up and history only on request (`tg chats sync`), and a group of any size only while
+the account takes part in it. Every message that arrives live is cached, in any chat but such a
+group; Telegram may push few posts of channels, so each dialog pass also caches the newest
+message of every chat with sync off. Details: [docs/sync-strategy.md](docs/sync-strategy.md).
 
 ### Bun-native APIs
 
@@ -164,7 +169,8 @@ Prefer `bun:sqlite` (not better-sqlite3), `Bun.file()`/`Bun.write()` (not `fs`),
 
 ```
 bin/tg.js            npm bin shim
-src/index.ts         CLI entry (citty)
+src/index.ts         CLI entry: wraps every command with the access guard and usage stats
+src/cli.ts           the citty command tree
 src/commands/        one file or folder per command group (auth, accounts, chats, send, sql…)
 src/services/        Telegram client manager (lazy credentials)
 src/db/              schema, caches, sync jobs, per-chat sync state, rate limits
@@ -177,7 +183,10 @@ src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integratio
 ```
 
 New commands use `defineCommand` from citty and report through `success()`/`error()` in
-`src/utils/output.ts`.
+`src/utils/output.ts`. Every command also needs an entry in `COMMAND_ACCESS`
+(`src/commands/access.ts`): whether it changes something on Telegram (refused in read-only
+mode) and which args name a chat (checked against `allowedChats`). A command without one fails
+at start and in `access.test.ts`.
 Import mtcute values and types (`tl`, `TelegramClient`, `networkMiddlewares`) from
 `@mtcute/bun` (helpers such as `toInputUser` from `@mtcute/bun/utils.js`). `@mtcute/core` is a
 direct dependency, at the same version, only for its TL schema export

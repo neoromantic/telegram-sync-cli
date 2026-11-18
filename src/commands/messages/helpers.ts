@@ -1,7 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { TelegramClient } from '@mtcute/bun'
 
-import { ConfigError } from '../../config'
 import { accountsDb, getAccountCacheDb } from '../../db'
 import { createChatsCache } from '../../db/chats-cache'
 import type { MessageSearchRow } from '../../db/messages-search'
@@ -20,8 +19,7 @@ import {
   type MessageAction,
 } from '../../utils/service-action'
 import {
-  isRateLimitError,
-  reportRateLimit,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import {
@@ -81,7 +79,7 @@ export function messageRowToItem(
  */
 export function messageItemReader(
   db: Database,
-): (row: MessageSearchRow) => MessageSearchItem {
+): (row: MessageRow) => MessageSearchItem {
   const rawJson = db.query<{ raw_json: string }, [number, number]>(
     'SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?',
   )
@@ -93,12 +91,11 @@ export function messageItemReader(
     const mayBeRich = !row.text && row.message_type === 'text'
     const raw =
       row.has_media === 1 || isService || mayBeRich
-        ? rawJson.get(row.chat_id, row.message_id)
+        ? (row.raw_json ?? rawJson.get(row.chat_id, row.message_id)?.raw_json)
         : null
     if (!raw) return messageRowToItem(row, null, null)
-    const text = mayBeRich ? richMessageText(raw.raw_json) : null
-    const attachment =
-      row.has_media === 1 ? extractAttachment(raw.raw_json) : null
+    const text = mayBeRich ? richMessageText(raw) : null
+    const attachment = row.has_media === 1 ? extractAttachment(raw) : null
     const transcript =
       attachment?.kind === 'voice' || attachment?.kind === 'round'
         ? transcriptOf.get(row.chat_id, row.message_id)
@@ -106,16 +103,22 @@ export function messageItemReader(
     return messageRowToItem(
       text ? { ...row, text } : row,
       attachment,
-      isService ? extractServiceAction(raw.raw_json) : null,
+      isService ? extractServiceAction(raw) : null,
       transcript,
     )
   }
 }
 
+/**
+ * A message row; one built from a Telegram page carries its raw_json,
+ * since the cache may not hold the message
+ */
+export type MessageRow = MessageSearchRow & { raw_json?: string }
+
 /** Items for rows, each with its attachment and action (see messageItemReader) */
 export function messageRowsToItems(
   db: Database,
-  rows: MessageSearchRow[],
+  rows: MessageRow[],
 ): MessageSearchItem[] {
   return rows.map(messageItemReader(db))
 }
@@ -203,10 +206,7 @@ export function reportHistoryError(err: unknown, action: string): never {
       { chat: err.identifier },
     )
   }
-  if (err instanceof ConfigError) {
-    error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-  }
-  if (isRateLimitError(err)) reportRateLimit(err)
+  reportConfigOrRateLimitError(err)
   const message = err instanceof Error ? err.message : 'Unknown error'
   error(ErrorCodes.TELEGRAM_ERROR, `Failed to ${action}: ${message}`)
 }

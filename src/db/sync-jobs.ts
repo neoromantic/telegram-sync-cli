@@ -12,6 +12,23 @@ import {
   SyncPriority,
 } from './sync-schema'
 
+// The priority of a job's chat lane: an initial load of a fully synced chat
+// goes first. NULL when the chat has no sync state.
+const LANE_PRIORITY_SQL = `(
+  SELECT CASE
+    WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
+    ELSE s.sync_priority
+  END
+  FROM chat_sync_state s
+  WHERE s.chat_id = sync_jobs.chat_id
+)`
+
+// A refetch or a sender fetch runs whether its chat syncs or not
+const RUNS_FOR_CHAT_SQL = `(job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
+  SELECT 1 FROM chat_sync_state s
+  WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
+))`
+
 /**
  * Input for creating a sync job
  */
@@ -79,8 +96,6 @@ export interface SyncJobsService {
   getNextPending(): SyncJobRow | null
   /** Get the next due pending job of the given types (highest priority, oldest first) */
   getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null
-  /** Atomically claim the next due pending job (prevents race conditions) */
-  claimNextJob(): SyncJobRow | null
   /** Get all pending jobs, including those waiting for a retry */
   getPendingJobs(): SyncJobRow[]
   /** Mark job as running */
@@ -110,10 +125,6 @@ export interface SyncJobsService {
    * failed job holds its chat's slot for that job type until it is deleted.
    */
   hasActiveJobForChat(chatId: number, jobType: SyncJobType): boolean
-  /** Clean up old completed jobs */
-  cleanupCompleted(olderThanMs: number): number
-  /** Clean up old failed jobs */
-  cleanupFailed(olderThanMs: number): number
   /** Delete failed jobs of one chat, or of every chat, whatever their age */
   deleteFailed(chatId?: number): number
   /** The newest failed jobs */
@@ -174,21 +185,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     `)
       .as(SyncJobRow),
 
-    claimNextJob: db
-      .query(`
-      UPDATE sync_jobs
-      SET status = $newStatus, started_at = $now
-      WHERE id = (
-        SELECT id FROM sync_jobs
-        WHERE status = $pendingStatus AND next_run_at <= $now
-        ORDER BY priority ASC, created_at ASC, id ASC
-        LIMIT 1
-      )
-      AND status = $pendingStatus
-      RETURNING *
-    `)
-      .as(SyncJobRow),
-
     getPendingJobs: db
       .query(`
       SELECT * FROM sync_jobs
@@ -216,41 +212,26 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       WHERE id = $id AND status = $expected_status
     `),
 
-    // A refetch or a sender fetch runs whether its chat syncs or not
     failIfEnabled: db.prepare(`
       UPDATE sync_jobs
       SET status = $status, error_message = $error, completed_at = $now,
           attempts = attempts + 1
       WHERE id = $id AND status = $expected_status
-        AND (job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
-          SELECT 1 FROM chat_sync_state s
-          WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
-        ))
+        AND ${RUNS_FOR_CHAT_SQL}
     `),
 
-    // The chat's mode may have changed while the job ran, and tg chats sync
-    // cancels only pending jobs, so the retry takes the chat's lane priority
-    // now, like alignPendingPriorities. A refetch or a sender fetch keeps its own.
+    // The chat's mode may have changed while the job ran, so the retry takes
+    // the chat's lane priority now. A refetch or a sender fetch keeps its own.
     retryLater: db.prepare(`
       UPDATE sync_jobs
       SET status = $pending_status, attempts = attempts + $inc,
           next_run_at = $run_at, error_message = $error, started_at = NULL,
           priority = CASE WHEN job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
             THEN priority
-            ELSE COALESCE((
-              SELECT CASE
-                WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
-                ELSE s.sync_priority
-              END
-              FROM chat_sync_state s
-              WHERE s.chat_id = sync_jobs.chat_id
-            ), priority)
+            ELSE COALESCE(${LANE_PRIORITY_SQL}, priority)
           END
       WHERE id = $id AND status = $running_status
-        AND (job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
-          SELECT 1 FROM chat_sync_state s
-          WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
-        ))
+        AND ${RUNS_FOR_CHAT_SQL}
     `),
 
     deleteRunning: db.prepare(`
@@ -283,16 +264,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         AND job_type = $job_type
         AND status IN ($pending_status, $running_status, $failed_status)
       LIMIT 1
-    `),
-
-    cleanupCompleted: db.prepare(`
-      DELETE FROM sync_jobs
-      WHERE status = $status AND completed_at < $before
-    `),
-
-    cleanupFailed: db.prepare(`
-      DELETE FROM sync_jobs
-      WHERE status = $status AND completed_at < $before
     `),
 
     deleteFailed: db.prepare(`
@@ -335,11 +306,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     deletePendingForInactiveChats: db.prepare(`
       DELETE FROM sync_jobs
       WHERE status = $status
-        AND job_type NOT IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
-        AND NOT EXISTS (
-          SELECT 1 FROM chat_sync_state s
-          WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
-        )
+        AND NOT ${RUNS_FOR_CHAT_SQL}
     `),
 
     deletePendingHistoryOfFirstPageOnlyChats: db.prepare(`
@@ -354,14 +321,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
 
     alignPendingPriorities: db.prepare(`
       UPDATE sync_jobs
-      SET priority = (
-        SELECT CASE
-          WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
-          ELSE s.sync_priority
-        END
-        FROM chat_sync_state s
-        WHERE s.chat_id = sync_jobs.chat_id
-      )
+      SET priority = ${LANE_PRIORITY_SQL}
       WHERE status = $status
         AND job_type NOT IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL}
         AND EXISTS (
@@ -456,16 +416,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       )
     },
 
-    claimNextJob(): SyncJobRow | null {
-      return (
-        stmts.claimNextJob.get({
-          $pendingStatus: SyncJobStatus.Pending,
-          $newStatus: SyncJobStatus.Running,
-          $now: Date.now(),
-        }) ?? null
-      )
-    },
-
     getPendingJobs(): SyncJobRow[] {
       return stmts.getPendingJobs.all({ $status: SyncJobStatus.Pending })
     },
@@ -550,24 +500,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         $failed_status: SyncJobStatus.Failed,
       })
       return result !== null
-    },
-
-    cleanupCompleted(olderThanMs: number): number {
-      const before = Date.now() - olderThanMs
-      const result = stmts.cleanupCompleted.run({
-        $status: SyncJobStatus.Completed,
-        $before: before,
-      })
-      return result.changes
-    },
-
-    cleanupFailed(olderThanMs: number): number {
-      const before = Date.now() - olderThanMs
-      const result = stmts.cleanupFailed.run({
-        $status: SyncJobStatus.Failed,
-        $before: before,
-      })
-      return result.changes
     },
 
     deleteFailed(chatId?: number): number {

@@ -2,7 +2,7 @@
  * Tests for the ranges of a chat the cache holds without gaps
  * (src/db/history-ranges.ts)
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import {
@@ -12,8 +12,8 @@ import {
   type PageBounds,
 } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { takePartIn } from './helpers/participation'
 
 const CHAT_ID = -1001234567890
 const OTHER_CHAT_ID = 10
@@ -23,9 +23,8 @@ describe('HistoryRanges', () => {
   let ranges: HistoryRanges
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
+    takePartIn(db, -1001234567890)
     ranges = createHistoryRanges(db)
   })
 

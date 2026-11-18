@@ -28,8 +28,8 @@ export interface MessagesHistory {
    * messages right above `after`.
    */
   list(chatId: number, options: HistoryListOptions): MessageSearchRow[]
-  /** The given messages of a chat, newest first, deleted ones included */
-  getMany(chatId: number, messageIds: number[]): MessageSearchRow[]
+  /** One message of a chat, deleted ones included */
+  get(chatId: number, messageId: number): MessageSearchRow | null
   /** How many incoming messages above `after` are cached, deleted ones not */
   countIncomingAfter(chatId: number, after: number): number
 }
@@ -75,19 +75,15 @@ export function createMessagesHistory(db: Database): MessagesHistory {
       return after !== undefined ? rows.reverse() : rows
     },
 
-    getMany(chatId, messageIds) {
-      if (messageIds.length === 0) return []
-
-      const placeholders = messageIds.map(() => '?').join(', ')
+    get(chatId, messageId) {
       return db
-        .query(`
+        .query<MessageSearchRow, [number, number]>(`
           SELECT ${MESSAGE_ROW_COLUMNS}
           FROM messages_cache m
           ${MESSAGE_ROW_JOINS}
-          WHERE m.chat_id = ? AND m.message_id IN (${placeholders})
-          ORDER BY m.message_id DESC
+          WHERE m.chat_id = ? AND m.message_id = ?
         `)
-        .all(chatId, ...messageIds) as MessageSearchRow[]
+        .get(chatId, messageId)
     },
 
     countIncomingAfter(chatId, after) {

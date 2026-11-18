@@ -96,8 +96,9 @@ The `data` of `tg chats list`:
 | `items[].isCreator` | boolean | The account created the chat |
 | `items[].isAdmin` | boolean | The account is an admin of the chat |
 | `items[].unreadCount` | integer or `null` | Unread incoming messages as Telegram counts them; `null` before a dialog list has the chat (a daemon start or `--fresh`) |
-| `items[].syncEnabled` | boolean | Whether the daemon syncs the chat's messages |
-| `items[].syncReason` | `dm`, `bot`, `deleted_account`, `small_group`, `medium_group`, `large_group`, `unknown_size`, `channel`, `community`, `on_by_hand`, `off_by_hand` or `null` | Why: the policy's reason (`medium_group` is the default; `large_group`, `unknown_size`, `channel` and `community` are off), or `on_by_hand` / `off_by_hand` from `tg chats sync`; `null` for a chat without sync state: an archived chat that hasn't synced yet, or one no daemon start has seen |
+| `items[].syncEnabled` | boolean | Whether the daemon syncs the chat's messages: its mode allows it and, in a group, the account takes part in it |
+| `items[].syncReason` | `dm`, `bot`, `deleted_account`, `small_group`, `medium_group`, `large_group`, `unknown_size`, `channel`, `community`, `on_by_hand`, `off_by_hand`, `group_participation_required`, `group_participation_unknown` or `null` | Why: the policy's reason (`medium_group` is the default; `large_group`, `unknown_size`, `channel` and `community` are off), `on_by_hand` / `off_by_hand` from `tg chats sync`, or `group_participation_required` / `group_participation_unknown` for a group that takes no new messages because the account sent none there in the last 90 days, or isn't checked yet ([sync-strategy.md](sync-strategy.md#group-participation)); `null` for a chat without sync state that takes messages: an archived chat that hasn't synced yet, or one no daemon start has seen |
+| `items[].lastOwnMessageAt` | integer or `null` | A group's newest own message known, Unix milliseconds; `null` in other chats or when none is known |
 | `total` | integer | Chats that match the filters |
 | `offset` | integer | `--offset` |
 | `limit` | integer | `--limit` |
@@ -121,7 +122,8 @@ cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
 
 ### Chat sync
 
-The daemon syncs DMs and groups of up to 100 members by default. A bot or a deleted account
+The daemon syncs DMs and groups of up to 100 members by default, a group only while you take
+part in it ([group participation](sync-strategy.md#group-participation)). A bot or a deleted account
 gets its newest 100 messages and new ones, but no older history unless you turn it on with
 `tg chats sync`; messages already cached stay. Archived ones start when a
 message arrives in them live, or with `tg chats sync`. A community has no messages of its own,
@@ -140,9 +142,11 @@ tg chats sync @examplenews --auto # follow the default policy again
 - The choice is stored in `chat_sync_state.sync_mode` and kept across daemon restarts and
   dialog passes.
 - `--off` and the default policy control catch-up, first pages and history. While the daemon
-  runs, it caches every message that arrives live, in any chat, and each dialog pass caches
-  the newest message of a chat that is off; Telegram may push few posts of a channel that is
-  off (see [real-time.md](real-time.md#channels)).
+  runs, it caches every message that arrives live, in any chat (a group only while you take
+  part in it), and each dialog pass caches the newest message of a chat that is off; Telegram
+  may push few posts of a channel that is off (see [real-time.md](real-time.md#channels)).
+- `syncEnabled` is whether the daemon syncs the chat now: the mode allows it and, in a group,
+  you take part in it. `mode` stays the choice you made.
 - `id` and `peerId` are the same marked ID; `peerId` stays for scripts written against 0.2.0,
   where `id` was the bare one. A positive ID is a user's DM first, as in `tg send --to`: the
   bare group or channel ID counts only when the cache doesn't know user N. A bare ID that names
@@ -189,6 +193,7 @@ tg chats sync @examplenews --auto # follow the default policy again
     "mode": "on",
     "syncEnabled": true,
     "syncReason": "on_by_hand",
+    "lastOwnMessageAt": null,
     "historyComplete": false,
     "syncedMessages": 0,
     "changed": true,
@@ -246,7 +251,9 @@ the last one when paging forward, asks Telegram. Messages that live updates or `
 are read from Telegram until a page covers them, so while the daemon runs, the newest page of an
 active chat asks Telegram. The newest page comes from the cache when a range holds it, so
 without a running daemon it can miss recent messages. See
-[caching.md](caching.md#chat-history). `--fresh` always reads the window from Telegram.
+[caching.md](caching.md#chat-history). `--fresh` always reads the window from Telegram. In a
+group you don't take part in, the page comes from Telegram
+as usual but its new messages aren't cached.
 
 `tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each
 side: `{ chatId, message, newer, older, source, stale }`. `newer` and `older` are newest first,
@@ -479,6 +486,8 @@ tg send --to me -m "Note to self"   # Saved Messages
 tg send --to -1001234567890 -m "Hi" # a chat ID as tg messages search prints it
 tg send --to me --file ./report.pdf --caption "Q3"
 tg send --to @username --file ./photo.jpg --force-document
+tg send --to me --markdown -m "$(cat report.md)"   # a rich message: headings, tables, lists
+tg send --to me --html -m "<h1>Report</h1><p>Sales doubled.</p>"
 ```
 
 `--to` takes an `@username`, a user or chat ID as any `tg` command prints it (`tg chats list`,
@@ -497,6 +506,21 @@ that, whatever its length.
 
 A sent message goes into the message cache right away, so `tg messages search`
 finds it without the daemon.
+
+Choose `--markdown` or `--html` for headings, tables and other rich blocks. Telegram parses
+the [Rich Markdown](https://core.telegram.org/bots/api#rich-markdown-style) or
+[Rich HTML](https://core.telegram.org/bots/api#rich-html-style) and enforces its
+[limits](https://core.telegram.org/bots/api#rich-message-limits). Both flags together,
+either flag with a file, or blank message text give `INVALID_ARGS` (exit 3). Captions are plain text.
+
+Rich sending depends on the account and chat and may require Premium. A rich-message RPC refusal
+gives `TELEGRAM_ERROR` (exit 5) with its reason in `details.telegramError`, e.g.
+`RICH_MESSAGE_EMPTY` when the parsed markup has no content. The result of a successful send has
+`format` set to `markdown`, `html`, or `null` for plain text and files.
+
+Cached reads and search use the returned blocks rendered as Markdown. If Telegram returns a short
+acknowledgement, they use the submitted source. If it returns only some blocks, they include
+only those blocks until a full message reaches the cache.
 
 `--file` sends one file: JPEG, PNG and WebP images up to 10 MB as a photo, anything else as a
 document under its file name (`--force-document` sends an image as a document too). `--caption`
