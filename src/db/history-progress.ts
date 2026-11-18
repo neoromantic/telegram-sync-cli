@@ -1,10 +1,12 @@
 /**
  * How far an account's history backfill is (#126): messages cached against
  * the counts Telegram gave on history pages (chat_sync_state.total_messages),
- * for the chats with sync on, and a time left measured from the pace of the
- * last history pages. Database only.
+ * for the chats with sync on (a group only while the account takes part in
+ * it), and a time left measured from the pace of the last history pages.
+ * Database only.
  */
 import type { Database } from 'bun:sqlite'
+import { capturesSql } from './group-participation'
 import { historyDoneSql, SyncJobStatus, SyncJobType } from './sync-schema'
 
 /** The span the pace of history pages is measured over */
@@ -88,6 +90,7 @@ interface ChatRow {
   history_done: number
   total_messages: number | null
   cached: number
+  has_gaps: number
 }
 
 /**
@@ -150,9 +153,10 @@ export function readHistoryProgress(
     .query(
       `SELECT s.chat_id, s.chat_type, s.history_complete,
          ${historyDoneSql('s')} AS history_done, s.total_messages,
-         (SELECT COUNT(*) FROM messages_cache m WHERE m.chat_id = s.chat_id) AS cached
+         (SELECT COUNT(*) FROM messages_cache m WHERE m.chat_id = s.chat_id) AS cached,
+         EXISTS (SELECT 1 FROM group_capture_gaps g WHERE g.chat_id = s.chat_id) AS has_gaps
        FROM chat_sync_state s
-       WHERE s.sync_enabled = 1`,
+       WHERE s.sync_enabled = 1 AND ${capturesSql('s', Math.floor(now / 1000))}`,
     )
     .all() as ChatRow[]
 
@@ -164,7 +168,13 @@ export function readHistoryProgress(
     // A bot or deleted account keeps its newest page only (#131): what is
     // cached is all it gets, whatever Telegram's count
     const newestPageOnly = !pendingChat && row.history_complete === 0
-    if (row.total_messages === null || newestPageOnly) {
+    if (
+      row.total_messages === null ||
+      newestPageOnly ||
+      // A group with a pause never caches the pause's messages, so Telegram's
+      // count says nothing about what is left (src/db/group-participation.ts)
+      row.has_gaps === 1
+    ) {
       if (pendingChat) {
         progress.chats_without_count++
       } else {

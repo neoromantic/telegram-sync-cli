@@ -6,6 +6,7 @@ import type { Database } from 'bun:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
@@ -65,6 +66,7 @@ function seed(db: Database): void {
     ].map(dialogToCacheInput),
   )
   const nowSec = Math.floor(now / 1000)
+  takePartIn(db, -4242, -1001234567890)
   createMessagesCache(db).upsertBatch(
     MESSAGES.map(([message_id, chat_id, from_id, text, age]) => ({
       chat_id,

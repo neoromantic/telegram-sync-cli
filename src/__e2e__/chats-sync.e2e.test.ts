@@ -6,6 +6,7 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import { fakeDialog, fakeRawCommunity } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
 import {
   dialogToCacheInput,
@@ -43,6 +44,7 @@ interface SyncResult {
     mode: string
     syncEnabled: boolean
     syncReason: string
+    lastOwnMessageAt: number | null
     historyComplete: boolean
     syncedMessages: number
     changed: boolean
@@ -127,6 +129,7 @@ describe('E2E: chats sync', () => {
           mode: 'on',
           syncEnabled: true,
           syncReason: 'on_by_hand',
+          lastOwnMessageAt: null,
           historyComplete: false,
           syncedMessages: 0,
           changed: true,
@@ -235,7 +238,12 @@ describe('E2E: chats sync', () => {
       sync_enabled: 0,
       sync_priority: SyncPriority.Low,
     })
-    expect(group.data).toMatchObject({ mode: 'auto', syncEnabled: true })
+    // A group syncs only once the account is known to take part in it
+    expect(group.data).toMatchObject({
+      mode: 'auto',
+      syncEnabled: false,
+      syncReason: 'group_participation_unknown',
+    })
     expect(stateOf(GROUP_PEER_ID)).toMatchObject({
       sync_enabled: 1,
       sync_priority: SyncPriority.Medium,
@@ -280,8 +288,25 @@ describe('E2E: chats sync', () => {
       return [item?.syncEnabled, item?.syncReason]
     }
     expect(syncOf(5001)).toEqual([true, 'bot'])
-    expect(syncOf(GROUP_PEER_ID)).toEqual([true, 'medium_group'])
+    expect(syncOf(GROUP_PEER_ID)).toEqual([
+      false,
+      'group_participation_unknown',
+    ])
     expect(syncOf(CHANNEL_PEER_ID)).toEqual([true, 'on_by_hand'])
+
+    // An own message of the last 90 days lets the group sync by its policy
+    takePartIn(cacheDb, GROUP_PEER_ID)
+    const again = await runCliSuccess(['chats', 'list'], options())
+    const group = (
+      again.json as {
+        data: { items: Array<{ id: number; lastOwnMessageAt: number | null }> }
+      }
+    ).data.items.find((chat) => chat.id === GROUP_PEER_ID)
+    expect(group).toMatchObject({
+      syncEnabled: true,
+      syncReason: 'medium_group',
+    })
+    expect(group?.lastOwnMessageAt).toBeGreaterThan(Date.now() - 60_000)
 
     // Turned on by hand, a bot gets its history; --off wins over the policy
     expect((await sync('5001')).data.syncReason).toBe('on_by_hand')
@@ -309,7 +334,9 @@ describe('E2E: chats sync', () => {
       type: 'supergroup',
       title: null,
       mode: 'on',
-      syncEnabled: true,
+      // Turned on, a group still syncs only while the account takes part
+      syncEnabled: false,
+      syncReason: 'group_participation_unknown',
     })
   })
 

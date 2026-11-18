@@ -138,6 +138,6 @@ describe('editMessage', () => {
       edited: true,
       message: null,
     })
-    expect(createMessagesHistory(db).getMany(10, [12])).toEqual([])
+    expect(createMessagesHistory(db).get(10, 12)).toBeNull()
   })
 })

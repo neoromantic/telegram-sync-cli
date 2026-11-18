@@ -2,19 +2,56 @@
  * Per-account daemon runtimes for unit tests: each account gets its own
  * in-memory cache, as accounts/<id>/cache.db is in production.
  */
-import { Database } from 'bun:sqlite'
-import type { AccountRuntime, DaemonContext } from '../../daemon/daemon-context'
+import type { Database } from 'bun:sqlite'
+import { type Mock, mock } from 'bun:test'
+import {
+  type AccountRuntime,
+  createDaemonRuntime,
+  type DaemonContext,
+} from '../../daemon/daemon-context'
 import { createSyncPacer } from '../../daemon/sync-pacing'
 import { createDaemonStatusService } from '../../db/daemon-status'
-import { initCacheSchema } from '../../db/schema'
-import { initSyncSchema } from '../../db/sync-schema'
+import { createAccountCacheDb } from './cache-db'
+import { createFakeAccountsDb } from './db-mock'
 
-/** An in-memory database with the cache schema */
-export function createAccountCacheDb(): Database {
-  const db = new Database(':memory:')
-  initCacheSchema(db)
-  initSyncSchema(db)
-  return db
+type LogFn = Mock<(message: string) => void>
+
+/** A daemon context with no accounts, mock loggers and a no-op PID file */
+export function testDaemonContext(
+  overrides: Partial<Omit<DaemonContext, 'logger'>> = {},
+): DaemonContext & {
+  logger: { info: LogFn; debug: LogFn; warn: LogFn; error: LogFn }
+} {
+  return {
+    dataDir: '/tmp/tgcli',
+    pidPath: '/tmp/tgcli/daemon.pid',
+    verbosity: 'normal',
+    reconnectConfig: {
+      initialDelayMs: 1000,
+      maxDelayMs: 4000,
+      maxAttempts: 3,
+      backoffMultiplier: 2,
+    },
+    shutdownTimeoutMs: 1_000_000,
+    logger: {
+      info: mock((_message: string) => {}),
+      debug: mock((_message: string) => {}),
+      warn: mock((_message: string) => {}),
+      error: mock((_message: string) => {}),
+    },
+    pidFile: {
+      acquire: () => {},
+      release: () => {},
+      read: () => null,
+      isRunning: () => false,
+      sendSignal: () => false,
+      getPath: () => '/tmp/tgcli/daemon.pid',
+    },
+    state: { running: true, accounts: new Map(), shutdownRequested: false },
+    accountsDb: createFakeAccountsDb([]),
+    runtime: createDaemonRuntime(),
+    ...overrides,
+  }
 }
 
 /** Give the context a runtime for the account, on its own cache */

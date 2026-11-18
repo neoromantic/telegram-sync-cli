@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { defineCommand } from 'citty'
 
+import { getErrorMessage } from '../daemon/daemon-utils'
 import { ErrorCodes } from '../types'
 import { error, success } from '../utils/output'
 import { VERSION } from '../version'
@@ -57,14 +58,6 @@ function resolveDataDir(): string {
     process.env.TELEGRAM_SYNC_CLI_DATA_DIR ??
     join(homedir(), '.telegram-sync-cli')
   )
-}
-
-/** @internal exported for testing */
-export function getErrorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    return err.message
-  }
-  return String(err)
 }
 
 export function buildSkillManifest(): SkillManifest {

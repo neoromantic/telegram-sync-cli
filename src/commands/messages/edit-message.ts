@@ -103,8 +103,8 @@ function cacheEditedMessage(
       return null
     }
     createMessagesCache(cacheDb).upsert(input)
-    const rows = createMessagesHistory(cacheDb).getMany(chatId, [messageId])
-    return messageRowsToItems(cacheDb, rows)[0] ?? null
+    const row = createMessagesHistory(cacheDb).get(chatId, messageId)
+    return messageRowsToItems(cacheDb, row ? [row] : [])[0] ?? null
   } catch (err) {
     verbose(`Could not cache the edited message: ${getErrorMessage(err)}`)
     return null

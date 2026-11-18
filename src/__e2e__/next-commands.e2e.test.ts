@@ -9,6 +9,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { createChatsCache } from '../db/chats-cache'
 import { createDaemonStatusService } from '../db/daemon-status'
@@ -107,6 +108,7 @@ beforeAll(() => {
       raw_json: '{}',
     })),
   )
+  takePartIn(first, -4241, -4242, -4243, TEAM_CHAT_ID)
   createMessagesCache(first).upsertBatch(
     [1, 2, 3, 4].map((id) => message(TEAM_CHAT_ID, id, ALICE_ID, `old ${id}`)),
   )
@@ -129,6 +131,7 @@ beforeAll(() => {
     ].map(dialogToCacheInput),
   )
   // Messages 1-7 of Team Chat; Alice says the phrase in 1-5 (Bob in 6)
+  takePartIn(work, -4241, -4242, -4243, TEAM_CHAT_ID)
   createMessagesCache(work).upsertBatch([
     ...[1, 2, 3, 4, 5].map((id) =>
       message(TEAM_CHAT_ID, id, ALICE_ID, `it's $5 "today" (${id})`),
@@ -320,6 +323,8 @@ describe('E2E: next for messages wait', () => {
         why: "Waits for the chat's next messages after these, so none is missed.",
       },
     ])
+
+    takePartIn(env.openCacheDb(1), -4241, -4242, -4243, TEAM_CHAT_ID)
 
     createMessagesCache(env.openCacheDb(1)).upsertBatch([
       message(TEAM_CHAT_ID, 5, ALICE_ID, 'new'),

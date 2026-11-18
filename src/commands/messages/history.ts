@@ -17,7 +17,7 @@ import {
   rawMessageId,
 } from '../../daemon/sync-worker-real-helpers'
 import type { AccountsDbInterface } from '../../db'
-import type { ChatsCache } from '../../db/chats-cache'
+import { type ChatsCache, createChatsCache } from '../../db/chats-cache'
 import { createHistoryRanges, type PageBounds } from '../../db/history-ranges'
 import { createMessagesCache } from '../../db/messages-cache'
 import { createMessagesHistory } from '../../db/messages-history'
@@ -31,6 +31,7 @@ import { resolveSelfId } from '../send/sent-message-cache'
 import {
   type HistoryClient,
   MessageNotFoundError,
+  type MessageRow,
   messageItemReader,
   messageRowsToItems,
 } from './helpers'
@@ -99,9 +100,14 @@ export function historyRequest({ limit, before, after }: HistoryWindow) {
 
 /**
  * Write a getHistory page to the cache in one transaction, with the range
- * it covers, and return the IDs of the messages it stored. Full (non-min)
- * senders go in first, because the search index reads sender names when a
- * message row is written. Sync cursors stay where the daemon left them.
+ * it covers, and return its rows, newest first, as the cache would read
+ * them back. Full (non-min) senders go in first, because the search index
+ * reads sender names when a message row is written. Sync cursors stay where
+ * the daemon left them.
+ *
+ * A group the account doesn't take part in keeps its new messages out of
+ * the cache (src/db/group-participation.ts), so the rows come from the page
+ * itself, and a page with any message kept out records no range.
  */
 export function cacheHistoryResponse(
   cacheDb: Database,
@@ -109,27 +115,59 @@ export function cacheHistoryResponse(
   messages: unknown[],
   users: tl.TypeUser[],
   bounds: PageBounds,
-): number[] {
+): MessageRow[] {
   const usersCache = createUsersCache(cacheDb)
   const messagesCache = createMessagesCache(cacheDb)
-  const { inputs } = createMessageInputs(
-    messages,
-    chatId,
-    Number.MAX_SAFE_INTEGER,
-    0,
-  )
+  const inputs = createMessageInputs(messages, chatId)
 
-  cacheDb.transaction(() => {
-    cachePageUsers(usersCache, users)
-    messagesCache.upsertBatch(inputs)
-    createHistoryRanges(cacheDb).recordPage(
-      chatId,
-      messages.map(rawMessageId),
-      bounds,
-    )
-  })()
+  // It reads before it writes, so it takes the write lock first
+  cacheDb
+    .transaction(() => {
+      cachePageUsers(usersCache, users)
+      const { skipped } = messagesCache.upsertBatch(inputs)
+      if (skipped === 0) {
+        createHistoryRanges(cacheDb).recordPage(
+          chatId,
+          messages.map(rawMessageId),
+          bounds,
+        )
+      }
+    })
+    .immediate()
 
-  return inputs.map((input) => input.message_id)
+  const chat = createChatsCache(cacheDb).getById(String(chatId))
+  const fetchedAt = Date.now()
+  return inputs
+    .map((input): MessageRow => {
+      const u =
+        input.from_id != null ? usersCache.getById(String(input.from_id)) : null
+      return {
+        chat_id: input.chat_id,
+        message_id: input.message_id,
+        from_id: input.from_id ?? null,
+        text: input.text ?? null,
+        message_type: input.message_type,
+        has_media: input.has_media ? 1 : 0,
+        media_path: input.media_path ?? null,
+        is_outgoing: input.is_outgoing ? 1 : 0,
+        is_edited: input.is_edited ? 1 : 0,
+        is_pinned: input.is_pinned ? 1 : 0,
+        is_deleted: input.is_deleted ? 1 : 0,
+        reply_to_id: input.reply_to_id ?? null,
+        forward_from_id: input.forward_from_id ?? null,
+        edit_date: input.edit_date ?? null,
+        date: input.date,
+        fetched_at: fetchedAt,
+        chat_title: chat?.title ?? null,
+        chat_username: chat?.username ?? null,
+        chat_type: chat?.type ?? null,
+        sender_username: u?.username ?? null,
+        sender_first_name: u?.first_name ?? null,
+        sender_last_name: u?.last_name ?? null,
+        raw_json: input.raw_json,
+      }
+    })
+    .sort((a, b) => b.message_id - a.message_id)
 }
 
 const PEER_HINT = 'run tg chats list --fresh or pass the @username'
@@ -158,9 +196,10 @@ async function callHistory(
 }
 
 /**
- * Fetch one window from Telegram, cache it and read it back from the cache,
- * so API items are exactly cache items. Messages outside the window are
- * dropped, and a long page keeps the `limit` messages closest to its anchor.
+ * Fetch one window from Telegram and cache it. Its rows come back in the
+ * cache's row shape, so API items are exactly cache items. Messages outside
+ * the window are dropped, and a long page keeps the `limit` messages closest
+ * to its anchor.
  */
 export async function fetchHistoryPage(
   client: CallClient,
@@ -194,8 +233,7 @@ export async function fetchHistoryPage(
       ? { before: window.before, reachedStart: short }
       : { after: window.after, before: short ? window.before : undefined }
 
-  const ids = cacheHistoryResponse(cacheDb, chat.chatId, page, users, bounds)
-  return createMessagesHistory(cacheDb).getMany(chat.chatId, ids)
+  return cacheHistoryResponse(cacheDb, chat.chatId, page, users, bounds)
 }
 
 export interface ListHistoryOptions {
@@ -351,8 +389,8 @@ function closest(ids: number[], to: number, side: 1 | -1, count: number) {
 }
 
 /**
- * Fetch a message and `context` messages on each side from Telegram, cache
- * them and read them back from the cache.
+ * Fetch a message and `context` messages on each side from Telegram and
+ * cache them. Their rows come back in the cache's row shape.
  */
 export async function fetchMessageAround(
   client: CallClient,
@@ -380,10 +418,9 @@ export async function fetchMessageAround(
   const page = messages.filter((message) => keep.has(rawMessageId(message)))
   // The page is a run of consecutive messages; with fewer older messages
   // than asked for, it reaches the first message of the chat
-  const stored = cacheHistoryResponse(cacheDb, chat.chatId, page, users, {
+  const rows = cacheHistoryResponse(cacheDb, chat.chatId, page, users, {
     reachedStart: older.length < context,
   })
-  const rows = createMessagesHistory(cacheDb).getMany(chat.chatId, stored)
 
   const message = rows.find((row) => row.message_id === messageId)
   if (!message) {
@@ -439,7 +476,7 @@ function readAroundFromCache(
   includeDeleted: boolean,
 ): CachedAround | null {
   const history = createMessagesHistory(cacheDb)
-  const [message] = history.getMany(chatId, [messageId])
+  const message = history.get(chatId, messageId)
   if (!message) return null
   if (context === 0) {
     return { around: { message, newer: [], older: [] }, complete: true }

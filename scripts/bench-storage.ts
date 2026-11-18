@@ -466,12 +466,7 @@ function writeOldFormPage(
 ): void {
   const usersCache = createUsersCache(db)
   const messagesCache = createMessagesCache(db)
-  const { inputs } = createMessageInputs(
-    page.messages,
-    chat.chatId,
-    Number.MAX_SAFE_INTEGER,
-    0,
-  )
+  const inputs = createMessageInputs(page.messages, chat.chatId)
   inputs.forEach((input, k) => {
     const raw = page.messages[k]!
     input.raw_json = JSON.stringify(raw)

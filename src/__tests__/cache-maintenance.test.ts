@@ -21,6 +21,7 @@ import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { getDefaultRetentionConfig } from '../db/types'
+import { takePartIn } from './helpers/participation'
 
 const SECOND = 1000
 const HOUR = 60 * 60 * SECOND
@@ -35,6 +36,7 @@ function openCache(path: string): Database {
   const cache = new Database(path)
   initCacheSchema(cache)
   initSyncSchema(cache)
+  takePartIn(cache, -1001234567890)
   return cache
 }
 

@@ -1,7 +1,7 @@
 /**
  * Additional tests for daemon account connection + event wiring
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import * as mtcute from '@mtcute/bun'
 import {
@@ -12,24 +12,18 @@ import {
   type TelegramClient,
   type tl,
 } from '@mtcute/bun'
-import {
-  createDaemonRuntime,
-  type DaemonContext,
-} from '../daemon/daemon-context'
+import type { DaemonContext } from '../daemon/daemon-context'
 import { buildInputPeer } from '../daemon/sync-worker-real-helpers'
 import type { AccountConnectionState } from '../daemon/types'
 import type { AccountsDbInterface } from '../db'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createChatsCache } from '../db/chats-cache'
 import { createMessagesCache } from '../db/messages-cache'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import type { Account } from '../types'
 import { toLong } from '../utils/long'
-import {
-  addAccountRuntime,
-  createAccountCacheDb,
-} from './helpers/daemon-runtime'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { addAccountRuntime, testDaemonContext } from './helpers/daemon-runtime'
+import { takePartIn } from './helpers/participation'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 type AccountCreateInput = Parameters<AccountsDbInterface['create']>[0]
@@ -153,15 +147,6 @@ mock.module('@mtcute/bun', () => ({
   },
 }))
 
-function createLogger() {
-  return {
-    info: mock(() => {}),
-    debug: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-  }
-}
-
 function createAccountsDb(seed: AccountSeed[]): AccountsDbInterface {
   const accounts = new Map<number, Account>()
   let activeId: number | null = null
@@ -229,49 +214,17 @@ function createAccountsDb(seed: AccountSeed[]): AccountsDbInterface {
 
 /** A context whose accounts all have a runtime on the test cache */
 function createContext(accountsDb: AccountsDbInterface): DaemonContext {
-  const ctx = createBareContext(accountsDb)
+  const ctx = testDaemonContext({ accountsDb })
   for (const account of accountsDb.getAll()) {
     addAccountRuntime(ctx, account.id, testCacheDb)
   }
   return ctx
 }
 
-function createBareContext(accountsDb: AccountsDbInterface): DaemonContext {
-  return {
-    dataDir: '/tmp/tgcli',
-    pidPath: '/tmp/tgcli.pid',
-    verbosity: 'normal',
-    reconnectConfig: {
-      initialDelayMs: 1000,
-      maxDelayMs: 4000,
-      maxAttempts: 2,
-      backoffMultiplier: 2,
-    },
-    shutdownTimeoutMs: 1_000_000,
-    logger: createLogger(),
-    pidFile: {
-      acquire: () => {},
-      release: () => {},
-      read: () => null,
-      isRunning: () => false,
-      sendSignal: () => false,
-      getPath: () => '/tmp/tgcli.pid',
-    },
-    state: {
-      running: true,
-      accounts: new Map(),
-      shutdownRequested: false,
-    },
-    accountsDb,
-    runtime: createDaemonRuntime(),
-  }
-}
-
 describe('daemon-accounts: connection + event wiring', () => {
   beforeEach(() => {
-    testCacheDb = new Database(':memory:')
-    initCacheSchema(testCacheDb)
-    initSyncSchema(testCacheDb)
+    testCacheDb = createAccountCacheDb()
+    takePartIn(testCacheDb, -4242, -5151, -1001234567890)
 
     nextGetMe = { id: 555, firstName: 'Test', lastName: 'User' }
     startError = null
@@ -527,9 +480,8 @@ describe('daemon-accounts: connection + event wiring', () => {
       users: [alice, self],
       chats: [news, bookClub],
     })
-    const historyDb = new Database(':memory:')
-    initCacheSchema(historyDb)
-    initSyncSchema(historyDb)
+    const historyDb = createAccountCacheDb()
+    takePartIn(historyDb, -4242, -1001234567890)
 
     const senders = messages.map((raw) => {
       const msg = new mtcute.Message(raw, peers)
@@ -1359,7 +1311,7 @@ describe('daemon-accounts: connection + event wiring', () => {
         { id: 1, phone: '+15550000001', user_id: 101 },
         { id: 2, phone: '+15550000002', user_id: 202 },
       ])
-      const ctx = createBareContext(accountsDb)
+      const ctx = testDaemonContext({ accountsDb })
       addAccountRuntime(ctx, 1, testCacheDb)
       addAccountRuntime(ctx, 2, otherDb)
       const { setupEventHandlers } = await import('../daemon/daemon-accounts')

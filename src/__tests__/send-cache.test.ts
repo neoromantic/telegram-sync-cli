@@ -17,13 +17,13 @@ import { createChatsCache } from '../db/chats-cache'
 import { createMessageAttachmentsStore } from '../db/message-attachments'
 import { createMessagesCache } from '../db/messages-cache'
 import { createMessagesSearch } from '../db/messages-search'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import { extractAttachment } from '../utils/attachment'
 import { toLong } from '../utils/long'
 import { toPeerIdFromInputPeer } from '../utils/telegram-peer-ids'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { pdfDocumentMessage } from './helpers/media-messages'
+import { takePartIn } from './helpers/participation'
 import { assertPeerIdInvariants } from './helpers/peer-id-invariants'
 
 const SELF_ID = 5550001
@@ -329,9 +329,8 @@ describe('cacheSentMessage', () => {
   let db: Database
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
+    takePartIn(db, CHANNEL_PEER_ID)
   })
 
   it('upserts the message with fetched_at and makes it searchable', async () => {
