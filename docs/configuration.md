@@ -54,7 +54,6 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 ├── accounts/<id>/       # One directory per account (mode 0700)
 │   ├── cache.db         # The account's cache, sync state, jobs and rate limits
 │   └── media/           # Files tg media download saved, one folder per file
-├── models/              # Where tg media transcribe's errors suggest a whisper.cpp model goes
 ├── daemon.pid           # PID file when daemon is running
 ├── config.json          # User config
 └── telemetry.json       # Usage stats: install ID, on/off, notice seen
@@ -173,7 +172,7 @@ Supported keys:
   as whisper.cpp, any other as an openai-whisper-compatible CLI. Without it, tg looks on `PATH`
   for `whisper-cli`, `mlx_whisper`, `whisper-ctranslate2` and `whisper`, in that order
 - `transcribe.model` (string): the model; for whisper.cpp the path of a model file, which it
-  needs (the error for a missing one suggests `<dataDir>/models/ggml-large-v3-turbo-q5_0.bin`). Defaults: `mlx-community/whisper-large-v3-turbo` for `mlx_whisper`, `large-v3-turbo`
+  needs (the error for a missing one suggests `~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin`). Defaults: `mlx-community/whisper-large-v3-turbo` for `mlx_whisper`, `large-v3-turbo`
   for the others ([media.md](media.md#transcribe))
 - `transcribe.language` (string, default none): the language code of the speech, such as `ru`;
   without it the program detects the language. `--language` overrides it

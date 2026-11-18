@@ -6,10 +6,10 @@
  */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { defineCommand } from 'citty'
 
-import { getConfigPath, loadConfig } from '../../config'
+import { loadConfig } from '../../config'
 import { getAccountMediaDir } from '../../db'
 import {
   createMessageTranscriptsStore,
@@ -37,6 +37,7 @@ import { downloadMedia } from './download-media'
 import { MediaError, reportMediaError } from './errors'
 import {
   convertToWav,
+  defaultModelPath,
   findTranscriber,
   installSuggestion,
   type Runner,
@@ -85,10 +86,10 @@ function notSpeech(chatId: number, messageId: number, kind: string | null) {
 
 /** The runner and ffmpeg, or the whole run fails: nothing can be transcribed */
 function requireTranscriber(config: Parameters<typeof findTranscriber>[0]) {
-  const dataDir = dirname(getConfigPath())
+  const suggestedModel = defaultModelPath()
   let found: ReturnType<typeof findTranscriber>
   try {
-    found = findTranscriber(config, dataDir)
+    found = findTranscriber(config, suggestedModel)
   } catch (err) {
     reportMediaError(err)
   }
@@ -105,7 +106,7 @@ function requireTranscriber(config: Parameters<typeof findTranscriber>[0]) {
       { searched: found.searched, runner: found.runner, ffmpeg: found.ffmpeg },
       installSuggestion(
         { runner: !found.runner, ffmpeg: !found.ffmpeg },
-        dataDir,
+        suggestedModel,
       ),
     )
   }

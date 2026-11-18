@@ -16,7 +16,10 @@ import { join } from 'node:path'
 
 import { documentMessage } from '../__tests__/helpers/media-messages'
 import { photoMessage } from '../__tests__/helpers/photo-message'
-import { installSuggestion } from '../commands/media/transcriber'
+import {
+  defaultModelPath,
+  installSuggestion,
+} from '../commands/media/transcriber'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
@@ -89,6 +92,7 @@ describe('E2E: media transcribe', () => {
   let toolsDir: string
   let logPath: string
   let mediaDir: string
+  let cacheHome: string
 
   beforeEach(() => {
     env = createTestEnvironment('media-transcribe')
@@ -108,6 +112,7 @@ describe('E2E: media transcribe', () => {
     }
     logPath = join(env.dataDir, 'calls.log')
     writeFileSync(logPath, '')
+    cacheHome = join(env.dataDir, 'cache')
   })
 
   afterEach(() => {
@@ -180,6 +185,7 @@ describe('E2E: media transcribe', () => {
         ...env.getCliOptions().env,
         ...NO_CREDENTIALS,
         PATH: `${binDir}:${toolsDir}`,
+        XDG_CACHE_HOME: cacheHome,
         FAKE_LOG: logPath,
         ...extraEnv,
       },
@@ -396,7 +402,7 @@ describe('E2E: media transcribe', () => {
 
     const result = await transcribe('--id', '1')
 
-    const model = join(env.dataDir, 'models', 'ggml-large-v3-turbo-q5_0.bin')
+    const model = join(cacheHome, 'whisper-cli', 'ggml-large-v3-turbo-q5_0.bin')
     expect(result.exitCode).toBe(3)
     expect(result.json).toEqual({
       success: false,
@@ -529,12 +535,16 @@ describe('E2E: media transcribe', () => {
         },
         suggestion: installSuggestion(
           { runner: true, ffmpeg: false },
-          env.dataDir,
+          defaultModelPath(cacheHome),
         ),
       },
     })
     if (process.platform !== 'win32') {
-      const model = join(env.dataDir, 'models', 'ggml-large-v3-turbo-q5_0.bin')
+      const model = join(
+        cacheHome,
+        'whisper-cli',
+        'ggml-large-v3-turbo-q5_0.bin',
+      )
       expect(
         (result.json as { error: { suggestion: string } }).error.suggestion,
       ).toStartWith(

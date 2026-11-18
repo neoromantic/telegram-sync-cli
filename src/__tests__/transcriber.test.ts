@@ -9,13 +9,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
+  defaultModelPath,
   findTranscriber,
   installSuggestion,
   parseOpenAiWhisperJson,
   parseWhisperCppJson,
 } from '../commands/media/transcriber'
 
-const DATA_DIR = '/data/tg'
+const MODEL = '/cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin'
 
 /** whisper-cli 1.9.5 -l auto -oj, large-v3-turbo-q5_0 */
 const WHISPER_CPP_OUTPUT = {
@@ -124,7 +125,7 @@ describe('findTranscriber', () => {
 
   it('takes the first runner on PATH, with its default model', () => {
     expect(
-      findTranscriber({}, DATA_DIR, on('whisper', 'mlx_whisper', 'ffmpeg')),
+      findTranscriber({}, MODEL, on('whisper', 'mlx_whisper', 'ffmpeg')),
     ).toEqual({
       runner: {
         name: 'mlx_whisper',
@@ -136,12 +137,12 @@ describe('findTranscriber', () => {
       ffmpeg: '/bin/ffmpeg',
     })
     expect(
-      findTranscriber({ model: 'small' }, DATA_DIR, on('whisper', 'ffmpeg')),
+      findTranscriber({ model: 'small' }, MODEL, on('whisper', 'ffmpeg')),
     ).toMatchObject({ runner: { name: 'whisper', model: 'small' } })
   })
 
   it('reports what is missing', () => {
-    expect(findTranscriber({}, DATA_DIR, on('whisper'))).toEqual({
+    expect(findTranscriber({}, MODEL, on('whisper'))).toEqual({
       missing: true,
       searched: [
         'whisper-cli',
@@ -155,7 +156,7 @@ describe('findTranscriber', () => {
     expect(
       findTranscriber(
         { command: 'my-whisper' },
-        DATA_DIR,
+        MODEL,
         on('whisper', 'ffmpeg'),
       ),
     ).toMatchObject({ missing: true, searched: ['my-whisper'], runner: null })
@@ -166,14 +167,14 @@ describe('findTranscriber', () => {
     try {
       const model = join(dir, 'ggml-example.bin')
       const which = on('whisper-cli', 'ffmpeg')
-      expect(() => findTranscriber({}, DATA_DIR, which)).toThrow(
+      expect(() => findTranscriber({}, MODEL, which)).toThrow(
         'whisper.cpp needs a model file',
       )
-      expect(() => findTranscriber({ model }, DATA_DIR, which)).toThrow(
+      expect(() => findTranscriber({ model }, MODEL, which)).toThrow(
         'not found or not readable',
       )
       writeFileSync(model, 'x')
-      expect(findTranscriber({ model }, DATA_DIR, which)).toMatchObject({
+      expect(findTranscriber({ model }, MODEL, which)).toMatchObject({
         runner: { shape: 'whisper.cpp', model, modelName: 'ggml-example.bin' },
       })
     } finally {
@@ -184,37 +185,31 @@ describe('findTranscriber', () => {
 
 describe('installSuggestion', () => {
   const both = { runner: true, ffmpeg: true }
-  const model = '/data/tg/models/ggml-large-v3-turbo-q5_0.bin'
 
   it('names whisper.cpp, its model and the config command', () => {
-    expect(installSuggestion(both, DATA_DIR, 'linux', 'x64')).toBe(
-      `Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o ${model} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.model ${model}`,
+    expect(installSuggestion(both, MODEL, 'linux', 'x64')).toBe(
+      `Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o ${MODEL} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.model ${MODEL}`,
     )
   })
 
   it('adds mlx-whisper on Apple Silicon', () => {
-    expect(installSuggestion(both, DATA_DIR, 'darwin', 'arm64')).toEndWith(
+    expect(installSuggestion(both, MODEL, 'darwin', 'arm64')).toEndWith(
       '. Or, faster on Apple Silicon and downloading its own model on first use: uv tool install mlx-whisper && brew install ffmpeg',
     )
   })
 
   it('names whisper-ctranslate2 on Windows, and ffmpeg alone when only it is missing', () => {
-    expect(installSuggestion(both, DATA_DIR, 'win32', 'x64')).toBe(
+    expect(installSuggestion(both, MODEL, 'win32', 'x64')).toBe(
       'Install a runner, which downloads its own model on first use: uv tool install whisper-ctranslate2. Install ffmpeg and put it on PATH',
     )
     expect(
-      installSuggestion(
-        { runner: false, ffmpeg: true },
-        DATA_DIR,
-        'linux',
-        'x64',
-      ),
+      installSuggestion({ runner: false, ffmpeg: true }, MODEL, 'linux', 'x64'),
     ).toBe('brew install ffmpeg')
   })
 
-  it('quotes a data directory with a space', () => {
-    expect(installSuggestion(both, '/data/my tg', 'linux', 'x64')).toContain(
-      "-o '/data/my tg/models/ggml-large-v3-turbo-q5_0.bin'",
-    )
+  it('quotes a model path with a space', () => {
+    expect(
+      installSuggestion(both, defaultModelPath('/my cache'), 'linux', 'x64'),
+    ).toContain("-o '/my cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin'")
   })
 })

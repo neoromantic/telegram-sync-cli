@@ -4,6 +4,7 @@
  * through ffmpeg to 16 kHz mono WAV first, so every runner reads one format.
  */
 import { accessSync, constants, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 
 import type { TranscribeConfigFile } from '../../config'
@@ -79,9 +80,14 @@ function modelCommands(file: string): string {
   return `download the ${WHISPER_CPP_MODEL.size} model and point tg at it: ${downloadCommand(file)} && tg config set transcribe.model ${shellArg(file)}`
 }
 
-/** Where the suggested whisper.cpp model goes: <dataDir>/models */
-export function defaultModelPath(dataDir: string): string {
-  return join(dataDir, 'models', WHISPER_CPP_MODEL.file)
+/**
+ * Where the suggested whisper.cpp model goes: the user's cache directory,
+ * not tg's data directory, because other programs can use the same file
+ */
+export function defaultModelPath(
+  cacheHome = process.env.XDG_CACHE_HOME || join(homedir(), '.cache'),
+): string {
+  return join(cacheHome, 'whisper-cli', WHISPER_CPP_MODEL.file)
 }
 
 function readable(path: string): boolean {
@@ -99,7 +105,7 @@ function readable(path: string): boolean {
  */
 export function findTranscriber(
   config: TranscribeConfigFile,
-  dataDir: string,
+  suggestedModel: string,
   which: (name: string) => string | null = (name) => Bun.which(name),
 ): FindResult {
   const searched = config.command ? [config.command] : [...RUNNER_NAMES]
@@ -124,7 +130,7 @@ export function findTranscriber(
         ErrorCodes.INVALID_ARGS,
         'whisper.cpp needs a model file: transcribe.model is not set',
         { runner: path, model: null },
-        `Run whisper.cpp with a model: ${modelCommands(defaultModelPath(dataDir))}`,
+        `Run whisper.cpp with a model: ${modelCommands(suggestedModel)}`,
       )
     }
     if (!readable(model)) {
@@ -147,7 +153,7 @@ export function findTranscriber(
 /** Install commands for this OS, for the error when something is missing */
 export function installSuggestion(
   missing: { runner: boolean; ffmpeg: boolean },
-  dataDir: string,
+  suggestedModel: string,
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
 ): string {
@@ -161,7 +167,7 @@ export function installSuggestion(
       .join('. ')
   }
   if (!missing.runner) return 'brew install ffmpeg'
-  const whisperCpp = `Install whisper.cpp: brew install whisper-cpp ffmpeg, then ${modelCommands(defaultModelPath(dataDir))}`
+  const whisperCpp = `Install whisper.cpp: brew install whisper-cpp ffmpeg, then ${modelCommands(suggestedModel)}`
   if (platform === 'darwin' && arch === 'arm64') {
     return `${whisperCpp}. Or, faster on Apple Silicon and downloading its own model on first use: uv tool install mlx-whisper${missing.ffmpeg ? ' && brew install ffmpeg' : ''}`
   }

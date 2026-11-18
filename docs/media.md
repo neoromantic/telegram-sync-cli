@@ -192,12 +192,13 @@ whisper.cpp is the one native program packaged for all three systems, so it is t
 choice. Its models are on Hugging Face at
 [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp): `ggml-large-v3-turbo-q5_0.bin`
 is 574 MB, `ggml-large-v3-turbo.bin` 1.6 GB. tg never downloads one; the errors print the
-commands, with the model under the data directory:
+commands. They put the model in the user's cache directory (`$XDG_CACHE_HOME`, else `~/.cache`),
+not in tg's data directory, because other programs can use the same file:
 
 ```bash
-curl -L --create-dirs -o ~/.telegram-sync-cli/models/ggml-large-v3-turbo-q5_0.bin \
+curl -L --create-dirs -o ~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
-tg config set transcribe.model ~/.telegram-sync-cli/models/ggml-large-v3-turbo-q5_0.bin
+tg config set transcribe.model ~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin
 ```
 
 Without `transcribe.command`, tg looks on `PATH` for `whisper-cli`, `mlx_whisper`,
@@ -211,7 +212,7 @@ Each setup problem is an error whose `suggestion` holds the commands to run:
 |---------|-------|--------------|
 | no program on `PATH` | `TRANSCRIBER_NOT_FOUND` (exit 1), `details: { searched, runner: null, ffmpeg }` | the install command for this OS; for whisper.cpp also the model download and `tg config set transcribe.model` (on Apple Silicon, mlx-whisper as the faster option) |
 | no ffmpeg | `TRANSCRIBER_NOT_FOUND`, `details.ffmpeg: null` | `brew install ffmpeg` (Windows: install it and put it on `PATH`) |
-| whisper.cpp, `transcribe.model` not set | `INVALID_ARGS` (exit 3), `details: { runner, model: null }` | the `curl` download into `<data dir>/models/` and the `tg config set` for that path |
+| whisper.cpp, `transcribe.model` not set | `INVALID_ARGS` (exit 3), `details: { runner, model: null }` | the `curl` download into `~/.cache/whisper-cli/` and the `tg config set` for that path |
 | whisper.cpp, model file missing or unreadable | `INVALID_ARGS`, `details: { runner, model }` | the `curl` download to that path |
 | the program ran and wrote no transcript | `GENERAL_ERROR` for that message, `details: { runner, exitCode, stderr }` (the last 20 lines) | none |
 
@@ -228,7 +229,7 @@ Example, on Linux with ffmpeg but no program:
       "runner": null,
       "ffmpeg": "/usr/bin/ffmpeg"
     },
-    "suggestion": "Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o /home/example/.telegram-sync-cli/models/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.model /home/example/.telegram-sync-cli/models/ggml-large-v3-turbo-q5_0.bin"
+    "suggestion": "Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.model /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin"
   }
 }
 ```
