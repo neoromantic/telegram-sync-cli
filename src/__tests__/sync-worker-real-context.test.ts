@@ -11,7 +11,6 @@ import {
 import { DaemonStopError } from '../daemon/daemon-utils'
 import {
   canMakeApiCall,
-  getInputPeer,
   getWaitTime,
   resolveFloodWaitResult,
   resolveJobError,
@@ -28,43 +27,19 @@ import { createChatsCache } from '../db/chats-cache'
 import { createHistoryRanges } from '../db/history-ranges'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
 import { createSenderLookups } from '../db/sender-lookups'
 import { createSyncJobsService } from '../db/sync-jobs'
-import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { communityDialog, fakeDialog } from './helpers/fake-dialogs'
+import { assertPeer, expectLongEqual } from './helpers/input-peer'
 
 type MockCall = <T extends tl.RpcMethod>(
   request: T,
 ) => Promise<tl.RpcCallReturn[T['_']]>
 
 type MockClient = Pick<TelegramClient, 'call'>
-
-function assertInputPeerUser(
-  peer: tl.TypeInputPeer | null,
-): asserts peer is tl.RawInputPeerUser {
-  if (peer?._ !== 'inputPeerUser') {
-    throw new Error(`Expected inputPeerUser, got ${peer?._ ?? 'null'}`)
-  }
-}
-
-function assertInputPeerChat(
-  peer: tl.TypeInputPeer | null,
-): asserts peer is tl.RawInputPeerChat {
-  if (peer?._ !== 'inputPeerChat') {
-    throw new Error(`Expected inputPeerChat, got ${peer?._ ?? 'null'}`)
-  }
-}
-
-function assertInputPeerChannel(
-  peer: tl.TypeInputPeer | null,
-): asserts peer is tl.RawInputPeerChannel {
-  if (peer?._ !== 'inputPeerChannel') {
-    throw new Error(`Expected inputPeerChannel, got ${peer?._ ?? 'null'}`)
-  }
-}
 
 function isGetHistoryRequest(
   request: tl.RpcMethod,
@@ -87,9 +62,7 @@ describe('sync-worker real helpers/context', () => {
   let db: Database
 
   beforeEach(() => {
-    const testDb = createTestCacheDatabase()
-    db = testDb.db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
   })
 
   afterEach(() => {
@@ -102,9 +75,9 @@ describe('sync-worker real helpers/context', () => {
       const peer = buildInputPeer(123, chatsCache)
 
       expect(peer).not.toBeNull()
-      assertInputPeerUser(peer)
+      assertPeer(peer, 'inputPeerUser')
       expect(peer.userId).toBe(123)
-      expect(peer.accessHash?.toString()).toBe(toLong(0).toString())
+      expectLongEqual(peer.accessHash, 0)
     })
 
     it('builds an uncached basic group, which needs no access hash', () => {
@@ -132,13 +105,13 @@ describe('sync-worker real helpers/context', () => {
       const groupPeer = buildInputPeer(-2, chatsCache)
       const channelPeer = buildInputPeer(-1000000000003, chatsCache)
 
-      assertInputPeerUser(privatePeer)
-      expect(privatePeer.accessHash?.toString()).toBe(toLong(777).toString())
-      assertInputPeerChat(groupPeer)
+      assertPeer(privatePeer, 'inputPeerUser')
+      expectLongEqual(privatePeer.accessHash, 777)
+      assertPeer(groupPeer, 'inputPeerChat')
       expect(groupPeer.chatId).toBe(2)
-      assertInputPeerChannel(channelPeer)
+      assertPeer(channelPeer, 'inputPeerChannel')
       expect(channelPeer.channelId).toBe(3)
-      expect(channelPeer.accessHash?.toString()).toBe(toLong(777).toString())
+      expectLongEqual(channelPeer.accessHash, 777)
       expect(buildInputPeer(-1001234567890, chatsCache)).toEqual({
         _: 'inputPeerChannel',
         channelId: 1234567890,
@@ -214,18 +187,14 @@ describe('sync-worker real helpers/context', () => {
   })
 
   describe('createMessageInputs', () => {
-    it('creates inputs and updates min/max ids', () => {
+    it('creates inputs for the messages it can parse', () => {
       const messages = [
         { _: 'message', id: 10, date: 1700000000, message: 'new' },
         { _: 'messageEmpty', id: 0, date: 0 },
         { _: 'message', id: 5, date: 1699999999, message: 'old' },
       ]
 
-      const result = createMessageInputs(messages, 1, 999, 0)
-
-      expect(result.inputs.length).toBe(2)
-      expect(result.minId).toBe(5)
-      expect(result.maxId).toBe(10)
+      expect(createMessageInputs(messages, 1).length).toBe(2)
     })
   })
 
@@ -396,7 +365,11 @@ describe('sync-worker real helpers/context', () => {
 
       expect(canMakeApiCall(ctx)).toBe(true)
       rateLimits.recordCall('messages.getHistory')
-      expect(rateLimits.getCallCount('messages.getHistory', 1)).toBe(1)
+      expect(
+        db
+          .query('SELECT call_count FROM rate_limits WHERE method = ?')
+          .all('messages.getHistory'),
+      ).toEqual([{ call_count: 1 }])
     })
 
     it('returns wait time when blocked and resolves flood waits', () => {
@@ -510,26 +483,6 @@ describe('sync-worker real helpers/context', () => {
         error: expect.stringContaining('CHANNEL_PRIVATE'),
         permanent: true,
       })
-    })
-
-    it('delegates getInputPeer to buildInputPeer', () => {
-      const chatsCache = createChatsCache(db)
-      const ctx: RealSyncWorkerContext = {
-        client: createMockClient(),
-        messagesCache: createMessagesCache(db),
-        historyRanges: createHistoryRanges(db),
-        chatSyncState: createChatSyncStateService(db),
-        jobsService: createSyncJobsService(db),
-        rateLimits: createRateLimitsService(db),
-        chatsCache,
-        usersCache: createUsersCache(db),
-        senderLookups: createSenderLookups(db),
-        config: { apiMethod: 'messages.getHistory', batchSize: 1 },
-      }
-
-      const inputPeer = getInputPeer(ctx, 77)
-      assertInputPeerUser(inputPeer)
-      expect(inputPeer.userId).toBe(77)
     })
   })
 })

@@ -1,5 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import { type TelegramClient, tl } from '@mtcute/bun'
+import { ConfigError } from '../config'
+import { getErrorMessage } from '../daemon/daemon-utils'
 import { getAccountCacheDb } from '../db'
 import {
   createRateLimitsService,
@@ -45,6 +47,14 @@ export function reportRateLimit(err: RateLimitError): never {
   error(ErrorCodes.RATE_LIMITED, message, details, suggestion)
 }
 
+/** Report a config error or a rate limit and exit; any other error returns */
+export function reportConfigOrRateLimitError(err: unknown): void {
+  if (err instanceof ConfigError) {
+    error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+  }
+  if (isRateLimitError(err)) reportRateLimit(err)
+}
+
 const services = new Map<number, { db: Database; service: RateLimitsService }>()
 
 /**
@@ -86,16 +96,6 @@ function extractFloodWaitSeconds(error: unknown): number | null {
 function isFloodWait(error: unknown): boolean {
   if (tl.RpcError.is(error)) return error.code === tl.RpcError.FLOOD
   return error instanceof Error && /FLOOD_WAIT_\d+/.test(error.message)
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  if (typeof error === 'string') {
-    return error
-  }
-  return String(error)
 }
 
 /** Telegram's error code (420 for a FLOOD_WAIT), or null for another error */

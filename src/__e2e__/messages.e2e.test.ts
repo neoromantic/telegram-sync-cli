@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
 import { LEGACY } from '../__tests__/helpers/legacy-cache'
 import { videoMessage } from '../__tests__/helpers/media-messages'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { assertPeerIdInvariants } from '../__tests__/helpers/peer-id-invariants'
 import { photoMessage } from '../__tests__/helpers/photo-message'
 import {
@@ -384,6 +385,8 @@ function seedCacheData(db: Database): void {
       fakeDialog({ kind: 'user', id: 10, title: 'Alice Able' }),
     ].map(dialogToCacheInput),
   )
+
+  takePartIn(db, -4242, -1001234567890)
 
   createMessagesCache(db).upsertBatch([
     syncedMessage(TEAM_CHAT_PEER, 1, 'hello team', ALICE_PEER),
@@ -934,6 +937,7 @@ describe('E2E: Message attachments', () => {
     const [textInput, photoInput, videoInput] = [text, photo, video].map(
       (raw) => parseRawMessage(raw, LAKE_CLUB_ID)!,
     )
+    takePartIn(db, LAKE_CLUB_ID)
     createMessagesCache(db).upsertBatch([
       textInput!,
       photoInput!,
@@ -1093,6 +1097,7 @@ describe('E2E: Service message actions', () => {
         }),
       ),
     ])
+    takePartIn(db, HARBOR_ID)
     const messages = createMessagesCache(db)
     messages.upsertBatch(calls.map((raw) => parseRawMessage(raw, CALLER_ID)!))
     messages.upsertBatch(harbor.map((raw) => parseRawMessage(raw, HARBOR_ID)!))
@@ -1213,6 +1218,7 @@ describe('E2E: Rich messages', () => {
       date: 1_760_000_001,
       message: 'report coming',
     }
+    takePartIn(db, GARDEN_ID)
     createMessagesCache(db).upsertBatch(
       [plainMessage, richTlMessage(peer, 2, REPORT_BLOCKS)].map(
         (raw) => parseRawMessage(raw, GARDEN_ID)!,
@@ -1287,6 +1293,7 @@ describe('E2E: Rich messages', () => {
 function seedHistory(db: Database): void {
   const now = Date.now()
   const usersCache = createUsersCache(db)
+  takePartIn(db, -4242, -1001234567890)
   const messagesCache = createMessagesCache(db)
 
   usersCache.upsert({

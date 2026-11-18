@@ -154,34 +154,6 @@ describe('Skill Command Helpers', () => {
   })
 })
 
-describe('getErrorMessage', () => {
-  it('returns message for Error instances', () => {
-    const err = new Error('Test error message')
-    expect(skillModule.getErrorMessage(err)).toBe('Test error message')
-  })
-
-  it('returns stringified value for non-Error objects', () => {
-    expect(skillModule.getErrorMessage('string error')).toBe('string error')
-    expect(skillModule.getErrorMessage(42)).toBe('42')
-    expect(skillModule.getErrorMessage(null)).toBe('null')
-    expect(skillModule.getErrorMessage(undefined)).toBe('undefined')
-  })
-
-  it('returns stringified value for plain objects', () => {
-    const obj = { code: 'ERR', message: 'fail' }
-    expect(skillModule.getErrorMessage(obj)).toBe('[object Object]')
-  })
-
-  it('uses custom toString for objects with it', () => {
-    const customObj = {
-      toString() {
-        return 'custom error string'
-      },
-    }
-    expect(skillModule.getErrorMessage(customObj)).toBe('custom error string')
-  })
-})
-
 describe('tryStat', () => {
   it('returns exists: true and isDirectory for existing directory', async () => {
     const result = await skillModule.tryStat(dataDir)

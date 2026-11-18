@@ -11,10 +11,9 @@ import Long from 'long'
 import { buildApiRequest } from '../commands/api'
 import { createDmLookup, resolvePeer } from '../commands/send/peer-resolver'
 import { createChatsCache } from '../db/chats-cache'
-import { createTestCacheDatabase } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 const HISTORY_ZEROS = {
   offsetId: 0,
@@ -30,8 +29,7 @@ describe('buildApiRequest', () => {
   let call: ReturnType<typeof mock>
 
   beforeEach(() => {
-    db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     createUsersCache(db).upsert({
       user_id: '1001',
       username: 'alice',

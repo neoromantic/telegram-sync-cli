@@ -21,17 +21,13 @@ import {
   setupSignalHandlers,
 } from '../daemon/daemon-accounts'
 import { floodWaitSecondsOf } from '../daemon/daemon-api-activity'
-import {
-  type AccountRuntime,
-  createDaemonRuntime,
-  type DaemonContext,
-  requestShutdown,
-} from '../daemon/daemon-context'
+import { type AccountRuntime, requestShutdown } from '../daemon/daemon-context'
 import { isDaemonStopError } from '../daemon/daemon-utils'
 import { createSyncPacer } from '../daemon/sync-pacing'
 import type { AccountConnectionState } from '../daemon/types'
 import { createRateLimitsService } from '../db/rate-limits'
-import { createTestCacheDatabase } from '../db/schema'
+import { createAccountCacheDb } from './helpers/cache-db'
+import { testDaemonContext } from './helpers/daemon-runtime'
 
 class MockEmitter<T> {
   handlers: Array<(value: T) => void> = []
@@ -78,65 +74,9 @@ const createClientWithEvents = (): TelegramClient => {
 const asTelegramClient = (client: unknown): TelegramClient =>
   client as TelegramClient
 
-function createLogger() {
-  return {
-    info: mock(() => {}),
-    debug: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-  }
-}
-
-function createContext(): DaemonContext {
-  return {
-    dataDir: '/tmp/tgcli',
-    pidPath: '/tmp/tgcli.pid',
-    verbosity: 'normal',
-    reconnectConfig: {
-      initialDelayMs: 1000,
-      maxDelayMs: 4000,
-      maxAttempts: 2,
-      backoffMultiplier: 2,
-    },
-    shutdownTimeoutMs: 1_000_000,
-    logger: createLogger(),
-    pidFile: {
-      acquire: () => {},
-      release: () => {},
-      read: () => null,
-      isRunning: () => false,
-      sendSignal: () => false,
-      getPath: () => '/tmp/tgcli.pid',
-    },
-    state: {
-      running: true,
-      accounts: new Map(),
-      shutdownRequested: false,
-    },
-    accountsDb: {
-      getAll: () => [],
-      getById: () => null,
-      getByPhone: () => null,
-      getByUserId: () => null,
-      getByUsername: () => null,
-      getAllByLabel: () => [],
-      getActive: () => null,
-      create: () => {
-        throw new Error('not used')
-      },
-      update: () => null,
-      updateSession: () => {},
-      setActive: () => {},
-      delete: () => false,
-      count: () => 0,
-    },
-    runtime: createDaemonRuntime(),
-  }
-}
-
 describe('removeEventHandlers', () => {
   it('clears handlers and unregisters events', () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const client = createClientWithEvents()
 
     const accountState: AccountConnectionState = {
@@ -168,7 +108,7 @@ describe('removeEventHandlers', () => {
 
 describe('reconnect scheduling', () => {
   it('schedules next reconnect when under max attempts', () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const accountState: AccountConnectionState = {
       accountId: 2,
       phone: '+12223334444',
@@ -184,13 +124,13 @@ describe('reconnect scheduling', () => {
   })
 
   it('does not schedule reconnect after max attempts', () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const accountState: AccountConnectionState = {
       accountId: 3,
       phone: '+19990000000',
       name: null,
       status: 'error',
-      reconnectAttempts: 2,
+      reconnectAttempts: ctx.reconnectConfig.maxAttempts,
     }
 
     scheduleReconnect(ctx, accountState)
@@ -333,7 +273,7 @@ describe('resolveSyncChatType', () => {
 
 describe('signal/cleanup helpers', () => {
   it('setupSignalHandlers marks runtime and installs handlers once', () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const calls: string[] = []
     const originalOn = process.on
 
@@ -354,7 +294,7 @@ describe('signal/cleanup helpers', () => {
   })
 
   it('SIGTERM sets the stop flag and aborts the stop signal', () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const handlers = new Map<string, () => void>()
     const originalOn = process.on
     // Capture the handlers without installing a real listener
@@ -379,7 +319,7 @@ describe('signal/cleanup helpers', () => {
   })
 
   it('closeClientSafe destroys the client', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const client = { destroy: mock(async () => {}) }
 
     await closeClientSafe(ctx, asTelegramClient(client), 'test')
@@ -389,7 +329,7 @@ describe('signal/cleanup helpers', () => {
   })
 
   it('closeClientSafe logs errors instead of throwing', async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const errorClient = {
       destroy: () => {
         throw new Error('boom')
@@ -413,7 +353,7 @@ describe('daemonNetworkMiddlewares', () => {
   }
 
   it("ends a FLOOD_WAIT the daemon's flood waiter sleeps out when the daemon stops", async () => {
-    const ctx = createContext()
+    const ctx = testDaemonContext()
     const sent: string[] = []
     const call = compose(daemonNetworkMiddlewares(ctx, 1), async (rpc) => {
       sent.push(rpc.request._)
@@ -457,8 +397,8 @@ describe('daemonNetworkMiddlewares', () => {
 
     /** A context whose account 1 has a cache */
     function withCache() {
-      const ctx = createContext()
-      const { db } = createTestCacheDatabase()
+      const ctx = testDaemonContext()
+      const db = createAccountCacheDb()
       ctx.runtime.accounts.set(1, { accountId: 1, db } as AccountRuntime)
       return { ctx, db }
     }
@@ -480,14 +420,19 @@ describe('daemonNetworkMiddlewares', () => {
         await call(rpc(method))
       }
 
-      const rateLimits = createRateLimitsService(db)
-      const rows = rateLimits.getActivity()
+      const rows = db
+        .query<
+          { timestamp: number; success: number; error_code: string | null },
+          []
+        >('SELECT timestamp, success, error_code FROM api_activity')
+        .all()
       expect(rows).toHaveLength(4)
       for (const row of rows) {
         expect(row).toMatchObject({ success: 1, error_code: null })
         expect(row.timestamp).toBeGreaterThanOrEqual(before)
         expect(row.timestamp).toBeLessThanOrEqual(Date.now())
       }
+      const rateLimits = createRateLimitsService(db)
       const status = rateLimits.getStatus()
       expect(status.totalCalls).toBe(4)
       expect(status.callsByMethod).toEqual({
@@ -495,7 +440,14 @@ describe('daemonNetworkMiddlewares', () => {
         'communities.getJoinedCommunities': 1,
         'users.getUsers': 1,
       })
-      expect(rateLimits.getCallCount('messages.getDialogs', 1)).toBe(2)
+      // recordCall counts each request in its rate window too
+      expect(
+        db
+          .query(
+            'SELECT SUM(call_count) AS calls FROM rate_limits WHERE method = ?',
+          )
+          .get('messages.getDialogs'),
+      ).toEqual({ calls: 2 })
       db.close()
     })
 
@@ -519,21 +471,23 @@ describe('daemonNetworkMiddlewares', () => {
 
       expect(thrown).toBeInstanceOf(Error)
       expect(
-        createRateLimitsService(db)
-          .getActivity()
-          .sort((a, b) => a.id - b.id),
-      ).toMatchObject([
+        db
+          .query(
+            'SELECT method, success, error_code, context FROM api_activity ORDER BY id',
+          )
+          .all(),
+      ).toEqual([
         {
           method: 'channels.getMessages',
           success: 0,
-          error_code: 400,
-          error_message: 'CHANNEL_PRIVATE',
+          error_code: '400',
+          context: 'CHANNEL_PRIVATE',
         },
         {
           method: 'users.getUsers',
           success: 0,
           error_code: null,
-          error_message: 'connection reset',
+          context: 'connection reset',
         },
       ])
       db.close()
@@ -590,7 +544,7 @@ describe('daemonNetworkMiddlewares', () => {
     })
 
     it('sends the request without a log for an account without a cache, or a cache that fails', async () => {
-      const ctx = createContext()
+      const ctx = testDaemonContext()
       const call = compose(daemonNetworkMiddlewares(ctx, 1), async () => ({
         _: 'ok',
       }))

@@ -19,6 +19,7 @@ import { initCacheSchema } from '../db/schema'
 import { runReindexBatch } from '../db/search-reindex'
 import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache, type UserCacheInput } from '../db/users-cache'
+import { takePartIn } from './helpers/participation'
 
 const CHAT_ID = -1009000000001
 const CHANNEL_ID = -1009000000002
@@ -54,6 +55,7 @@ function open(path = ':memory:'): Database {
   const db = new Database(path)
   initCacheSchema(db)
   initSyncSchema(db)
+  takePartIn(db, -1009000000001, -1009000000002)
   return db
 }
 
@@ -328,6 +330,7 @@ describe('search disabled by an older SQLite', () => {
     expect(queue(db)).toHaveLength(1)
 
     initSyncSchema(db)
+
     expect(queue(db)).toEqual([])
     expect(matches(db, 'sender:ann')).toBe(MESSAGES)
   })
@@ -393,6 +396,7 @@ describe('the index of a cache from before #93', () => {
     }
 
     initSyncSchema(db)
+
     expect(triggerSql(db, 'messages_cache_ai')).toContain('chats_cache')
     expect(triggerSql(db, 'messages_cache_au')).toContain('chats_cache')
     expect(mergeOptions(db)).toEqual({

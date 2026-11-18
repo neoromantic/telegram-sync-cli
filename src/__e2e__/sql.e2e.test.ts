@@ -9,7 +9,7 @@ import { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-
+import { takePartIn } from '../__tests__/helpers/participation'
 import { photoMessage } from '../__tests__/helpers/photo-message'
 import { seedInChild } from '../__tests__/helpers/seed-in-child'
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
@@ -207,6 +207,7 @@ describe('E2E: SQL Command', () => {
 
   it('reads search matches with their text from the message_search_text view', async () => {
     const db = env.openCacheDb(1)
+    takePartIn(db, -1001234567890)
     createMessagesCache(db).upsertBatch(
       [
         [1, 'the deploy failed'],

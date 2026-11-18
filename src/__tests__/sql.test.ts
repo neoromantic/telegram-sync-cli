@@ -1,7 +1,6 @@
 /**
  * SQL command tests
  */
-import { Database } from 'bun:sqlite'
 import { describe, expect, it } from 'bun:test'
 
 import { CHAT_TYPE_VALUES } from '../commands/chats/helpers'
@@ -11,7 +10,6 @@ import {
   isReadOnlyQuery,
 } from '../commands/sql/helpers'
 import { formatSchemaAsSql } from '../commands/sql/schema-text'
-import { initCacheSchema } from '../db/schema'
 import {
   getColumnAnnotation,
   getColumnNames,
@@ -19,8 +17,8 @@ import {
   getTableNames,
   SCHEMA_REGISTRY,
 } from '../db/schema-annotations'
-import { initSyncSchema } from '../db/sync-schema'
 import { stringify as stringifyCsv } from '../utils/csv'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 describe('SQL Command', () => {
   describe('isReadOnlyQuery', () => {
@@ -241,9 +239,7 @@ describe('SQL Command', () => {
     })
 
     it('describes every column of history_ranges', () => {
-      const db = new Database(':memory:')
-      initCacheSchema(db)
-      initSyncSchema(db)
+      const db = createAccountCacheDb()
       const columns = (
         db.query('PRAGMA table_info(history_ranges)').all() as Array<{
           name: string
@@ -255,9 +251,7 @@ describe('SQL Command', () => {
     })
 
     it('describes every column of message_attachments, with its index', () => {
-      const db = new Database(':memory:')
-      initCacheSchema(db)
-      initSyncSchema(db)
+      const db = createAccountCacheDb()
       const columns = (
         db.query('PRAGMA table_info(message_attachments)').all() as Array<{
           name: string
@@ -290,9 +284,7 @@ describe('SQL Command', () => {
     })
 
     it('describes every column of chat_content_protection', () => {
-      const db = new Database(':memory:')
-      initCacheSchema(db)
-      initSyncSchema(db)
+      const db = createAccountCacheDb()
       const columns = (
         db.query('PRAGMA table_info(chat_content_protection)').all() as Array<{
           name: string
@@ -308,9 +300,7 @@ describe('SQL Command', () => {
     })
 
     it('describes every column of the message_search_text view, in order', () => {
-      const db = new Database(':memory:')
-      initCacheSchema(db)
-      initSyncSchema(db)
+      const db = createAccountCacheDb()
       const columns = (
         db.query('PRAGMA table_info(message_search_text)').all() as Array<{
           name: string

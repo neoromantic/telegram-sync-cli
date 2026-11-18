@@ -7,7 +7,7 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-
+import { takePartIn } from '../__tests__/helpers/participation'
 import type { StatusHistoryProgress } from '../commands/status'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createDaemonStatusService } from '../db/daemon-status'
@@ -441,6 +441,7 @@ describe('E2E: status, history progress and API calls', () => {
       sync_enabled: true,
     })
     state.setTotalMessages(-4242, 1000)
+    takePartIn(cacheDb, -4242)
     createMessagesCache(cacheDb).upsertBatch(
       Array.from({ length: 200 }, (_, i) => ({
         chat_id: -4242,
@@ -543,6 +544,7 @@ describe('E2E: status, senders missing from the cache (#143)', () => {
 
     // Three senders of a basic group, one of them cached; Telegram was
     // asked for another one and didn't return them
+    takePartIn(cacheDb, -4242)
     createMessagesCache(cacheDb).upsertBatch(
       [7001, 7002, 7003].map((fromId, i) => ({
         chat_id: -4242,

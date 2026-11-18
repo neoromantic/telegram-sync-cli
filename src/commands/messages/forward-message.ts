@@ -133,7 +133,10 @@ function cacheForwardedMessages(
       return new Map()
     }
     createMessagesCache(cacheDb).upsertBatch(inputs)
-    const rows = createMessagesHistory(cacheDb).getMany(toChatId, newIds)
+    const history = createMessagesHistory(cacheDb)
+    const rows = newIds
+      .map((id) => history.get(toChatId, id))
+      .filter((row) => row !== null)
     return new Map(
       messageRowsToItems(cacheDb, rows).map((item) => [item.messageId, item]),
     )

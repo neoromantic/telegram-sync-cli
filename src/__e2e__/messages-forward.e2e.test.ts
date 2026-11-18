@@ -6,6 +6,7 @@ import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import { fakeDialog } from '../__tests__/helpers/fake-dialogs'
+import { takePartIn } from '../__tests__/helpers/participation'
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import type { ForwardMessagesResult } from '../commands/messages/forward-message'
 import { createChatsCache } from '../db/chats-cache'
@@ -64,6 +65,7 @@ function seed(db: Database): void {
       }),
     ].map(dialogToCacheInput),
   )
+  takePartIn(db, TEAM_ID)
 }
 
 interface ErrorJson {
