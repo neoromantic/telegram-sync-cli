@@ -1540,9 +1540,14 @@ describe('reportHistoryError', () => {
     expect(reported.message).toStartWith('Invalid --chat: -12.5.')
   })
 
-  it('maps rate limits to RATE_LIMITED', () => {
-    expect(codeOf(new RateLimitError('messages.getHistory', 30)).code).toBe(
-      'RATE_LIMITED',
+  it('maps rate limits to RATE_LIMITED, retryable after the wait', () => {
+    expect(codeOf(new RateLimitError('messages.getHistory', 30))).toMatchObject(
+      {
+        code: 'RATE_LIMITED',
+        details: { method: 'messages.getHistory', wait_seconds: 30 },
+        suggestion: 'Wait 30s, then run the same command again',
+        retryable: true,
+      },
     )
   })
 

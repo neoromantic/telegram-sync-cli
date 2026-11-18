@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
-import { defineCommand } from 'citty'
+import { type ArgsDef, defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
 import {
   type ChatSyncStateService,
@@ -20,9 +20,11 @@ import { error, success, verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import {
   isRateLimitError,
+  reportRateLimit,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import { allowedChatIds } from '../access'
+import { nextCommand } from '../next'
 import {
   CHAT_TYPE_VALUES,
   type ChatItem,
@@ -108,41 +110,43 @@ function withSync(
   }
 }
 
+export const listChatsArgs = {
+  limit: {
+    type: 'string',
+    description: 'Maximum number of chats to return (default: 50)',
+    default: '50',
+  },
+  offset: {
+    type: 'string',
+    description: 'Offset for pagination (default: 0)',
+    default: '0',
+  },
+  type: {
+    type: 'string',
+    description: `Filter by chat type: ${CHAT_TYPE_VALUES.join(', ')} (default: all)`,
+  },
+  unread: {
+    type: 'boolean',
+    description: 'Only chats with unread messages',
+    default: false,
+  },
+  account: {
+    type: 'string',
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+  fresh: {
+    type: 'boolean',
+    description: 'Bypass cache and fetch from API',
+    default: false,
+  },
+} satisfies ArgsDef
+
 export const listChatsCommand = defineCommand({
   meta: {
     name: 'list',
     description: 'List chats and dialogs with pagination',
   },
-  args: {
-    limit: {
-      type: 'string',
-      description: 'Maximum number of chats to return (default: 50)',
-      default: '50',
-    },
-    offset: {
-      type: 'string',
-      description: 'Offset for pagination (default: 0)',
-      default: '0',
-    },
-    type: {
-      type: 'string',
-      description: `Filter by chat type: ${CHAT_TYPE_VALUES.join(', ')} (default: all)`,
-    },
-    unread: {
-      type: 'boolean',
-      description: 'Only chats with unread messages',
-      default: false,
-    },
-    account: {
-      type: 'string',
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-    fresh: {
-      type: 'boolean',
-      description: 'Bypass cache and fetch from API',
-      default: false,
-    },
-  },
+  args: listChatsArgs,
   async run({ args }) {
     const limit = Number.parseInt(args.limit ?? '50', 10)
     const offset = Number.parseInt(args.offset ?? '0', 10)
@@ -191,7 +195,7 @@ export const listChatsCommand = defineCommand({
             source: 'cache',
           })
 
-          success(response)
+          success(response, nextChatsPage(args, response))
           return
         }
       }
@@ -227,20 +231,29 @@ export const listChatsCommand = defineCommand({
         stale: false,
       }
 
-      success(response)
+      success(response, nextChatsPage(args, response))
     } catch (err) {
       if (err instanceof ConfigError) {
         error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
       }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      if (isRateLimitError(err)) reportRateLimit(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Failed to fetch chats: ${message}`)
     }
   },
 })
+
+function nextChatsPage(
+  args: Record<string, unknown>,
+  { hasMore, offset, limit }: PaginatedResult<unknown>,
+) {
+  if (!hasMore) return []
+  return [
+    nextCommand(
+      'chats list',
+      listChatsArgs,
+      { ...args, limit, offset: offset + limit },
+      'The next page of chats.',
+    ),
+  ]
+}

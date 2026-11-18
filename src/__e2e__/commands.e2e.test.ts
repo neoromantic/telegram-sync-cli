@@ -1250,6 +1250,7 @@ describe('E2E: Chats Commands', () => {
         details: { identifier: '-1009999999999' },
         suggestion:
           'Start the daemon (its dialog pass caches every chat, archived ones too) or use @username',
+        retryable: false,
       },
     }
 
@@ -1287,6 +1288,7 @@ describe('E2E: Chats Commands', () => {
             'Fetching chat -1000000012345 by ID is not supported yet; --fresh needs @username',
           details: { identifier: '-1000000012345' },
           suggestion: 'Use @username, or drop --fresh to read the cache',
+          retryable: false,
         },
       })
     })

@@ -46,7 +46,10 @@ import {
   touch,
 } from '../../utils/media-cache'
 import { resolveRawMessageType } from '../../utils/message-type'
-import { isRateLimitError } from '../../utils/telegram-rate-limits'
+import {
+  describeRateLimit,
+  isRateLimitError,
+} from '../../utils/telegram-rate-limits'
 import { transferClient } from '../../utils/telegram-transfer'
 import type { HistoryClient } from '../messages/helpers'
 import {
@@ -264,6 +267,7 @@ function lockTimeout(err: DownloadLockTimeoutError): MediaError {
       waited_seconds: Math.round(err.waitedMs / 1000),
     },
     'run the command again when the other download ends',
+    true,
   )
 }
 
@@ -376,6 +380,20 @@ function floodWaitSeconds(err: tl.RpcError): number | null {
   return match ? Number(match[1]) : null
 }
 
+/** A flood wait during the transfer: the next run resumes the partial file */
+function rateLimited(method: string, waitSeconds: number): MediaError {
+  const { message, details, suggestion } = describeRateLimit(
+    method,
+    waitSeconds,
+  )
+  return new MediaError(
+    ErrorCodes.RATE_LIMITED,
+    message,
+    details,
+    `${suggestion} to resume the download`,
+  )
+}
+
 async function sizeOf(path: string): Promise<number> {
   try {
     return (await stat(path)).size
@@ -403,25 +421,13 @@ async function transferError(
       { method: GET_FILE, error: text },
     )
   }
-  if (isRateLimitError(err)) {
-    return new MediaError(
-      ErrorCodes.RATE_LIMITED,
-      `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-      { method: err.method, wait_seconds: err.waitSeconds },
-      'run the command again after the wait to resume',
-    )
-  }
+  if (isRateLimitError(err)) return rateLimited(err.method, err.waitSeconds)
   if (tl.RpcError.is(err) && err.code === tl.RpcError.FLOOD) {
     const seconds = floodWaitSeconds(err)
     if (seconds !== null) {
       // FLOOD_PREMIUM_WAIT and other waits the rate-limit wrapper can't read
       rateLimits().setFloodWait(GET_FILE, seconds)
-      return new MediaError(
-        ErrorCodes.RATE_LIMITED,
-        `Rate limited for ${GET_FILE}. Wait ${seconds}s before retrying.`,
-        { method: GET_FILE, wait_seconds: seconds },
-        'run the command again after the wait to resume',
-      )
+      return rateLimited(GET_FILE, seconds)
     }
   }
   if (err instanceof MtTimeoutError) {

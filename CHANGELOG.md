@@ -21,6 +21,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tg messages list` page that fetches the missing history, and a `suggestion`. Without the new
   flags the output is unchanged. `tg messages search` takes `--type` too, and echoes it in
   `filters.type`.
+- Every error says whether running the same command again can work: `error.retryable` is
+  `true` for `RATE_LIMITED`, `NETWORK_ERROR`, a media download that waited too long for
+  another tg process and a `tg api` call Telegram failed on its side (500 or -503), `false`
+  otherwise (#160). Nothing else in the error schema changes.
+- `RATE_LIMITED` carries the suggestion `Wait <n>s, then run the same command again` (for a
+  media download, "… to resume the download"), with the wait in `details.wait_seconds` as
+  before, from every command: `tg api`, `tg send`, `tg chats`, `tg contacts`, `tg user`,
+  `tg messages` and `tg media download`.
+- `ACCOUNT_NOT_FOUND` suggests `tg accounts list` and the flag to pass the account to
+  (`--account`, or `--id` for `tg accounts switch`, `remove` and `info`). `tg send --to` with a
+  user ID Telegram refuses (`PEER_ID_INVALID`) suggests sending to the user's `@username` or
+  `+phone` once, so tg caches the user.
+- `next` in success answers: a list of `{ command, why }` beside `data`, where `command` is a
+  complete `tg` command line that runs as written in a POSIX shell and `why` says what it does
+  (#160). A paged read that has more suggests its next page with the account and every filter
+  it was given: `tg messages list` (older pages, or newer ones after `--after`),
+  `tg messages search`, `tg chats list`, `tg contacts list`, and `tg messages wait --chat`,
+  which suggests waiting on from the last message it returned. `tg chats search` with no
+  result suggests `tg chats list --fresh`, then the same search, where before the command was
+  only in `message`. An answer with nothing to suggest has no `next`, and every existing field
+  (`message`, `nextBefore`, `nextAfter`, `hasMore`, `offset`) is unchanged. `--format pretty`
+  prints the suggestions on stderr, so stdout stays the data's JSON; `--quiet` prints nothing.
+
+### Fixed
+
+- `tg messages list`, `get`, `search`, `unread`, `wait` and `watch` show the content of a rich
+  message: one whose content is page blocks (headings, tables, lists, quotations, code,
+  formulas, footnotes, media) instead of a text. It printed as `text: null`, so an agent saw an
+  empty message where a table or a whole report was sent, and search could not find it. Its
+  `text` is now the blocks in Telegram's rich Markdown (`#` headings, pipe tables, `- [x]` task
+  lists, `$$…$$` formulas, `[^1]` footnotes, HTML tags such as `<details>` where Markdown has
+  none), with a placeholder for media, maps and buttons (`[photo: caption]`). `messageType`
+  stays `text`. The text is cached, so search matches any word of it, a table cell's too.
+  Messages cached by older versions print it from `raw_json` at once, and a background
+  migration (`messages_rich_text`) makes them searchable.
 
 ## [0.13.1] - 2026-11-18
 

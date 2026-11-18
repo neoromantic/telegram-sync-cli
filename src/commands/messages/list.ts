@@ -1,9 +1,9 @@
-import { defineCommand } from 'citty'
-
-import { ErrorCodes } from '../../types'
+import { type ArgsDef, defineCommand } from 'citty'
+import { ErrorCodes, type NextCommand } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success } from '../../utils/output'
+import { nextCommand } from '../next'
 import {
   parseTimeWindow,
   parseTypeArg,
@@ -18,56 +18,62 @@ import {
   parseIntegerArg,
   reportHistoryError,
 } from './helpers'
-import { listHistory, resolveHistoryChat } from './history'
+import {
+  type ListHistoryResult,
+  listHistory,
+  resolveHistoryChat,
+} from './history'
+
+const listArgs = {
+  chat: {
+    type: 'string',
+    description: CHAT_ARG_DESCRIPTION,
+    required: true,
+  },
+  limit: {
+    type: 'string',
+    description: 'Messages per page, 1-100',
+    default: '20',
+  },
+  before: {
+    type: 'string',
+    description:
+      'Only messages older than this message ID (pass nextBefore to page back)',
+  },
+  after: {
+    type: 'string',
+    description:
+      'The messages right after this message ID (pass nextAfter to page forward; 0 starts at the first message)',
+  },
+  type: {
+    type: 'string',
+    description: `${TYPE_ARG_DESCRIPTION}. With --type, --since or --until the page comes from the cache only, with complete saying whether the cache holds all of it`,
+  },
+  since: { type: 'string', description: SINCE_ARG_DESCRIPTION },
+  until: { type: 'string', description: UNTIL_ARG_DESCRIPTION },
+  includeDeleted: {
+    type: 'boolean',
+    description: 'Include deleted messages',
+    default: false,
+  },
+  fresh: {
+    type: 'boolean',
+    description: 'Fetch the page from Telegram and cache it',
+    default: false,
+  },
+  account: {
+    type: 'string',
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+} satisfies ArgsDef
 
 export const listMessagesCommand = defineCommand({
   meta: {
     name: 'list',
     description:
-      'List the messages of a chat, newest first (cache-first). Page back with --before <nextBefore> and forward with --after <nextAfter> until items is empty',
+      'List the messages of a chat, newest first (cache-first). Page back with --before <nextBefore> and forward with --after <nextAfter> until items is empty; next has the command for the next page',
   },
-  args: {
-    chat: {
-      type: 'string',
-      description: CHAT_ARG_DESCRIPTION,
-      required: true,
-    },
-    limit: {
-      type: 'string',
-      description: 'Messages per page, 1-100',
-      default: '20',
-    },
-    before: {
-      type: 'string',
-      description:
-        'Only messages older than this message ID (pass nextBefore to page back)',
-    },
-    after: {
-      type: 'string',
-      description:
-        'The messages right after this message ID (pass nextAfter to page forward; 0 starts at the first message)',
-    },
-    type: {
-      type: 'string',
-      description: `${TYPE_ARG_DESCRIPTION}. With --type, --since or --until the page comes from the cache only, with complete saying whether the cache holds all of it`,
-    },
-    since: { type: 'string', description: SINCE_ARG_DESCRIPTION },
-    until: { type: 'string', description: UNTIL_ARG_DESCRIPTION },
-    includeDeleted: {
-      type: 'boolean',
-      description: 'Include deleted messages',
-      default: false,
-    },
-    fresh: {
-      type: 'boolean',
-      description: 'Fetch the page from Telegram and cache it',
-      default: false,
-    },
-    account: {
-      type: 'string',
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-  },
+  args: listArgs,
   async run({ args, rawArgs }) {
     const limit = parseIntegerArg(args.limit, 'limit', {
       min: 1,
@@ -115,9 +121,41 @@ export const listMessagesCommand = defineCommand({
         fresh: args.fresh ?? false,
         filter: filtered ? { types, since, until } : undefined,
       })
-      success(result)
+      success(result, nextPage({ ...args, type: types?.join(',') }, result))
     } catch (err) {
       reportHistoryError(err, 'list messages')
     }
   },
 })
+
+/**
+ * The next page in the direction the command read: newer with --after,
+ * else older. Only after a full page: a short one reached the first
+ * message (paging back) or the newest one Telegram has (paging forward).
+ */
+function nextPage(
+  args: Record<string, unknown>,
+  { items, limit, after, nextBefore, nextAfter }: ListHistoryResult,
+): NextCommand[] {
+  if (items.length < limit) return []
+  if (after !== null) {
+    return [
+      nextCommand(
+        'messages list',
+        listArgs,
+        { ...args, after: nextAfter },
+        'The next page of newer messages.',
+      ),
+    ]
+  }
+  // Message IDs start at 1: nothing is older than message 1
+  if (nextBefore === null || nextBefore <= 1) return []
+  return [
+    nextCommand(
+      'messages list',
+      listArgs,
+      { ...args, before: nextBefore },
+      'The next page of older messages.',
+    ),
+  ]
+}
