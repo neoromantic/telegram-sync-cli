@@ -21,10 +21,18 @@ export interface Account {
 /** Output format options */
 export type OutputFormat = 'json' | 'pretty' | 'quiet'
 
+/** A command to run next: a complete `tg` command line and why */
+export interface NextCommand {
+  command: string
+  why: string
+}
+
 /** Result wrapper for consistent output */
 export interface Result<T> {
   success: true
   data: T
+  /** Commands that continue this read; absent when there is none */
+  next?: NextCommand[]
 }
 
 /** Error wrapper for consistent output */
@@ -36,6 +44,11 @@ export interface ErrorResult {
     details?: Record<string, unknown>
     /** What to do next, for errors that have a fix */
     suggestion?: string
+    /**
+     * Whether the same command, run again unchanged, can succeed: after
+     * `details.wait_seconds` for RATE_LIMITED
+     */
+    retryable: boolean
   }
 }
 

@@ -1095,6 +1095,7 @@ describe('downloadMedia: partial downloads', () => {
     )
     expect(err.code).toBe(ErrorCodes.GENERAL_ERROR)
     expect(err.details).toMatchObject({ lock: paths.lock, pid: process.pid })
+    expect(err.retryable).toBe(true)
     expect(transfer.runs).toHaveLength(0)
     expect(existsSync(paths.lock)).toBe(true)
   })
@@ -1172,6 +1173,10 @@ describe('downloadMedia: Telegram errors during the transfer', () => {
     )
     expect(err.code).toBe(ErrorCodes.RATE_LIMITED)
     expect(err.details).toEqual({ method: 'upload.getFile', wait_seconds: 7 })
+    expect(err.retryable).toBe(true)
+    expect(err.suggestion).toBe(
+      'Wait 7s, then run the same command again to resume the download',
+    )
     expect(createRateLimitsService(db).isBlocked('upload.getFile')).toBe(true)
   })
 
@@ -1190,6 +1195,10 @@ describe('downloadMedia: Telegram errors during the transfer', () => {
     )
     expect(err.code).toBe(ErrorCodes.RATE_LIMITED)
     expect(err.details).toEqual({ method: 'upload.getFile', wait_seconds: 30 })
+    expect(err.retryable).toBe(true)
+    expect(err.suggestion).toBe(
+      'Wait 30s, then run the same command again to resume the download',
+    )
   })
 
   it('reports another refusal as TELEGRAM_ERROR', async () => {
