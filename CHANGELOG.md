@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lastOwnMessageAt`, and `tg status` leaves it out of the chats with sync on and of the history
   progress. See [docs/sync-strategy.md](docs/sync-strategy.md#group-participation).
 
+### Fixed
+
+- The npm package declares `long`, which tg imports directly. Until now it only arrived
+  through `@mtcute/core`, so an install that doesn't hoist transitive dependencies could fail
+  to start.
+
 ## [0.14.0] - 2026-11-18
 
 ### Added
