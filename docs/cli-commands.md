@@ -276,6 +276,37 @@ Any other action has only `type`, its Telegram name in snake case without `messa
 (`chat_edit_photo`, `screenshot_taken`, `history_clear`…), so nothing is dropped. Search doesn't
 index actions: `tg messages search` finds a service message only by its text, which is empty.
 
+A rich message (a heading, a table, lists, a report: page blocks instead of a text) has
+`messageType: "text"` like any other text message, and its `text` is the blocks written in
+Telegram's rich Markdown, the syntax a rich message is sent with
+([Bot API](https://core.telegram.org/bots/api#rich-messages)):
+
+```markdown
+# Garden report
+
+Harvest is **on track**
+
+| Crop | Kg |
+|---|---:|
+| Zucchini | 12 |
+```
+
+Headings are `#`, styles `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `==marked==`,
+`||spoiler||` and `[links](https://example.com)`; code blocks are fenced with their language;
+lists are `-`, `1.`, `- [ ]` and `- [x]`; quotations `>`; dividers `---`; tables are pipe
+tables with an alignment row; formulas `$…$` and `$$…$$`; footnotes `[^id]` and `[^id]: text`.
+Where Markdown has no syntax it uses Telegram's HTML tags: `<u>`, `<sub>`, `<sup>`,
+`<details><summary>…</summary>…</details>`, `<aside>` for a pull quote, `<cite>` for a
+quotation's author, `<tg-collage>` and `<tg-slideshow>` around their media. Media, maps, embeds
+and buttons can't be text, so each is a placeholder with its caption or label: `[photo: The
+lake]`, `[video]`, `[document plan.pdf: The plan]`, `[map 41.9, 12.5: Meeting point]`,
+`[embed https://example.com/widget]`, `[button: Open (https://example.com)]`. A block Telegram
+adds later shows its text, or `[pageBlockName]` when it has none. Search matches every word of
+the rendered text, a table cell's too. Messages cached by 0.13.1 and older have it as well:
+list, get, search, unread, wait and watch render it from `raw_json`, and the background
+migration `messages_rich_text` stores it so search finds them
+([tg db migrate](#tg-db-migrate)).
+
 `tg messages search` reads only the cache. A plain query matches messages that contain every
 word, in any order; a query with FTS5 syntax (`"phrase"`, `OR`, `NOT`, `sender:alice`,
 `chat:team`, `word*`) goes to FTS5 as written, and `--phrase` matches the whole query as one
@@ -726,7 +757,8 @@ them on its own, a little each second ([daemon.md](daemon.md#background-migratio
 `tg db migrate` runs the pending ones of one account's cache (`--account`, else the active
 account, else the only one) in the foreground until they are done, and needs no Telegram
 credentials. `messages_refetch_empty_raw_json` only queues sync jobs for messages cached with
-an empty `raw_json`; the daemon fetches them again (#130). Then it re-indexes the messages of
+an empty `raw_json`; the daemon fetches them again (#130). `messages_rich_text` gives rich
+messages cached by 0.13.1 and older their text, so search finds them. Then it re-indexes the messages of
 senders and chats whose names changed ([search.md](search.md#names-after-a-rename)), so a
 search by a new name finds older messages without the daemon; `rows` counts those messages
 too. Last it merges the search index, which a cache written by 0.11.1 or older needs once

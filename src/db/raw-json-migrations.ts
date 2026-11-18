@@ -11,6 +11,7 @@ import type { Database } from 'bun:sqlite'
 import { extractAttachment } from '../utils/attachment'
 import { resolveRawMessageType } from '../utils/message-type'
 import { reencodeRawJson } from '../utils/raw-json'
+import { richMessageText } from '../utils/rich-message'
 import type {
   BackgroundMigration,
   MigrationRow,
@@ -110,6 +111,32 @@ const refetchEmptyMigration: BackgroundMigration = {
   },
 }
 
+/**
+ * Rich messages cached before tg read them have no text, so search can't
+ * find them. Only text rows without text are rich candidates: the pass
+ * reads raw_json for those alone, and the update trigger re-indexes them.
+ */
+const richTextMigration: BackgroundMigration = {
+  name: 'messages_rich_text',
+  description: 'Fill the text of cached rich messages, so search finds them',
+  table: 'messages_cache',
+  columns: ['text', 'message_type'],
+  prepare(db: Database) {
+    const rawJson = db.query<{ raw_json: string }, [number]>(
+      'SELECT raw_json FROM messages_cache WHERE rowid = ?',
+    )
+    const update = db.query(
+      'UPDATE messages_cache SET text = $text WHERE rowid = $rowid',
+    )
+    return (row: MigrationRow) => {
+      if (row.text || row.message_type !== 'text') return
+      const raw = rawJson.get(row.rowid)
+      const text = raw ? richMessageText(raw.raw_json) : null
+      if (text) update.run({ $rowid: row.rowid, $text: text })
+    }
+  },
+}
+
 function reencodeMigration(
   name: string,
   table: MigrationTable,
@@ -141,4 +168,5 @@ export const BACKGROUND_MIGRATIONS: readonly BackgroundMigration[] = [
   reencodeMigration('chats_raw_json_v2', 'chats_cache', 'chats'),
   refetchEmptyMigration,
   searchNamesMigration,
+  richTextMigration,
 ]

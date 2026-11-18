@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`message`, `nextBefore`, `nextAfter`, `hasMore`, `offset`) is unchanged. `--format pretty`
   prints the suggestions on stderr, so stdout stays the data's JSON; `--quiet` prints nothing.
 
+### Fixed
+
+- `tg messages list`, `get`, `search`, `unread`, `wait` and `watch` show the content of a rich
+  message: one whose content is page blocks (headings, tables, lists, quotations, code,
+  formulas, footnotes, media) instead of a text. It printed as `text: null`, so an agent saw an
+  empty message where a table or a whole report was sent, and search could not find it. Its
+  `text` is now the blocks in Telegram's rich Markdown (`#` headings, pipe tables, `- [x]` task
+  lists, `$$…$$` formulas, `[^1]` footnotes, HTML tags such as `<details>` where Markdown has
+  none), with a placeholder for media, maps and buttons (`[photo: caption]`). `messageType`
+  stays `text`. The text is cached, so search matches any word of it, a table cell's too.
+  Messages cached by older versions print it from `raw_json` at once, and a background
+  migration (`messages_rich_text`) makes them searchable.
+
 ## [0.13.1] - 2026-11-18
 
 ### Fixed
