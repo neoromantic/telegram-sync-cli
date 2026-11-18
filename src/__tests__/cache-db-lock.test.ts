@@ -74,13 +74,13 @@ const HOLD_OPEN = `
   db.close()
 `;
 
-function seedSharedCache(path: string): void {
+function seedSharedCache(path: string) {
   rmSync(path, { force: true });
   for (const suffix of ["-wal", "-shm"]) rmSync(path + suffix, { force: true });
   seedInChild(path, "legacySharedCache");
 }
 
-function seedAccounts(dir: string, count: number): void {
+function seedAccounts(dir: string, count: number) {
   const data = new Database(join(dir, "data.db"));
   data.run("PRAGMA journal_mode = WAL");
   data.run(`
@@ -106,7 +106,7 @@ function seedAccounts(dir: string, count: number): void {
   data.close();
 }
 
-function listCacheFiles(dir: string): string[] {
+function listCacheFiles(dir: string) {
   return (readdirSync(dir, { recursive: true }) as string[])
     .filter((name) => /cache[^/]*\.db$/.test(name))
     .sort();

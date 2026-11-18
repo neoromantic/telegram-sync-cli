@@ -1,4 +1,4 @@
-export function formatRelativeTime(timestamp: number): string {
+export function formatRelativeTime(timestamp: number) {
   const now = Date.now();
   const diff = now - timestamp;
 
@@ -9,7 +9,7 @@ export function formatRelativeTime(timestamp: number): string {
   return `${Math.floor(diff / 86400000)}d ago`;
 }
 
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;

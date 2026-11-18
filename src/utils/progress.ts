@@ -10,14 +10,14 @@ interface ProgressStream {
  * A progress callback that rewrites one line, `<label> 42% 12.3 MB / 29.0 MB`,
  * and ends it once `done` reaches `total`. Undefined when nobody watches.
  */
-export function createProgress(
-  label: string,
-  stream: ProgressStream = process.stderr,
-): ((done: number, total: number) => void) | undefined {
-  if (!stream.isTTY || getOutputFormat() === "quiet") return undefined;
+export function createProgress(label: string, stream: ProgressStream = process.stderr) {
+  if (!stream.isTTY || getOutputFormat() === "quiet") {
+    const result: ((done: number, total: number) => void) | undefined = undefined;
+    return result;
+  }
 
   let finished = false;
-  return (done, total) => {
+  const result: ((done: number, total: number) => void) | undefined = (done, total) => {
     if (finished) return;
     const known = Number.isFinite(total) && total > 0;
     const text = known
@@ -29,4 +29,5 @@ export function createProgress(
       stream.write("\n");
     }
   };
+  return result;
 }

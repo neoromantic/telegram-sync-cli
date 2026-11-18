@@ -714,7 +714,7 @@ describe("SyncScheduler", () => {
       }
     }
 
-    function run(count: number): string[] {
+    function run(count: number) {
       const lanes: string[] = [];
       for (let i = 0; i < count; i++) {
         const job = scheduler.getNextJob();

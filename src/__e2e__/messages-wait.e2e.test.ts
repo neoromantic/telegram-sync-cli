@@ -72,12 +72,12 @@ describe("E2E: messages wait and watch", () => {
     env.cleanup();
   });
 
-  function store(messages: ReturnType<typeof message>[]): void {
+  function store(messages: ReturnType<typeof message>[]) {
     takePartIn(env.openCacheDb(1), TEAM_CHAT_ID, -4242);
     createMessagesCache(env.openCacheDb(1)).upsertBatch(messages);
   }
 
-  function startDaemon(): void {
+  function startDaemon() {
     writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));
     createDaemonStatusService(env.openCacheDb(1)).setDaemonRunning(process.pid, "test");
   }

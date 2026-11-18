@@ -86,35 +86,43 @@ export function chatSyncView(
   participation: GroupParticipation,
   chatId: number,
   state: ChatSyncStateRow | null,
-): ChatSyncView {
+) {
   const group = participation.isGroup(chatId);
   const last = group ? participation.lastOwnDate(chatId) : null;
   const lastOwnMessageAt = last === null ? null : last * 1000;
   const status = group ? participation.status(chatId) : "active";
   if (status !== "active") {
-    return {
+    const result: ChatSyncView = {
       syncEnabled: false,
       syncReason:
         status === "unknown" ? "group_participation_unknown" : "group_participation_required",
       lastOwnMessageAt,
     };
+    return result;
   }
-  return {
+  const result: ChatSyncView = {
     syncEnabled: state?.sync_enabled === 1,
     syncReason: state ? syncReason(state) : null,
     lastOwnMessageAt,
   };
+  return result;
 }
 
 export function syncReason(
   state: Pick<ChatSyncStateRow, "sync_mode" | "sync_policy" | "chat_type" | "member_count">,
-): SyncReason {
-  if (state.sync_mode === "on") return "on_by_hand";
-  if (state.sync_mode === "off") return "off_by_hand";
-  return (
+) {
+  if (state.sync_mode === "on") {
+    const result: SyncReason = "on_by_hand";
+    return result;
+  }
+  if (state.sync_mode === "off") {
+    const result: SyncReason = "off_by_hand";
+    return result;
+  }
+  const result: SyncReason =
     state.sync_policy ??
-    determineSyncPolicy(state.chat_type as SyncChatType, state.member_count).reason
-  );
+    determineSyncPolicy(state.chat_type as SyncChatType, state.member_count).reason;
+  return result;
 }
 
 /**
@@ -175,7 +183,7 @@ export interface ChatSyncStateService {
 /**
  * Create a chat sync state service
  */
-export function createChatSyncStateService(db: Database): ChatSyncStateService {
+export function createChatSyncStateService(db: Database) {
   const stmts = {
     get: db
       .query(`
@@ -342,11 +350,11 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
   };
 
   return {
-    get(chatId: number): ChatSyncStateRow | null {
+    get(chatId: number) {
       return stmts.get.get({ $chat_id: chatId }) ?? null;
     },
 
-    upsert(input: ChatSyncStateInput): void {
+    upsert(input: ChatSyncStateInput) {
       stmts.upsert.run({
         $chat_id: input.chat_id,
         $chat_type: input.chat_type,
@@ -361,7 +369,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       });
     },
 
-    updateBackwardCursor(chatId: number, backwardCursor: number): void {
+    updateBackwardCursor(chatId: number, backwardCursor: number) {
       stmts.updateBackwardCursor.run({
         $chat_id: chatId,
         $backward: backwardCursor,
@@ -369,14 +377,14 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       });
     },
 
-    markHistoryComplete(chatId: number): void {
+    markHistoryComplete(chatId: number) {
       stmts.markHistoryComplete.run({
         $chat_id: chatId,
         $now: Date.now(),
       });
     },
 
-    incrementSyncedMessages(chatId: number, count: number): void {
+    incrementSyncedMessages(chatId: number, count: number) {
       stmts.incrementSyncedMessages.run({
         $chat_id: chatId,
         $count: count,
@@ -384,7 +392,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       });
     },
 
-    setTotalMessages(chatId: number, total: number): void {
+    setTotalMessages(chatId: number, total: number) {
       stmts.setTotalMessages.run({
         $chat_id: chatId,
         $total: total,
@@ -392,11 +400,11 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       });
     },
 
-    getInitialLoadDue(): ChatSyncStateRow[] {
+    getInitialLoadDue() {
       return stmts.getInitialLoadDue.all();
     },
 
-    recordFirstPage(chatId: number, page: FirstPageResult): void {
+    recordFirstPage(chatId: number, page: FirstPageResult) {
       stmts.recordFirstPage.run({
         $chat_id: chatId,
         $forward: page.forward_cursor,
@@ -407,19 +415,19 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       });
     },
 
-    getCatchupDue(): ChatSyncStateRow[] {
+    getCatchupDue() {
       return stmts.getCatchupDue.all();
     },
 
-    getEnabledWithCursor(): ChatSyncStateRow[] {
+    getEnabledWithCursor() {
       return stmts.getEnabledWithCursor.all();
     },
 
-    getHistoryDue(): ChatSyncStateRow[] {
+    getHistoryDue() {
       return stmts.getHistoryDue.all();
     },
 
-    recordCatchupPage(chatId: number, page: CatchupPageResult): void {
+    recordCatchupPage(chatId: number, page: CatchupPageResult) {
       stmts.recordCatchupPage.run({
         $chat_id: chatId,
         $cursor: page.forward_cursor,
@@ -430,7 +438,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       });
     },
 
-    raiseTopMessageId(chatId: number, topMessageId: number): void {
+    raiseTopMessageId(chatId: number, topMessageId: number) {
       stmts.raiseTopMessageId.run({
         $chat_id: chatId,
         $top: topMessageId,
@@ -438,7 +446,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       });
     },
 
-    markCaughtUp(chatIds: Iterable<number>): void {
+    markCaughtUp(chatIds: Iterable<number>) {
       const now = Date.now();
       db.transaction(() => {
         for (const chatId of chatIds) {
@@ -447,7 +455,7 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       })();
     },
 
-    markTopUnknown(chatIds: Iterable<number>): void {
+    markTopUnknown(chatIds: Iterable<number>) {
       const now = Date.now();
       db.transaction(() => {
         for (const chatId of chatIds) {
@@ -456,16 +464,16 @@ export function createChatSyncStateService(db: Database): ChatSyncStateService {
       })();
     },
 
-    delete(chatId: number): void {
+    delete(chatId: number) {
       stmts.delete.run({ $chat_id: chatId });
     },
 
-    updateLastSync(chatId: number, type: "forward" | "backward"): void {
+    updateLastSync(chatId: number, type: "forward" | "backward") {
       const stmt = type === "forward" ? stmts.updateLastForwardSync : stmts.updateLastBackwardSync;
       stmt.run({ $chat_id: chatId, $now: Date.now() });
     },
 
-    setSyncMode(chatId: number, mode: SyncMode): void {
+    setSyncMode(chatId: number, mode: SyncMode) {
       const state = stmts.get.get({ $chat_id: chatId });
       if (!state) return;
 

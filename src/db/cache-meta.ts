@@ -13,7 +13,7 @@ export interface CacheMeta {
   user_id: string | null;
 }
 
-export function readCacheMeta(db: Database): CacheMeta {
+export function readCacheMeta(db: Database) {
   const rows = db
     .query("SELECT key, value FROM cache_meta WHERE key IN ('account_id', 'user_id')")
     .all() as Array<{ key: string; value: string }>;
@@ -38,9 +38,7 @@ export interface CacheOwnerOptions {
   accountUserId?: (accountId: number) => number | null | undefined;
 }
 
-type Ownership = "own" | "reclaim" | "foreign";
-
-function ownership(meta: CacheMeta, owner: CacheOwner, options: CacheOwnerOptions): Ownership {
+function ownership(meta: CacheMeta, owner: CacheOwner, options: CacheOwnerOptions) {
   if (meta.user_id !== null && owner.user_id !== null && meta.user_id !== String(owner.user_id)) {
     return "foreign";
   }
@@ -59,7 +57,7 @@ function ownership(meta: CacheMeta, owner: CacheOwner, options: CacheOwnerOption
   return stampedAccountGone ? "reclaim" : "foreign";
 }
 
-function missingStamps(meta: CacheMeta, owner: CacheOwner): Array<[string, string]> {
+function missingStamps(meta: CacheMeta, owner: CacheOwner) {
   const stamps: Array<[string, string]> = [];
   if (meta.account_id === null) stamps.push(["account_id", String(owner.id)]);
   if (meta.user_id === null && owner.user_id !== null) {
@@ -80,7 +78,7 @@ export function checkCacheOwner(
   owner: CacheOwner,
   path: string,
   options: CacheOwnerOptions = {},
-): void {
+) {
   const meta = readCacheMeta(db);
   const found = ownership(meta, owner, options);
   if (found === "foreign") {

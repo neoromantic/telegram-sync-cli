@@ -31,17 +31,17 @@ interface FixtureRecord {
 
 const TYPE_KEY = "__tgcli_type";
 
-function parseBooleanEnv(value?: string): boolean {
+function parseBooleanEnv(value?: string) {
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
-function resolveDataDir(dataDir?: string): string {
+function resolveDataDir(dataDir?: string) {
   return dataDir ?? process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? join(homedir(), ".telegram-sync-cli");
 }
 
-export function getRecordReplayConfig(dataDir?: string): RecordReplayConfig {
+export function getRecordReplayConfig(dataDir?: string) {
   const replay = parseBooleanEnv(process.env.TELEGRAM_API_REPLAY);
   const record = parseBooleanEnv(process.env.TELEGRAM_API_RECORD);
   const mode: RecordReplayMode = replay ? "replay" : record ? "record" : "off";
@@ -59,7 +59,7 @@ function isMarkerObject(value: unknown): value is { __tgcli_type: string; value:
   );
 }
 
-export function dehydrate(value: unknown): DehydratedValue {
+export function dehydrate(value: unknown) {
   if (
     value === null ||
     typeof value === "string" ||
@@ -70,29 +70,32 @@ export function dehydrate(value: unknown): DehydratedValue {
   }
 
   if (typeof value === "bigint") {
-    return { __tgcli_type: "bigint", value: value.toString() };
+    return { __tgcli_type: "bigint", value: value.toString() } satisfies DehydratedValue;
   }
 
   if (value instanceof Date) {
-    return { __tgcli_type: "date", value: value.toISOString() };
+    return { __tgcli_type: "date", value: value.toISOString() } satisfies DehydratedValue;
   }
 
   if (value instanceof Uint8Array) {
     return {
       __tgcli_type: "bytes",
       value: Buffer.from(value).toString("base64"),
-    };
+    } satisfies DehydratedValue;
   }
 
   if (value instanceof ArrayBuffer) {
     return {
       __tgcli_type: "bytes",
       value: Buffer.from(new Uint8Array(value)).toString("base64"),
-    };
+    } satisfies DehydratedValue;
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => (item === undefined ? null : dehydrate(item)));
+    const items: DehydratedValue[] = value.map((item) =>
+      item === undefined ? null : dehydrate(item),
+    );
+    return items;
   }
 
   if (typeof value === "object") {
@@ -107,7 +110,7 @@ export function dehydrate(value: unknown): DehydratedValue {
   return String(value);
 }
 
-export function rehydrate(value: DehydratedValue): unknown {
+export function rehydrate(value: DehydratedValue) {
   if (
     value === null ||
     typeof value === "string" ||
@@ -118,7 +121,8 @@ export function rehydrate(value: DehydratedValue): unknown {
   }
 
   if (Array.isArray(value)) {
-    return value.map((entry) => rehydrate(entry as DehydratedValue));
+    const items: unknown[] = value.map((entry) => rehydrate(entry as DehydratedValue));
+    return items;
   }
 
   if (isMarkerObject(value)) {
@@ -140,9 +144,10 @@ export function rehydrate(value: DehydratedValue): unknown {
   return hydrated;
 }
 
-function sortForStable(value: unknown): unknown {
+function sortForStable(value: unknown) {
   if (Array.isArray(value)) {
-    return value.map((entry) => sortForStable(entry));
+    const items: unknown[] = value.map((entry) => sortForStable(entry));
+    return items;
   }
   if (value && typeof value === "object" && !isMarkerObject(value)) {
     const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
@@ -155,11 +160,11 @@ function sortForStable(value: unknown): unknown {
   return value;
 }
 
-function stableStringify(value: unknown): string {
+function stableStringify(value: unknown) {
   return JSON.stringify(sortForStable(value));
 }
 
-function sanitizeMethod(method: string): string {
+function sanitizeMethod(method: string) {
   return method.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
@@ -169,7 +174,7 @@ function buildFixturePaths(options: {
   method: string;
   request: unknown;
   callOptions?: unknown;
-}): { dir: string; path: string } {
+}) {
   const accountSegment =
     typeof options.accountId === "number" ? `account-${options.accountId}` : "account-unknown";
   const methodSegment = sanitizeMethod(options.method);
@@ -187,7 +192,7 @@ function buildFixturePaths(options: {
   return { dir, path: join(dir, `${hash}.json`) };
 }
 
-async function readFixture(path: string): Promise<FixtureRecord> {
+async function readFixture(path: string) {
   const file = Bun.file(path);
   if (!(await file.exists())) {
     throw new Error(`Replay fixture not found: ${path}`);
@@ -206,7 +211,7 @@ async function readFixture(path: string): Promise<FixtureRecord> {
   return record;
 }
 
-async function writeFixture(path: string, record: FixtureRecord): Promise<void> {
+async function writeFixture(path: string, record: FixtureRecord) {
   await Bun.write(path, JSON.stringify(record, null, 2));
 }
 
@@ -217,7 +222,7 @@ export function wrapClientCallWithRecordReplay(
     dataDir?: string;
     config?: RecordReplayConfig;
   } = {},
-): TelegramClient {
+) {
   const config = options.config ?? getRecordReplayConfig(options.dataDir);
   if (config.mode === "off") return client;
 

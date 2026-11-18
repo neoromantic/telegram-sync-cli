@@ -59,8 +59,8 @@ export interface HistoryProgress {
   largest_pending: PendingHistoryChat[];
 }
 
-export function emptyHistoryProgress(): HistoryProgress {
-  return {
+export function emptyHistoryProgress() {
+  const result: HistoryProgress = {
     chats_pending: 0,
     chats_without_count: 0,
     messages_cached: 0,
@@ -71,6 +71,7 @@ export function emptyHistoryProgress(): HistoryProgress {
     calls_per_second: null,
     largest_pending: [],
   };
+  return result;
 }
 
 interface ChatRow {
@@ -83,7 +84,7 @@ interface ChatRow {
   has_gaps: number;
 }
 
-function measurePace(db: Database, now: number): number | null {
+function measurePace(db: Database, now: number) {
   const types = HISTORY_JOB_TYPES.map((type) => `'${type}'`).join(", ");
   const jobs = db
     .query(
@@ -104,7 +105,7 @@ function measurePace(db: Database, now: number): number | null {
   return (messages / (now - first.completed_at)) * 60_000;
 }
 
-function measureCallRate(db: Database, now: number): number | null {
+function measureCallRate(db: Database, now: number) {
   const row = db
     .query(
       `SELECT COUNT(*) AS calls, MIN(timestamp) AS first FROM api_activity
@@ -121,7 +122,7 @@ function measureCallRate(db: Database, now: number): number | null {
   return ((row.calls - 1) / (now - row.first)) * 1000;
 }
 
-export function readHistoryProgress(db: Database, options: { now?: number } = {}): HistoryProgress {
+export function readHistoryProgress(db: Database, options: { now?: number } = {}) {
   const now = options.now ?? Date.now();
   const rows = db
     .query(

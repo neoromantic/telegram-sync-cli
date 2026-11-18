@@ -14,7 +14,7 @@ import { createAccountCacheDb } from "./helpers/cache-db";
 
 const NOW = 1_800_000_000_000;
 
-function rawUser(id: number, contact = true): tl.RawUser {
+function rawUser(id: number, contact = true) {
   return {
     _: "user",
     id,
@@ -23,8 +23,8 @@ function rawUser(id: number, contact = true): tl.RawUser {
   } as tl.RawUser;
 }
 
-function contactsResult(ids: number[], savedCount = 0): tl.contacts.RawContacts {
-  return {
+function contactsResult(ids: number[], savedCount = 0) {
+  const result: tl.contacts.RawContacts = {
     _: "contacts.contacts",
     contacts: ids.map((userId) => ({
       _: "contact",
@@ -34,6 +34,7 @@ function contactsResult(ids: number[], savedCount = 0): tl.contacts.RawContacts 
     savedCount,
     users: ids.map((id) => rawUser(id)),
   };
+  return result;
 }
 
 function seedUser(db: Database, id: number, isContact: boolean, at = 1000) {
@@ -68,7 +69,7 @@ function row(db: Database, id: number) {
   } | null;
 }
 
-function userCount(db: Database): number {
+function userCount(db: Database) {
   return (db.query("SELECT COUNT(*) AS n FROM users_cache").get() as { n: number }).n;
 }
 

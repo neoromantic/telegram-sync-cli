@@ -17,7 +17,7 @@ export function isOwnOrdinaryMessage(message: {
   is_outgoing?: boolean | null;
   from_id?: number | null;
   message_type: string;
-}): boolean {
+}) {
   return (
     Boolean(message.is_outgoing) && (message.from_id ?? 0) > 0 && message.message_type !== "service"
   );
@@ -29,12 +29,12 @@ export function isOwnOrdinaryMessage(message: {
  * the last 90 days is known in it. Matches GroupParticipation.captures for
  * a chat with sync state.
  */
-export function capturesSql(table: string, now: number = nowSeconds()): string {
+export function capturesSql(table: string, now: number = nowSeconds()) {
   const since = Math.floor(now) - PARTICIPATION_WINDOW_SECONDS;
   return `(${table}.chat_type NOT IN ('group', 'supergroup') OR EXISTS (SELECT 1 FROM group_participation p WHERE p.chat_id = ${table}.chat_id AND p.last_own_date > ${since}))`;
 }
 
-export function nowSeconds(): number {
+export function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
@@ -43,7 +43,7 @@ interface ParticipationRow {
   initialized_at: number | null;
 }
 
-function statusOf(row: ParticipationRow | null, now: number): GroupCaptureStatus {
+function statusOf(row: ParticipationRow | null, now: number) {
   if (row?.last_own_date != null && now < row.last_own_date + PARTICIPATION_WINDOW_SECONDS) {
     return "active";
   }
@@ -75,7 +75,7 @@ export interface GroupParticipation {
  * messages it already holds as the first facts, in one pass over
  * messages_cache; their state stays unknown until the first check.
  */
-export function createGroupParticipationSchema(db: Database): void {
+export function createGroupParticipationSchema(db: Database) {
   const created = () =>
     db
       .query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'group_capture_gaps'`)
@@ -112,7 +112,7 @@ export function createGroupParticipationSchema(db: Database): void {
   });
 }
 
-export function createGroupParticipation(db: Database): GroupParticipation {
+export function createGroupParticipation(db: Database) {
   const stmts = {
     get: db.query(
       "SELECT last_own_date, initialized_at FROM group_participation WHERE chat_id = ?",

@@ -62,7 +62,7 @@ export function createContext(
   config: Partial<DaemonConfig>,
   accountsDb: AccountsDbInterface,
   logger: DaemonLogger,
-): DaemonContext {
+) {
   const dataDir = config.dataDir ?? getDataDir();
   const pidPath = config.pidPath ?? join(dataDir, "daemon.pid");
   const verbosity = config.verbosity ?? "normal";
@@ -77,7 +77,7 @@ export function createContext(
     shutdownRequested: false,
   };
 
-  return {
+  const result: DaemonContext = {
     dataDir,
     pidPath,
     verbosity,
@@ -91,9 +91,10 @@ export function createContext(
     retention: config.retention ?? getDefaultRetentionConfig(),
     pacing: config.pacing ?? DEFAULT_SYNC_PACING,
   };
+  return result;
 }
 
-async function initializeDatabase(ctx: DaemonContext): Promise<boolean> {
+async function initializeDatabase(ctx: DaemonContext) {
   try {
     ensureCacheLayout({
       mode: "strict",
@@ -138,7 +139,7 @@ async function initializeDatabase(ctx: DaemonContext): Promise<boolean> {
   return true;
 }
 
-async function connectAccounts(ctx: DaemonContext): Promise<number> {
+async function connectAccounts(ctx: DaemonContext) {
   const accounts = ctx.accountsDb
     .getAll()
     .filter((account) => ctx.runtime.accounts.has(account.id));
@@ -151,7 +152,7 @@ async function connectAccounts(ctx: DaemonContext): Promise<number> {
   return connectionResults.filter(Boolean).length;
 }
 
-async function cleanupWithTimeout(ctx: DaemonContext, task: () => Promise<void>): Promise<void> {
+async function cleanupWithTimeout(ctx: DaemonContext, task: () => Promise<void>) {
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       reject(new Error("Shutdown timeout exceeded"));
@@ -170,7 +171,7 @@ async function cleanupWithTimeout(ctx: DaemonContext, task: () => Promise<void>)
   }
 }
 
-async function performCleanup(ctx: DaemonContext): Promise<void> {
+async function performCleanup(ctx: DaemonContext) {
   const cleanupWork = async () => {
     requestShutdown(ctx);
     await cleanupScheduler(ctx);
@@ -194,7 +195,7 @@ async function performCleanup(ctx: DaemonContext): Promise<void> {
   await cleanupWithTimeout(ctx, cleanupWork);
 }
 
-async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
+async function startDaemon(ctx: DaemonContext) {
   ctx.logger.info(`Starting Telegram Sync CLI daemon ${VERSION}...`);
 
   let exitCode = DaemonExitCode.Success;
@@ -295,19 +296,19 @@ async function startDaemon(ctx: DaemonContext): Promise<DaemonExitCode> {
 export function createDaemon(
   config: Partial<DaemonConfig> = {},
   accountsDb: AccountsDbInterface = defaultAccountsDb,
-): Daemon {
+) {
   const verbosity = config.verbosity ?? "normal";
   const logger = createLogger(verbosity);
   const ctx = createContext(config, accountsDb, logger);
 
-  return {
-    async start(): Promise<DaemonExitCode> {
+  const result: Daemon = {
+    async start() {
       return startDaemon(ctx);
     },
-    stop(): void {
+    stop() {
       requestShutdown(ctx);
     },
-    getStatus(): DaemonStatus {
+    getStatus() {
       const connectedAccounts = Array.from(ctx.state.accounts.values()).filter(
         (a) => a.status === "connected",
       ).length;
@@ -329,8 +330,9 @@ export function createDaemon(
         lastUpdate: ctx.state.running ? Date.now() : null,
       };
     },
-    isRunning(): boolean {
+    isRunning() {
       return ctx.state.running;
     },
   };
+  return result;
 }

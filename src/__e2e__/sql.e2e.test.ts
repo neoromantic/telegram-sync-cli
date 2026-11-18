@@ -367,7 +367,7 @@ describe("E2E: SQL Command", () => {
   });
 
   describe("on a read-only connection", () => {
-    function userVersion(): number {
+    function userVersion() {
       const db = new Database(env.cachePath(1), { readonly: true });
       try {
         return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;

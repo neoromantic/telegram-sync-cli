@@ -22,7 +22,7 @@ import { renderQr } from "../utils/qr";
 /**
  * Prompt user for input
  */
-export async function prompt(message: string): Promise<string> {
+export async function prompt(message: string) {
   const rl = readline.createInterface({ input, output });
   try {
     return (await rl.question(message)).trim();
@@ -35,7 +35,7 @@ export async function prompt(message: string): Promise<string> {
  * Prompt user for password input (hidden for privacy)
  * Falls back to regular prompt for non-TTY environments
  */
-export async function promptPassword(message: string): Promise<string> {
+export async function promptPassword(message: string) {
   if (!process.stdin.isTTY) {
     return prompt(message);
   }
@@ -59,7 +59,7 @@ export async function promptPassword(message: string): Promise<string> {
     }
   };
 
-  return new Promise((resolve) => {
+  return new Promise<string>((resolve) => {
     rl.question(message, (answer) => {
       output.write("\n");
       rl.close();
@@ -91,8 +91,8 @@ export interface AuthDependencies {
 /**
  * Get default auth dependencies
  */
-export function getDefaultDependencies(): AuthDependencies {
-  return {
+export function getDefaultDependencies() {
+  const result: AuthDependencies = {
     accountsDb: defaultAccountsDb,
     createClient,
     getClient: getClientForAccount,
@@ -107,14 +107,14 @@ export function getDefaultDependencies(): AuthDependencies {
         suggestion: `Make config.json writable or remove activeAccount from it, then run tg accounts switch --id ${accountId}`,
       }),
   };
+  return result;
 }
 
-async function activateLoggedInAccount(accountId: number, deps: AuthDependencies): Promise<void> {
+async function activateLoggedInAccount(accountId: number, deps: AuthDependencies) {
   await deps.keepActiveAccountInConfig(accountId);
   deps.accountsDb.setActive(accountId);
 }
 
-/** The account a phone login signed in */
 interface PhoneLoginAccount {
   id: number;
   phone: string;
@@ -123,7 +123,31 @@ interface PhoneLoginAccount {
   label?: string | null;
 }
 
-/** The account a QR login signed in */
+interface LoginResult<T> {
+  success: boolean;
+  account?: T;
+  error?: string;
+}
+
+interface LogoutResult {
+  success: boolean;
+  accountId?: number;
+  phone?: string;
+  error?: string;
+}
+
+interface AuthStatus {
+  authenticated: boolean;
+  account?: {
+    id: number;
+    phone: string;
+    name?: string;
+    username?: string;
+    userId?: number;
+  };
+  message?: string;
+}
+
 interface QrLoginAccount {
   id: number;
   name?: string;
@@ -137,7 +161,7 @@ function saveLoggedInUser(
   account: Account,
   user: User,
   fields: { phone?: string; label?: string },
-): Account {
+) {
   const existing = accountsDb.getByUserId(user.id);
   const finalAccount = existing && existing.id !== account.id ? existing : account;
   accountsDb.update(finalAccount.id, {
@@ -157,11 +181,7 @@ export async function loginWithPhone(
   phone: string,
   deps: AuthDependencies,
   options: { label?: string } = {},
-): Promise<{
-  success: boolean;
-  account?: PhoneLoginAccount;
-  error?: string;
-}> {
+) {
   const { accountsDb, createClient, prompt, promptPassword } = deps;
   const label = options.label?.trim();
   const labelValue = label ? label : undefined;
@@ -195,24 +215,19 @@ export async function loginWithPhone(
   } catch (err) {
     await client.destroy().catch(() => {});
     const message = err instanceof Error ? err.message : "Unknown error";
-    return { success: false, error: message };
+    const result: LoginResult<PhoneLoginAccount> = { success: false, error: message };
+    return result;
   }
 
   await activateLoggedInAccount(loggedIn.id, deps);
-  return { success: true, account: loggedIn };
+  const result: LoginResult<PhoneLoginAccount> = { success: true, account: loggedIn };
+  return result;
 }
 
 /**
  * Login via QR code - core logic
  */
-export async function loginWithQr(
-  accountName: string | undefined,
-  deps: AuthDependencies,
-): Promise<{
-  success: boolean;
-  account?: QrLoginAccount;
-  error?: string;
-}> {
+export async function loginWithQr(accountName: string | undefined, deps: AuthDependencies) {
   const { accountsDb, createClient } = deps;
 
   const label = accountName?.trim();
@@ -262,31 +277,26 @@ export async function loginWithQr(
     await client.destroy().catch(() => {});
     accountsDb.delete(account.id);
     const message = err instanceof Error ? err.message : "Unknown error";
-    return { success: false, error: message };
+    const result: LoginResult<QrLoginAccount> = { success: false, error: message };
+    return result;
   }
 
   await activateLoggedInAccount(loggedIn.id, deps);
-  return { success: true, account: loggedIn };
+  const result: LoginResult<QrLoginAccount> = { success: true, account: loggedIn };
+  return result;
 }
 
 /**
  * Logout from account - core logic
  */
-export async function logout(
-  accountId: number | undefined,
-  deps: AuthDependencies,
-): Promise<{
-  success: boolean;
-  accountId?: number;
-  phone?: string;
-  error?: string;
-}> {
+export async function logout(accountId: number | undefined, deps: AuthDependencies) {
   const { accountsDb, getClient } = deps;
 
   const account = accountId ? accountsDb.getById(accountId) : accountsDb.getActive();
 
   if (!account) {
-    return { success: false, error: "No account found to logout" };
+    const result: LogoutResult = { success: false, error: "No account found to logout" };
+    return result;
   }
 
   const client = getClient(account.id);
@@ -298,44 +308,34 @@ export async function logout(
 
     accountsDb.delete(account.id);
 
-    return {
+    const result: LogoutResult = {
       success: true,
       accountId: account.id,
       phone: account.phone,
     };
+    return result;
   } catch (err) {
     await client.destroy().catch(() => {});
     const message = err instanceof Error ? err.message : "Unknown error";
-    return { success: false, error: message };
+    const result: LogoutResult = { success: false, error: message };
+    return result;
   }
 }
 
 /**
  * Get authentication status - core logic
  */
-export async function getAuthStatus(
-  accountId: number | undefined,
-  deps: AuthDependencies,
-): Promise<{
-  authenticated: boolean;
-  account?: {
-    id: number;
-    phone: string;
-    name?: string;
-    username?: string;
-    userId?: number;
-  };
-  message?: string;
-}> {
+export async function getAuthStatus(accountId: number | undefined, deps: AuthDependencies) {
   const { accountsDb, getClient, isAuthorized } = deps;
 
   const account = accountId ? accountsDb.getById(accountId) : accountsDb.getActive();
 
   if (!account) {
-    return {
+    const result: AuthStatus = {
       authenticated: false,
       message: "No account configured",
     };
+    return result;
   }
 
   const client = getClient(account.id);
@@ -346,7 +346,7 @@ export async function getAuthStatus(
     if (authorized) {
       const me = await client.getMe();
       await client.destroy();
-      return {
+      const result: AuthStatus = {
         authenticated: true,
         account: {
           id: account.id,
@@ -356,10 +356,11 @@ export async function getAuthStatus(
           userId: me.id,
         },
       };
+      return result;
     }
 
     await client.destroy();
-    return {
+    const result: AuthStatus = {
       authenticated: false,
       account: {
         id: account.id,
@@ -367,9 +368,10 @@ export async function getAuthStatus(
       },
       message: 'Account exists but not authenticated. Run "tg auth login" to authenticate.',
     };
+    return result;
   } catch {
     await client.destroy().catch(() => {});
-    return {
+    const result: AuthStatus = {
       authenticated: false,
       account: {
         id: account.id,
@@ -377,16 +379,17 @@ export async function getAuthStatus(
       },
       message: "Could not verify authentication status",
     };
+    return result;
   }
 }
 
-function exitOnConfigError(err: unknown): void {
+function exitOnConfigError(err: unknown) {
   if (err instanceof ConfigError) {
     error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues });
   }
 }
 
-function ensureCredentials(): void {
+function ensureCredentials() {
   try {
     requireDefaultConfig();
   } catch (err) {

@@ -14,7 +14,7 @@ interface ContactsStateRow {
   last_sync_at: number | null;
 }
 
-function getContactsState(db: Database): ContactsStateRow | null {
+function getContactsState(db: Database) {
   return db
     .query("SELECT forward_cursor, last_sync_at FROM sync_state WHERE entity_type = $entity")
     .get({ $entity: CONTACTS_ENTITY }) as ContactsStateRow | null;
@@ -27,7 +27,7 @@ function getContactsState(db: Database): ContactsStateRow | null {
  * through `tg api`, a missed update), the hash differs and Telegram sends
  * the full list. Without a recorded list it is 0, which always gets one.
  */
-export function contactsHash(db: Database): tl.Long {
+export function contactsHash(db: Database) {
   const state = getContactsState(db);
   if (!state) return toLong(0);
 
@@ -56,11 +56,7 @@ const UNMARK_SQL = `
  * listed users as contacts, unmark every cached contact the list leaves out
  * (fetched_at stays, the row stays), and record the list in sync_state.
  */
-export function applyContactsSnapshot(
-  db: Database,
-  result: tl.contacts.RawContacts,
-  now: number,
-): { contacts: number; unmarked: number } {
+export function applyContactsSnapshot(db: Database, result: tl.contacts.RawContacts, now: number) {
   const contactIds = new Set(result.contacts.map((c) => String(c.userId)));
   const usersCache = createUsersCache(db);
 
@@ -96,18 +92,18 @@ export function applyContactsSnapshot(
 }
 
 /** Telegram said the list is unchanged: only the check time moves */
-export function markContactsNotModified(db: Database, now: number): void {
+export function markContactsNotModified(db: Database, now: number) {
   db.query(
     "UPDATE sync_state SET last_sync_at = $now, updated_at = $now WHERE entity_type = $entity",
   ).run({ $entity: CONTACTS_ENTITY, $now: now });
 }
 
 /** Unmark every cached contact (updateContactsReset); returns how many */
-export function unmarkAllContacts(db: Database, now: number): number {
+export function unmarkAllContacts(db: Database, now: number) {
   return db.query(UNMARK_SQL).run({ $now: now }).changes;
 }
 
 /** When the contact list was last checked against Telegram, or null */
-export function getContactsSyncedAt(db: Database): number | null {
+export function getContactsSyncedAt(db: Database) {
   return getContactsState(db)?.last_sync_at ?? null;
 }

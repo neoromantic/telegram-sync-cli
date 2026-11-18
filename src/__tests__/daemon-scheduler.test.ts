@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { TelegramClient, tl } from "@mtcute/bun";
-import type { AccountRuntime, DaemonContext } from "../daemon/daemon-context";
+import type { DaemonContext } from "../daemon/daemon-context";
 import { requestShutdown, totalMessagesSynced } from "../daemon/daemon-context";
 import {
   cleanupOldJobs,
@@ -27,10 +27,9 @@ import { fakeDialogClient } from "./helpers/fake-dialogs";
 import { createFakeHistory, range } from "./helpers/fake-history";
 import { waitLikeFloodWait } from "./helpers/flood-wait";
 
-const asTelegramClient = (client: Partial<TelegramClient>): TelegramClient =>
-  client as TelegramClient;
+const asTelegramClient = (client: Partial<TelegramClient>) => client as TelegramClient;
 
-const createSchedulerStub = (overrides: Partial<SyncScheduler> = {}): SyncScheduler => {
+const createSchedulerStub = (overrides: Partial<SyncScheduler> = {}) => {
   const scheduler = {
     queueForwardCatchup: mock(() => {}),
     queueBackwardHistory: mock(() => {}),
@@ -51,7 +50,7 @@ const createSchedulerStub = (overrides: Partial<SyncScheduler> = {}): SyncSchedu
   return scheduler;
 };
 
-const createWorkerStub = (overrides: Partial<RealSyncWorker> = {}): RealSyncWorker => {
+const createWorkerStub = (overrides: Partial<RealSyncWorker> = {}) => {
   const worker = {
     client: asTelegramClient({}),
     processJobReal: mock(async () => ({
@@ -83,7 +82,7 @@ function runAccount(
   ctx: DaemonContext,
   accountId: number,
   parts: { scheduler?: SyncScheduler; worker?: RealSyncWorker } = {},
-): AccountRuntime {
+) {
   connect(ctx, accountId);
   return addAccountRuntime(ctx, accountId, createAccountCacheDb(), {
     scheduler: parts.scheduler ?? createSchedulerStub(),
@@ -816,7 +815,7 @@ describe("processJobs", () => {
 
   it("runs account 2's jobs while account 1's cache fails to pick one", async () => {
     const ctx = testDaemonContext();
-    const failingGetNextJob = mock((): SyncJobRow | null => {
+    const failingGetNextJob = mock(() => {
       throw new Error("database disk image is malformed");
     });
     runAccount(ctx, 1, {

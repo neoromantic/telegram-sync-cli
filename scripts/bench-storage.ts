@@ -95,7 +95,7 @@ type RawUser = Parameters<typeof apiUserToCacheInput>[0];
 type RawChat = Parameters<typeof rawChatToCacheInput>[0];
 type PageUsers = Parameters<typeof cacheHistoryResponse>[3];
 
-function log(message: string): void {
+function log(message: string) {
   console.error(`[bench] ${message}`);
 }
 
@@ -106,12 +106,12 @@ interface Timing {
   runs: number;
 }
 
-function round(value: number, digits = 2): number {
+function round(value: number, digits = 2) {
   const f = 10 ** digits;
   return Math.round(value * f) / f;
 }
 
-function summarize(samples: number[], first: number): Timing {
+function summarize(samples: number[], first: number) {
   const sorted = [...samples].sort((a, b) => a - b);
   const at = (q: number) =>
     sorted[Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1)] ?? 0;
@@ -123,10 +123,7 @@ function summarize(samples: number[], first: number): Timing {
   };
 }
 
-async function time<T>(
-  runs: number,
-  fn: () => T | Promise<T>,
-): Promise<{ timing: Timing; result: T }> {
+async function time<T>(runs: number, fn: () => T | Promise<T>) {
   let start = performance.now();
   let result = await fn();
   const first = performance.now() - start;
@@ -142,7 +139,7 @@ async function time<T>(
 function writeTimes() {
   const stats = { count: 0, ms: 0, max_ms: 0, over_100ms: 0 };
   return {
-    time<T>(fn: () => T): T {
+    time<T>(fn: () => T) {
       const start = performance.now();
       const result = fn();
       const ms = performance.now() - start;
@@ -165,12 +162,12 @@ function writeTimes() {
 
 type WriteTimes = ReturnType<typeof writeTimes>;
 
-function backgroundMerge(db: Database, merges: WriteTimes, mode: "rest" | "bulk" = "rest"): void {
+function backgroundMerge(db: Database, merges: WriteTimes, mode: "rest" | "bulk" = "rest") {
   if (!isSearchMergeDue(db, mode)) return;
   merges.time(() => runSearchMergeBatch(db, DEFAULT_BATCH_LIMITS, mode));
 }
 
-function mergeAll(db: Database, merges: WriteTimes): void {
+function mergeAll(db: Database, merges: WriteTimes) {
   while (isSearchMergeDue(db)) {
     if (merges.time(() => runSearchMergeBatch(db, DEFAULT_BATCH_LIMITS)).finished) {
       return;
@@ -236,7 +233,7 @@ function reindexNames(db: Database, merge: boolean) {
   };
 }
 
-function fileBytes(path: string): number {
+function fileBytes(path: string) {
   return Bun.file(path).size;
 }
 
@@ -263,7 +260,7 @@ function watchDisk(cachePath: string) {
   };
 }
 
-async function cli(argv: string[]): Promise<{ ms: number; stdout: string }> {
+async function cli(argv: string[]) {
   const start = performance.now();
   const proc = Bun.spawn(["bun", "--no-env-file", join(ROOT, "src/index.ts"), ...argv], {
     cwd: dataDir,
@@ -287,7 +284,7 @@ async function cli(argv: string[]): Promise<{ ms: number; stdout: string }> {
   return { ms, stdout };
 }
 
-async function timeCli(argv: string[]): Promise<Timing> {
+async function timeCli(argv: string[]) {
   const first = (await cli(argv)).ms;
   const samples: number[] = [];
   for (let i = 0; i < CLI_RUNS; i++) samples.push((await cli(argv)).ms);
@@ -329,18 +326,18 @@ function historyPage(data: Dataset, chat: BenchChat, p: number) {
   };
 }
 
-function pagesOf(chat: BenchChat): number {
+function pagesOf(chat: BenchChat) {
   return Math.ceil(chat.size / PAGE_SIZE);
 }
 
-function count(db: Database, sql: string): number {
+function count(db: Database, sql: string) {
   return (db.query(sql).get() as { n: number }).n;
 }
 
-function writePeers(db: Database, data: Dataset, oldForm: boolean): void {
+function writePeers(db: Database, data: Dataset, oldForm: boolean) {
   const usersCache = createUsersCache(db);
   const chatsCache = createChatsCache(db);
-  const raw = <T extends { raw_json: string }>(input: T, value: unknown): T =>
+  const raw = <T extends { raw_json: string }>(input: T, value: unknown) =>
     oldForm ? { ...input, raw_json: JSON.stringify(value) } : input;
   db.transaction(() => {
     usersCache.upsert(
@@ -368,7 +365,7 @@ function writePeers(db: Database, data: Dataset, oldForm: boolean): void {
   })();
 }
 
-function oldMessageType(message: Record<string, unknown>): string {
+function oldMessageType(message: Record<string, unknown>) {
   const media = message.media as { _?: string } | undefined;
   if (media?._ === "messageMediaDocument") return "document";
   return resolveRawMessageType(message).messageType;
@@ -379,7 +376,7 @@ function writeOldFormPage(
   chat: BenchChat,
   page: ReturnType<typeof historyPage>,
   users: Array<Record<string, unknown>>,
-): void {
+) {
   const usersCache = createUsersCache(db);
   const messagesCache = createMessagesCache(db);
   const inputs = createMessageInputs(page.messages, chat.chatId);
@@ -445,7 +442,7 @@ function writeHistory(db: Database, data: Dataset, oldForm: boolean) {
   };
 }
 
-function markDeletions(db: Database, data: Dataset): void {
+function markDeletions(db: Database, data: Dataset) {
   const messagesCache = createMessagesCache(db);
   const r = rng(SEED * 7919);
   for (const chat of data.chats) {
@@ -1006,30 +1003,30 @@ try {
   else rmSync(dataDir, { recursive: true, force: true });
 }
 
-function mb(bytes: number): string {
+function mb(bytes: number) {
   return `${(bytes / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 })} MB`;
 }
 
-function n(value: number): string {
+function n(value: number) {
   return value.toLocaleString("en-US");
 }
 
 type Size = ReturnType<typeof measureSize>;
 
-function mergeLine(merges: ReturnType<WriteTimes["report"]>): string {
+function mergeLine(merges: ReturnType<WriteTimes["report"]>) {
   return `${n(merges.count)} batches, ${merges.seconds} s, longest ${merges.max_ms} ms (${merges.over_100ms} over 100 ms)`;
 }
 
-function indexLine(label: string, index: ReturnType<typeof measureIndex>): string {
+function indexLine(label: string, index: ReturnType<typeof measureIndex>) {
   return `| ${label} | ${mb(index.bytes)} | ${index.segments} | ${index.probe_us} |`;
 }
 type Head = ReturnType<typeof describe>;
 
-function heading(r: Head): string {
+function heading(r: Head) {
   return `## ${n(r.params.messages)} messages, ${r.mode} (${r.machine.os}, ${r.machine.arch}, Bun ${r.machine.bun}, SQLite ${r.machine.sqlite})`;
 }
 
-function sizeLines(size: Size): string[] {
+function sizeLines(size: Size) {
   const lines = [
     `File ${mb(size.file_bytes)}, ${n(size.bytes_per_message)} B per message; raw_json ${n(size.raw_json.per_message)} B per message (${Math.round(size.raw_json.share_of_file * 100)}% of the file).`,
     "",
@@ -1045,9 +1042,7 @@ function sizeLines(size: Size): string[] {
   return lines;
 }
 
-function markdown(
-  r: Head & Awaited<ReturnType<typeof runCurrent>> & { total_seconds: number },
-): string {
+function markdown(r: Head & Awaited<ReturnType<typeof runCurrent>> & { total_seconds: number }) {
   const lines = [heading(r), "", ...sizeLines(r.size), ""];
   lines.push("| raw_json compression (sample) | B/message |", "|---|---:|");
   for (const [name, bytes] of Object.entries(r.size.raw_json_compression.per_message)) {
@@ -1109,7 +1104,7 @@ function markdown(
 
 function markdownOldForm(
   r: Head & Awaited<ReturnType<typeof runOldForm>> & { total_seconds: number },
-): string {
+) {
   const m = r.migration;
   const v = r.vacuum;
   return [

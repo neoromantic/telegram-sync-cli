@@ -68,7 +68,7 @@ const TEAM_CHAT: HistoryChat = {
 
 type CallClient = Pick<TelegramClient, "call">;
 
-function createCacheDb(): Database {
+function createCacheDb() {
   const db = createAccountCacheDb();
   takePartIn(db, TEAM_CHAT_ID, BOOK_CLUB_ID);
   return db;
@@ -93,7 +93,7 @@ function cacheRun(db: Database, chatId: number, low: number, high: number) {
   createHistoryRanges(db).add(chatId, { low, high });
 }
 
-function storedRanges(db: Database, chatId = TEAM_CHAT_ID): HistoryRange[] {
+function storedRanges(db: Database, chatId = TEAM_CHAT_ID) {
   return db
     .query("SELECT low, high FROM history_ranges WHERE chat_id = ? ORDER BY low")
     .all(chatId) as HistoryRange[];
@@ -170,7 +170,7 @@ function unboundedClient(ids: number[]) {
 }
 
 function throwingFactory() {
-  return mock((): HistoryClient => {
+  return mock(() => {
     throw new Error("the cache should have answered");
   });
 }
@@ -183,7 +183,7 @@ function rowIds(rows: Array<{ message_id: number }>) {
   return rows.map((row) => row.message_id);
 }
 
-function storedIds(db: Database): number[] {
+function storedIds(db: Database) {
   const rows = db
     .query("SELECT message_id FROM messages_cache ORDER BY message_id DESC")
     .all() as Array<{ message_id: number }>;
@@ -1221,7 +1221,7 @@ describe("reportHistoryError", () => {
     errorSpy.mockRestore();
   });
 
-  function codeOf(err: unknown): { code?: string; message: string } {
+  function codeOf(err: unknown) {
     try {
       reportHistoryError(err, "list messages");
     } catch (thrown) {

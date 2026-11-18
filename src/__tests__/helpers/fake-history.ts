@@ -15,7 +15,7 @@ export function rawMessage(id: number) {
   return { _: "message", id, date: 1_700_000_000 + id, message: `msg ${id}` };
 }
 
-export function range(from: number, to: number): number[] {
+export function range(from: number, to: number) {
   return Array.from({ length: to - from + 1 }, (_, i) => from + i);
 }
 
@@ -79,7 +79,7 @@ export function createMultiChatHistory() {
     set(chatId: number, ids: Iterable<number>) {
       chats.set(chatId, new Set(ids));
     },
-    requestsFor(chatId: number): GetHistoryRequest[] {
+    requestsFor(chatId: number) {
       return requestsByChat.get(chatId) ?? [];
     },
     get requestCount() {

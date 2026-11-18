@@ -5,7 +5,7 @@ import { apiCommand } from "../commands/api";
 import { sendCommand } from "../commands/send";
 import { flagValues, spacedFlagValues } from "../utils/args";
 
-function spaced(...argv: string[]): Record<string, string> {
+function spaced(...argv: string[]) {
   const args = parseArgs(argv, apiCommand.args as ArgsDef) as Record<string, unknown>;
   return Object.fromEntries(spacedFlagValues(argv, args.method as string, args));
 }

@@ -1,7 +1,7 @@
 import { Long } from "@mtcute/bun";
 
 /** Made-up bytes: `length` bytes counting up from `seed` */
-export function fakeBytes(length: number, seed = 0): Uint8Array {
+export function fakeBytes(length: number, seed = 0) {
   return Uint8Array.from({ length }, (_, i) => (seed + i * 7) % 256);
 }
 

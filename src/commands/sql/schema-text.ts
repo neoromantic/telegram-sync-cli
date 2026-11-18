@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 
 import type { TableAnnotation } from "../../db/schema-annotations";
 
-function formatHeader(tableName: string, annotation: TableAnnotation): string[] {
+function formatHeader(tableName: string, annotation: TableAnnotation) {
   const lines: string[] = [];
   lines.push(`Table: ${tableName}`);
   lines.push(`Description: ${annotation.description}`);
@@ -17,7 +17,7 @@ function formatHeader(tableName: string, annotation: TableAnnotation): string[] 
   return lines;
 }
 
-function formatColumnFlags(colName: string, annotation: TableAnnotation): string {
+function formatColumnFlags(colName: string, annotation: TableAnnotation) {
   const flags: string[] = [];
   const pk = annotation.primaryKey;
   const isPrimaryKey = Array.isArray(pk) ? pk.includes(colName) : pk === colName;
@@ -35,7 +35,7 @@ function formatColumnFlags(colName: string, annotation: TableAnnotation): string
   return flags.length > 0 ? `  [${flags.join(", ")}]` : "";
 }
 
-function formatColumnDetails(colName: string, annotation: TableAnnotation): string[] {
+function formatColumnDetails(colName: string, annotation: TableAnnotation) {
   const col = annotation.columns[colName];
   if (!col) return [];
 
@@ -50,7 +50,7 @@ function formatColumnDetails(colName: string, annotation: TableAnnotation): stri
   return lines;
 }
 
-function formatColumns(annotation: TableAnnotation): string[] {
+function formatColumns(annotation: TableAnnotation) {
   const lines: string[] = [];
   lines.push("Columns:");
 
@@ -63,7 +63,7 @@ function formatColumns(annotation: TableAnnotation): string[] {
   return lines;
 }
 
-function formatIndexes(annotation: TableAnnotation): string[] {
+function formatIndexes(annotation: TableAnnotation) {
   if (!annotation.indexes || Object.keys(annotation.indexes).length === 0) {
     return [];
   }
@@ -77,7 +77,7 @@ function formatIndexes(annotation: TableAnnotation): string[] {
   return lines;
 }
 
-export function formatSchemaAsText(tableName: string, annotation: TableAnnotation): string {
+export function formatSchemaAsText(tableName: string, annotation: TableAnnotation) {
   const lines: string[] = [];
   lines.push(...formatHeader(tableName, annotation));
   lines.push(...formatColumns(annotation));
@@ -107,7 +107,7 @@ interface IndexColumnInfo {
   name: string;
 }
 
-function buildColumnComment(colName: string, annotation: TableAnnotation): string {
+function buildColumnComment(colName: string, annotation: TableAnnotation) {
   const col = annotation.columns[colName];
   if (!col) return "";
 
@@ -131,7 +131,7 @@ function formatSqlColumn(
   annotation: TableAnnotation,
   isLast: boolean,
   primaryKeyColumns: string[],
-): string {
+) {
   const parts: string[] = [];
 
   parts.push(`  ${col.name.padEnd(20)} ${col.type.padEnd(12)}`);
@@ -166,7 +166,7 @@ function formatCreateTable(
   columns: ColumnInfo[],
   annotation: TableAnnotation,
   kind: "TABLE" | "VIEW",
-): string[] {
+) {
   const lines: string[] = [];
 
   lines.push(`-- ${annotation.description}`);
@@ -193,11 +193,7 @@ function formatCreateTable(
   return lines;
 }
 
-function formatCreateIndexes(
-  tableName: string,
-  db: Database,
-  annotation: TableAnnotation,
-): string[] {
+function formatCreateIndexes(tableName: string, db: Database, annotation: TableAnnotation) {
   const lines: string[] = [];
 
   const indexList = db.query(`PRAGMA index_list(${tableName})`).all() as IndexInfo[];
@@ -230,11 +226,7 @@ function formatCreateIndexes(
 /**
  * Format full schema as annotated SQL DDL
  */
-export function formatSchemaAsSql(
-  tableName: string,
-  annotation: TableAnnotation,
-  db: Database,
-): string {
+export function formatSchemaAsSql(tableName: string, annotation: TableAnnotation, db: Database) {
   const lines: string[] = [];
 
   const columns = db.query(`PRAGMA table_info(${tableName})`).all() as ColumnInfo[];

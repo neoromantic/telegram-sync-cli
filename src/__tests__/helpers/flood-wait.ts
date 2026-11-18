@@ -21,7 +21,7 @@ export interface FloodWaitOptions {
 export function waitLikeFloodWait(
   params: { abortSignal?: AbortSignal } | undefined,
   { onWait, guardMs = 1500 }: FloodWaitOptions = {},
-): Promise<never> {
+) {
   return new Promise<never>((_resolve, reject) => {
     const signal = params?.abortSignal;
     const timers: ReturnType<typeof setTimeout>[] = [];

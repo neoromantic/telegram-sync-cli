@@ -13,7 +13,7 @@ import { createDaemonStatusService } from "../db/daemon-status";
 import { createMessagesCache } from "../db/messages-cache";
 import { createUsersCache } from "../db/users-cache";
 import { toPeerIdFromRawPeer } from "../utils/telegram-peer-ids";
-import { type CliOptions, NO_CREDENTIALS, runCli, runCliSuccess, spawnCli } from "./helpers/cli";
+import { NO_CREDENTIALS, runCli, runCliSuccess, spawnCli } from "./helpers/cli";
 import { FAKE_CLIENT_CLI } from "./helpers/fake-client-cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
 
@@ -50,7 +50,7 @@ interface CommandArg {
   required?: boolean;
 }
 
-function argv(path: string, chat?: string): string[] {
+function argv(path: string, chat?: string) {
   const node = runnableCommands(main).find((c) => c.path === path)?.node as {
     args?: Record<string, CommandArg>;
   };
@@ -119,7 +119,7 @@ describe("E2E: read-only mode and allowedChats", () => {
     env.cleanup();
   });
 
-  function options(vars: Record<string, string> = {}): CliOptions {
+  function options(vars: Record<string, string> = {}) {
     return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS, ...vars } };
   }
 

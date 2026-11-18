@@ -24,7 +24,7 @@ export interface ChatProtectionStore {
   ): void;
 }
 
-export function createChatProtectionStore(db: Database): ChatProtectionStore {
+export function createChatProtectionStore(db: Database) {
   const stmts = {
     get: db.query<ChatProtectionRow, [number]>(`
       SELECT chat_id, protected, reason, fetched_at
@@ -41,7 +41,7 @@ export function createChatProtectionStore(db: Database): ChatProtectionStore {
     `),
   };
 
-  return {
+  const value: ChatProtectionStore = {
     get(chatId) {
       return stmts.get.get(chatId) ?? null;
     },
@@ -55,4 +55,5 @@ export function createChatProtectionStore(db: Database): ChatProtectionStore {
       });
     },
   };
+  return value;
 }

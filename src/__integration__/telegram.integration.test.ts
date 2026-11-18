@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type CliOptions, runCli, runCliSuccess, spawnCli } from "../__e2e__/helpers/cli";
+import { runCli, runCliSuccess, spawnCli } from "../__e2e__/helpers/cli";
 import { VERSION } from "../version";
 import { createIntegrationEnvironment, type IntegrationEnvironment } from "./helpers/setup";
 
@@ -20,11 +20,11 @@ const SMOKE_FILE_SIZE = 700_000;
 
 type Envelope<T> = { success: boolean; data: T };
 
-function uniqueMarker(): string {
+function uniqueMarker() {
   return `tgsmoke${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function smokeBytes(length: number): Uint8Array {
+function smokeBytes(length: number) {
   const bytes = new Uint8Array(length);
   let state = 0x2545f491;
   for (let i = 0; i < length; i++) {
@@ -52,11 +52,7 @@ function collectOutput(stream: ReadableStream<Uint8Array>) {
   };
 }
 
-async function waitFor<T>(
-  check: () => Promise<T | null>,
-  timeoutMs: number,
-  what: string,
-): Promise<T> {
+async function waitFor<T>(check: () => Promise<T | null>, timeoutMs: number, what: string) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const value = await check();
@@ -70,7 +66,7 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
   let env: IntegrationEnvironment;
   const sentMessageIds: number[] = [];
 
-  function cli(timeout = API_TIMEOUT_MS): CliOptions {
+  function cli(timeout = API_TIMEOUT_MS) {
     return {
       ...env.getCliOptions({
         TELEGRAM_API_ID: API_ID!,
@@ -80,7 +76,7 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
     };
   }
 
-  async function sendToSavedMessages(text: string): Promise<number> {
+  async function sendToSavedMessages(text: string) {
     const result = await runCliSuccess(
       ["send", "--to", "me", "--message", text, "--silent"],
       cli(),

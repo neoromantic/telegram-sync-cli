@@ -6,7 +6,7 @@ import { listChatsArgs } from "../commands/chats/list";
 import { listContactsArgs } from "../commands/contacts";
 import { shellQuote, tgCommand } from "../commands/next";
 
-async function shellWords(words: string): Promise<string[]> {
+async function shellWords(words: string) {
   const out = await $`sh -c ${`printf '%s\\0' ${words}`}`.text();
   return out.split("\0").slice(0, -1);
 }

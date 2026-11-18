@@ -24,10 +24,7 @@ import {
 
 type TelegramClientLike = Pick<TelegramClient, "call">;
 
-async function resolveUserByUsername(
-  client: TelegramClientLike,
-  username: string,
-): Promise<tl.RawUser | undefined> {
+async function resolveUserByUsername(client: TelegramClientLike, username: string) {
   return (
     await client.call({
       _: "contacts.resolveUsername",
@@ -36,10 +33,7 @@ async function resolveUserByUsername(
   ).users?.find(isRawUser);
 }
 
-async function resolveUserByPhone(
-  client: TelegramClientLike,
-  phone: string,
-): Promise<tl.RawUser | undefined> {
+async function resolveUserByPhone(client: TelegramClientLike, phone: string) {
   return (
     await client.call({
       _: "contacts.resolvePhone",
@@ -48,10 +42,7 @@ async function resolveUserByPhone(
   ).users?.find(isRawUser);
 }
 
-async function resolveUserById(
-  client: TelegramClientLike,
-  identifier: string,
-): Promise<tl.RawUser | undefined> {
+async function resolveUserById(client: TelegramClientLike, identifier: string) {
   return (
     await client.call({
       _: "users.getUsers",
@@ -69,7 +60,7 @@ async function resolveUserById(
 async function resolveUserFromApi(
   client: TelegramClientLike,
   parsed: ReturnType<typeof parseUserIdentifier>,
-): Promise<tl.RawUser | undefined> {
+) {
   if (parsed.kind === "username") {
     verbose(`Resolving username: ${parsed.value}`);
     return resolveUserByUsername(client, parsed.value);

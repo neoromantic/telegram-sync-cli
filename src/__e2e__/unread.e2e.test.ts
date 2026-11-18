@@ -43,7 +43,7 @@ function message(
   ) as NonNullable<ReturnType<typeof parseRawMessage>>;
 }
 
-function seed(db: Database): void {
+function seed(db: Database) {
   createUsersCache(db).upsert({
     user_id: "10",
     username: "alice",
@@ -129,15 +129,15 @@ describe("E2E: unread messages", () => {
     env.cleanup();
   });
 
-  const offline = (): CliOptions => ({
+  const offline = () => ({
     env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
   });
-  const fake = (): CliOptions => ({
+  const fake = () => ({
     ...env.getCliOptions(),
     entry: FAKE_CLIENT_CLI,
   });
 
-  async function data<T>(args: string[], options: CliOptions): Promise<T> {
+  async function data<T>(args: string[], options: CliOptions) {
     const result = await runCli(args, options);
     expect(result.exitCode).toBe(0);
     return (result.json as { data: T }).data;

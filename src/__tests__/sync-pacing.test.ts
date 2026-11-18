@@ -3,7 +3,7 @@ import { createSyncPacer, PACING_CLEAN_RUN_CALLS, type SyncPacer } from "../daem
 
 const T0 = 1_760_000_000_000;
 
-function runClean(pacer: SyncPacer, calls: number, start = T0): number {
+function runClean(pacer: SyncPacer, calls: number, start = T0) {
   let now = start;
   for (let i = 0; i < calls; i++) {
     now = Math.max(now, pacer.nextStartAt());

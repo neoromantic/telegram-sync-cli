@@ -14,13 +14,13 @@ import { photoMessage } from "./helpers/photo-message";
 const CHAT = 1001;
 const peer = { _: "peerUser" as const, userId: CHAT };
 
-function input(raw: unknown, chatId = CHAT): MessageInput {
+function input(raw: unknown, chatId = CHAT) {
   const parsed = parseRawMessage(raw, chatId);
   if (!parsed) throw new Error("not a message");
   return parsed;
 }
 
-function totalChanges(db: Database): number {
+function totalChanges(db: Database) {
   return (db.query("SELECT total_changes() AS n").get() as { n: number }).n;
 }
 

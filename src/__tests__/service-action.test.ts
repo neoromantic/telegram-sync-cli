@@ -6,11 +6,8 @@ import { extractServiceAction } from "../utils/service-action";
 
 const peerId = { _: "peerUser" as const, userId: 1001 };
 
-function service(
-  action: tl.TypeMessageAction,
-  extra: Partial<tl.RawMessageService> = {},
-): tl.RawMessageService {
-  return {
+function service(action: tl.TypeMessageAction, extra: Partial<tl.RawMessageService> = {}) {
+  const result: tl.RawMessageService = {
     _: "messageService",
     id: 40,
     peerId,
@@ -18,6 +15,7 @@ function service(
     action,
     ...extra,
   };
+  return result;
 }
 
 function cached(message: tl.RawMessageService) {

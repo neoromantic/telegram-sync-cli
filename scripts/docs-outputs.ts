@@ -16,29 +16,32 @@ interface JsonSchema {
   items?: JsonSchema;
 }
 
-function alternatives(schema: JsonSchema): string[] {
-  if (schema.anyOf) return schema.anyOf.flatMap(alternatives);
+function alternatives(schema: JsonSchema) {
+  if (schema.anyOf) {
+    const names: string[] = schema.anyOf.flatMap(alternatives);
+    return names;
+  }
   if (schema.enum) return schema.enum.map((value) => `\`${value}\``);
   const types = [schema.type ?? "unknown"].flat();
   return types.map((type) => (type === "null" ? "`null`" : type));
 }
 
-function typeName(schema: JsonSchema): string {
+function typeName(schema: JsonSchema) {
   if (schema.type === "array") return "array";
   const names = alternatives(schema);
   const last = names.pop();
   return names.length > 0 ? `${names.join(", ")} or ${last}` : `${last}`;
 }
 
-function rows(schema: JsonSchema, prefix = ""): string[] {
+function rows(schema: JsonSchema, prefix = "") {
   return Object.entries(schema.properties ?? {}).flatMap(([key, field]) => {
     const row = `| \`${prefix}${key}\` | ${typeName(field)} | ${field.description ?? ""} |`;
-    const nested = field.items?.properties ? rows(field.items, `${prefix}${key}[].`) : [];
+    const nested: string[] = field.items?.properties ? rows(field.items, `${prefix}${key}[].`) : [];
     return [row, ...nested];
   });
 }
 
-export function renderTable(output: z.ZodType): string {
+export function renderTable(output: z.ZodType) {
   const schema = z.toJSONSchema(output) as JsonSchema;
   return ["| Field | Type | Description |", "|---|---|---|", ...rows(schema)]
     .join("\n")
@@ -46,7 +49,7 @@ export function renderTable(output: z.ZodType): string {
 }
 
 /** The doc with every output table regenerated */
-export function updateDoc(doc: string): string {
+export function updateDoc(doc: string) {
   return doc.replace(
     /(<!-- output: (.+?) -->\n)[\s\S]*?(<!-- \/output -->)/g,
     (_, open: string, command: string, close: string) => {

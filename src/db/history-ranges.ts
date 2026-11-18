@@ -31,7 +31,7 @@ export interface HistoryRanges {
   find(chatId: number, messageId: number): HistoryRange | null;
 }
 
-export function createHistoryRanges(db: Database): HistoryRanges {
+export function createHistoryRanges(db: Database) {
   const stmts = {
     find: db.query(`
       SELECT low, high FROM history_ranges

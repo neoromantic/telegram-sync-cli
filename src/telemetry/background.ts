@@ -32,12 +32,12 @@ const AGENT_VARS = [
 ];
 
 /** A compiled binary runs its modules from Bun's embedded file system */
-export function isCompiled(modulePath: string = import.meta.path): boolean {
+export function isCompiled(modulePath: string = import.meta.path) {
   return modulePath.includes("$bunfs") || modulePath.includes("~BUN");
 }
 
 /** The keys under which the client counts a call's event once a day */
-export function dailyKey(call: Call): string {
+export function dailyKey(call: Call) {
   const [name, arg] = call;
   if (name === "started") return "app_started";
   if (name === "feature") return `feature_used:${arg}`;
@@ -56,7 +56,7 @@ export function sentToday(
   handoff: Handoff,
   env: Env = process.env,
   now: Date = new Date(),
-): boolean {
+) {
   if (handoff.tty) return false;
   if (AGENT_VARS.some((name) => (env[name] ?? "").trim() !== "")) return false;
   try {
@@ -78,13 +78,14 @@ export function sentToday(
  * The environment of the copy that sends `handoff`. It runs in another
  * folder, so a data directory given as a relative path is made absolute.
  */
-export function senderEnv(handoff: Handoff, env: Env = process.env): Env {
+export function senderEnv(handoff: Handoff, env: Env = process.env) {
   const dataDir = env.TELEGRAM_SYNC_CLI_DATA_DIR;
-  return {
+  const result: Env = {
     ...env,
     ...(dataDir && { TELEGRAM_SYNC_CLI_DATA_DIR: resolve(dataDir) }),
     [EVENTS_ENV]: JSON.stringify(handoff),
   };
+  return result;
 }
 
 /**

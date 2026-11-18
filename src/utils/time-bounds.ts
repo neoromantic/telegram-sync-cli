@@ -5,7 +5,7 @@ const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME =
   /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
 
-function localDate(value: string): Date | null {
+function localDate(value: string) {
   const [year, month, day] = value.split("-").map(Number);
   const date = new Date(year!, month! - 1, day!);
   if (date.getMonth() !== month! - 1 || date.getDate() !== day) return null;
@@ -21,10 +21,7 @@ function localDate(value: string): Date | null {
  * - a date and time, `2026-10-01T09:30`: local time unless it ends with `Z`
  *   or an offset such as `+03:00`.
  */
-export function parseTimeBound(
-  value: string,
-  options: { now: number; end?: boolean },
-): number | null {
+export function parseTimeBound(value: string, options: { now: number; end?: boolean }) {
   const input = value.trim();
   let ms: number;
 

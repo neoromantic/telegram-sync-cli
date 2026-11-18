@@ -50,7 +50,7 @@ const DAY = 24 * HOUR;
 const WEEK = 7 * DAY;
 
 /** Default retention of the bookkeeping tables */
-export function getDefaultRetentionConfig(): CacheRetentionConfig {
+export function getDefaultRetentionConfig() {
   return {
     apiActivity: WEEK,
     rateLimits: HOUR,
@@ -62,7 +62,7 @@ export function getDefaultRetentionConfig(): CacheRetentionConfig {
 /**
  * Returns default cache configuration
  */
-export function getDefaultCacheConfig(): CacheConfig {
+export function getDefaultCacheConfig() {
   return {
     staleness: {
       peers: WEEK,
@@ -91,7 +91,7 @@ export type DurationString = `${number}${DurationUnit}`;
 /**
  * Parse a human-readable duration string to milliseconds
  */
-export function parseDuration(duration: DurationString): number {
+export function parseDuration(duration: DurationString) {
   const match = duration.match(/^(\d+)(s|m|h|d|w)$/);
   const value = match?.[1];
   const unit = match?.[2] as DurationUnit | undefined;
@@ -113,7 +113,7 @@ export function parseDuration(duration: DurationString): number {
 /**
  * Check if a cached entry is stale
  */
-export function isCacheStale(fetchedAt: number | null, ttlMs: number): boolean {
+export function isCacheStale(fetchedAt: number | null, ttlMs: number) {
   if (fetchedAt === null) return true;
   return Date.now() - fetchedAt > ttlMs;
 }

@@ -8,14 +8,14 @@ import { seedLegacyCache } from "./legacy-cache";
 import { takePartIn } from "./participation";
 
 /** A shared cache as 0.2.0 left it (see legacy-cache.ts) */
-export function legacySharedCache(db: Database): void {
+export function legacySharedCache(db: Database) {
   initCacheSchema(db);
   initSyncSchema(db);
   seedLegacyCache(db);
 }
 
 /** The current schema with no rows */
-export function emptyCache(db: Database): void {
+export function emptyCache(db: Database) {
   initCacheSchema(db);
   initSyncSchema(db);
 }
@@ -24,7 +24,7 @@ export function emptyCache(db: Database): void {
  * A shared cache whose rows are still in the WAL: checkpoints are off and
  * the process exits without closing it, so only the -wal file holds them
  */
-export function cacheWithRowsInWal(db: Database, args: { messages: number }): "exit-without-close" {
+export function cacheWithRowsInWal(db: Database, args: { messages: number }) {
   initCacheSchema(db);
   initSyncSchema(db);
   db.run("PRAGMA wal_autocheckpoint = 0");
@@ -47,7 +47,7 @@ export function cacheWithRowsInWal(db: Database, args: { messages: number }): "e
  * A shared cache that is already in rollback-journal mode, as a fold leaves
  * it: no -wal or -shm after the process exits
  */
-export function foldedCache(db: Database, args: { empty?: boolean }): void {
+export function foldedCache(db: Database, args: { empty?: boolean }) {
   if (args?.empty) emptyCache(db);
   else legacySharedCache(db);
   db.run("PRAGMA journal_mode = DELETE");

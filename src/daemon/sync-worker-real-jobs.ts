@@ -39,7 +39,7 @@ async function fetchJobPage(
   chatId: number,
   inputPeer: tl.TypeInputPeer,
   request: Parameters<typeof fetchMessagesRaw>[2],
-): Promise<unknown[]> {
+) {
   const page = await fetchMessagesRaw(ctx.client, inputPeer, request, ctx.signal);
   cachePageUsers(ctx.usersCache, page.users);
   const total = historyTotal(page, request);
@@ -62,10 +62,7 @@ async function fetchJobPage(
  * A chat without a cursor gets its newest page; older history is the
  * backward job's.
  */
-export async function processForwardCatchupReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
+export async function processForwardCatchupReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
   const chatId = job.chat_id;
   const peer = requestPeer(ctx, chatId);
   if ("result" in peer) return peer.result;
@@ -97,7 +94,8 @@ export async function processForwardCatchupReal(
           top_before: topBefore,
         });
       }
-      return { success: true, messagesFetched: 0, hasMore: false };
+      const value: RealJobResult = { success: true, messagesFetched: 0, hasMore: false };
+      return value;
     }
 
     const top = Math.max(...above.map(rawMessageId));
@@ -130,28 +128,27 @@ export async function processForwardCatchupReal(
       cursor_end: top,
     });
 
-    return {
+    const value: RealJobResult = {
       success: true,
       messagesFetched: newCount,
       hasMore,
       newCursor: top,
     };
+    return value;
   } catch (err) {
     return resolveJobError(ctx, err);
   }
 }
 
-export async function processBackwardHistoryReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
+export async function processBackwardHistoryReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
   const chatId = job.chat_id;
   const peer = requestPeer(ctx, chatId);
   if ("result" in peer) return peer.result;
 
   const state = ctx.chatSyncState.get(chatId);
   if (state?.history_complete) {
-    return { success: true, messagesFetched: 0, historyComplete: true };
+    const value: RealJobResult = { success: true, messagesFetched: 0, historyComplete: true };
+    return value;
   }
 
   const forwardCursor = state?.forward_cursor ?? null;
@@ -177,7 +174,8 @@ export async function processBackwardHistoryReal(
       ctx.historyRanges.recordPage(chatId, [], bounds);
       ctx.chatSyncState.markHistoryComplete(chatId);
       ctx.chatSyncState.updateLastSync(chatId, "backward");
-      return { success: true, messagesFetched: 0, historyComplete: true };
+      const value: RealJobResult = { success: true, messagesFetched: 0, historyComplete: true };
+      return value;
     }
 
     const ids = messages.map(rawMessageId).filter((id) => id > 0);
@@ -207,13 +205,14 @@ export async function processBackwardHistoryReal(
       ctx.chatSyncState.markHistoryComplete(chatId);
     }
 
-    return {
+    const value: RealJobResult = {
       success: true,
       messagesFetched: newCount,
       hasMore: !historyComplete,
       newCursor: minId,
       historyComplete,
     };
+    return value;
   } catch (err) {
     return resolveJobError(ctx, err);
   }
@@ -225,24 +224,23 @@ export async function processBackwardHistoryReal(
  * history pages down from the oldest. An empty chat gets cursors at 0, so
  * its first message is caught up from the start.
  */
-export async function processInitialLoadReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
+export async function processInitialLoadReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
   const chatId = job.chat_id;
 
   if (!canMakeApiCall(ctx)) {
-    return {
+    const value: RealJobResult = {
       success: false,
       messagesFetched: 0,
       rateLimited: true,
       waitSeconds: getWaitTime(ctx),
     };
+    return value;
   }
 
   const state = ctx.chatSyncState.get(chatId);
   if (state && state.forward_cursor !== null) {
-    return { success: true, messagesFetched: 0 };
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
   }
 
   const peer = requestPeer(ctx, chatId);
@@ -263,12 +261,13 @@ export async function processInitialLoadReal(
         history_complete: true,
         new_messages: 0,
       });
-      return {
+      const value: RealJobResult = {
         success: true,
         messagesFetched: 0,
         newCursor: 0,
         historyComplete: true,
       };
+      return value;
     }
 
     const maxId = Math.max(...ids);
@@ -299,12 +298,13 @@ export async function processInitialLoadReal(
       cursor_end: minId,
     });
 
-    return {
+    const value: RealJobResult = {
       success: true,
       messagesFetched: newCount,
       newCursor: maxId,
       historyComplete,
     };
+    return value;
   } catch (err) {
     return resolveJobError(ctx, err);
   }
@@ -322,14 +322,14 @@ export const REFETCH_BATCH_SIZE = 100;
  * while it ran), it queues the next job above it, so the rows that stay '{}'
  * are asked for once.
  */
-export async function processRefetchMessagesReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
+export async function processRefetchMessagesReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
   const chatId = job.chat_id;
   const after = job.cursor_start ?? 0;
   const ids = ctx.messagesCache.listEmptyRawJsonIds(chatId, after, REFETCH_BATCH_SIZE);
-  if (ids.length === 0) return { success: true, messagesFetched: 0 };
+  if (ids.length === 0) {
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
+  }
 
   const peer = requestPeer(ctx, chatId);
   if ("result" in peer) return peer.result;
@@ -371,7 +371,8 @@ export async function processRefetchMessagesReal(
         cursor_start: last,
       });
     }
-    return { success: true, messagesFetched: written };
+    const value: RealJobResult = { success: true, messagesFetched: written };
+    return value;
   } catch (err) {
     return resolveJobError(ctx, err);
   }
@@ -385,12 +386,12 @@ export async function processRefetchMessagesReal(
  * (left, private). A chat with more senders waiting gets its next job at the
  * scheduler's next refresh.
  */
-export async function processFetchSendersReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
+export async function processFetchSendersReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
   const batch = ctx.senderLookups.nextBatch(job.chat_id, REFETCH_BATCH_SIZE);
-  if (batch.length === 0) return { success: true, messagesFetched: 0 };
+  if (batch.length === 0) {
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
+  }
 
   const senderIds = batch.map((lookup) => lookup.sender_id);
   const peer = requestPeer(ctx, job.chat_id);
@@ -408,7 +409,8 @@ export async function processFetchSendersReal(
     );
     cachePageUsers(ctx.usersCache, page.users);
     ctx.senderLookups.finish(senderIds, Date.now());
-    return { success: true, messagesFetched: 0 };
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
   } catch (err) {
     const result = resolveJobError(ctx, err);
     if (result.permanent) ctx.senderLookups.finish(senderIds, Date.now());
@@ -428,7 +430,7 @@ const PARTICIPATION_SEARCH_LIMIT = 10;
 export async function processCheckGroupParticipationReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
-): Promise<RealJobResult> {
+) {
   const chatId = job.chat_id;
   const peer = requestPeer(ctx, chatId);
   if ("result" in peer) return peer.result;
@@ -460,19 +462,18 @@ export async function processCheckGroupParticipationReal(
       .map((input) => input!.date);
     const newest = found.length > 0 ? Math.max(...found) : null;
     ctx.messagesCache.participation.recordCheck(chatId, newest);
-    return { success: true, messagesFetched: 0 };
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
   } catch (err) {
     return resolveJobError(ctx, err);
   }
 }
 
-async function processFullSyncReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
+async function processFullSyncReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
   const result = await processInitialLoadReal(ctx, job);
   if (result.success && !result.historyComplete) {
-    return { ...result, hasMore: true };
+    const value: RealJobResult = { ...result, hasMore: true };
+    return value;
   }
   return result;
 }
@@ -489,10 +490,7 @@ const JOB_HANDLERS: Partial<
   [SyncJobType.CheckGroupParticipation]: processCheckGroupParticipationReal,
 };
 
-export async function processJobReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
+export async function processJobReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
   const handlers =
     !CHAT_INDEPENDENT_JOB_TYPES.includes(job.job_type) &&
     !ctx.messagesCache.participation.captures(job.chat_id)

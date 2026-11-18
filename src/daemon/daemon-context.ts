@@ -90,8 +90,8 @@ export interface DaemonContext {
   pacing?: SyncPacingConfig;
 }
 
-export function createDaemonRuntime(): DaemonRuntime {
-  return {
+export function createDaemonRuntime() {
+  const result: DaemonRuntime = {
     accounts: new Map(),
     jobsInFlight: new Map(),
     signalHandlersSetup: false,
@@ -106,13 +106,14 @@ export function createDaemonRuntime(): DaemonRuntime {
     migrations: createMigrationsState(),
     lastTickAt: null,
   };
+  return result;
 }
 
 /**
  * Ask the daemon to stop: the loops end at their next check, and the
  * requests the dialog passes and sync jobs wait on end at once (#64)
  */
-export function requestShutdown(ctx: DaemonContext): void {
+export function requestShutdown(ctx: DaemonContext) {
   ctx.state.shutdownRequested = true;
   if (!ctx.runtime.shutdown.signal.aborted) {
     ctx.runtime.shutdown.abort(new DaemonStopError());
@@ -120,7 +121,7 @@ export function requestShutdown(ctx: DaemonContext): void {
 }
 
 /** Messages cached since the daemon started, over every account */
-export function totalMessagesSynced(runtime: DaemonRuntime): number {
+export function totalMessagesSynced(runtime: DaemonRuntime) {
   let total = 0;
   for (const rt of runtime.accounts.values()) total += rt.messagesSynced;
   return total;

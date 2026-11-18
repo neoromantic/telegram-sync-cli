@@ -30,7 +30,7 @@ const DEFAULT_PRUNE_BATCH_SIZE = 5000;
 
 const SECONDS_TIMESTAMP_LIMIT = 100_000_000_000;
 
-function convertSecondsActivity(db: Database): number {
+function convertSecondsActivity(db: Database) {
   return db
     .query("UPDATE api_activity SET timestamp = timestamp * 1000 WHERE timestamp < $limit")
     .run({ $limit: SECONDS_TIMESTAMP_LIMIT }).changes;
@@ -42,7 +42,7 @@ function deleteInBatches(
   where: string,
   params: Record<string, number>,
   batchSize: number,
-): number {
+) {
   const stmt = db.query(
     `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${where} LIMIT $limit)`,
   );
@@ -67,7 +67,7 @@ export function pruneCache(
   db: Database,
   retention: CacheRetentionConfig,
   options: PruneOptions = {},
-): PruneResult {
+) {
   const now = options.now ?? Date.now();
   const batchSize = options.batchSize ?? DEFAULT_PRUNE_BATCH_SIZE;
   const nowSec = Math.floor(now / 1000);
@@ -133,17 +133,17 @@ export interface CacheSize {
 
 const AUTO_VACUUM_MODES: AutoVacuumMode[] = ["none", "full", "incremental"];
 
-function pragmaNumber(db: Database, name: string): number {
+function pragmaNumber(db: Database, name: string) {
   const row = db.query(`PRAGMA ${name}`).get() as Record<string, number> | null;
   return row ? Number(Object.values(row)[0] ?? 0) : 0;
 }
 
 /** The cache's auto_vacuum mode */
-export function readAutoVacuum(db: Database): AutoVacuumMode {
+export function readAutoVacuum(db: Database) {
   return AUTO_VACUUM_MODES[pragmaNumber(db, "auto_vacuum")] ?? "none";
 }
 
-function fileSize(path: string): number {
+function fileSize(path: string) {
   try {
     return Bun.file(path).size;
   } catch {
@@ -151,7 +151,7 @@ function fileSize(path: string): number {
   }
 }
 
-function readTableSizes(db: Database): Record<string, number> | null {
+function readTableSizes(db: Database) {
   let rows: Array<{ name: string; pgsize: number }>;
   try {
     rows = db.query("SELECT name, pgsize FROM dbstat WHERE aggregate = TRUE").all() as Array<{
@@ -187,7 +187,7 @@ function readTableSizes(db: Database): Record<string, number> | null {
  * mode. With `tables`, also each table's bytes from dbstat, which reads
  * every page of the file, so only on request.
  */
-export function readCacheSize(db: Database, path: string, options: { tables: boolean }): CacheSize {
+export function readCacheSize(db: Database, path: string, options: { tables: boolean }) {
   const page_size = pragmaNumber(db, "page_size");
   const free_pages = pragmaNumber(db, "freelist_count");
   const size: CacheSize = {
@@ -244,7 +244,7 @@ export interface VacuumDiskCheck {
   enough: boolean;
 }
 
-function readFreeDiskBytes(dir: string): number {
+function readFreeDiskBytes(dir: string) {
   const injected = process.env.TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES;
   if (injected) return Number(injected);
   const stats = statfsSync(dir);
@@ -252,7 +252,7 @@ function readFreeDiskBytes(dir: string): number {
 }
 
 /** Whether the disk of the cache at `path` has room for a full VACUUM */
-export function checkVacuumDisk(path: string): VacuumDiskCheck {
+export function checkVacuumDisk(path: string) {
   const needed_bytes = Math.ceil(fileSize(path) * VACUUM_DISK_FACTOR + VACUUM_DISK_MARGIN_BYTES);
   const free_bytes = readFreeDiskBytes(dirname(path));
   return { needed_bytes, free_bytes, enough: free_bytes >= needed_bytes };
@@ -268,7 +268,7 @@ export interface MessageRowidSnapshot {
   max: number | null;
 }
 
-export function snapshotMessageRowids(db: Database): MessageRowidSnapshot {
+export function snapshotMessageRowids(db: Database) {
   return db
     .query("SELECT COUNT(*) AS count, MIN(rowid) AS min, MAX(rowid) AS max FROM messages_cache")
     .get() as MessageRowidSnapshot;
@@ -280,7 +280,7 @@ export function snapshotMessageRowids(db: Database): MessageRowidSnapshot {
  * keeps its rowids, and message_search is keyed on them. Returns whether
  * it rebuilt.
  */
-export function rebuildSearchIfRowidsMoved(db: Database, before: MessageRowidSnapshot): boolean {
+export function rebuildSearchIfRowidsMoved(db: Database, before: MessageRowidSnapshot) {
   const after = snapshotMessageRowids(db);
   if (after.count === before.count && after.min === before.min && after.max === before.max) {
     return false;
@@ -289,11 +289,11 @@ export function rebuildSearchIfRowidsMoved(db: Database, before: MessageRowidSna
   return true;
 }
 
-function totalBytes(path: string): number {
+function totalBytes(path: string) {
   return fileSize(path) + fileSize(`${path}-wal`);
 }
 
-function checkpoint(db: Database, options: { wait: boolean }): boolean {
+function checkpoint(db: Database, options: { wait: boolean }) {
   const run = () =>
     db.query("PRAGMA wal_checkpoint(TRUNCATE)").get() as {
       busy: number;
@@ -321,11 +321,7 @@ function checkpoint(db: Database, options: { wait: boolean }): boolean {
  * it gives up at once when a reader holds the WAL, so the daemon's writes
  * never wait for it.
  */
-export function vacuumCache(
-  db: Database,
-  path: string,
-  options: { daemonRunning: boolean },
-): VacuumResult {
+export function vacuumCache(db: Database, path: string, options: { daemonRunning: boolean }) {
   const autoVacuum = readAutoVacuum(db);
   if (options.daemonRunning && autoVacuum === "none") {
     throw new VacuumNeedsStoppedDaemonError();

@@ -45,26 +45,26 @@ export interface MediaThumb {
 
 type RawObject = Record<string, unknown>;
 
-function asObject(value: unknown): RawObject | null {
+function asObject(value: unknown) {
   return typeof value === "object" && value !== null ? (value as RawObject) : null;
 }
 
-function num(value: unknown): number | null {
+function num(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function str(value: unknown): string | null {
+function str(value: unknown) {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
-function attributesOf(doc: RawObject): RawObject[] {
+function attributesOf(doc: RawObject) {
   return Array.isArray(doc.attributes)
     ? doc.attributes.filter((attr): attr is RawObject => asObject(attr) !== null)
     : [];
 }
 
 /** A TL Long in any form raw_json holds, as a decimal string */
-export function longToDecimal(value: unknown): string | null {
+export function longToDecimal(value: unknown) {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "number") {
     return Number.isSafeInteger(value) ? String(value) : null;
@@ -86,14 +86,14 @@ export function longToDecimal(value: unknown): string | null {
   return null;
 }
 
-function longToNumber(value: unknown): number | null {
+function longToNumber(value: unknown) {
   const decimal = longToDecimal(value);
   if (decimal === null) return null;
   const parsed = Number(decimal);
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
-function rleEncode(bytes: Uint8Array): Uint8Array {
+function rleEncode(bytes: Uint8Array) {
   const out: number[] = [];
   let zeros = 0;
   for (const byte of bytes) {
@@ -116,7 +116,7 @@ function rleEncode(bytes: Uint8Array): Uint8Array {
  * with the document ID for a document, type 1 with the photo or document ID
  * and the size type for a photo or a preview
  */
-export function uniqueFileIdOf(type: 1 | 2, id: bigint, thumbType?: string): string {
+export function uniqueFileIdOf(type: 1 | 2, id: bigint, thumbType?: string) {
   const bytes = new Uint8Array(thumbType === undefined ? 12 : 13);
   const view = new DataView(bytes.buffer);
   view.setInt32(0, type, true);
@@ -128,7 +128,7 @@ export function uniqueFileIdOf(type: 1 | 2, id: bigint, thumbType?: string): str
   return rleEncode(bytes).toBase64({ alphabet: "base64url", omitPadding: true });
 }
 
-function toMessage(input: unknown): RawObject | null {
+function toMessage(input: unknown) {
   let value = input;
   if (typeof value === "string") {
     try {
@@ -149,34 +149,49 @@ export type PickedMedia =
   | { file: "photo"; raw: RawObject; source: AttachmentSource }
   | { file: "document"; raw: RawObject; source: AttachmentSource };
 
-function pickMedia(message: RawObject): PickedMedia | null {
+function pickMedia(message: RawObject) {
   const media = asObject(message.media);
-  if (!media) return null;
+  if (!media) {
+    const result: PickedMedia | null = null;
+    return result;
+  }
 
   switch (media._) {
     case "messageMediaPhoto": {
       const photo = asObject(media.photo);
-      return photo?._ === "photo" ? { file: "photo", raw: photo, source: "message" } : null;
+      const result: PickedMedia | null =
+        photo?._ === "photo" ? { file: "photo", raw: photo, source: "message" } : null;
+      return result;
     }
     case "messageMediaDocument": {
       const doc = asObject(media.document);
-      return doc?._ === "document" ? { file: "document", raw: doc, source: "message" } : null;
+      const result: PickedMedia | null =
+        doc?._ === "document" ? { file: "document", raw: doc, source: "message" } : null;
+      return result;
     }
     case "messageMediaWebPage": {
       const webpage = asObject(media.webpage);
-      if (webpage?._ !== "webPage") return null;
+      if (webpage?._ !== "webPage") {
+        const result: PickedMedia | null = null;
+        return result;
+      }
       const doc = asObject(webpage.document);
       if (doc?._ === "document") {
-        return { file: "document", raw: doc, source: "webpage" };
+        const result: PickedMedia | null = { file: "document", raw: doc, source: "webpage" };
+        return result;
       }
       const photo = asObject(webpage.photo);
       if (photo?._ === "photo") {
-        return { file: "photo", raw: photo, source: "webpage" };
+        const result: PickedMedia | null = { file: "photo", raw: photo, source: "webpage" };
+        return result;
       }
-      return null;
+      const result: PickedMedia | null = null;
+      return result;
     }
-    default:
-      return null;
+    default: {
+      const result: PickedMedia | null = null;
+      return result;
+    }
   }
 }
 
@@ -188,7 +203,7 @@ interface PhotoSize {
   progressive: boolean;
 }
 
-function plainSizes(sizes: unknown): PhotoSize[] {
+function plainSizes(sizes: unknown) {
   if (!Array.isArray(sizes)) return [];
   const result: PhotoSize[] = [];
   for (const entry of sizes) {
@@ -219,7 +234,7 @@ function plainSizes(sizes: unknown): PhotoSize[] {
   return result;
 }
 
-function bestPhotoSize(photo: RawObject): PhotoSize | null {
+function bestPhotoSize(photo: RawObject) {
   const sizes = plainSizes(photo.sizes);
   const progressive = sizes.find((size) => size.progressive);
   if (progressive) return progressive;
@@ -230,15 +245,14 @@ function bestPhotoSize(photo: RawObject): PhotoSize | null {
   return best;
 }
 
-function photoAttachment(
-  photo: RawObject,
-  source: AttachmentSource,
-  groupedId: string | null,
-): AttachmentInfo | null {
+function photoAttachment(photo: RawObject, source: AttachmentSource, groupedId: string | null) {
   const id = longToDecimal(photo.id);
   const best = bestPhotoSize(photo);
-  if (id === null || !best) return null;
-  return {
+  if (id === null || !best) {
+    const result: AttachmentInfo | null = null;
+    return result;
+  }
+  const result: AttachmentInfo | null = {
     kind: "photo",
     source,
     fileName: null,
@@ -250,13 +264,16 @@ function photoAttachment(
     uniqueFileId: uniqueFileIdOf(1, BigInt(id), best.type),
     groupedId,
   };
+  return result;
 }
 
-function documentKind(doc: RawObject): {
+interface DocumentKind {
   kind: AttachmentKind;
   dimensions: RawObject | null;
   timed: RawObject | null;
-} {
+}
+
+function documentKind(doc: RawObject) {
   const attributes = attributesOf(doc);
   const { type, attr } = classifyDocument(doc);
 
@@ -270,44 +287,43 @@ function documentKind(doc: RawObject): {
         kind: "sticker",
         dimensions: size,
         timed: size?._ === "documentAttributeVideo" ? size : null,
-      };
+      } satisfies DocumentKind;
     }
     case "voice":
     case "audio":
-      return { kind: type, dimensions: null, timed: attr };
+      return { kind: type, dimensions: null, timed: attr } satisfies DocumentKind;
     case "video": {
       if (attr?._ !== "documentAttributeVideo") {
-        return { kind: "animation", dimensions: attr, timed: null };
+        return { kind: "animation", dimensions: attr, timed: null } satisfies DocumentKind;
       }
       const animated = attributes.some((it) => it._ === "documentAttributeAnimated");
       return {
         kind: attr.roundMessage ? "round" : animated ? "animation" : "video",
         dimensions: attr,
         timed: attr,
-      };
+      } satisfies DocumentKind;
     }
     default:
       return {
         kind: "document",
         dimensions: attributes.find((it) => it._ === "documentAttributeImageSize") ?? null,
         timed: null,
-      };
+      } satisfies DocumentKind;
   }
 }
 
-function documentAttachment(
-  doc: RawObject,
-  source: AttachmentSource,
-  groupedId: string | null,
-): AttachmentInfo | null {
+function documentAttachment(doc: RawObject, source: AttachmentSource, groupedId: string | null) {
   const id = longToDecimal(doc.id);
-  if (id === null) return null;
+  if (id === null) {
+    const result: AttachmentInfo | null = null;
+    return result;
+  }
   const { kind, dimensions, timed } = documentKind(doc);
   const fileName = attributesOf(doc).find(
     (attr) => attr._ === "documentAttributeFilename",
   )?.fileName;
 
-  return {
+  const result: AttachmentInfo | null = {
     kind,
     source,
     fileName: str(fileName),
@@ -319,15 +335,17 @@ function documentAttachment(
     uniqueFileId: uniqueFileIdOf(2, BigInt(id)),
     groupedId,
   };
+  return result;
 }
 
 /**
  * The raw photo or document object extractAttachment reads, for a download
  * of exactly that file. Null where extractAttachment finds no file.
  */
-export function attachmentMedia(input: unknown): PickedMedia | null {
+export function attachmentMedia(input: unknown) {
   const message = toMessage(input);
-  return message ? pickMedia(message) : null;
+  const result: PickedMedia | null = message ? pickMedia(message) : null;
+  return result;
 }
 
 /**
@@ -335,19 +353,27 @@ export function attachmentMedia(input: unknown): PickedMedia | null {
  * of its link preview. Null for a message without one, and for anything
  * that isn't a message; never throws.
  */
-export function extractAttachment(input: unknown): AttachmentInfo | null {
+export function extractAttachment(input: unknown) {
   const message = toMessage(input);
-  if (!message) return null;
+  if (!message) {
+    const result: AttachmentInfo | null = null;
+    return result;
+  }
   const media = pickMedia(message);
-  if (!media) return null;
+  if (!media) {
+    const result: AttachmentInfo | null = null;
+    return result;
+  }
 
   const groupedId = longToDecimal(message.groupedId);
-  return media.file === "photo"
-    ? photoAttachment(media.raw, media.source, groupedId)
-    : documentAttachment(media.raw, media.source, groupedId);
+  const result: AttachmentInfo | null =
+    media.file === "photo"
+      ? photoAttachment(media.raw, media.source, groupedId)
+      : documentAttachment(media.raw, media.source, groupedId);
+  return result;
 }
 
-function area(size: PhotoSize): number {
+function area(size: PhotoSize) {
   return (size.width ?? 0) * (size.height ?? 0);
 }
 
@@ -356,7 +382,7 @@ function area(size: PhotoSize): number {
  * (320 px) or else its smallest plain size, for a document its largest
  * thumbnail. Stripped, cached, path and video sizes are never used.
  */
-export function pickThumb(input: unknown): MediaThumb | null {
+export function pickThumb(input: unknown) {
   const message = toMessage(input);
   const media = message ? pickMedia(message) : null;
   if (!media) return null;
@@ -414,7 +440,7 @@ const EXTENSION_BY_MIME: Record<string, string> = {
  * A name for a file the sender gave no name: `photo.jpg`, `voice.ogg`,
  * `file.pdf` for a plain document; `.bin` for a MIME type it doesn't know
  */
-export function attachmentDefaultFileName(info: AttachmentInfo): string {
+export function attachmentDefaultFileName(info: AttachmentInfo) {
   if (info.kind === "photo") return "photo.jpg";
   const stem = info.kind === "document" ? "file" : info.kind;
   const extension = (info.mimeType && EXTENSION_BY_MIME[info.mimeType]) || "bin";

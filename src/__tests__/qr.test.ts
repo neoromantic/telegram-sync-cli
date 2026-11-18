@@ -11,7 +11,7 @@ const HALVES: Record<string, [boolean, boolean]> = {
   "█": [true, true],
 };
 
-function readModules(text: string): boolean[][] {
+function readModules(text: string) {
   const rows: boolean[][] = [];
   for (const line of text.split("\n")) {
     expect(line.startsWith("\x1b[30;47m")).toBe(true);

@@ -107,13 +107,13 @@ class SyncSchedulerImpl implements SyncScheduler {
     return this.options.chatSyncState;
   }
 
-  private enabledState(chatId: number): ChatSyncStateRow | null {
+  private enabledState(chatId: number) {
     const state = this.chatSyncState.get(chatId);
     if (!state?.sync_enabled) return null;
     return this.participation.captures(chatId) ? state : null;
   }
 
-  private dropJobsOfPausedGroups(): void {
+  private dropJobsOfPausedGroups() {
     const chats = new Set(
       this.jobsService
         .getPendingJobs()
@@ -127,14 +127,14 @@ class SyncSchedulerImpl implements SyncScheduler {
     }
   }
 
-  private lanePriority(state: ChatSyncStateRow, jobType: SyncJobType): SyncPriority {
+  private lanePriority(state: ChatSyncStateRow, jobType: SyncJobType) {
     if (jobType === SyncJobType.InitialLoad && state.sync_mode === "on") {
       return SyncPriority.Realtime;
     }
     return state.sync_priority;
   }
 
-  queueForwardCatchup(chatId: number): void {
+  queueForwardCatchup(chatId: number) {
     const state = this.enabledState(chatId);
     if (!state) return;
 
@@ -149,7 +149,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     });
   }
 
-  queueBackwardHistory(chatId: number): void {
+  queueBackwardHistory(chatId: number) {
     const state = this.enabledState(chatId);
     if (!state || state.history_complete) return;
     if (!isHistoryAllowed(state)) return;
@@ -170,7 +170,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     });
   }
 
-  queueInitialLoad(chatId: number): void {
+  queueInitialLoad(chatId: number) {
     const state = this.enabledState(chatId);
     if (!state) return;
 
@@ -185,7 +185,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     });
   }
 
-  async initializeForStartup(): Promise<void> {
+  async initializeForStartup() {
     this.recoverCrashedJobs();
     this.jobsService.deleteFailed();
     this.jobsService.deletePendingOfType(SyncJobType.ForwardCatchup);
@@ -194,7 +194,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.refreshQueues();
   }
 
-  refreshQueues(): void {
+  refreshQueues() {
     this.jobsService.deletePendingHistoryOfFirstPageOnlyChats();
     this.dropJobsOfPausedGroups();
 
@@ -213,7 +213,7 @@ class SyncSchedulerImpl implements SyncScheduler {
     this.queueSenderFetches();
   }
 
-  private queueSenderFetches(): void {
+  private queueSenderFetches() {
     const now = Date.now();
     if (this.sendersScannedAt === null || now - this.sendersScannedAt >= SENDER_SCAN_INTERVAL_MS) {
       this.senderLookups.scan(now);
@@ -231,11 +231,11 @@ class SyncSchedulerImpl implements SyncScheduler {
     }
   }
 
-  private nextInLane(lane: SyncLane): SyncJobRow | null {
+  private nextInLane(lane: SyncLane) {
     return this.jobsService.getNextPendingOfTypes(SYNC_LANES[lane]);
   }
 
-  getNextJob(): SyncJobRow | null {
+  getNextJob() {
     const lane = SYNC_SLOT_CYCLE[this.slot % SYNC_SLOT_CYCLE.length]!;
     const job = this.nextInLane(lane);
     if (job) return job;
@@ -248,26 +248,27 @@ class SyncSchedulerImpl implements SyncScheduler {
     return null;
   }
 
-  hasHistoryDue(): boolean {
+  hasHistoryDue() {
     return this.nextInLane("firstPage") !== null || this.nextInLane("history") !== null;
   }
 
-  recordJobRun(_job: SyncJobRow): void {
+  recordJobRun(_job: SyncJobRow) {
     this.slot = (this.slot + 1) % SYNC_SLOT_CYCLE.length;
   }
 
-  getStatus(): SchedulerStatus {
+  getStatus() {
     return {
       pendingJobs: this.jobsService.getPendingJobs().length,
       runningJobs: this.jobsService.getRunningJobs().length,
     };
   }
 
-  recoverCrashedJobs(): number {
+  recoverCrashedJobs() {
     return this.jobsService.recoverCrashedJobs();
   }
 }
 
-export function createSyncScheduler(options: SyncSchedulerOptions): SyncScheduler {
-  return new SyncSchedulerImpl(options);
+export function createSyncScheduler(options: SyncSchedulerOptions) {
+  const result: SyncScheduler = new SyncSchedulerImpl(options);
+  return result;
 }

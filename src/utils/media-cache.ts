@@ -48,14 +48,14 @@ export interface MediaCachePaths {
   lock: string;
 }
 
-function folderPath(mediaDir: string, uniqueFileId: string): string {
+function folderPath(mediaDir: string, uniqueFileId: string) {
   if (!FOLDER_NAME.test(uniqueFileId)) {
     throw new Error(`Invalid unique file ID: ${uniqueFileId}`);
   }
   return join(mediaDir, uniqueFileId);
 }
 
-function pathsIn(dir: string, name: string): MediaCachePaths {
+function pathsIn(dir: string, name: string) {
   return {
     dir,
     file: join(dir, name),
@@ -65,16 +65,12 @@ function pathsIn(dir: string, name: string): MediaCachePaths {
 }
 
 /** Where the file of an attachment is cached */
-export function mediaPaths(mediaDir: string, info: AttachmentInfo): MediaCachePaths {
+export function mediaPaths(mediaDir: string, info: AttachmentInfo) {
   return pathsIn(folderPath(mediaDir, info.uniqueFileId), cachedFileName(info));
 }
 
 /** Where a preview of an attachment is cached: next to the file */
-export function thumbPaths(
-  mediaDir: string,
-  info: AttachmentInfo,
-  thumb: MediaThumb,
-): MediaCachePaths {
+export function thumbPaths(mediaDir: string, info: AttachmentInfo, thumb: MediaThumb) {
   const type = thumb.type.replace(/[^A-Za-z0-9]/g, "_");
   const extension = info.kind === "sticker" ? "webp" : "jpg";
   return pathsIn(folderPath(mediaDir, info.uniqueFileId), `thumb-${type}.${extension}`);
@@ -84,7 +80,7 @@ const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f/\\:*?"<>|]/g;
 const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 
-function cutToBytes(text: string, maxBytes: number): string {
+function cutToBytes(text: string, maxBytes: number) {
   const encoder = new TextEncoder();
   let result = "";
   let bytes = 0;
@@ -103,7 +99,7 @@ function cutToBytes(text: string, maxBytes: number): string {
  * Windows device name, at most 200 bytes with the extension kept. Null when
  * nothing usable is left.
  */
-export function sanitizeFileName(name: string): string | null {
+export function sanitizeFileName(name: string) {
   let result = (name.split(/[/\\]/).pop() ?? "")
     .normalize("NFC")
     .replace(UNSAFE_CHARS, "_")
@@ -130,13 +126,13 @@ export function sanitizeFileName(name: string): string | null {
  * A name like a preview's (`thumb-…`) gets a `_` prefix, so a file and its
  * preview never share a path.
  */
-export function cachedFileName(info: AttachmentInfo): string {
+export function cachedFileName(info: AttachmentInfo) {
   const name =
     (info.fileName !== null && sanitizeFileName(info.fileName)) || attachmentDefaultFileName(info);
   return /^thumb-/i.test(name) ? `_${name}` : name;
 }
 
-function statOrNull(path: string): Stats | null {
+function statOrNull(path: string) {
   try {
     return statSync(path);
   } catch {
@@ -145,10 +141,7 @@ function statOrNull(path: string): Stats | null {
 }
 
 /** The file if it is complete: it exists and, when the size is known, has it */
-export function findCachedFile(
-  path: string,
-  expectedSize: number | null,
-): { path: string; size: number } | null {
+export function findCachedFile(path: string, expectedSize: number | null) {
   const stats = statOrNull(path);
   if (!stats?.isFile()) return null;
   if (expectedSize !== null && stats.size !== expectedSize) return null;
@@ -159,19 +152,19 @@ export function findCachedFile(
  * Mark a cached file as used now, so `tg media clean --older-than` means
  * "not used since". Best effort: a file that can't be touched is still served.
  */
-export function touch(path: string): void {
+export function touch(path: string) {
   const now = new Date();
   try {
     utimesSync(path, now, now);
   } catch {}
 }
 
-function errorCode(err: unknown): string | undefined {
+function errorCode(err: unknown) {
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" ? code : undefined;
 }
 
-function processAlive(pid: number): boolean {
+function processAlive(pid: number) {
   try {
     process.kill(pid, 0);
     return true;
@@ -185,37 +178,42 @@ interface LockState {
   mtimeMs: number;
 }
 
-function readLock(lockPath: string): LockState | null {
+function readLock(lockPath: string) {
   let content: string;
   let stats: Stats;
   try {
     stats = statSync(lockPath);
     content = readFileSync(lockPath, "utf-8").trim();
   } catch {
-    return null;
+    const result: LockState | null = null;
+    return result;
   }
   if (content === "") {
-    return Date.now() - stats.mtimeMs < LOCK_WRITE_GRACE_MS
-      ? { holder: "pending", mtimeMs: stats.mtimeMs }
-      : null;
+    const result: LockState | null =
+      Date.now() - stats.mtimeMs < LOCK_WRITE_GRACE_MS
+        ? { holder: "pending", mtimeMs: stats.mtimeMs }
+        : null;
+    return result;
   }
   const pid = Number(content);
-  return Number.isSafeInteger(pid) && pid > 0 ? { holder: pid, mtimeMs: stats.mtimeMs } : null;
+  const result: LockState | null =
+    Number.isSafeInteger(pid) && pid > 0 ? { holder: pid, mtimeMs: stats.mtimeMs } : null;
+  return result;
 }
 
 type IsAlive = (pid: number) => boolean;
 
-function isLive(lock: LockState | null, isAlive: IsAlive): boolean {
+function isLive(lock: LockState | null, isAlive: IsAlive) {
   if (lock === null) return false;
   if (Date.now() - lock.mtimeMs >= LOCK_STALE_MS) return false;
   return lock.holder === "pending" || isAlive(lock.holder);
 }
 
-function lockIsLive(lockPath: string, isAlive: IsAlive): boolean {
+function lockIsLive(lockPath: string, isAlive: IsAlive) {
   return isLive(readLock(lockPath), isAlive);
 }
 
-function removeStaleLock(lockPath: string, isAlive: IsAlive): void {
+function removeStaleLock(lockPath: string, isAlive: IsAlive) {
   const moved = join(
     dirname(lockPath),
     `${LOCK_FILE}-${process.pid}-${randomUUID()}${PARTIAL_SUFFIX}`,
@@ -268,10 +266,7 @@ export interface DownloadLockOptions {
  * is refreshed until the release, which removes it only while it is still
  * this process's.
  */
-export async function acquireDownloadLock(
-  lockPath: string,
-  options: DownloadLockOptions = {},
-): Promise<() => void> {
+export async function acquireDownloadLock(lockPath: string, options: DownloadLockOptions = {}) {
   const isAlive = options.isAlive ?? processAlive;
   const pollMs = options.pollMs ?? LOCK_POLL_MS;
   const waitMs = options.waitMs ?? LOCK_WAIT_MS;
@@ -334,7 +329,7 @@ export interface MediaUsage {
   partial_files: number;
 }
 
-function isPartialName(name: string): boolean {
+function isPartialName(name: string) {
   return name.startsWith(".") && name.endsWith(PARTIAL_SUFFIX);
 }
 
@@ -345,7 +340,7 @@ interface CacheEntry {
   mtimeMs: number;
 }
 
-function folderFiles(dir: string): CacheEntry[] {
+function folderFiles(dir: string) {
   let names: string[];
   try {
     names = readdirSync(dir);
@@ -368,7 +363,7 @@ function folderFiles(dir: string): CacheEntry[] {
   return entries;
 }
 
-function cacheFolders(mediaDir: string): string[] {
+function cacheFolders(mediaDir: string) {
   let names: string[];
   try {
     names = readdirSync(mediaDir);
@@ -389,7 +384,7 @@ function cacheFolders(mediaDir: string): string[] {
  * The media cache's size: files and previews, and partial downloads apart.
  * Apparent sizes; a missing cache is all zeros.
  */
-export function readMediaUsage(mediaDir: string): MediaUsage {
+export function readMediaUsage(mediaDir: string) {
   const usage: MediaUsage = {
     bytes: 0,
     files: 0,
@@ -446,7 +441,7 @@ export interface CleanResult {
  * (its holder gone or no longer refreshing it), and removes folders left
  * empty.
  */
-export function cleanMedia(mediaDir: string, options: CleanOptions): CleanResult {
+export function cleanMedia(mediaDir: string, options: CleanOptions) {
   const isAlive = options.isAlive ?? processAlive;
   const filtersFiles = options.olderThan !== undefined || options.uniqueFileIds !== undefined;
   const result: CleanResult = {
@@ -475,7 +470,7 @@ export function cleanMedia(mediaDir: string, options: CleanOptions): CleanResult
       shared ??= options.isShared?.(folder) ?? false;
       return shared;
     };
-    const remove = (entry: CacheEntry): boolean => {
+    const remove = (entry: CacheEntry) => {
       try {
         rmSync(entry.path, { force: true });
       } catch {

@@ -1,5 +1,5 @@
 import { type AccountsDbInterface, accountsDb as defaultAccountsDb } from "../db";
-import { type Account, ErrorCodes } from "../types";
+import { ErrorCodes } from "../types";
 import { error } from "./output";
 
 export const ACCOUNT_SELECTOR_DESCRIPTION = "Account selector (ID, @username, or label)";
@@ -11,7 +11,7 @@ export const ACCOUNT_NOT_FOUND_SUGGESTION =
 export function resolveAccountSelector(
   selector: string | undefined,
   accountsDb: AccountsDbInterface = defaultAccountsDb,
-): number | undefined {
+) {
   if (selector === undefined) return undefined;
 
   const trimmed = selector.trim();
@@ -83,7 +83,7 @@ export function resolveAccountSelector(
 export function resolveAccount(
   selector: string | undefined,
   accountsDb: AccountsDbInterface = defaultAccountsDb,
-): Account {
+) {
   const selectedId = resolveAccountSelector(selector, accountsDb);
   if (selectedId !== undefined) {
     const selected = accountsDb.getById(selectedId);

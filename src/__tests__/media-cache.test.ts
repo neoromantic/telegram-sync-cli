@@ -31,8 +31,8 @@ import {
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 9, 28, 12, 0, 0);
 
-function attachment(overrides: Partial<AttachmentInfo> = {}): AttachmentInfo {
-  return {
+function attachment(overrides: Partial<AttachmentInfo> = {}) {
+  const result: AttachmentInfo = {
     kind: "document",
     source: "message",
     fileName: "report.pdf",
@@ -45,6 +45,7 @@ function attachment(overrides: Partial<AttachmentInfo> = {}): AttachmentInfo {
     groupedId: null,
     ...overrides,
   };
+  return result;
 }
 
 const thumb: MediaThumb = {
@@ -65,7 +66,7 @@ afterEach(() => {
   rmSync(mediaDir, { recursive: true, force: true });
 });
 
-function place(path: string, size: number, ageMs = 0): string {
+function place(path: string, size: number, ageMs = 0) {
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, Buffer.alloc(size, 7));
   const at = new Date(NOW - ageMs);
@@ -75,7 +76,7 @@ function place(path: string, size: number, ageMs = 0): string {
 
 const DEAD_PID = 999_999;
 
-function writeLock(folder: string, pid: number, ageMs = 0): string {
+function writeLock(folder: string, pid: number, ageMs = 0) {
   mkdirSync(join(mediaDir, folder), { recursive: true });
   const path = join(mediaDir, folder, ".lock");
   writeFileSync(path, String(pid));

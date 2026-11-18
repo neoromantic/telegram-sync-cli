@@ -32,7 +32,7 @@ export interface PidFile {
   getPath(): string;
 }
 
-function processExists(pid: number): boolean {
+function processExists(pid: number) {
   try {
     process.kill(pid, 0);
     return true;
@@ -41,7 +41,7 @@ function processExists(pid: number): boolean {
   }
 }
 
-function readPidFromFile(path: string): number | null {
+function readPidFromFile(path: string) {
   if (!existsSync(path)) {
     return null;
   }
@@ -58,13 +58,13 @@ function readPidFromFile(path: string): number | null {
   }
 }
 
-function removePidFile(path: string): void {
+function removePidFile(path: string) {
   if (existsSync(path)) {
     rmSync(path, { force: true });
   }
 }
 
-function writePidFile(path: string, pid: number): void {
+function writePidFile(path: string, pid: number) {
   try {
     writeFileSync(path, pid.toString(), { mode: 0o600 });
   } catch (err) {
@@ -75,7 +75,7 @@ function writePidFile(path: string, pid: number): void {
 class PidFileManager implements PidFile {
   constructor(private readonly path: string) {}
 
-  acquire(): void {
+  acquire() {
     const existingPid = readPidFromFile(this.path);
     if (existingPid && processExists(existingPid)) {
       throw new PidFileError(
@@ -92,11 +92,11 @@ class PidFileManager implements PidFile {
     writePidFile(this.path, process.pid);
   }
 
-  release(): void {
+  release() {
     removePidFile(this.path);
   }
 
-  read(): number | null {
+  read() {
     const pid = readPidFromFile(this.path);
     if (!pid) {
       return null;
@@ -107,11 +107,11 @@ class PidFileManager implements PidFile {
     return pid;
   }
 
-  isRunning(): boolean {
+  isRunning() {
     return this.read() !== null;
   }
 
-  sendSignal(signal: number | NodeJS.Signals): boolean {
+  sendSignal(signal: number | NodeJS.Signals) {
     const pid = this.read();
     if (pid === null) {
       return false;
@@ -125,7 +125,7 @@ class PidFileManager implements PidFile {
     }
   }
 
-  getPath(): string {
+  getPath() {
     return this.path;
   }
 }
@@ -133,6 +133,7 @@ class PidFileManager implements PidFile {
 /**
  * Create a PID file manager
  */
-export function createPidFile(path: string): PidFile {
-  return new PidFileManager(path);
+export function createPidFile(path: string) {
+  const result: PidFile = new PidFileManager(path);
+  return result;
 }

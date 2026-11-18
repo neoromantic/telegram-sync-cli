@@ -4,7 +4,6 @@ import type { CachedChat, CachedChatInput } from "../../db/chats-cache";
 import type { ChatType } from "../../db/types";
 import { toRawJson } from "../../utils/raw-json";
 import { toPeerIdFromRawChat, toPeerIdFromRawPeer } from "../../utils/telegram-peer-ids";
-import type { ChatItem } from "./list-output";
 
 export const CHAT_TYPE_VALUES = [
   "private",
@@ -20,7 +19,7 @@ export function isValidChatType(value: string | undefined): value is ChatType {
 
 type ChatRow = CachedChat | CachedChatInput;
 
-export function chatRowToItem(chat: ChatRow): ChatItem {
+export function chatRowToItem(chat: ChatRow) {
   return {
     id: Number(chat.chat_id),
     type: chat.type,
@@ -34,15 +33,12 @@ export function chatRowToItem(chat: ChatRow): ChatItem {
   };
 }
 
-export function filterChatsByType(
-  chats: CachedChatInput[],
-  typeFilter?: ChatType,
-): CachedChatInput[] {
+export function filterChatsByType(chats: CachedChatInput[], typeFilter?: ChatType) {
   if (!typeFilter) return chats;
   return chats.filter((chat) => chat.type === typeFilter);
 }
 
-export function getChatType(dialog: Dialog): ChatType {
+export function getChatType(dialog: Dialog) {
   const peer = dialog.peer;
   if (peer.type === "user") return "private";
   if (peer.chatType === "community") return "community";
@@ -59,7 +55,7 @@ export function getChatType(dialog: Dialog): ChatType {
  * A chats_cache row for a dialog, under its marked peer ID: the user ID for
  * a private chat, -N for basic group N and -100…N for channel or community N.
  */
-export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
+export function dialogToCacheInput(dialog: Dialog) {
   const rawPeer = dialog.raw.peer;
   const peer = dialog.peer;
   const type = getChatType(dialog);
@@ -90,7 +86,7 @@ export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
     }
   }
 
-  return {
+  const result: CachedChatInput = {
     chat_id: String(toPeerIdFromRawPeer(rawPeer)),
     type,
     title,
@@ -106,10 +102,11 @@ export function dialogToCacheInput(dialog: Dialog): CachedChatInput {
     unread_count: dialog.raw.unreadCount,
     read_inbox_max_id: dialog.raw.readInboxMaxId,
   };
+  return result;
 }
 
-export function userToPrivateChatCacheInput(user: tl.RawUser): CachedChatInput {
-  return {
+export function userToPrivateChatCacheInput(user: tl.RawUser) {
+  const result: CachedChatInput = {
     chat_id: String(user.id),
     type: "private",
     title: [user.firstName, user.lastName].filter(Boolean).join(" "),
@@ -123,6 +120,7 @@ export function userToPrivateChatCacheInput(user: tl.RawUser): CachedChatInput {
     fetched_at: Date.now(),
     raw_json: toRawJson(user),
   };
+  return result;
 }
 
 /** A chat that a resolved username or an update can carry */
@@ -139,7 +137,7 @@ function hasChannelId(
   );
 }
 
-function rawChatType(peer: ResolvedChat): ChatType {
+function rawChatType(peer: ResolvedChat) {
   if (peer._ === "community" || peer._ === "communityForbidden") {
     return "community";
   }
@@ -152,8 +150,8 @@ function rawChatType(peer: ResolvedChat): ChatType {
 }
 
 /** A chats_cache row for a raw chat, under its marked peer ID */
-export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
-  return {
+export function rawChatToCacheInput(chat: ResolvedChat) {
+  const result: CachedChatInput = {
     chat_id: String(toPeerIdFromRawChat(chat)),
     type: rawChatType(chat),
     title: "title" in chat ? (chat.title ?? null) : null,
@@ -167,6 +165,7 @@ export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
     fetched_at: Date.now(),
     raw_json: toRawJson(chat),
   };
+  return result;
 }
 
 /**
@@ -175,9 +174,7 @@ export function rawChatToCacheInput(chat: ResolvedChat): CachedChatInput {
  * dialogs, and mtcute's dialog list drops it (#58). One request; errors are
  * left to the caller.
  */
-export async function fetchJoinedCommunities(
-  client: Pick<TelegramClient, "getJoinedCommunities">,
-): Promise<CachedChatInput[]> {
+export async function fetchJoinedCommunities(client: Pick<TelegramClient, "getJoinedCommunities">) {
   const chats = await client.getJoinedCommunities();
   return chats
     .filter((chat) => !(chat.raw._ === "community" && chat.raw.min))
@@ -190,16 +187,24 @@ export async function fetchJoinedCommunities(
  * give one: an empty peer, or a "min" user, channel or community, whose
  * access hash works only in the update that carried it.
  */
-export function rawPeerToCacheInput(peer: tl.TypeUser | tl.TypeChat): CachedChatInput | null {
+export function rawPeerToCacheInput(peer: tl.TypeUser | tl.TypeChat) {
   switch (peer._) {
-    case "user":
-      return peer.min ? null : userToPrivateChatCacheInput(peer);
-    case "chat":
-      return rawChatToCacheInput(peer);
+    case "user": {
+      const result: CachedChatInput | null = peer.min ? null : userToPrivateChatCacheInput(peer);
+      return result;
+    }
+    case "chat": {
+      const result: CachedChatInput | null = rawChatToCacheInput(peer);
+      return result;
+    }
     case "channel":
-    case "community":
-      return peer.min ? null : rawChatToCacheInput(peer);
-    default:
-      return null;
+    case "community": {
+      const result: CachedChatInput | null = peer.min ? null : rawChatToCacheInput(peer);
+      return result;
+    }
+    default: {
+      const result: CachedChatInput | null = null;
+      return result;
+    }
   }
 }

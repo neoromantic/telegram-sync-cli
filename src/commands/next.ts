@@ -1,12 +1,11 @@
 import type { ArgsDef } from "citty";
 
-import type { NextCommand } from "../types";
 import { COMMAND_ACCESS } from "./access";
 
 const SHELL_SAFE = /^[\w@%+=:,./-]+$/;
 
 /** `value` as one POSIX shell word: as is when safe, else in single quotes */
-export function shellQuote(value: string): string {
+export function shellQuote(value: string) {
   if (SHELL_SAFE.test(value)) return value;
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
@@ -18,7 +17,7 @@ export function shellQuote(value: string): string {
  * The global --format and --verbose are never carried: `next` is for the
  * JSON output, the default.
  */
-export function tgCommand(path: string, defs: ArgsDef, values: Record<string, unknown>): string {
+export function tgCommand(path: string, defs: ArgsDef, values: Record<string, unknown>) {
   const access = COMMAND_ACCESS[path];
   if (!access || access.write) {
     throw new Error(`tg ${path} can't be suggested as a next command`);
@@ -53,6 +52,6 @@ export function nextCommand(
   defs: ArgsDef,
   values: Record<string, unknown>,
   why: string,
-): NextCommand {
+) {
   return { command: tgCommand(path, defs, values), why };
 }

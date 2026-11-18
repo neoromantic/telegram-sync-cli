@@ -53,24 +53,24 @@ let exiting = false;
 let errorReported = false;
 let completed = false;
 
-function children(cmd: CommandNode): Record<string, CommandNode> {
+function children(cmd: CommandNode) {
   const subs = cmd.subCommands;
   return subs && typeof subs === "object" ? (subs as Record<string, CommandNode>) : {};
 }
 
 /** Every command path the dispatcher knows (`chats list`, `send`), tg telemetry's aside */
-export function commandPaths(cmd: CommandNode, prefix: string[] = []): string[] {
+export function commandPaths(cmd: CommandNode, prefix: string[] = []) {
   return Object.entries(children(cmd)).flatMap(([name, sub]) => {
     if (prefix.length === 0 && name === OWN_COMMAND) return [];
     const path = [...prefix, name];
-    const below = commandPaths(sub, path);
+    const below: string[] = commandPaths(sub, path);
     return typeof sub.run === "function" || below.length === 0 ? [path.join(" "), ...below] : below;
   });
 }
 
 const camel = (name: string) => name.replace(/-(\w)/g, (_, c: string) => c.toUpperCase());
 
-function subCommandIndex(args: string[], defs: unknown): number {
+function subCommandIndex(args: string[], defs: unknown) {
   const valueFlags = new Set<string>();
   for (const [key, def] of Object.entries(defs ?? {})) {
     const d = def as { type?: string; alias?: string | string[] };
@@ -94,7 +94,7 @@ function subCommandIndex(args: string[], defs: unknown): number {
  * The command path that `rawArgs` runs, without its arguments. A name the
  * dispatcher doesn't know ends the path; the client sends it as "other".
  */
-export function commandPath(cmd: CommandNode, rawArgs: string[]): string[] {
+export function commandPath(cmd: CommandNode, rawArgs: string[]) {
   const path: string[] = [];
   let node = cmd;
   let rest = rawArgs;
@@ -120,18 +120,20 @@ export function commandPath(cmd: CommandNode, rawArgs: string[]): string[] {
 export function detectChannel(
   modulePath: string = import.meta.path,
   execPath: string = process.execPath,
-): Channel {
+) {
   if (isCompiled(modulePath)) {
     let real = execPath;
     try {
       real = realpathSync(execPath);
     } catch {}
-    return /[\\/]Cellar[\\/]/.test(real) ? "homebrew" : "binary";
+    const result: Channel = /[\\/]Cellar[\\/]/.test(real) ? "homebrew" : "binary";
+    return result;
   }
-  return /[\\/]node_modules[\\/]/.test(modulePath) ? "npm" : "source";
+  const result: Channel = /[\\/]node_modules[\\/]/.test(modulePath) ? "npm" : "source";
+  return result;
 }
 
-function optedIn(env: Env): boolean {
+function optedIn(env: Env) {
   const value = (env[`${ENV_PREFIX}_TELEMETRY`] ?? "").trim().toLowerCase();
   return ["1", "on", "true", "debug"].includes(value);
 }
@@ -149,7 +151,7 @@ export function createTgTelemetry(
     tty?: boolean;
     features?: string[];
   } = {},
-): Telemetry {
+) {
   const env = options.env ?? process.env;
   const channel = options.channel ?? detectChannel();
   return createTelemetry({
@@ -170,10 +172,12 @@ export function createTgTelemetry(
 }
 
 /** tg telemetry status: the client's status and the channel */
-export function telemetryStatus(
-  t: Telemetry = createTgTelemetry(),
-): TelemetryStatus & { channel: Channel } {
-  return { ...t.status(), channel: detectChannel() };
+export function telemetryStatus(t: Telemetry = createTgTelemetry()) {
+  const result: TelemetryStatus & { channel: Channel } = {
+    ...t.status(),
+    channel: detectChannel(),
+  };
+  return result;
 }
 
 /**
@@ -181,7 +185,7 @@ export function telemetryStatus(
  * run so an error it throws is reported, as its type, before citty prints
  * it.
  */
-export function instrumentCommands(cmd: CommandNode): void {
+export function instrumentCommands(cmd: CommandNode) {
   root = cmd;
   const wrap = (node: CommandNode) => {
     for (const sub of Object.values(children(node))) {
@@ -213,7 +217,7 @@ export function instrumentCommands(cmd: CommandNode): void {
 export function startTelemetry(
   rawArgs: string[],
   options: { quiet?: boolean; env?: Env; channel?: Channel } = {},
-): void {
+) {
   try {
     if (!root) return;
     const path = commandPath(root, rawArgs);
@@ -255,13 +259,13 @@ export function startTelemetry(
  * Telegram's error name from an mtcute message, numbers dropped: FLOOD_WAIT.
  * tg may add a hint after it (`PEER_ID_INVALID (run tg chats list …)`).
  */
-export function rpcErrorType(message: string): string | null {
+export function rpcErrorType(message: string) {
   const text = /Telegram API error -?\d+: ([A-Z0-9_%]+)(?![\w%])/.exec(message)?.[1];
   return text ? text.replace(/_(?:%d|\d+)(?=_|$)/g, "") : null;
 }
 
 /** What error() reports: its code, or for a Telegram error the RPC error's name */
-export function cliErrorType(code: string, message: string): string {
+export function cliErrorType(code: string, message: string) {
   if (code === "TELEGRAM_ERROR" || code === "RATE_LIMITED") {
     return rpcErrorType(message) ?? (code === "RATE_LIMITED" ? "FLOOD_WAIT" : code);
   }
@@ -269,7 +273,7 @@ export function cliErrorType(code: string, message: string): string {
 }
 
 /** An error's type alone: the RPC error's name, its code or its class */
-export function errorType(err: unknown): string {
+export function errorType(err: unknown) {
   if (typeof err !== "object" || err === null) return "Error";
   const e = err as { code?: unknown; name?: unknown; message?: unknown };
   const rpc = typeof e.message === "string" ? rpcErrorType(e.message) : null;
@@ -279,14 +283,14 @@ export function errorType(err: unknown): string {
   return err.constructor?.name || "Error";
 }
 
-function report(err: ErrorReport): void {
+function report(err: ErrorReport) {
   if (errorReported || !(tracker || handoff)) return;
   errorReported = true;
   if (tracker) tracker.error(err);
   else handoff?.calls.push(["error", err]);
 }
 
-function handOff(env: Env): void {
+function handOff(env: Env) {
   const events = handoff;
   handoff = null;
   try {
@@ -297,7 +301,7 @@ function handOff(env: Env): void {
 }
 
 /** The failure error() prints, as its type */
-export function reportCliError(code: string, message: string): void {
+export function reportCliError(code: string, message: string) {
   report(cliErrorType(code, message));
 }
 
@@ -305,7 +309,7 @@ export function reportCliError(code: string, message: string): void {
  * A local error's message without tg's account numbers, which its paths
  * carry (`accounts/2/cache.db`, `session_2.db`, `account 2`)
  */
-export function withoutAccountIds(message: string): string {
+export function withoutAccountIds(message: string) {
   return message
     .replace(/(accounts[\\/]|session_)\d+/g, "$1<id>")
     .replace(/\b(account) \d+/gi, "$1 <id>");
@@ -319,7 +323,7 @@ const quoteRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * user's. The default one is in the home directory, which the client turns
  * into `~`.
  */
-export function withoutDataDir(message: string, env: Env = process.env): string {
+export function withoutDataDir(message: string, env: Env = process.env) {
   const dir = env.TELEGRAM_SYNC_CLI_DATA_DIR;
   if (!dir) return message;
   const forms = [dir, normalize(dir), resolve(dir)]
@@ -338,7 +342,7 @@ export function withoutDataDir(message: string, env: Env = process.env): string 
  * or a data directory the user set, and scrubbed of the home directory and
  * user name by the client. Call it before error().
  */
-export function reportLocalError(err: unknown): void {
+export function reportLocalError(err: unknown) {
   if (err instanceof ExitPending) return;
   const message = (err as { message?: unknown } | null)?.message;
   report(
@@ -352,13 +356,13 @@ export function reportLocalError(err: unknown): void {
 }
 
 /** A thrown error that no command handled, or one the daemon logs, as its type */
-export function reportErrorType(err: unknown): void {
+export function reportErrorType(err: unknown) {
   if (err instanceof ExitPending) return;
   report(errorType(err));
 }
 
 /** True once an exit is under way: output after it prints nothing */
-export function isExiting(): boolean {
+export function isExiting() {
   return exiting;
 }
 
@@ -369,7 +373,7 @@ export function isExiting(): boolean {
  * it returns, and the caller must stop: error() throws ExitPending, which
  * the root command's cleanup holds (endRun).
  */
-export function exitAfterFlush(code: number): Promise<never> {
+export function exitAfterFlush(code: number) {
   const pending = new Promise<never>(() => {});
   if (exiting) return pending;
   exiting = true;
@@ -391,7 +395,7 @@ export function exitAfterFlush(code: number): Promise<never> {
  * the flush, so a slow request can't keep tg running; after a thrown error
  * citty prints it and exits with 1.
  */
-export async function endRun(): Promise<void> {
+export async function endRun() {
   if (exiting) return new Promise<never>(() => {});
   if (!tracker) return;
   await tracker.flush(FLUSH_MS).catch(() => {});
@@ -399,17 +403,17 @@ export async function endRun(): Promise<void> {
 }
 
 /** The daemon's exit code, as an error type (DaemonExitCode.NoAccounts → DAEMON_NO_ACCOUNTS) */
-export function reportDaemonExit(code: number, name: string | undefined): void {
+export function reportDaemonExit(code: number, name: string | undefined) {
   if (code === 0) return;
   const snake = (name ?? "Error").replace(/([a-z])([A-Z])/g, "$1_$2");
   report(`DAEMON_${snake.toUpperCase()}`);
 }
 
-export function pendingHandoff(): Handoff | null {
+export function pendingHandoff() {
   return handoff;
 }
 
-export function resetTelemetryForTests(): void {
+export function resetTelemetryForTests() {
   root = undefined;
   tracker = null;
   handoff = null;

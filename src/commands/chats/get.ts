@@ -50,7 +50,7 @@ function getCachedChat(
   };
 }
 
-function assertUsernameIdentifier(isUsername: boolean, identifier: string, fresh: boolean): void {
+function assertUsernameIdentifier(isUsername: boolean, identifier: string, fresh: boolean) {
   if (isUsername) return;
   if (fresh) {
     error(

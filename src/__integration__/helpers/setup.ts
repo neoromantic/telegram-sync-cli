@@ -24,7 +24,7 @@ export interface IntegrationEnvironment {
   };
 }
 
-function initSchema(db: Database): void {
+function initSchema(db: Database) {
   db.run("PRAGMA journal_mode = WAL");
 
   db.run(`
@@ -58,7 +58,7 @@ async function copyFileIfExists(source: string, destination: string) {
   return true;
 }
 
-async function copySessionFiles(sourceBase: string, destinationBase: string): Promise<void> {
+async function copySessionFiles(sourceBase: string, destinationBase: string) {
   const copiedMain = await copyFileIfExists(sourceBase, destinationBase);
   if (!copiedMain) {
     throw new Error(`Session file not found: ${sourceBase}`);
@@ -68,7 +68,7 @@ async function copySessionFiles(sourceBase: string, destinationBase: string): Pr
   await copyFileIfExists(`${sourceBase}-shm`, `${destinationBase}-shm`);
 }
 
-export function createIntegrationEnvironment(testName: string): IntegrationEnvironment {
+export function createIntegrationEnvironment(testName: string) {
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 8);
   const dataDir = join(INTEGRATION_TEST_BASE, `${testName}-${timestamp}-${randomSuffix}`);
@@ -77,7 +77,7 @@ export function createIntegrationEnvironment(testName: string): IntegrationEnvir
 
   let activeAccountId = 1;
 
-  return {
+  const result: IntegrationEnvironment = {
     dataDir,
     get accountId() {
       return activeAccountId;
@@ -148,4 +148,5 @@ export function createIntegrationEnvironment(testName: string): IntegrationEnvir
       };
     },
   };
+  return result;
 }

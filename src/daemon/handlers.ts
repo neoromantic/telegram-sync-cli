@@ -3,7 +3,7 @@ import type { tl } from "@mtcute/bun";
 import { rawPeerToCacheInput } from "../commands/chats/helpers";
 import type { ChatSyncStateService } from "../db/chat-sync-state";
 import type { ChatsCache } from "../db/chats-cache";
-import type { DeleteWithoutChatResult, MessageInput, MessagesCache } from "../db/messages-cache";
+import type { DeleteWithoutChatResult, MessagesCache } from "../db/messages-cache";
 import { createSyncJobsService, type SyncJobsService } from "../db/sync-jobs";
 import { determineSyncPolicy, rawUserPolicy, type SyncChatType } from "../db/sync-schema";
 import { toRawJson } from "../utils/raw-json";
@@ -88,7 +88,7 @@ export interface ReadInboxData {
  * The read state a raw update carries, or null for any other update. A read
  * within one forum topic says nothing about the whole chat, so it is null.
  */
-export function readInboxFromUpdate(update: tl.TypeUpdate): ReadInboxData | null {
+export function readInboxFromUpdate(update: tl.TypeUpdate) {
   if (update._ === "updateReadHistoryInbox") {
     if (update.topMsgId) return null;
     const chatId = toPeerIdFromRawPeer(update.peer);
@@ -177,7 +177,7 @@ function liveMessageInput(deps: HandlerDeps, data: NewMessageData) {
   return input;
 }
 
-function toMessageInput(data: NewMessageData): MessageInput {
+function toMessageInput(data: NewMessageData) {
   return {
     chat_id: data.chatId,
     message_id: data.messageId,
@@ -200,7 +200,7 @@ function ensureSyncState(
   chatType?: SyncChatType,
   memberCount?: number | null,
   rawChat?: NewMessageData["rawChat"],
-): void {
+) {
   const existing = chatSyncState.get(chatId);
   if (!existing) {
     const resolvedChatType = chatType ?? "private";
@@ -216,7 +216,7 @@ function ensureSyncState(
   }
 }
 
-function ensureChatCached(chatsCache: ChatsCache | undefined, data: NewMessageData): void {
+function ensureChatCached(chatsCache: ChatsCache | undefined, data: NewMessageData) {
   const { chatId, rawChat } = data;
   if (!chatsCache || !rawChat) return;
   if (chatsCache.getById(String(chatId))) return;
@@ -262,7 +262,7 @@ function createSafeHandler<T>(
   handler: (data: T) => Promise<void>,
   logContext: (data: T) => string,
 ) {
-  return async (_ctx: UpdateContext, data: T): Promise<void> => {
+  return async (_ctx: UpdateContext, data: T) => {
     try {
       await handler(data);
     } catch (err) {
@@ -274,7 +274,7 @@ function createSafeHandler<T>(
 /**
  * Create update handlers
  */
-export function createUpdateHandlers(options: UpdateHandlersOptions): UpdateHandlers {
+export function createUpdateHandlers(options: UpdateHandlersOptions) {
   const deps: HandlerDeps = {
     messagesCache: options.messagesCache,
     chatSyncState: options.chatSyncState,
@@ -285,7 +285,7 @@ export function createUpdateHandlers(options: UpdateHandlersOptions): UpdateHand
     loggedEmptyRaw: false,
   };
 
-  return {
+  const result: UpdateHandlers = {
     handleNewMessage: createSafeHandler(
       deps,
       "handle new message",
@@ -316,4 +316,5 @@ export function createUpdateHandlers(options: UpdateHandlersOptions): UpdateHand
       (data) => `chatId=${data.chatId}, maxId=${data.maxId}`,
     ),
   };
+  return result;
 }

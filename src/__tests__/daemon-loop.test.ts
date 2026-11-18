@@ -17,9 +17,7 @@ import { createAccountCacheDb } from "./helpers/cache-db";
 import { addAccountRuntime, testDaemonContext } from "./helpers/daemon-runtime";
 import { fakeDialogClient } from "./helpers/fake-dialogs";
 
-function createMockStatusService(
-  overrides: Partial<DaemonStatusService> = {},
-): DaemonStatusService {
+function createMockStatusService(overrides: Partial<DaemonStatusService> = {}) {
   const base: DaemonStatusService = {
     get: () => null,
     set: () => {},
@@ -47,7 +45,7 @@ function createMockStatusService(
   return { ...base, ...overrides };
 }
 
-function createMockScheduler(overrides: Partial<SyncScheduler> = {}): SyncScheduler {
+function createMockScheduler(overrides: Partial<SyncScheduler> = {}) {
   const base: SyncScheduler = {
     queueForwardCatchup: () => {},
     queueBackwardHistory: () => {},
@@ -66,11 +64,12 @@ function createMockScheduler(overrides: Partial<SyncScheduler> = {}): SyncSchedu
   return { ...base, ...overrides };
 }
 
-function createContext(): DaemonContext {
-  return testDaemonContext({
+function createContext() {
+  const result: DaemonContext = testDaemonContext({
     verbosity: "quiet",
     state: { running: false, accounts: new Map(), shutdownRequested: false },
   });
+  return result;
 }
 
 async function runWithImmediateTimeouts(
@@ -101,7 +100,7 @@ function stopAfterTicks(ctx: DaemonContext, ticks: number) {
   });
 }
 
-function jobOf(id: number): SyncJobRow {
+function jobOf(id: number) {
   return {
     id,
     chat_id: 55,

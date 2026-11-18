@@ -131,13 +131,9 @@ interface DownloadTarget {
   thumb: MediaThumb | null;
 }
 
-function downloadTarget(
-  mediaDir: string,
-  info: AttachmentInfo,
-  thumb: MediaThumb | null,
-): DownloadTarget {
+function downloadTarget(mediaDir: string, info: AttachmentInfo, thumb: MediaThumb | null) {
   if (!thumb) {
-    return {
+    const result: DownloadTarget = {
       paths: mediaPaths(mediaDir, info),
       expectedSize: info.size,
       fileName: cachedFileName(info),
@@ -146,9 +142,10 @@ function downloadTarget(
       kind: info.kind,
       thumb: null,
     };
+    return result;
   }
   const paths = thumbPaths(mediaDir, info, thumb);
-  return {
+  const result: DownloadTarget = {
     paths,
     expectedSize: thumb.size,
     fileName: basename(paths.file),
@@ -157,6 +154,7 @@ function downloadTarget(
     kind: "thumbnail",
     thumb,
   };
+  return result;
 }
 
 interface MessageRef {
@@ -170,7 +168,7 @@ function toResult(
   ref: MessageRef,
   file: { path: string; size: number },
   transfer: { cached: boolean; resumedFrom: number | null },
-): DownloadResult {
+) {
   return {
     path: file.path,
     fileName: target.fileName,
@@ -193,12 +191,7 @@ function toResult(
   };
 }
 
-function noMedia(
-  chatId: number,
-  messageId: number,
-  messageType: string,
-  suggestion?: string,
-): MediaError {
+function noMedia(chatId: number, messageId: number, messageType: string, suggestion?: string) {
   return new MediaError(
     ErrorCodes.NO_MEDIA,
     `Message ${messageId} in chat ${chatId} has no file to download`,
@@ -207,7 +200,7 @@ function noMedia(
   );
 }
 
-function noThumbnail(chatId: number, messageId: number): MediaError {
+function noThumbnail(chatId: number, messageId: number) {
   return new MediaError(
     ErrorCodes.NO_MEDIA,
     `The file of message ${messageId} in chat ${chatId} has no preview`,
@@ -228,7 +221,7 @@ function contentProtected(
   messageId: number,
   reason: ProtectionReason,
   suggestion?: string,
-): MediaError {
+) {
   return new MediaError(
     ErrorCodes.CONTENT_PROTECTED,
     `${PROTECTION_MESSAGES[reason]}: Telegram doesn't allow saving its media`,
@@ -237,7 +230,7 @@ function contentProtected(
   );
 }
 
-function lockTimeout(err: DownloadLockTimeoutError): MediaError {
+function lockTimeout(err: DownloadLockTimeoutError) {
   const holder = err.holder === null ? "" : ` (pid ${err.holder})`;
   return new MediaError(
     ErrorCodes.GENERAL_ERROR,
@@ -252,11 +245,7 @@ function lockTimeout(err: DownloadLockTimeoutError): MediaError {
   );
 }
 
-function readFromCache(
-  deps: DownloadDeps,
-  chat: HistoryChat,
-  request: DownloadRequest,
-): DownloadResult | null {
+function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: DownloadRequest) {
   const { chatId } = chat;
   const { messageId } = request;
   const row = createMessagesCache(deps.cacheDb).get(chatId, messageId);
@@ -288,7 +277,7 @@ function readFromCache(
   });
 }
 
-function fileLocation(message: FetchedRawMessage, thumb: MediaThumb | null): FileDownloadLocation {
+function fileLocation(message: FetchedRawMessage, thumb: MediaThumb | null) {
   const media = attachmentMedia(message);
   if (!media) throw new Error("The message has no file");
   if (!thumb) {
@@ -306,7 +295,7 @@ function fileLocation(message: FetchedRawMessage, thumb: MediaThumb | null): Fil
   return new Thumbnail(owner, size);
 }
 
-function errorCode(err: unknown): string | undefined {
+function errorCode(err: unknown) {
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" ? code : undefined;
 }
@@ -324,19 +313,19 @@ const NETWORK_ERROR_CODES = new Set([
   "EAI_AGAIN",
 ]);
 
-function isFileReferenceError(err: unknown): boolean {
+function isFileReferenceError(err: unknown) {
   if (tl.RpcError.is(err)) return err.text.startsWith("FILE_REFERENCE_");
   return err instanceof MtUnsupportedError && /file ref/i.test(err.message);
 }
 
-function floodWaitSeconds(err: tl.RpcError): number | null {
+function floodWaitSeconds(err: tl.RpcError) {
   const seconds = (err as { seconds?: unknown }).seconds;
   if (typeof seconds === "number" && seconds > 0) return seconds;
   const match = err.text.match(/_(\d+)$/);
   return match ? Number(match[1]) : null;
 }
 
-function rateLimited(method: string, waitSeconds: number): MediaError {
+function rateLimited(method: string, waitSeconds: number) {
   const { message, details, suggestion } = describeRateLimit(method, waitSeconds);
   return new MediaError(
     ErrorCodes.RATE_LIMITED,
@@ -346,7 +335,7 @@ function rateLimited(method: string, waitSeconds: number): MediaError {
   );
 }
 
-async function sizeOf(path: string): Promise<number> {
+async function sizeOf(path: string) {
   try {
     return (await stat(path)).size;
   } catch {
@@ -359,7 +348,7 @@ async function transferError(
   target: DownloadTarget,
   stallTimeoutMs: number,
   rateLimits: () => RateLimitsService,
-): Promise<unknown> {
+) {
   if (isFileReferenceError(err)) {
     const text = tl.RpcError.is(err) ? err.text : (err as Error).message;
     return new MediaError(
@@ -414,10 +403,7 @@ async function transferError(
   return err;
 }
 
-async function writeAll(
-  handle: Awaited<ReturnType<typeof open>>,
-  chunk: Uint8Array,
-): Promise<void> {
+async function writeAll(handle: Awaited<ReturnType<typeof open>>, chunk: Uint8Array) {
   let written = 0;
   while (written < chunk.length) {
     const { bytesWritten } = await handle.write(chunk, written, chunk.length - written);
@@ -433,13 +419,7 @@ interface StreamOptions {
   stallTimeoutMs: number;
 }
 
-async function streamToCache({
-  client,
-  location,
-  target,
-  deps,
-  stallTimeoutMs,
-}: StreamOptions): Promise<number | null> {
+async function streamToCache({ client, location, target, deps, stallTimeoutMs }: StreamOptions) {
   const { part, file } = target.paths;
   const { expectedSize } = target;
   let have = await sizeOf(part);
@@ -486,11 +466,7 @@ async function streamToCache({
   return offset > 0 ? offset : null;
 }
 
-async function downloadOnline(
-  deps: DownloadDeps,
-  chat: HistoryChat,
-  request: DownloadRequest,
-): Promise<DownloadResult> {
+async function downloadOnline(deps: DownloadDeps, chat: HistoryChat, request: DownloadRequest) {
   const { chatId } = chat;
   const { messageId } = request;
   const now = deps.now ?? Date.now;
@@ -585,10 +561,7 @@ async function downloadOnline(
  * cache. From the cache alone when it holds the file and `fresh` is off:
  * then no client is created.
  */
-export async function downloadMedia(
-  deps: DownloadDeps,
-  request: DownloadRequest,
-): Promise<DownloadResult> {
+export async function downloadMedia(deps: DownloadDeps, request: DownloadRequest) {
   const chat = await resolveHistoryChat(deps.history.client, request.chat, deps.history);
   if (!request.fresh) {
     const cached = readFromCache(deps, chat, request);

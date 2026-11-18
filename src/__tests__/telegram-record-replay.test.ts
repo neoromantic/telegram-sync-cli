@@ -10,7 +10,7 @@ import {
   wrapClientCallWithRecordReplay,
 } from "../utils/telegram-record-replay";
 
-function listJsonFiles(dir: string): string[] {
+function listJsonFiles(dir: string) {
   const entries = readdirSync(dir, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {

@@ -30,7 +30,7 @@ interface Answer {
   next?: NextCommand[];
 }
 
-function answer(result: CliResult): Answer {
+function answer(result: CliResult) {
   return result.json as Answer;
 }
 
@@ -40,7 +40,7 @@ function options() {
   return { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } };
 }
 
-async function follow(previous: Answer): Promise<Answer> {
+async function follow(previous: Answer) {
   const command = previous.next?.[0]?.command;
   if (!command) throw new Error(`No next command: ${JSON.stringify(previous)}`);
   const result = await runShellCommand(command, options());
@@ -50,7 +50,7 @@ async function follow(previous: Answer): Promise<Answer> {
   return answer(result);
 }
 
-async function run(...args: string[]): Promise<Answer> {
+async function run(...args: string[]) {
   return answer(await runCliSuccess(args, options()));
 }
 

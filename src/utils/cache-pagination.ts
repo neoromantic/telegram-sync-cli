@@ -1,8 +1,7 @@
 import { isCacheStale } from "../db/types";
-import type { PaginatedResult } from "../types";
 import { verbose } from "./output";
 
-export function paginate<T>(items: T[], offset: number, limit: number): PaginatedResult<T> {
+export function paginate<T>(items: T[], offset: number, limit: number) {
   return {
     items: items.slice(offset, offset + limit),
     total: items.length,
@@ -20,7 +19,7 @@ export function buildCachePaginatedResponse<
   items: TInput[],
   mapItem: (item: TInput) => TOutput,
   options: { offset: number; limit: number; ttlMs: number; source: TSource },
-): PaginatedResult<TOutput> & { source: TSource; stale: boolean } {
+) {
   const { offset, limit, ttlMs, source } = options;
   const anyStale = items.some((item) => isCacheStale(item.fetched_at, ttlMs));
 

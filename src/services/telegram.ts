@@ -5,7 +5,7 @@ if (!(globalThis as Record<symbol, boolean>)[timeoutPatchKey]) {
     handler: (...args: unknown[]) => void,
     delay?: number,
     ...args: unknown[]
-  ): ReturnType<typeof originalSetTimeout> => {
+  ) => {
     const safeDelay = Math.max(0, Number.isFinite(delay) ? delay! : 0);
     return originalSetTimeout(handler, safeDelay, ...args);
   }) as typeof setTimeout;
@@ -61,7 +61,7 @@ const DEFAULT_FLOOD_WAITER_OPTIONS: FloodWaiterOptions = {
 /**
  * Get default configuration from environment
  */
-export function getDefaultConfig(): TelegramConfig {
+export function getDefaultConfig() {
   const config: TelegramConfig = {
     apiId: parseInt(process.env.TELEGRAM_API_ID ?? "0", 10),
     apiHash: process.env.TELEGRAM_API_HASH ?? "",
@@ -85,10 +85,7 @@ export function getDefaultConfig(): TelegramConfig {
 /**
  * Validate API credentials
  */
-export function validateConfig(config: TelegramConfig): {
-  valid: boolean;
-  error?: string;
-} {
+export function validateConfig(config: TelegramConfig) {
   if (!config.apiId || config.apiId <= 0) {
     return {
       valid: false,
@@ -119,7 +116,7 @@ export class MissingCredentialsError extends ConfigError {
 /**
  * Get config from environment, throwing if credentials are missing
  */
-export function requireDefaultConfig(): TelegramConfig {
+export function requireDefaultConfig() {
   const config = getDefaultConfig();
   const validation = validateConfig(config);
   if (!validation.valid) {
@@ -131,7 +128,7 @@ export function requireDefaultConfig(): TelegramConfig {
 /**
  * Get session storage path for an account
  */
-export function getSessionPath(accountId: number, dataDir?: string): string {
+export function getSessionPath(accountId: number, dataDir?: string) {
   return join(dataDir ?? getDataDir(), `session_${accountId}.db`);
 }
 
@@ -145,15 +142,12 @@ export interface ClientFactory {
 /**
  * Default client factory using mtcute
  */
-export function createDefaultClientFactory(
-  config: TelegramConfig,
-  dataDir?: string,
-): ClientFactory {
+export function createDefaultClientFactory(config: TelegramConfig, dataDir?: string) {
   const floodWaiterOpts = config.floodWaiter ?? DEFAULT_FLOOD_WAITER_OPTIONS;
   const middlewares = [networkMiddlewares.floodWaiter(floodWaiterOpts)];
 
   return {
-    create(accountId: number): TelegramClient {
+    create(accountId: number) {
       const client = new TelegramClient({
         apiId: config.apiId,
         apiHash: config.apiHash,
@@ -173,7 +167,7 @@ export function createDefaultClientFactory(
 /**
  * Check if a client is connected and authorized
  */
-export async function isAuthorized(client: TelegramClient): Promise<boolean> {
+export async function isAuthorized(client: TelegramClient) {
   try {
     await client.getMe();
     return true;
@@ -184,7 +178,7 @@ export async function isAuthorized(client: TelegramClient): Promise<boolean> {
 
 let defaultFactory: ClientFactory | null = null;
 
-function getDefaultFactory(): ClientFactory {
+function getDefaultFactory() {
   defaultFactory ??= createDefaultClientFactory(requireDefaultConfig());
   return defaultFactory;
 }
@@ -192,7 +186,7 @@ function getDefaultFactory(): ClientFactory {
 /**
  * Create a new Telegram client for an account (uses global clients map)
  */
-export function createClient(accountId: number): TelegramClient {
+export function createClient(accountId: number) {
   const client = getDefaultFactory().create(accountId);
   clients.set(accountId, client);
   return client;
@@ -201,6 +195,6 @@ export function createClient(accountId: number): TelegramClient {
 /**
  * Get or create the client for an account the command already resolved
  */
-export function getClientForAccount(accountId: number): TelegramClient {
+export function getClientForAccount(accountId: number) {
   return clients.get(accountId) ?? createClient(accountId);
 }

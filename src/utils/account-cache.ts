@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import {
   type AccountsDbInterface,
   type CacheLayoutResult,
@@ -11,7 +10,7 @@ import {
 } from "../db";
 import type { CacheUnavailableReason } from "../db/cache-layout";
 import { reportLocalError } from "../telemetry";
-import { type Account, ErrorCodes } from "../types";
+import { ErrorCodes } from "../types";
 import { resolveAccount } from "./account-selector";
 import { error } from "./output";
 
@@ -23,7 +22,7 @@ const CACHE_UNAVAILABLE_SUGGESTIONS: Record<CacheUnavailableReason, string> = {
 };
 
 /** What to do about a cache that can't be opened */
-export function cacheUnavailableSuggestion(reason: string): string {
+export function cacheUnavailableSuggestion(reason: string) {
   return (
     CACHE_UNAVAILABLE_SUGGESTIONS[reason as CacheUnavailableReason] ??
     CACHE_UNAVAILABLE_SUGGESTIONS.move_failed
@@ -60,7 +59,7 @@ export function reportCacheError(err: unknown, accountId?: number): never {
 export function openAccountCache(
   selector: string | undefined,
   accountsDb: AccountsDbInterface = defaultAccountsDb,
-): { account: Account; db: Database } {
+) {
   const account = resolveAccount(selector, accountsDb);
   try {
     return { account, db: getAccountCacheDb(account.id) };
@@ -79,7 +78,7 @@ export function openAccountCache(
  * file that other accounts wrote. So no account changes while an older tg
  * holds the file or the move fails, whatever the count.
  */
-export function settleCacheLayoutBeforeAccountChange(): void {
+export function settleCacheLayoutBeforeAccountChange() {
   let result: CacheLayoutResult;
   try {
     result = ensureCacheLayout({ mode: "report" });

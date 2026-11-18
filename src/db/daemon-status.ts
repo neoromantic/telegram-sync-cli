@@ -114,7 +114,7 @@ export interface DaemonSummary {
  * PID (from daemon.pid) count: a stopped daemon's or an older version's rows
  * say nothing about now. Only lastUpdate of a stopped daemon reads them.
  */
-export function summarizeDaemonStatus(infos: DaemonInfo[], livePid: number | null): DaemonSummary {
+export function summarizeDaemonStatus(infos: DaemonInfo[], livePid: number | null) {
   const live =
     livePid === null
       ? []
@@ -146,15 +146,19 @@ const PACING_KEYS = [
   "pacing_flood_waits",
 ] as const;
 
-function readPacing(read: (key: string) => string | null): DaemonPacing | null {
+function readPacing(read: (key: string) => string | null) {
   const mode = read("pacing_mode");
   const target = Number(read("pacing_target_calls_per_second"));
-  if ((mode !== "history" && mode !== "calm") || !(target > 0)) return null;
-  return {
+  if ((mode !== "history" && mode !== "calm") || !(target > 0)) {
+    const result: DaemonPacing | null = null;
+    return result;
+  }
+  const result: DaemonPacing | null = {
     mode,
     targetCallsPerSecond: target,
     floodWaits: parseNumber(read("pacing_flood_waits")) ?? 0,
   };
+  return result;
 }
 
 const CATCH_UP_REASONS: readonly string[] = [
@@ -163,7 +167,7 @@ const CATCH_UP_REASONS: readonly string[] = [
   "new_client",
 ] satisfies CatchUpReason[];
 
-function readCatchUp(read: (key: string) => string | null): CatchUpRecord | null {
+function readCatchUp(read: (key: string) => string | null) {
   const at = parseNumber(read("last_catch_up_at"));
   const reason = read("last_catch_up_reason");
   if (at === null || reason === null || !CATCH_UP_REASONS.includes(reason)) {
@@ -177,7 +181,7 @@ function readCatchUp(read: (key: string) => string | null): CatchUpRecord | null
   };
 }
 
-function parseNumber(value: string | null): number | null {
+function parseNumber(value: string | null) {
   if (value === null) return null;
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) ? null : parsed;
@@ -186,7 +190,7 @@ function parseNumber(value: string | null): number | null {
 /**
  * Create a daemon status service
  */
-export function createDaemonStatusService(db: Database): DaemonStatusService {
+export function createDaemonStatusService(db: Database) {
   const stmts = {
     get: db.query(`
       SELECT value FROM daemon_status WHERE key = $key
@@ -209,14 +213,14 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
   };
 
   const service: DaemonStatusService = {
-    get(key: string): string | null {
+    get(key: string) {
       const result = stmts.get.get({ $key: key }) as {
         value: string | null;
       } | null;
       return result?.value ?? null;
     },
 
-    set(key: string, value: string): void {
+    set(key: string, value: string) {
       stmts.set.run({
         $key: key,
         $value: value,
@@ -224,11 +228,11 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       });
     },
 
-    delete(key: string): void {
+    delete(key: string) {
       stmts.delete.run({ $key: key });
     },
 
-    getAll(): Record<string, string> {
+    getAll() {
       const rows = stmts.getAll.all();
       const result: Record<string, string> = {};
       for (const row of rows) {
@@ -239,7 +243,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       return result;
     },
 
-    setDaemonRunning(pid: number, version: string): void {
+    setDaemonRunning(pid: number, version: string) {
       const now = Date.now();
       db.transaction(() => {
         service.set("daemon_version", version);
@@ -258,7 +262,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       }).immediate();
     },
 
-    setDaemonStopped(): void {
+    setDaemonStopped() {
       db.transaction(() => {
         service.delete("daemon_pid");
         service.delete("daemon_started_at");
@@ -269,7 +273,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       }).immediate();
     },
 
-    writeTick(tick: DaemonTick): void {
+    writeTick(tick: DaemonTick) {
       db.transaction(() => {
         service.set("connection_status", tick.connectionStatus);
         if (tick.lastError === null) {
@@ -289,7 +293,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       }).immediate();
     },
 
-    recordCatchUp(record: CatchUpRecord): void {
+    recordCatchUp(record: CatchUpRecord) {
       db.transaction(() => {
         service.set("last_catch_up_at", String(record.at));
         service.set("last_catch_up_reason", record.reason);
@@ -299,11 +303,11 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
       }).immediate();
     },
 
-    getDaemonInfo(): DaemonInfo {
+    getDaemonInfo() {
       const values = service.getAll();
       const read = (key: string) => values[key] ?? null;
       const pid = read("daemon_pid");
-      return {
+      const result: DaemonInfo = {
         status: read("daemon_status") === "running" ? "running" : "stopped",
         pid: parseNumber(pid),
         version: pid !== null && read("daemon_version_pid") === pid ? read("daemon_version") : null,
@@ -317,6 +321,7 @@ export function createDaemonStatusService(db: Database): DaemonStatusService {
         lastCatchUp: readCatchUp(read),
         pacing: readPacing(read),
       };
+      return result;
     },
   };
 

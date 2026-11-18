@@ -68,10 +68,7 @@ describe("resolveAccountSelector", () => {
   });
 });
 
-function failureOf(run: () => unknown): Error & {
-  code?: string;
-  details?: Record<string, unknown>;
-} {
+function failureOf(run: () => unknown) {
   try {
     run();
   } catch (err) {

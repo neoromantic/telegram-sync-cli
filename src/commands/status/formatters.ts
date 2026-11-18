@@ -46,21 +46,21 @@ export const c = {
   number: (s: string | number) => `${colors.cyan}${colors.bold}${s}${colors.reset}`,
 };
 
-export function printHeader(title: string): void {
+export function printHeader(title: string) {
   const line = icons.line.repeat(40);
   console.log();
   console.log(c.header(`${icons.bullet} ${title}`));
   console.log(c.dim(line));
 }
 
-export function printRow(label: string, value: string, indent = 2): void {
+export function printRow(label: string, value: string, indent = 2) {
   const padding = " ".repeat(indent);
   const labelWidth = 20;
   const paddedLabel = label.padEnd(labelWidth);
   console.log(`${padding}${c.label(paddedLabel)} ${value}`);
 }
 
-export function jobStatusIcon(status: SyncJobStatus): string {
+export function jobStatusIcon(status: SyncJobStatus) {
   if (status === "running") return c.success(icons.running);
   if (status === "failed") return c.red(icons.error);
   return c.yellow(icons.pending);

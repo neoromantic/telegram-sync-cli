@@ -11,7 +11,7 @@ export interface SenderLookup {
   message_id: number;
 }
 
-export function createSenderLookupsSchema(db: Database): void {
+export function createSenderLookupsSchema(db: Database) {
   db.run(`
     CREATE TABLE IF NOT EXISTS sender_lookups (
       sender_id   INTEGER PRIMARY KEY,
@@ -26,7 +26,7 @@ export function createSenderLookupsSchema(db: Database): void {
   `);
 }
 
-function cachedUserSql(id: string): string {
+function cachedUserSql(id: string) {
   return `EXISTS (SELECT 1 FROM users_cache WHERE user_id = CAST(${id} AS TEXT))`;
 }
 
@@ -72,7 +72,7 @@ export interface SenderLookups {
   countNotFound(): number;
 }
 
-export function createSenderLookups(db: Database): SenderLookups {
+export function createSenderLookups(db: Database) {
   const reachable = `(
     r.chat_id > -${CHANNEL_PEER_ID_OFFSET} OR EXISTS (
       SELECT 1 FROM chats_cache c
@@ -131,7 +131,7 @@ export function createSenderLookups(db: Database): SenderLookups {
 
   const count = (query: typeof stmts.countWaiting) => (query.get() as { count: number }).count;
 
-  return {
+  const result: SenderLookups = {
     scan(now) {
       db.transaction(() => {
         stmts.dropCached.run();
@@ -162,4 +162,5 @@ export function createSenderLookups(db: Database): SenderLookups {
     countMissing: () => count(stmts.countMissing),
     countNotFound: () => count(stmts.countNotFound),
   };
+  return result;
 }

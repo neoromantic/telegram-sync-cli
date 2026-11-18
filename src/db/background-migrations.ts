@@ -67,7 +67,7 @@ export interface BatchLimits {
 /** About 50 ms of the daemon's write lock per batch */
 export const DEFAULT_BATCH_LIMITS: BatchLimits = { maxRows: 500, maxMs: 50 };
 
-function createMigrationsTable(db: Database): void {
+function createMigrationsTable(db: Database) {
   db.run(`
     CREATE TABLE IF NOT EXISTS cache_migrations (
       name        TEXT PRIMARY KEY,
@@ -84,7 +84,7 @@ function createMigrationsTable(db: Database): void {
   `);
 }
 
-function hasMigrationsTable(db: Database): boolean {
+function hasMigrationsTable(db: Database) {
   return (
     db
       .query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cache_migrations'`)
@@ -92,7 +92,7 @@ function hasMigrationsTable(db: Database): boolean {
   );
 }
 
-function registeredNames(db: Database): Set<string> {
+function registeredNames(db: Database) {
   if (!hasMigrationsTable(db)) return new Set();
   const rows = db.query("SELECT name FROM cache_migrations").all() as {
     name: string;
@@ -100,7 +100,7 @@ function registeredNames(db: Database): Set<string> {
   return new Set(rows.map((row) => row.name));
 }
 
-function tableIsEmpty(db: Database, table: MigrationTable): boolean {
+function tableIsEmpty(db: Database, table: MigrationTable) {
   const exists = db
     .query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`)
     .get(table);
@@ -116,7 +116,7 @@ function tableIsEmpty(db: Database, table: MigrationTable): boolean {
 export function registerBackgroundMigrations(
   db: Database,
   migrations: readonly BackgroundMigration[] = BACKGROUND_MIGRATIONS,
-): void {
+) {
   const known = registeredNames(db);
   if (migrations.every((migration) => known.has(migration.name))) return;
 
@@ -140,13 +140,13 @@ export function registerBackgroundMigrations(
   }).immediate();
 }
 
-function readRecord(db: Database, name: string): MigrationRecord | null {
+function readRecord(db: Database, name: string) {
   return db
     .query("SELECT * FROM cache_migrations WHERE name = ?")
     .get(name) as MigrationRecord | null;
 }
 
-function isoOrNull(ms: number | null): string | null {
+function isoOrNull(ms: number | null) {
   return ms === null ? null : new Date(ms).toISOString();
 }
 
@@ -157,7 +157,7 @@ function isoOrNull(ms: number | null): string | null {
 export function readMigrationStatus(
   db: Database,
   migrations: readonly BackgroundMigration[] = BACKGROUND_MIGRATIONS,
-): MigrationStatus[] {
+) {
   if (!hasMigrationsTable(db)) return [];
   const result: MigrationStatus[] = [];
   for (const migration of migrations) {
@@ -178,7 +178,7 @@ export function readMigrationStatus(
   return result;
 }
 
-function startMigration(db: Database, migration: BackgroundMigration, now: number): void {
+function startMigration(db: Database, migration: BackgroundMigration, now: number) {
   const { end, total } = db
     .query(`SELECT COALESCE(MAX(rowid), 0) AS end, COUNT(*) AS total FROM ${migration.table}`)
     .get() as { end: number; total: number };
@@ -208,7 +208,7 @@ export function runMigrationBatch(
   db: Database,
   migration: BackgroundMigration,
   limits: BatchLimits = DEFAULT_BATCH_LIMITS,
-): BatchResult {
+) {
   const now = limits.now ?? Date.now;
   const initial = readRecord(db, migration.name);
   if (!initial || initial.state === "done") return { rows: 0, finished: true };
@@ -229,7 +229,7 @@ export function runMigrationBatch(
 
   try {
     return db
-      .transaction((): BatchResult => {
+      .transaction(() => {
         const record = readRecord(db, migration.name);
         if (!record || record.state === "done") {
           return { rows: 0, finished: true };
@@ -271,7 +271,7 @@ export function runMigrationBatch(
   }
 }
 
-function recordError(db: Database, name: string, err: unknown, now: number): void {
+function recordError(db: Database, name: string, err: unknown, now: number) {
   try {
     db.query(
       "UPDATE cache_migrations SET last_error = $error, updated_at = $now WHERE name = $name",
@@ -287,7 +287,7 @@ function recordError(db: Database, name: string, err: unknown, now: number): voi
  * Start every migration over: after a VACUUM moved rowids, a cursor no
  * longer marks the rows done. Rewriting a row again changes nothing.
  */
-export function restartUnfinishedMigrations(db: Database): void {
+export function restartUnfinishedMigrations(db: Database) {
   if (!hasMigrationsTable(db)) return;
   db.run(`
     UPDATE cache_migrations
@@ -341,23 +341,23 @@ export const ALONE_WORK_MS = 1_000;
  * default batches back to back, with that pause once ALONE_WORK_MS have
  * passed since the last one.
  */
-export function foregroundPacing(
-  daemonRunning: boolean,
-): Pick<RunOptions, "limits" | "yieldBetweenBatches"> {
+export function foregroundPacing(daemonRunning: boolean) {
   if (daemonRunning) {
-    return {
+    const result: Pick<RunOptions, "limits" | "yieldBetweenBatches"> = {
       limits: SHARED_BATCH_LIMITS,
       yieldBetweenBatches: () => Bun.sleep(OTHER_PROCESS_PAUSE_MS),
     };
+    return result;
   }
   let workStarted = performance.now();
-  return {
+  const result: Pick<RunOptions, "limits" | "yieldBetweenBatches"> = {
     yieldBetweenBatches: async () => {
       if (performance.now() - workStarted < ALONE_WORK_MS) return;
       await Bun.sleep(OTHER_PROCESS_PAUSE_MS);
       workStarted = performance.now();
     },
   };
+  return result;
 }
 
 /**
@@ -373,7 +373,7 @@ export async function runPendingMigrations(
   db: Database,
   options: RunOptions = {},
   migrations: readonly BackgroundMigration[] = BACKGROUND_MIGRATIONS,
-): Promise<number> {
+) {
   const limits = options.limits ?? DEFAULT_BATCH_LIMITS;
   let total = 0;
   const search = isSearchEnabled(db);

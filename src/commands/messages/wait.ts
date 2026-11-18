@@ -25,7 +25,7 @@ import { resolveHistoryChat } from "./history";
 
 const POLL_MS = 200;
 
-function requireDaemon(account: Account, cacheDb: Database): void {
+function requireDaemon(account: Account, cacheDb: Database) {
   const pid = createPidFile(join(getDataDir(), "daemon.pid")).read();
   const daemon = createDaemonStatusService(cacheDb).getDaemonInfo();
   if (pid !== null && daemon.status === "running" && daemon.pid === pid) {

@@ -40,7 +40,7 @@ const ATTACHMENT_COLUMNS = [
   "grouped_id",
 ] as const;
 
-export function createMessageAttachmentsStore(db: Database): MessageAttachmentsStore {
+export function createMessageAttachmentsStore(db: Database) {
   const stmts = {
     upsert: db.prepare(`
       INSERT INTO message_attachments (
@@ -71,7 +71,7 @@ export function createMessageAttachmentsStore(db: Database): MessageAttachmentsS
     `),
   };
 
-  return {
+  const result: MessageAttachmentsStore = {
     sync(chatId, messageId, attachment) {
       if (!attachment) {
         stmts.delete.run({ $chat_id: chatId, $message_id: messageId });
@@ -105,4 +105,5 @@ export function createMessageAttachmentsStore(db: Database): MessageAttachmentsS
       return stmts.heldOutsideChat.get(uniqueFileId, chatId) !== null;
     },
   };
+  return result;
 }

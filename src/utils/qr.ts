@@ -9,7 +9,7 @@ const RESET = "\x1b[0m";
  * Render text as a QR code of half blocks: each character holds two rows of
  * modules (the upper one in the text colour when `▀`, the lower one when `▄`).
  */
-export function renderQr(text: string): string {
+export function renderQr(text: string) {
   const { data } = encode(text, { border: QUIET_ZONE });
   const dark = (row: number, col: number) => data[row]?.[col] === true;
   const lines: string[] = [];

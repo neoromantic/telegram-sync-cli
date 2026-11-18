@@ -25,7 +25,7 @@ export interface ResolvedChat {
   memberCount: number | null;
 }
 
-function fromCachedChat(chat: CachedChat): ResolvedChat {
+function fromCachedChat(chat: CachedChat) {
   const id = Number(chat.chat_id);
   return {
     id,
@@ -37,7 +37,7 @@ function fromCachedChat(chat: CachedChat): ResolvedChat {
   };
 }
 
-function resolveChat(db: Database, input: string): ResolvedChat | null {
+function resolveChat(db: Database, input: string) {
   if (isUsernameIdentifier(input)) {
     const chat = createChatsCache(db).getByUsername(input);
     return chat ? fromCachedChat(chat) : null;
@@ -60,7 +60,7 @@ function resolveChat(db: Database, input: string): ResolvedChat | null {
   };
 }
 
-function resolveChatOrFail(db: Database, input: string): ResolvedChat | null {
+function resolveChatOrFail(db: Database, input: string) {
   try {
     return resolveChat(db, input);
   } catch (err) {

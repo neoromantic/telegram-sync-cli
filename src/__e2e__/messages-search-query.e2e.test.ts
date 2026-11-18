@@ -32,7 +32,7 @@ const MESSAGES = [
   [11, BOOK_CLUB_ID, BOB_ID, "tips for C++ templates", 50 * DAY],
 ] as const;
 
-function seed(db: Database): void {
+function seed(db: Database) {
   const now = Date.now();
   const users = createUsersCache(db);
   for (const [id, username, first] of [
@@ -105,7 +105,7 @@ describe("E2E: messages search query rules", () => {
     env.cleanup();
   });
 
-  async function ids(...args: string[]): Promise<number[]> {
+  async function ids(...args: string[]) {
     const result = await runCliSuccess(
       ["messages", "search", "--query", ...args],
       env.getCliOptions(),
@@ -174,7 +174,7 @@ describe("E2E: messages search query rules", () => {
     ).data;
   }
 
-  async function invalidArgs(...args: string[]): Promise<string> {
+  async function invalidArgs(...args: string[]) {
     const result = await runCli(["messages", "search", "--query", ...args], env.getCliOptions());
     expect(result.exitCode).toBe(3);
     return (result.json as { error: { code: string } }).error.code;

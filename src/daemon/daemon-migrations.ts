@@ -16,12 +16,13 @@ export interface MigrationsState {
   retryAt: Map<number, number>;
 }
 
-export function createMigrationsState(): MigrationsState {
-  return { retryAt: new Map() };
+export function createMigrationsState() {
+  const result: MigrationsState = { retryAt: new Map() };
+  return result;
 }
 
-function yieldToEventLoop(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
+function yieldToEventLoop() {
+  return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 export interface MigrationTickOptions {
@@ -31,10 +32,7 @@ export interface MigrationTickOptions {
 }
 
 /** Run pending migrations of each account until the tick's budget is spent */
-export async function runMigrationsTick(
-  ctx: DaemonContext,
-  options: MigrationTickOptions = {},
-): Promise<void> {
+export async function runMigrationsTick(ctx: DaemonContext, options: MigrationTickOptions = {}) {
   const now = options.now ?? Date.now;
   const state = ctx.runtime.migrations;
   const deadline = now() + (options.budgetMs ?? MIGRATION_TICK_BUDGET_MS);

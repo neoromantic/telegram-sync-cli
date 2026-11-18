@@ -194,7 +194,7 @@ export async function buildApiRequest(
   method: string,
   params: Record<string, unknown>,
   resolve: ResolveInputPeer,
-): Promise<tl.RpcMethod> {
+) {
   const { default: schema } = await import("@mtcute/core/tl/api-schema.json");
   const entry = (schema.e as TlEntry[]).find((e) => e.kind === "method" && e.name === method);
   const request: Record<string, unknown> = { _: method, ...params };
@@ -216,11 +216,7 @@ export async function buildApiRequest(
   return request as unknown as tl.RpcMethod;
 }
 
-async function toTlValue(
-  type: string,
-  value: unknown,
-  resolve: ResolveInputPeer,
-): Promise<unknown> {
+async function toTlValue(type: string, value: unknown, resolve: ResolveInputPeer) {
   if (typeof value !== "string" && typeof value !== "number") return value;
   const text = String(value);
   if (type === "long") return /^-?\d+$/.test(text) ? toLong(text) : value;
@@ -228,7 +224,7 @@ async function toTlValue(
   return toInput ? toInput(await resolve(text), text) : value;
 }
 
-function zeroValue({ name, type }: TlArgument): unknown {
+function zeroValue({ name, type }: TlArgument) {
   if (type === "int") return 0;
   if (type === "long") return name === "random_id" ? randomLong() : toLong(0);
   if (type === "InputPeer" && name === "offset_peer") {
@@ -237,11 +233,11 @@ function zeroValue({ name, type }: TlArgument): unknown {
   return undefined;
 }
 
-async function closeClient(client: TelegramClient | undefined): Promise<void> {
+async function closeClient(client: TelegramClient | undefined) {
   await client?.destroy().catch(() => {});
 }
 
-function replacer(_key: string, value: unknown): unknown {
+function replacer(_key: string, value: unknown) {
   if (typeof value === "bigint") {
     return value.toString();
   }

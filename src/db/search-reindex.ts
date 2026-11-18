@@ -1,8 +1,8 @@
 import type { Database } from "bun:sqlite";
 
-import type { BackgroundMigration, BatchLimits, BatchResult } from "./background-migrations";
+import type { BackgroundMigration, BatchLimits } from "./background-migrations";
 
-function chatNamesExpr(id: string, onlyIf = ""): string {
+function chatNamesExpr(id: string, onlyIf = "") {
   return `
     SELECT trim(
       COALESCE(title, '') || ' ' ||
@@ -19,7 +19,7 @@ function chatNamesExpr(id: string, onlyIf = ""): string {
  * a channel or group that posts as itself (a negative, marked ID) from
  * chats_cache
  */
-export function buildSenderSearchExpr(prefix: string): string {
+export function buildSenderSearchExpr(prefix: string) {
   return `
     COALESCE(
       (
@@ -40,7 +40,7 @@ export function buildSenderSearchExpr(prefix: string): string {
 }
 
 /** The title and username of a message's chat, from chats_cache, else its ID */
-export function buildChatSearchExpr(prefix: string): string {
+export function buildChatSearchExpr(prefix: string) {
   return `
     COALESCE(
       (${chatNamesExpr(`${prefix}.chat_id`)}),
@@ -53,7 +53,7 @@ export function buildChatSearchExpr(prefix: string): string {
  * Whether a message trigger reads the names of channels that post as
  * themselves: the triggers of older caches don't (buildSenderSearchExpr)
  */
-export function readsChannelSenders(triggerSql: string): boolean {
+export function readsChannelSenders(triggerSql: string) {
   return /from_id < 0/.test(triggerSql);
 }
 
@@ -65,12 +65,7 @@ export const REINDEX_TRIGGERS = [
   "chats_cache_search_au",
 ] as const;
 
-function queueStatements(
-  kind: "sender" | "chat",
-  peerId: string,
-  column: string,
-  onlyIf = "",
-): string {
+function queueStatements(kind: "sender" | "chat", peerId: string, column: string, onlyIf = "") {
   return `
     DELETE FROM search_reindex_queue WHERE kind = '${kind}' AND peer_id = ${peerId};
     INSERT INTO search_reindex_queue (kind, peer_id, end_rowid)
@@ -84,7 +79,7 @@ function queueStatements(
  * triggers compare the names the index reads: a dialog pass that rewrites
  * thousands of unchanged rows queues nothing.
  */
-export function createSearchReindexSchema(db: Database): void {
+export function createSearchReindexSchema(db: Database) {
   db.run(`
     CREATE TABLE IF NOT EXISTS search_reindex_queue (
       kind       TEXT NOT NULL,
@@ -127,7 +122,7 @@ export function createSearchReindexSchema(db: Database): void {
   `);
 }
 
-function prepareMessageReindex(db: Database): (rowid: number) => void {
+function prepareMessageReindex(db: Database) {
   const remove = db.query("DELETE FROM message_search WHERE rowid = ?");
   const read = db.query(`
     SELECT
@@ -143,10 +138,11 @@ function prepareMessageReindex(db: Database): (rowid: number) => void {
     INSERT INTO message_search(rowid, text, sender, chat, files)
     VALUES (?, ?, ?, ?, ?)
   `);
-  return (rowid) => {
+  const result: (rowid: number) => void = (rowid) => {
     remove.run(rowid);
     insert.run(...(read.values(rowid)[0] as [number, string, string, string, string]));
   };
+  return result;
 }
 
 /**
@@ -177,7 +173,7 @@ interface QueueRow {
  * disables it (sync-schema.ts): the re-index waits for a newer one, which
  * rebuilds the whole index with the names cached then.
  */
-export function isSearchEnabled(db: Database): boolean {
+export function isSearchEnabled(db: Database) {
   const row = db
     .query(`SELECT value FROM search_meta WHERE key = 'search_index_version'`)
     .get() as { value: string } | null;
@@ -185,7 +181,7 @@ export function isSearchEnabled(db: Database): boolean {
 }
 
 /** Whether queued peers wait for a re-index */
-export function hasQueuedReindex(db: Database): boolean {
+export function hasQueuedReindex(db: Database) {
   return db.query("SELECT 1 FROM search_reindex_queue LIMIT 1").get() !== null;
 }
 
@@ -196,7 +192,7 @@ export function hasQueuedReindex(db: Database): boolean {
  * cursor and the messages commit together, so a stop resumes after the
  * last batch. Messages above end_rowid were written with the new names.
  */
-export function runReindexBatch(db: Database, limits: BatchLimits): BatchResult {
+export function runReindexBatch(db: Database, limits: BatchLimits) {
   const now = limits.now ?? Date.now;
   const next = db.query(
     "SELECT kind, peer_id, cursor, end_rowid FROM search_reindex_queue ORDER BY rowid LIMIT 1",
@@ -219,7 +215,7 @@ export function runReindexBatch(db: Database, limits: BatchLimits): BatchResult 
   );
 
   return db
-    .transaction((): BatchResult => {
+    .transaction(() => {
       const reindex = prepareMessageReindex(db);
       const started = now();
       let rows = 0;

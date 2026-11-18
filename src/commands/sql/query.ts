@@ -36,7 +36,7 @@ function validateQueryArgs(
   output: string,
   limit: number,
   limitStr: string,
-): void {
+) {
   if (!query) {
     error(
       ErrorCodes.INVALID_ARGS,

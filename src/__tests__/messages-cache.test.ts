@@ -370,7 +370,7 @@ describe("MessagesCache", () => {
       expect(cache.get(200, 42)?.is_deleted).toBe(1);
     });
 
-    function cacheMessageSeven(chatIds: number[]): void {
+    function cacheMessageSeven(chatIds: number[]) {
       for (const chatId of chatIds) {
         cache.upsert({
           chat_id: chatId,

@@ -56,7 +56,7 @@ function connect(
   accountId: number,
   client: TelegramClient,
   status: AccountConnectionState["status"] = "connected",
-): Database {
+) {
   const rt = addAccountRuntime(ctx, accountId);
   ctx.state.accounts.set(accountId, {
     accountId,
@@ -68,8 +68,8 @@ function connect(
   return rt.db;
 }
 
-function contactsList(ids: number[]): tl.contacts.RawContacts {
-  return {
+function contactsList(ids: number[]) {
+  const result: tl.contacts.RawContacts = {
     _: "contacts.contacts",
     contacts: ids.map((userId) => ({ _: "contact", userId, mutual: false })),
     savedCount: ids.length,
@@ -83,11 +83,12 @@ function contactsList(ids: number[]): tl.contacts.RawContacts {
         }) as tl.RawUser,
     ),
   };
+  return result;
 }
 
 const notModified = { _: "contacts.contactsNotModified" };
 
-function contactIds(db: Database): string[] {
+function contactIds(db: Database) {
   return createUsersCache(db)
     .getContacts()
     .map((u) => u.user_id)
@@ -348,7 +349,7 @@ describe("handleContactRawUpdate", () => {
     } as tl.RawUser;
   }
 
-  function peerSettings(users: tl.TypeUser[] = []): RawUpdateInfo {
+  function peerSettings(users: tl.TypeUser[] = []) {
     return new RawUpdateInfo(
       {
         _: "updatePeerSettings",
@@ -359,7 +360,7 @@ describe("handleContactRawUpdate", () => {
     );
   }
 
-  function userUpdate(users: tl.TypeUser[] = []): RawUpdateInfo {
+  function userUpdate(users: tl.TypeUser[] = []) {
     return new RawUpdateInfo({ _: "updateUser", userId: USER }, PeersIndex.from({ users }));
   }
 
@@ -520,7 +521,7 @@ describe("handleContactRawUpdate", () => {
 });
 describe("loadContactsTtl", () => {
   let dirs = 0;
-  async function withConfig(config: string): Promise<ReturnType<typeof createContext>> {
+  async function withConfig(config: string) {
     const ctx = createContext();
     ctx.dataDir = join(
       process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? ".tmp",

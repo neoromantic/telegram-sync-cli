@@ -127,7 +127,7 @@ describe("daemon restart with messages missed while stopped", () => {
     );
   }
 
-  async function runNextJob(): Promise<boolean> {
+  async function runNextJob() {
     if (!scheduler.getNextJob()) return false;
     rt.pacer = createSyncPacer();
     await processJobs(ctx);
@@ -141,7 +141,7 @@ describe("daemon restart with messages missed while stopped", () => {
     throw new Error("sync jobs did not drain");
   }
 
-  function missingIds(from: number, to: number): number[] {
+  function missingIds(from: number, to: number) {
     return range(from, to).filter((id) => messagesCache.get(CHAT_ID, id) === null);
   }
 

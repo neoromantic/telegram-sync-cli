@@ -127,11 +127,10 @@ class MockTelegramClient {
   }
 }
 
-const createClient = (): TelegramClient => new MockTelegramClient({}) as unknown as TelegramClient;
+const createClient = () => new MockTelegramClient({}) as unknown as TelegramClient;
 
-const asMessage = (input: MessageLike): Message => input as Message;
-const asDeleteUpdate = (input: DeleteMessageUpdateLike): DeleteMessageUpdate =>
-  input as DeleteMessageUpdate;
+const asMessage = (input: MessageLike) => input as Message;
+const asDeleteUpdate = (input: DeleteMessageUpdateLike) => input as DeleteMessageUpdate;
 
 mock.module("@mtcute/bun", () => ({
   ...mtcute,
@@ -141,7 +140,7 @@ mock.module("@mtcute/bun", () => ({
   },
 }));
 
-function createAccountsDb(seed: AccountSeed[]): AccountsDbInterface {
+function createAccountsDb(seed: AccountSeed[]) {
   const accounts = new Map<number, Account>();
   let activeId: number | null = null;
 
@@ -204,12 +203,13 @@ function createAccountsDb(seed: AccountSeed[]): AccountsDbInterface {
   };
 }
 
-function createContext(accountsDb: AccountsDbInterface): DaemonContext {
+function createContext(accountsDb: AccountsDbInterface) {
   const ctx = testDaemonContext({ accountsDb });
   for (const account of accountsDb.getAll()) {
     addAccountRuntime(ctx, account.id, testCacheDb);
   }
-  return ctx;
+  const result: DaemonContext = ctx;
+  return result;
 }
 
 describe("daemon-accounts: connection + event wiring", () => {

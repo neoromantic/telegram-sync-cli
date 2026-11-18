@@ -2,7 +2,7 @@ import type { TelegramClient } from "@mtcute/bun";
 import { getErrorMessage } from "./daemon-utils";
 import type { DaemonLogger, DaemonVerbosity } from "./types";
 
-export function createLogger(verbosity: DaemonVerbosity): DaemonLogger {
+export function createLogger(verbosity: DaemonVerbosity) {
   const shouldLog = {
     info: verbosity !== "quiet",
     debug: verbosity === "verbose",
@@ -32,7 +32,7 @@ export function createLogger(verbosity: DaemonVerbosity): DaemonLogger {
  * A phone number with only its first two and last two digits shown:
  * `+15550000000` is `+15*******00`. Logs get pasted into issues (#128).
  */
-export function maskPhone(phone: string): string {
+export function maskPhone(phone: string) {
   const digits = phone.replace(/\D/g, "");
   if (digits.length < 6) return "***";
   return `+${digits.slice(0, 2)}${"*".repeat(digits.length - 4)}${digits.slice(-2)}`;
@@ -46,7 +46,7 @@ export function accountLabel(account: {
   accountId: number;
   phone: string;
   username?: string | null;
-}): string {
+}) {
   if (account.username) return `#${account.accountId} (@${account.username})`;
   if (!account.phone || account.phone.startsWith("user:")) {
     return `#${account.accountId}`;
@@ -59,7 +59,7 @@ const MTCUTE_WARN = 2;
 
 const REPEATED_ERROR_WINDOW_MS = 5 * 60 * 1000;
 
-function stripPayloadsAndStacks(text: string): string {
+function stripPayloadsAndStacks(text: string) {
   return text
     .replace(/\n\s*at\s[^\n]*/g, "")
     .replace(/(\[\s*)?\{"_":"([\w.]+)"[\s\S]*$/, (_m, _arr, type) => `<${type}>`)
@@ -70,7 +70,7 @@ function stripPayloadsAndStacks(text: string): string {
  * One line of mtcute's log: its format filled in, an error by its message,
  * a Telegram object by its type, never a stack or a payload (#128)
  */
-export function formatClientLog(fmt: string, args: unknown[]): string {
+export function formatClientLog(fmt: string, args: unknown[]) {
   const rest = [...args];
   const text = stripPayloadsAndStacks(fmt.replace(/^\[USER [^\]]*\] /, "")).replace(
     /%[sdifo]/gi,
@@ -83,7 +83,7 @@ export function formatClientLog(fmt: string, args: unknown[]): string {
   return [text.trim(), ...extra].join(" ").replace(/\s+/g, " ").trim();
 }
 
-function describeArg(value: unknown): string {
+function describeArg(value: unknown) {
   if (value instanceof Error) return getErrorMessage(value);
   if (typeof value === "object" && value !== null) {
     const type = (value as { _?: unknown })._;
@@ -104,7 +104,7 @@ export function routeClientLogs(
   verbosity: DaemonVerbosity,
   tag: string,
   now: () => number = Date.now,
-): void {
+) {
   const mgr = client.log.mgr;
   mgr.level = verbosity === "verbose" ? MTCUTE_WARN : MTCUTE_ERROR;
   mgr.handler = (_color, level, logTag, fmt, args) => {

@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import { ConfigError, ConfigReadError, getResolvedCacheConfig } from "../config";
@@ -29,7 +28,7 @@ import { ACCOUNT_SELECTOR_DESCRIPTION, resolveAccount } from "../utils/account-s
 import { formatBytes } from "../utils/formatting";
 import { error, getOutputFormat, success } from "../utils/output";
 
-function sqliteCode(err: unknown): string {
+function sqliteCode(err: unknown) {
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" ? code : "";
 }
@@ -51,7 +50,7 @@ async function loadRetention() {
   }
 }
 
-function openCache(accountId: number): Database | null {
+function openCache(accountId: number) {
   try {
     ensureCacheLayout({ mode: "strict" });
     return openExistingAccountCacheDb(accountId);
@@ -181,17 +180,24 @@ const vacuumCommand = defineCommand({
   },
 });
 
-function migrationProgress():
-  | ((name: string, done: number, total: number | null) => void)
-  | undefined {
+function migrationProgress() {
   const stream = process.stderr;
-  if (!stream.isTTY || getOutputFormat() === "quiet") return undefined;
-  return (name, done, total) => {
+  if (!stream.isTTY || getOutputFormat() === "quiet") {
+    const result: ((name: string, done: number, total: number | null) => void) | undefined =
+      undefined;
+    return result;
+  }
+  const result: ((name: string, done: number, total: number | null) => void) | undefined = (
+    name,
+    done,
+    total,
+  ) => {
     const share =
       total && total > 0 ? ` ${Math.floor((Math.min(done, total) / total) * 100)}%` : "";
     stream.write(`\r${name}${share} ${done} / ${total ?? "?"} rows\x1b[K`);
     if (total !== null && done >= total) stream.write("\n");
   };
+  return result;
 }
 
 const migrateCommand = defineCommand({

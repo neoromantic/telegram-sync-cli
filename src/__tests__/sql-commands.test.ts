@@ -16,7 +16,7 @@ type CommandRun = (input: { args: Record<string, unknown> }) => Promise<void>;
 
 mock.module("../db", () => mockDbModule({ cacheFor: () => testCacheDb }));
 
-async function expectCommandError(run: Promise<unknown>, code: ErrorCode): Promise<void> {
+async function expectCommandError(run: Promise<unknown>, code: ErrorCode) {
   try {
     await run;
   } catch (err) {

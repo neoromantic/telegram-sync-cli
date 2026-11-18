@@ -24,7 +24,7 @@ describe("E2E: tg api builds the request from its arguments", () => {
     env.cleanup();
   });
 
-  async function recordFixture(request: Record<string, unknown>, response: unknown): Promise<void> {
+  async function recordFixture(request: Record<string, unknown>, response: unknown) {
     const client = wrapClientCallWithRecordReplay(
       { call: async () => response } as unknown as TelegramClient,
       { accountId: 1, config: { mode: "record", fixturesDir } },
@@ -44,7 +44,7 @@ describe("E2E: tg api builds the request from its arguments", () => {
     };
   }
 
-  function envelope(stdout: string): unknown {
+  function envelope(stdout: string) {
     return JSON.parse(stdout.slice(stdout.indexOf("{\n")));
   }
 

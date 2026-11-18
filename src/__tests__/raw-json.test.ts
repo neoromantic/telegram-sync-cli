@@ -5,7 +5,7 @@ import { parseRawMessage } from "../daemon/sync-worker-real-helpers";
 import { reencodeRawJson, toRawJson } from "../utils/raw-json";
 import { fakeBytes, photoMessage } from "./helpers/photo-message";
 
-function fromBase64(value: unknown): Uint8Array {
+function fromBase64(value: unknown) {
   expect(typeof value).toBe("string");
   return Uint8Array.fromBase64(value as string);
 }

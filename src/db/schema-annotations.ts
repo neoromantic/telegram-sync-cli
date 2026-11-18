@@ -1152,31 +1152,28 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
 /**
  * Get annotation for a specific table
  */
-export function getTableAnnotation(tableName: string): TableAnnotation | undefined {
+export function getTableAnnotation(tableName: string) {
   return SCHEMA_REGISTRY.tables[tableName];
 }
 
 /**
  * Get annotation for a specific column
  */
-export function getColumnAnnotation(
-  tableName: string,
-  columnName: string,
-): ColumnAnnotation | undefined {
+export function getColumnAnnotation(tableName: string, columnName: string) {
   return SCHEMA_REGISTRY.tables[tableName]?.columns[columnName];
 }
 
 /**
  * Get all table names
  */
-export function getTableNames(): string[] {
+export function getTableNames() {
   return Object.keys(SCHEMA_REGISTRY.tables);
 }
 
 /**
  * Get column names for a table
  */
-export function getColumnNames(tableName: string): string[] {
+export function getColumnNames(tableName: string) {
   const table = SCHEMA_REGISTRY.tables[tableName];
   return table ? Object.keys(table.columns) : [];
 }

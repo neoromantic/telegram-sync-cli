@@ -10,12 +10,12 @@ export type ActivityTarget = () => Database | null;
 export type FloodWaitListener = (method: string, seconds: number) => void;
 
 /** The seconds of a FLOOD_WAIT_<n> or FLOOD_PREMIUM_WAIT_<n>, else null */
-export function floodWaitSecondsOf(errorMessage: string): number | null {
+export function floodWaitSecondsOf(errorMessage: string) {
   const match = /^FLOOD_(?:PREMIUM_)?WAIT_(\d+)$/.exec(errorMessage);
   return match ? Number(match[1]) : null;
 }
 
-function rpcErrorOf(result: unknown): { errorCode: number; errorMessage: string } | null {
+function rpcErrorOf(result: unknown) {
   const value = result as {
     _?: unknown;
     errorCode?: unknown;
@@ -40,7 +40,7 @@ export function apiActivityMiddleware(
   target: ActivityTarget,
   context = "daemon",
   onFloodWait?: FloodWaitListener,
-): RpcCallMiddleware {
+) {
   const services = new WeakMap<Database, RateLimitsService>();
   const serviceFor = (db: Database) => {
     let service = services.get(db);
@@ -59,7 +59,7 @@ export function apiActivityMiddleware(
     } catch {}
   };
 
-  return async (ctx, next) => {
+  const value: RpcCallMiddleware = async (ctx, next) => {
     const db = target();
     let rateLimits: RateLimitsService;
     try {
@@ -101,4 +101,5 @@ export function apiActivityMiddleware(
       throw err;
     }
   };
+  return value;
 }

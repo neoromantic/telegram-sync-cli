@@ -10,7 +10,7 @@ export const MEDIA_FLOOD_SLEEP_MS = 10_000;
  * `@mtcute/bun/methods.js`) this facade of the rate-limited client: the
  * client's own methods call an inner client that bypasses the wrapper.
  */
-export function transferClient(client: TelegramClient): TelegramClient {
+export function transferClient(client: TelegramClient) {
   const facade = Object.create(client) as TelegramClient;
   facade.call = ((
     request: Parameters<TelegramClient["call"]>[0],

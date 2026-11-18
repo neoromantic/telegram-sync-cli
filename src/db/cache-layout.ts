@@ -75,38 +75,38 @@ const DATA_TABLES = [
 const MOVE_LOCK_TIMEOUT_MS = 60_000;
 const FOLD_BUSY_TIMEOUT_MS = 2_000;
 
-export function accountDirPath(dataDir: string, accountId: number): string {
+export function accountDirPath(dataDir: string, accountId: number) {
   return join(dataDir, ACCOUNTS_DIR, String(accountId));
 }
 
-export function accountCachePath(dataDir: string, accountId: number): string {
+export function accountCachePath(dataDir: string, accountId: number) {
   return join(accountDirPath(dataDir, accountId), CACHE_FILE);
 }
 
-export function accountMediaPath(dataDir: string, accountId: number): string {
+export function accountMediaPath(dataDir: string, accountId: number) {
   return join(accountDirPath(dataDir, accountId), MEDIA_DIR);
 }
 
 /** The shared cache of 0.3 and older */
-export function legacyCachePath(dataDir: string): string {
+export function legacyCachePath(dataDir: string) {
   return join(dataDir, CACHE_FILE);
 }
 
-function anyAccountCacheExists(dataDir: string): boolean {
+function anyAccountCacheExists(dataDir: string) {
   const dir = join(dataDir, ACCOUNTS_DIR);
   if (!existsSync(dir)) return false;
   return readdirSync(dir).some((name) => existsSync(join(dir, name, CACHE_FILE)));
 }
 
-function sharedCacheName(index: number): string {
+function sharedCacheName(index: number) {
   return index === 1 ? `${SHARED_CACHE_BASENAME}.db` : `${SHARED_CACHE_BASENAME}-${index}.db`;
 }
 
-function isTaken(path: string): boolean {
+function isTaken(path: string) {
   return existsSync(path) || SIDECARS.some((suffix) => existsSync(path + suffix));
 }
 
-function nextSharedCachePath(dataDir: string): string {
+function nextSharedCachePath(dataDir: string) {
   for (let index = 1; ; index++) {
     const path = join(dataDir, sharedCacheName(index));
     if (!isTaken(path)) return path;
@@ -114,7 +114,7 @@ function nextSharedCachePath(dataDir: string): string {
 }
 
 /** Set-aside shared caches, oldest name first */
-export function listSharedCaches(dataDir: string): Array<{ path: string; size_bytes: number }> {
+export function listSharedCaches(dataDir: string) {
   if (!existsSync(dataDir)) return [];
   const pattern = new RegExp(`^${SHARED_CACHE_BASENAME}(-(\\d+))?\\.db$`);
   return readdirSync(dataDir)
@@ -130,12 +130,12 @@ export function listSharedCaches(dataDir: string): Array<{ path: string; size_by
     });
 }
 
-function sqliteCode(err: unknown): string {
+function sqliteCode(err: unknown) {
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" ? code : "";
 }
 
-function isBusyError(err: unknown): boolean {
+function isBusyError(err: unknown) {
   if (!(err instanceof Error)) return false;
   const code = sqliteCode(err);
   if (code.startsWith("SQLITE_BUSY") || code.startsWith("SQLITE_LOCKED")) {
@@ -144,7 +144,7 @@ function isBusyError(err: unknown): boolean {
   return /database is locked|database table is locked/i.test(err.message);
 }
 
-function isCorruptError(err: unknown): boolean {
+function isCorruptError(err: unknown) {
   if (!(err instanceof Error)) return false;
   const code = sqliteCode(err);
   if (code.startsWith("SQLITE_NOTADB") || code.startsWith("SQLITE_CORRUPT")) {
@@ -153,16 +153,23 @@ function isCorruptError(err: unknown): boolean {
   return /file is not a database|database disk image is malformed/i.test(err.message);
 }
 
-function foldFailure(err: unknown): FoldResult {
-  if (isBusyError(err)) return { state: "in_use" };
-  if (isCorruptError(err)) return { state: "unreadable" };
-  return {
+function foldFailure(err: unknown) {
+  if (isBusyError(err)) {
+    const result: FoldResult = { state: "in_use" };
+    return result;
+  }
+  if (isCorruptError(err)) {
+    const result: FoldResult = { state: "unreadable" };
+    return result;
+  }
+  const result: FoldResult = {
     state: "error",
     error: err instanceof Error ? err.message : String(err),
   };
+  return result;
 }
 
-function hasRows(db: Database, table: string): boolean {
+function hasRows(db: Database, table: string) {
   try {
     return db.query(`SELECT 1 FROM ${table} LIMIT 1`).get() !== null;
   } catch (err) {
@@ -184,7 +191,7 @@ export type FoldResult =
  * A non-empty -wal holds rows another process wrote after the fold, so the
  * file is in use and nothing is deleted.
  */
-export function removeFoldSidecars(path: string): "removed" | "in_use" {
+export function removeFoldSidecars(path: string) {
   const wal = `${path}-wal`;
   if (existsSync(wal)) {
     if (statSync(wal).size > 0) return "in_use";
@@ -202,12 +209,13 @@ export function removeFoldSidecars(path: string): "removed" | "in_use" {
  * leaves an empty one after a normal close. With `checkData`, it also says
  * whether any table that makes the file worth keeping has rows.
  */
-export function foldSharedCache(path: string, options: { checkData?: boolean } = {}): FoldResult {
+export function foldSharedCache(path: string, options: { checkData?: boolean } = {}) {
   let db: Database;
   try {
     db = new Database(path, { readwrite: true, create: false });
   } catch (err) {
-    return foldFailure(err);
+    const result: FoldResult = foldFailure(err);
+    return result;
   }
 
   let hasData: boolean | undefined;
@@ -217,30 +225,38 @@ export function foldSharedCache(path: string, options: { checkData?: boolean } =
       journal_mode?: string;
     } | null;
     if (row?.journal_mode?.toLowerCase() !== "delete") {
-      return { state: "in_use" };
+      const result: FoldResult = { state: "in_use" };
+      return result;
     }
     if (options.checkData) {
       hasData = DATA_TABLES.some((table) => hasRows(db, table));
     }
   } catch (err) {
-    return foldFailure(err);
+    const result: FoldResult = foldFailure(err);
+    return result;
   } finally {
     db.close();
   }
 
   try {
-    if (removeFoldSidecars(path) === "in_use") return { state: "in_use" };
+    if (removeFoldSidecars(path) === "in_use") {
+      const result: FoldResult = { state: "in_use" };
+      return result;
+    }
   } catch (err) {
-    return {
+    const result: FoldResult = {
       state: "error",
       error: err instanceof Error ? err.message : String(err),
     };
+    return result;
   }
 
-  return hasData === undefined ? { state: "folded" } : { state: "folded", hasData };
+  const result: FoldResult =
+    hasData === undefined ? { state: "folded" } : { state: "folded", hasData };
+  return result;
 }
 
-function moveWithSidecars(from: string, to: string): void {
+function moveWithSidecars(from: string, to: string) {
   renameSync(from, to);
   for (const suffix of SIDECARS) {
     if (existsSync(from + suffix)) renameSync(from + suffix, to + suffix);
@@ -253,9 +269,12 @@ function moveWithSidecars(from: string, to: string): void {
  * and two of them can't move the same file. Never copies: a rename keeps
  * every row and costs nothing.
  */
-export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
+export function migrateSharedCache(deps: CacheLayoutDeps) {
   const shared = legacyCachePath(deps.dataDir);
-  if (!existsSync(shared)) return { state: "none" };
+  if (!existsSync(shared)) {
+    const result: CacheLayoutResult = { state: "none" };
+    return result;
+  }
 
   const { db } = deps;
   const { timeout } = db.query("PRAGMA busy_timeout").get() as {
@@ -270,10 +289,18 @@ export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
       inTransaction = true;
     } catch (err) {
       if (!isBusyError(err)) throw err;
-      return { state: "blocked", reason: "shared_cache_in_use", path: shared };
+      const result: CacheLayoutResult = {
+        state: "blocked",
+        reason: "shared_cache_in_use",
+        path: shared,
+      };
+      return result;
     }
 
-    if (!existsSync(shared)) return { state: "none" };
+    if (!existsSync(shared)) {
+      const result: CacheLayoutResult = { state: "none" };
+      return result;
+    }
 
     const accounts = deps.accounts.getAll();
     const adopter =
@@ -282,9 +309,10 @@ export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
     const fold = foldSharedCache(shared, { checkData: adopter === null });
     if (fold.state === "in_use" || fold.state === "error") {
       const reason = fold.state === "in_use" ? "shared_cache_in_use" : "move_failed";
-      return adopter
+      const result: CacheLayoutResult = adopter
         ? { state: "blocked", reason, path: shared, accountId: adopter.id }
         : { state: "deferred", reason, path: shared };
+      return result;
     }
 
     if (adopter && fold.state === "folded") {
@@ -299,41 +327,51 @@ export function migrateSharedCache(deps: CacheLayoutDeps): CacheLayoutResult {
         }
         renameSync(shared, target);
       } catch {
-        return {
+        const result: CacheLayoutResult = {
           state: "blocked",
           reason: "move_failed",
           path: shared,
           accountId: adopter.id,
         };
+        return result;
       }
       db.run("COMMIT");
       inTransaction = false;
-      return { state: "adopted", path: target, accountId: adopter.id };
+      const result: CacheLayoutResult = { state: "adopted", path: target, accountId: adopter.id };
+      return result;
     }
 
     if (fold.state === "folded" && fold.hasData === false) {
       try {
         unlinkSync(shared);
       } catch {
-        return { state: "deferred", reason: "move_failed", path: shared };
+        const result: CacheLayoutResult = {
+          state: "deferred",
+          reason: "move_failed",
+          path: shared,
+        };
+        return result;
       }
       db.run("COMMIT");
       inTransaction = false;
-      return { state: "deleted", path: shared };
+      const result: CacheLayoutResult = { state: "deleted", path: shared };
+      return result;
     }
 
     const parked = nextSharedCachePath(deps.dataDir);
     try {
       moveWithSidecars(shared, parked);
     } catch {
-      return { state: "deferred", reason: "move_failed", path: shared };
+      const result: CacheLayoutResult = { state: "deferred", reason: "move_failed", path: shared };
+      return result;
     }
     db.run("COMMIT");
     inTransaction = false;
     deps.notice?.(
       `tg: each account now has its own cache; the shared cache of an older version can't be split by account and was kept as ${parked} (see ${UPGRADE_DOCS_URL})`,
     );
-    return { state: "parked", path: parked };
+    const result: CacheLayoutResult = { state: "parked", path: parked };
+    return result;
   } finally {
     if (inTransaction) db.run("ROLLBACK");
     db.run(`PRAGMA busy_timeout = ${timeout}`);
@@ -352,10 +390,10 @@ export interface CacheLayoutGuard {
   ensure(mode: CacheLayoutMode, notice?: (message: string) => void): CacheLayoutResult;
 }
 
-export function createCacheLayoutGuard(getDeps: () => CacheLayoutDeps): CacheLayoutGuard {
+export function createCacheLayoutGuard(getDeps: () => CacheLayoutDeps) {
   let settled: CacheLayoutResult | null = null;
 
-  return {
+  const value: CacheLayoutGuard = {
     ensure(mode, notice) {
       if (settled) return settled;
       const deps = getDeps();
@@ -373,4 +411,5 @@ export function createCacheLayoutGuard(getDeps: () => CacheLayoutDeps): CacheLay
       return result;
     },
   };
+  return value;
 }

@@ -24,7 +24,7 @@ export interface UnreadChatInfo {
   type: string | null;
 }
 
-async function call<T>(promise: Promise<T>): Promise<T> {
+async function call<T>(promise: Promise<T>) {
   try {
     return await promise;
   } catch (err) {
@@ -36,11 +36,7 @@ async function call<T>(promise: Promise<T>): Promise<T> {
  * The chat's unread state from its dialog on Telegram, written to its
  * chats_cache row (a chat without a row keeps none)
  */
-export async function fetchUnreadState(
-  client: CallClient,
-  cacheDb: Database,
-  chat: HistoryChat,
-): Promise<UnreadState> {
+export async function fetchUnreadState(client: CallClient, cacheDb: Database, chat: HistoryChat) {
   const result = await call(
     client.call({
       _: "messages.getPeerDialogs",
@@ -67,13 +63,10 @@ export async function fetchUnreadState(
  * channels.readHistory for a channel or supergroup, messages.readHistory
  * for a private chat, a basic group or Saved Messages
  */
-export function readHistoryRequest(
-  inputPeer: tl.TypeInputPeer,
-  maxId: number,
-): tl.messages.RawReadHistoryRequest | tl.channels.RawReadHistoryRequest {
+export function readHistoryRequest(inputPeer: tl.TypeInputPeer, maxId: number) {
   switch (inputPeer._) {
-    case "inputPeerChannel":
-      return {
+    case "inputPeerChannel": {
+      const result: tl.messages.RawReadHistoryRequest | tl.channels.RawReadHistoryRequest = {
         _: "channels.readHistory",
         channel: {
           _: "inputChannel",
@@ -82,8 +75,10 @@ export function readHistoryRequest(
         },
         maxId,
       };
-    case "inputPeerChannelFromMessage":
-      return {
+      return result;
+    }
+    case "inputPeerChannelFromMessage": {
+      const result: tl.messages.RawReadHistoryRequest | tl.channels.RawReadHistoryRequest = {
         _: "channels.readHistory",
         channel: {
           _: "inputChannelFromMessage",
@@ -93,8 +88,16 @@ export function readHistoryRequest(
         },
         maxId,
       };
-    default:
-      return { _: "messages.readHistory", peer: inputPeer, maxId };
+      return result;
+    }
+    default: {
+      const result: tl.messages.RawReadHistoryRequest | tl.channels.RawReadHistoryRequest = {
+        _: "messages.readHistory",
+        peer: inputPeer,
+        maxId,
+      };
+      return result;
+    }
   }
 }
 
@@ -114,11 +117,12 @@ export async function markRead(
   cacheDb: Database,
   chat: HistoryChat,
   maxId: number | null,
-): Promise<MarkReadResult> {
+) {
   const request = readHistoryRequest(chat.inputPeer, maxId ?? 0);
   await call(client.call(request));
   const state = await fetchUnreadState(client, cacheDb, chat);
-  return { chatId: chat.chatId, maxId, method: request._, ...state };
+  const result: MarkReadResult = { chatId: chat.chatId, maxId, method: request._, ...state };
+  return result;
 }
 
 export interface UnreadChat extends UnreadState {
@@ -152,7 +156,7 @@ export async function readUnreadChat(
   target: UnreadTarget,
   limit: number,
   fresh: boolean,
-): Promise<UnreadChat> {
+) {
   const history = createMessagesHistory(cacheDb);
   const { chat, state } = target;
   const boundary = state.readInboxMaxId;
@@ -202,14 +206,14 @@ export async function readUnread(
   targets: UnreadTarget[],
   limit: number,
   fresh: boolean,
-): Promise<UnreadResult> {
+) {
   const chats: UnreadChat[] = [];
   for (const target of targets) {
     chats.push(await readUnreadChat(cacheDb, client, target, limit, fresh));
   }
   const sum = (key: "unreadCount" | "missing" | "returned") =>
     chats.reduce((total, chat) => total + chat[key], 0);
-  return {
+  const result: UnreadResult = {
     chats,
     unreadCount: sum("unreadCount"),
     missing: sum("missing"),
@@ -218,4 +222,5 @@ export async function readUnread(
     source: chats.some((chat) => chat.source === "api") ? "api" : "cache",
     stale: false,
   };
+  return result;
 }

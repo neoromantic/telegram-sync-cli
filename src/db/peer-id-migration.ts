@@ -27,22 +27,22 @@ interface BareChatRow {
   raw_json: string;
 }
 
-function userVersion(db: Database): number {
+function userVersion(db: Database) {
   const row = db.query("PRAGMA user_version").get() as {
     user_version: number;
   };
   return row.user_version;
 }
 
-function hasBareChatRows(db: Database): boolean {
+function hasBareChatRows(db: Database) {
   return db.query(`SELECT 1 ${BARE_CHAT_ROWS} LIMIT 1`).get() !== null;
 }
 
-function needsMigration(db: Database): boolean {
+function needsMigration(db: Database) {
   return userVersion(db) < PEER_ID_USER_VERSION || hasBareChatRows(db);
 }
 
-function markedIdFromRawJson(rawJson: string): number | null {
+function markedIdFromRawJson(rawJson: string) {
   let raw: unknown;
   try {
     raw = JSON.parse(rawJson);
@@ -56,7 +56,7 @@ function markedIdFromRawJson(rawJson: string): number | null {
   return toPeerIdFromRawChat(raw);
 }
 
-function markedIdOf(row: BareChatRow): number {
+function markedIdOf(row: BareChatRow) {
   const bareId = Number(row.chat_id);
   const fromRaw = markedIdFromRawJson(row.raw_json);
   if (fromRaw !== null && fromRaw < 0 && toRawPeerId(fromRaw) === bareId) {
@@ -65,7 +65,7 @@ function markedIdOf(row: BareChatRow): number {
   return toMarkedPeerId(bareId, row.type);
 }
 
-function rekeyBareChats(db: Database): void {
+function rekeyBareChats(db: Database) {
   const rows = db
     .query(`SELECT chat_id, type, access_hash, fetched_at, raw_json ${BARE_CHAT_ROWS}`)
     .all() as BareChatRow[];
@@ -111,11 +111,11 @@ function rekeyBareChats(db: Database): void {
 
 type RawPeer = Parameters<typeof toPeerIdFromRawPeer>[0];
 
-function rawPeerType(path: string): string {
+function rawPeerType(path: string) {
   return `CASE WHEN json_valid(raw_json) THEN json_extract(raw_json, '${path}._') END`;
 }
 
-function markedSenderId(stored: number | null, peer: RawPeer): number | null {
+function markedSenderId(stored: number | null, peer: RawPeer) {
   if (stored === null || stored <= 0) return stored;
   const marked = toPeerIdFromRawPeer(peer);
   if (marked === null || marked > 0 || toRawPeerId(marked) !== stored) {
@@ -124,7 +124,7 @@ function markedSenderId(stored: number | null, peer: RawPeer): number | null {
   return marked;
 }
 
-function markSenderIds(db: Database): void {
+function markSenderIds(db: Database) {
   const rows = db
     .query(`
       SELECT rowid, from_id, forward_from_id, raw_json
@@ -163,7 +163,7 @@ function markSenderIds(db: Database): void {
   }
 }
 
-function fillMissingSenders(db: Database): void {
+function fillMissingSenders(db: Database) {
   const rows = db
     .query(`
       SELECT rowid,
@@ -191,7 +191,7 @@ function fillMissingSenders(db: Database): void {
  * after the search index exists. Without work to do it only reads, so the
  * CLI and the daemon can call it on every open.
  */
-export function migratePeerIds(db: Database, rebuildSearchIndex: (db: Database) => void): void {
+export function migratePeerIds(db: Database, rebuildSearchIndex: (db: Database) => void) {
   if (!needsMigration(db)) return;
 
   const { timeout } = db.query("PRAGMA busy_timeout").get() as {

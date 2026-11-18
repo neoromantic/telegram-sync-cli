@@ -7,7 +7,7 @@ const END_DATE = 1_790_000_000;
 const FIVE_YEARS = 5 * 365 * 24 * 3600;
 
 /** mulberry32: a small, fast 32-bit PRNG */
-export function rng(seed: number): () => number {
+export function rng(seed: number) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -18,7 +18,7 @@ export function rng(seed: number): () => number {
   };
 }
 
-function hash(...parts: number[]): number {
+function hash(...parts: number[]) {
   let h = 2_166_136_261;
   for (const part of parts) {
     h = Math.imul(h ^ (part & 0xffff), 16_777_619);
@@ -29,25 +29,25 @@ function hash(...parts: number[]): number {
 
 type Rand = () => number;
 
-function int(r: Rand, min: number, max: number): number {
+function int(r: Rand, min: number, max: number) {
   return min + Math.floor(r() * (max - min + 1));
 }
 
-function pick<T>(r: Rand, items: readonly T[]): T {
+function pick<T>(r: Rand, items: readonly T[]) {
   return items[Math.floor(r() * items.length)] as T;
 }
 
-function bytes(r: Rand, length: number): Uint8Array {
+function bytes(r: Rand, length: number) {
   const out = new Uint8Array(length);
   for (let i = 0; i < length; i++) out[i] = Math.floor(r() * 256);
   return out;
 }
 
-function long(r: Rand): Long {
+function long(r: Rand) {
   return Long.fromBits(Math.floor(r() * 4_294_967_296) | 0, Math.floor(r() * 2_147_483_648) | 0);
 }
 
-function zipfCdf(n: number, s: number): Float64Array {
+function zipfCdf(n: number, s: number) {
   const cdf = new Float64Array(n);
   let sum = 0;
   for (let k = 0; k < n; k++) {
@@ -58,7 +58,7 @@ function zipfCdf(n: number, s: number): Float64Array {
   return cdf;
 }
 
-function sampleCdf(cdf: Float64Array, u: number): number {
+function sampleCdf(cdf: Float64Array, u: number) {
   let lo = 0;
   let hi = cdf.length - 1;
   while (lo < hi) {
@@ -142,7 +142,7 @@ export interface Word {
 }
 
 /** Pseudo-words, most frequent first; half Latin, half Cyrillic */
-export function buildVocabulary(seed: number, size: number): Word[] {
+export function buildVocabulary(seed: number, size: number) {
   const r = rng(hash(seed, 1));
   const seen = new Set<string>();
   const words: Word[] = [];
@@ -159,7 +159,7 @@ export function buildVocabulary(seed: number, size: number): Word[] {
   return words;
 }
 
-function capitalize(word: string): string {
+function capitalize(word: string) {
   return word.charAt(0).toUpperCase() + word.slice(1);
 }
 
@@ -262,7 +262,7 @@ export interface Dataset {
  * The account's users and chats, and how many messages each chat gets:
  * chat sizes follow a Zipf curve, so a few chats are big and most are small
  */
-export function buildDataset(seed: number, messages: number, vocabularySize = 30_000): Dataset {
+export function buildDataset(seed: number, messages: number, vocabularySize = 30_000) {
   const vocab = buildVocabulary(seed, vocabularySize);
   const wordCdf = zipfCdf(vocab.length, 1);
   const userCount = Math.min(20_000, Math.max(50, Math.round(messages / 500)));
@@ -410,7 +410,7 @@ export function buildDataset(seed: number, messages: number, vocabularySize = 30
 }
 
 /** The message ID of a chat's i-th message, oldest first */
-export function messageIdAt(chat: BenchChat, i: number): number {
+export function messageIdAt(chat: BenchChat, i: number) {
   return chat.firstId + i + Math.floor(i / 37);
 }
 
@@ -420,7 +420,7 @@ function peerOf(chat: BenchChat) {
   return { _: "peerChannel", channelId: chat.peerId };
 }
 
-function words(r: Rand, data: Dataset, count: number): string {
+function words(r: Rand, data: Dataset, count: number) {
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
     const word = data.vocab[sampleCdf(data.wordCdf, r())] as Word;
@@ -429,7 +429,7 @@ function words(r: Rand, data: Dataset, count: number): string {
   return out.join(" ");
 }
 
-function messageText(r: Rand, data: Dataset): string {
+function messageText(r: Rand, data: Dataset) {
   return words(r, data, 3 + Math.floor(37 * r() ** 2));
 }
 
@@ -523,7 +523,7 @@ function mediaDocument(doc: unknown, flags: { video?: boolean; voice?: boolean }
 
 type MediaKind = "photo" | "video" | "voice" | "document" | "sticker" | "webpage";
 
-function mediaKind(r: Rand, chat: BenchChat): MediaKind | null {
+function mediaKind(r: Rand, chat: BenchChat) {
   const roll = r();
   if (roll < 0.1) return "photo";
   if (roll < 0.115) return "video";
@@ -673,11 +673,7 @@ function buildMedia(r: Rand, data: Dataset, kind: MediaKind, date: number) {
  * A chat's i-th message (oldest first), from (seed, chat, i) alone: the
  * same arguments give the same object, so a page fetched again is unchanged
  */
-export function generateMessage(
-  data: Dataset,
-  chat: BenchChat,
-  i: number,
-): Record<string, unknown> {
+export function generateMessage(data: Dataset, chat: BenchChat, i: number) {
   const r = rng(hash(data.seed, 4, chat.index, i));
   const id = messageIdAt(chat, i);
   const span = chat.endDate - chat.startDate;
@@ -803,20 +799,13 @@ export function generateMessage(
 }
 
 /** A chat's message for a new live update, above its generated history */
-export function generateLiveMessage(
-  data: Dataset,
-  chat: BenchChat,
-  n: number,
-): Record<string, unknown> {
+export function generateLiveMessage(data: Dataset, chat: BenchChat, n: number) {
   const message = generateMessage(data, chat, chat.size + n);
   return { ...message, date: chat.endDate + 60 * (n + 1) };
 }
 
 /** Raw users of the senders on a page, as getHistory returns them */
-export function pageUsers(
-  data: Dataset,
-  messages: Array<Record<string, unknown>>,
-): Array<Record<string, unknown>> {
+export function pageUsers(data: Dataset, messages: Array<Record<string, unknown>>) {
   const ids = new Set<number>();
   for (const message of messages) {
     const from = message.fromId as { userId?: number } | undefined;
@@ -826,6 +815,6 @@ export function pageUsers(
 }
 
 /** The vocabulary's Latin or Cyrillic words, most frequent first */
-export function wordsOf(data: Dataset, cyrillic: boolean): string[] {
+export function wordsOf(data: Dataset, cyrillic: boolean) {
   return data.vocab.filter((word) => word.cyrillic === cyrillic).map((word) => word.stem);
 }

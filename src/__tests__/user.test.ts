@@ -14,8 +14,8 @@ import { createAccountCacheDb } from "./helpers/cache-db";
 import { createFakeAccountsDb, mockDbModule, testAccount } from "./helpers/db-mock";
 import { expectLongEqual } from "./helpers/input-peer";
 
-function makeRawUser(overrides: Partial<tl.RawUser> = {}): tl.RawUser {
-  return {
+function makeRawUser(overrides: Partial<tl.RawUser> = {}) {
+  const result: tl.RawUser = {
     _: "user",
     id: 1,
     accessHash: toLong(0),
@@ -28,9 +28,10 @@ function makeRawUser(overrides: Partial<tl.RawUser> = {}): tl.RawUser {
     contact: false,
     ...overrides,
   };
+  return result;
 }
 
-function requireCachedUser(value: CachedUser | null, message = "Expected cached user"): CachedUser {
+function requireCachedUser(value: CachedUser | null, message = "Expected cached user") {
   if (!value) {
     throw new Error(message);
   }
@@ -62,7 +63,7 @@ mock.module("../db", () =>
   }),
 );
 
-function createTestUser(overrides: Partial<UserCacheInput> = {}): UserCacheInput {
+function createTestUser(overrides: Partial<UserCacheInput> = {}) {
   return {
     user_id: "123456",
     username: "testuser",
@@ -132,7 +133,7 @@ function cachedUserToUserInfo(cached: CachedUser) {
   };
 }
 
-function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
+function apiUserToCacheInput(user: tl.RawUser) {
   const rawData: Record<string, unknown> = { ...user };
   if (user.accessHash !== undefined) {
     rawData.accessHash = String(user.accessHash);
@@ -153,11 +154,7 @@ function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
   };
 }
 
-function parseIdentifier(identifier: string): {
-  isUsername: boolean;
-  isPhone: boolean;
-  isUserId: boolean;
-} {
+function parseIdentifier(identifier: string) {
   const isUsername =
     identifier.startsWith("@") || (Number.isNaN(Number(identifier)) && !identifier.startsWith("+"));
   const isPhone = identifier.startsWith("+") || /^\d{10,}$/.test(identifier);

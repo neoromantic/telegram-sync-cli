@@ -14,7 +14,7 @@ const STRUCTURE_ROWID = 10;
 
 const SET_OPTION = "INSERT INTO message_search(message_search, rank) VALUES(?, ?)";
 
-function readOption(db: Database, option: string): unknown {
+function readOption(db: Database, option: string) {
   const row = db.query("SELECT v FROM message_search_config WHERE k = ?").get(option) as {
     v: unknown;
   } | null;
@@ -26,7 +26,7 @@ function readOption(db: Database, option: string): unknown {
  * is only read. Only contentless-delete tables (SQLite 3.43+) know
  * `deletemerge`; caches from 0.9.0 to 0.11.1 have it at 0 already (#141).
  */
-export function configureSearchMerges(db: Database, contentless: boolean): void {
+export function configureSearchMerges(db: Database, contentless: boolean) {
   if (readOption(db, "automerge") === 0) return;
   db.transaction(() => {
     if (readOption(db, "automerge") === 0) return;
@@ -39,24 +39,28 @@ export function configureSearchMerges(db: Database, contentless: boolean): void 
 
 const merged = new WeakMap<Database, { mode: SearchMergeMode; structure: Uint8Array }>();
 
-function readStructure(db: Database): Uint8Array {
+function readStructure(db: Database) {
   const row = db
     .query("SELECT block FROM message_search_data WHERE id = ?")
     .get(STRUCTURE_ROWID) as { block: Uint8Array };
   return row.block;
 }
 
-function readVarint(bytes: Uint8Array, at: number): [number, number] {
+function readVarint(bytes: Uint8Array, at: number) {
   let value = 0;
   for (let i = 0; i < 8; i++) {
     const byte = bytes[at + i] ?? 0;
     value = value * 128 + (byte & 0x7f);
-    if (byte < 0x80) return [value, at + i + 1];
+    if (byte < 0x80) {
+      const result: [number, number] = [value, at + i + 1];
+      return result;
+    }
   }
-  return [value * 256 + (bytes[at + 8] ?? 0), at + 9];
+  const result: [number, number] = [value * 256 + (bytes[at + 8] ?? 0), at + 9];
+  return result;
 }
 
-function deletedShare(structure: Uint8Array): number {
+function deletedShare(structure: Uint8Array) {
   const counted = [0xff, 0, 0, 1].every((byte, i) => structure[4 + i] === byte);
   if (!counted) return 0;
   let at = 8;
@@ -83,7 +87,7 @@ function deletedShare(structure: Uint8Array): number {
 }
 
 /** Whether the index may have segments to merge in `mode`; only reads */
-export function isSearchMergeDue(db: Database, mode: SearchMergeMode = "rest"): boolean {
+export function isSearchMergeDue(db: Database, mode: SearchMergeMode = "rest") {
   const last = merged.get(db);
   if (last?.mode !== mode) return true;
   return !Buffer.from(readStructure(db)).equals(last.structure);
@@ -108,14 +112,14 @@ export function runSearchMergeBatch(
   db: Database,
   limits: Pick<BatchLimits, "maxMs" | "now">,
   mode: SearchMergeMode = "rest",
-): MergeBatchResult {
+) {
   const now = limits.now ?? Date.now;
   const merge = db.query(`INSERT INTO message_search(message_search, rank) VALUES('merge', ?)`);
   const changes = db.query("SELECT total_changes() AS n");
   const totalChanges = () => (changes.get() as { n: number }).n;
 
   return db
-    .transaction((): MergeBatchResult => {
+    .transaction(() => {
       if (readOption(db, "usermerge") !== LEVEL_SEGMENTS[mode]) {
         db.query(SET_OPTION).run("usermerge", LEVEL_SEGMENTS[mode]);
       }

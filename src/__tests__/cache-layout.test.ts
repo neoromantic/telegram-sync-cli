@@ -27,7 +27,7 @@ import { createTestDatabase } from "../db/index";
 import { seedInChild } from "./helpers/seed-in-child";
 import { holdOpen, rowCounts } from "./helpers/shared-cache";
 
-function filesIn(dir: string): string[] {
+function filesIn(dir: string) {
   return (readdirSync(dir, { recursive: true }) as string[])
     .filter((name) => !name.startsWith("data.db"))
     .filter((name) => !/^accounts\/.*-(wal|shm)$/.test(name))
@@ -37,7 +37,7 @@ function filesIn(dir: string): string[] {
 
 const isRoot = process.getuid?.() === 0;
 
-function withMode<T>(path: string, mode: number, run: () => T): T {
+function withMode<T>(path: string, mode: number, run: () => T) {
   const before = statSync(path).mode & 0o777;
   chmodSync(path, mode);
   try {
@@ -77,8 +77,9 @@ describe("migrateSharedCache", () => {
     }
   }
 
-  function deps(): CacheLayoutDeps {
-    return { dataDir, db: data.db, accounts: data.accountsDb, notice };
+  function deps() {
+    const result: CacheLayoutDeps = { dataDir, db: data.db, accounts: data.accountsDb, notice };
+    return result;
   }
 
   function createAccountCache(accountId: number) {

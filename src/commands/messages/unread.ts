@@ -10,17 +10,11 @@ import { allowedChatIds } from "../access";
 import { fetchChatsFromApi } from "../chats/list";
 import { CHAT_ARG_DESCRIPTION, openHistory, parseIntegerArg, reportHistoryError } from "./helpers";
 import { resolveHistoryChat } from "./history";
-import {
-  fetchUnreadState,
-  readUnread,
-  type UnreadChatInfo,
-  type UnreadState,
-  type UnreadTarget,
-} from "./read-state";
+import { fetchUnreadState, readUnread, type UnreadTarget } from "./read-state";
 
 const CONTEXT = "cli:messages.unread";
 
-function chatInfo(chatId: number, row: CachedChat | null): UnreadChatInfo {
+function chatInfo(chatId: number, row: CachedChat | null) {
   return {
     id: chatId,
     title: row?.title ?? null,
@@ -29,7 +23,7 @@ function chatInfo(chatId: number, row: CachedChat | null): UnreadChatInfo {
   };
 }
 
-function cachedState(row: CachedChat | null): UnreadState | null {
+function cachedState(row: CachedChat | null) {
   if (row?.unread_count == null || row.read_inbox_max_id == null) return null;
   return {
     unreadCount: row.unread_count,

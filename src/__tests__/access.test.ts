@@ -12,7 +12,7 @@ import { ALLOWED_CHATS_ENV, READ_ONLY_ENV } from "../config";
 
 const PATHS = runnableCommands(main).map(({ path }) => path);
 
-async function refusal(path: string, args: Record<string, unknown> = {}): Promise<string | null> {
+async function refusal(path: string, args: Record<string, unknown> = {}) {
   const access = COMMAND_ACCESS[path];
   if (!access) throw new Error(`tg ${path} is unclassified`);
   try {

@@ -11,7 +11,7 @@ import { parseTimeBound } from "../../utils/time-bounds";
 import { CHAT_ARG_DESCRIPTION, openHistory, reportHistoryError } from "../messages/helpers";
 import { type HistoryChat, resolveHistoryChat } from "../messages/history";
 
-function parseOlderThan(value: string | undefined, now: number): number | undefined {
+function parseOlderThan(value: string | undefined, now: number) {
   if (value === undefined) return undefined;
   const seconds = parseTimeBound(value, { now });
   if (seconds === null) {

@@ -17,15 +17,19 @@ import {
  * for it. Without a row a basic group needs no hash and a user gets hash 0,
  * which Telegram may refuse; a channel can't be reached without one.
  */
-export function buildInputPeer(chatId: number, chatsCache: ChatsCache): tl.TypeInputPeer | null {
+export function buildInputPeer(chatId: number, chatsCache: ChatsCache) {
   const chat = chatsCache.getById(String(chatId));
-  if (chat) return toInputPeerFromPeerId(chatId, chat.access_hash);
+  if (chat) {
+    const result: tl.TypeInputPeer | null = toInputPeerFromPeerId(chatId, chat.access_hash);
+    return result;
+  }
 
   const peer = toInputPeerFromPeerId(chatId, null);
-  return peer?._ === "inputPeerChannel" ? null : peer;
+  const result: tl.TypeInputPeer | null = peer?._ === "inputPeerChannel" ? null : peer;
+  return result;
 }
 
-function extractReplyToId(message: Record<string, unknown>): number | null {
+function extractReplyToId(message: Record<string, unknown>) {
   const replyToObj = message.replyTo as Record<string, unknown> | undefined;
   if (replyToObj?.replyToMsgId) {
     return replyToObj.replyToMsgId as number;
@@ -36,16 +40,17 @@ function extractReplyToId(message: Record<string, unknown>): number | null {
 type RawPeerField = Parameters<typeof toPeerIdFromRawPeer>[0];
 
 /** Marked ID of the original sender of a forwarded message */
-export function extractForwardFromId(message: Record<string, unknown>): number | null {
+export function extractForwardFromId(message: Record<string, unknown>) {
   const fwdFrom = message.fwdFrom as { fromId?: RawPeerField } | undefined;
   return toPeerIdFromRawPeer(fwdFrom?.fromId);
 }
 
-export function parseRawMessage(msg: unknown, chatId: number): MessageInput | null {
+export function parseRawMessage(msg: unknown, chatId: number) {
   const m = msg as Record<string, unknown>;
 
   if (!m || m._ === "messageEmpty") {
-    return null;
+    const result: MessageInput | null = null;
+    return result;
   }
 
   const { messageType, hasMedia } = resolveRawMessageType(m);
@@ -53,7 +58,7 @@ export function parseRawMessage(msg: unknown, chatId: number): MessageInput | nu
   const replyToId = extractReplyToId(m);
   const forwardFromId = extractForwardFromId(m);
 
-  return {
+  const result: MessageInput | null = {
     chat_id: chatId,
     message_id: m.id as number,
     from_id: fromId,
@@ -69,9 +74,10 @@ export function parseRawMessage(msg: unknown, chatId: number): MessageInput | nu
     date: m.date as number,
     raw_json: toRawJson(m),
   };
+  return result;
 }
 
-export function extractFloodWaitSeconds(error: Error): number | null {
+export function extractFloodWaitSeconds(error: Error) {
   const match = error.message.match(/FLOOD_WAIT_(\d+)/);
   if (match?.[1]) {
     return parseInt(match[1], 10);
@@ -86,7 +92,7 @@ export function extractFloodWaitSeconds(error: Error): number | null {
 }
 
 /** The `id` of a raw message from Telegram, or 0 if it has none */
-export function rawMessageId(message: unknown): number {
+export function rawMessageId(message: unknown) {
   const id = (message as { id?: unknown } | null)?.id;
   return typeof id === "number" ? id : 0;
 }
@@ -119,7 +125,7 @@ export async function fetchMessagesRaw(
     maxId?: number;
   },
   signal?: AbortSignal,
-): Promise<{ messages: unknown[]; count?: number; users: tl.TypeUser[] }> {
+) {
   signal?.throwIfAborted();
   const request: tl.messages.RawGetHistoryRequest = {
     _: "messages.getHistory",
@@ -139,7 +145,12 @@ export async function fetchMessagesRaw(
   const count = "count" in result ? result.count : undefined;
   const users = "users" in result ? result.users : [];
 
-  return { messages, count, users };
+  const page: { messages: unknown[]; count?: number; users: tl.TypeUser[] } = {
+    messages,
+    count,
+    users,
+  };
+  return page;
 }
 
 /**
@@ -153,11 +164,7 @@ export async function fetchMessagesByIdRaw(
   inputPeer: tl.TypeInputPeer,
   ids: number[],
   signal?: AbortSignal,
-): Promise<{
-  messages: unknown[];
-  chats: tl.TypeChat[];
-  users: tl.TypeUser[];
-}> {
+) {
   signal?.throwIfAborted();
   const id: tl.TypeInputMessage[] = ids.map((messageId) => ({
     _: "inputMessageID",
@@ -178,11 +185,12 @@ export async function fetchMessagesByIdRaw(
   const result = signal
     ? await client.call(request, { abortSignal: signal })
     : await client.call(request);
-  return {
+  const found: { messages: unknown[]; chats: tl.TypeChat[]; users: tl.TypeUser[] } = {
     messages: "messages" in result ? result.messages : [],
     chats: "chats" in result ? result.chats : [],
     users: "users" in result ? result.users : [],
   };
+  return found;
 }
 
 /**
@@ -193,7 +201,7 @@ export async function fetchMessagesByIdRaw(
  * Callers write them before the messages, because the search index reads a
  * sender's name when a message row is written.
  */
-export function cachePageUsers(usersCache: UsersCache, users: tl.TypeUser[]): void {
+export function cachePageUsers(usersCache: UsersCache, users: tl.TypeUser[]) {
   const full = users.filter((user): user is tl.RawUser => user._ === "user" && !user.min);
   if (full.length > 0) usersCache.mergeMany(full.map(apiPageUserToCacheInput));
 }
@@ -208,13 +216,13 @@ export function cachePageUsers(usersCache: UsersCache, users: tl.TypeUser[]): vo
 export function historyTotal(
   page: { messages: unknown[]; count?: number },
   request: { offsetId?: number; minId?: number; maxId?: number },
-): number | null {
+) {
   if (request.minId || request.maxId) return null;
   if (page.count !== undefined) return page.count;
   return request.offsetId ? null : page.messages.length;
 }
 
-export function createMessageInputs(messages: unknown[], chatId: number): MessageInput[] {
+export function createMessageInputs(messages: unknown[], chatId: number) {
   return messages
     .map((message) => parseRawMessage(message, chatId))
     .filter((input) => input !== null);

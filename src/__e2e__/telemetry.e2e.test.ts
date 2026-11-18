@@ -30,7 +30,7 @@ const NO_AGENT = {
 
 const NOTICE = "telegram-sync-cli shares usage stats with its author";
 
-function events(stderr: string): Event[] {
+function events(stderr: string) {
   return stderr
     .split("\n")
     .filter((line) => line.startsWith("[telemetry] "))

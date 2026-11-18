@@ -8,7 +8,7 @@ import type { BackgroundMigration, MigrationRow, MigrationTable } from "./backgr
 import { createMessageAttachmentsStore } from "./message-attachments";
 import { searchNamesMigration } from "./search-reindex";
 
-function rawMessageType(raw: unknown): string | null {
+function rawMessageType(raw: unknown) {
   const kind = (raw as { _?: unknown } | null)?._;
   if (kind !== "message" && kind !== "messageService") return null;
   return resolveRawMessageType(raw).messageType;
@@ -92,7 +92,7 @@ const richTextMigration: BackgroundMigration = {
   },
 };
 
-function reencodeMigration(name: string, table: MigrationTable, noun: string): BackgroundMigration {
+function reencodeMigration(name: string, table: MigrationTable, noun: string) {
   return {
     name,
     description: `Re-encode raw_json of cached ${noun}`,

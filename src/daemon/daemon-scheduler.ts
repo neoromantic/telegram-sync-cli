@@ -19,11 +19,7 @@ import { formatPace, PACING_CLEAN_RUN_CALLS } from "./sync-pacing";
 import { retryDelayMs, SYNC_RETRY_CONFIG } from "./sync-retry";
 import { createRealSyncWorker, type RealJobResult, type RealSyncWorker } from "./sync-worker-real";
 
-function createAccountSyncWorker(
-  cacheDb: Database,
-  client: TelegramClient,
-  signal: AbortSignal,
-): RealSyncWorker {
+function createAccountSyncWorker(cacheDb: Database, client: TelegramClient, signal: AbortSignal) {
   return createRealSyncWorker({
     client,
     signal,
@@ -38,7 +34,7 @@ function createAccountSyncWorker(
   });
 }
 
-function runtimesInOrder(ctx: DaemonContext): AccountRuntime[] {
+function runtimesInOrder(ctx: DaemonContext) {
   return [...ctx.runtime.accounts.values()].sort((a, b) => a.accountId - b.accountId);
 }
 
@@ -49,7 +45,7 @@ function runtimesInOrder(ctx: DaemonContext): AccountRuntime[] {
  * one whose startup pass fails keeps its scheduler and worker, so it runs
  * the jobs it has and the next refresh queues the rest.
  */
-export async function initializeScheduler(ctx: DaemonContext): Promise<void> {
+export async function initializeScheduler(ctx: DaemonContext) {
   ctx.logger.info("Initializing sync scheduler...");
 
   for (const rt of runtimesInOrder(ctx)) {
@@ -106,7 +102,7 @@ export function rebuildSyncWorker(
   accountId: number,
   client: TelegramClient,
   trigger?: CatchUpTrigger,
-): Promise<boolean> | undefined {
+) {
   const rt = ctx.runtime.accounts.get(accountId);
   if (!rt?.scheduler) return;
 
@@ -116,11 +112,7 @@ export function rebuildSyncWorker(
   return refreshDialogsAfterReconnect(ctx, accountId, client, trigger);
 }
 
-function pickJob(
-  ctx: DaemonContext,
-  rt: AccountRuntime,
-  now: number,
-): { worker: RealSyncWorker; job: SyncJobRow } | null {
+function pickJob(ctx: DaemonContext, rt: AccountRuntime, now: number) {
   const { scheduler, worker, pacer } = rt;
   if (!scheduler || !worker) return null;
 
@@ -145,7 +137,7 @@ function logJobOutcome(
   accountId: number,
   job: SyncJobRow,
   result: RealJobResult,
-): void {
+) {
   const outcome = result.outcome;
   const tag = `[Account ${accountId}]`;
   const label = `${tag} Job ${job.id} (${job.job_type}, chat ${job.chat_id})`;
@@ -194,7 +186,7 @@ async function runJob(
   rt: AccountRuntime,
   worker: RealSyncWorker,
   job: SyncJobRow,
-): Promise<void> {
+) {
   const scheduler = rt.scheduler!;
   const tag = `[Account ${rt.accountId}]`;
 
@@ -248,7 +240,7 @@ async function runJob(
  * slept inside it, a slow page) starts the next one right away, so the
  * account doesn't wait for the main loop's next tick.
  */
-export function startDueJobs(ctx: DaemonContext): Promise<void>[] {
+export function startDueJobs(ctx: DaemonContext) {
   if (ctx.state.shutdownRequested) return [];
 
   const now = Date.now();
@@ -284,7 +276,7 @@ export function startDueJobs(ctx: DaemonContext): Promise<void>[] {
  * but started nothing (no job, a FLOOD_WAIT, a job still running) counts
  * from the next tick, or from its job's end.
  */
-export function nextJobDueAt(ctx: DaemonContext, now: number): number | null {
+export function nextJobDueAt(ctx: DaemonContext, now: number) {
   let next: number | null = null;
   for (const rt of ctx.runtime.accounts.values()) {
     if (!rt.scheduler || !rt.worker) continue;
@@ -295,12 +287,12 @@ export function nextJobDueAt(ctx: DaemonContext, now: number): number | null {
 }
 
 /** Run every due account's next job and wait for them: tests, one-shot use */
-export async function processJobs(ctx: DaemonContext): Promise<void> {
+export async function processJobs(ctx: DaemonContext) {
   await Promise.all(startDueJobs(ctx));
 }
 
 /** Wait for every account's running sync job to end */
-export async function waitForJobsInFlight(ctx: DaemonContext): Promise<void> {
+export async function waitForJobsInFlight(ctx: DaemonContext) {
   await Promise.allSettled([...ctx.runtime.jobsInFlight.values()]);
 }
 
@@ -310,7 +302,7 @@ export async function waitForJobsInFlight(ctx: DaemonContext): Promise<void> {
  * cache is open is pruned, with a scheduler or not, and one whose cache
  * fails is logged and doesn't stop the others.
  */
-export function cleanupOldJobs(ctx: DaemonContext): void {
+export function cleanupOldJobs(ctx: DaemonContext) {
   const retention = ctx.retention ?? getDefaultRetentionConfig();
   for (const rt of runtimesInOrder(ctx)) {
     try {
@@ -329,7 +321,7 @@ export function cleanupOldJobs(ctx: DaemonContext): void {
 }
 
 /** Queue the work that is due, in every account's cache */
-export function refreshAllQueues(ctx: DaemonContext): void {
+export function refreshAllQueues(ctx: DaemonContext) {
   for (const rt of runtimesInOrder(ctx)) {
     if (!rt.scheduler) continue;
     try {
@@ -347,7 +339,7 @@ export function refreshAllQueues(ctx: DaemonContext): void {
  * worker, so a cache or client is never closed under a job. Call it after
  * `requestShutdown`: the stop ends the request each job waits on.
  */
-export async function cleanupScheduler(ctx: DaemonContext): Promise<void> {
+export async function cleanupScheduler(ctx: DaemonContext) {
   await waitForJobsInFlight(ctx);
   cleanupOldJobs(ctx);
   for (const rt of ctx.runtime.accounts.values()) {

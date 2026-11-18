@@ -42,7 +42,7 @@ export interface UserCacheInput {
 function computeDisplayName(
   firstName: string | null | undefined,
   lastName: string | null | undefined,
-): string | null {
+) {
   const parts: string[] = [];
   if (firstName) parts.push(firstName);
   if (lastName) parts.push(lastName);
@@ -62,14 +62,14 @@ export class UsersCache {
   /**
    * Get user by ID
    */
-  getById(userId: string): CachedUser | null {
+  getById(userId: string) {
     return this.statements.getById.get({ $user_id: userId }) ?? null;
   }
 
   /**
    * Get user by username (without @)
    */
-  getByUsername(username: string): CachedUser | null {
+  getByUsername(username: string) {
     const normalized = username.startsWith("@") ? username.slice(1) : username;
     return (
       this.statements.getByUsername.get({
@@ -81,7 +81,7 @@ export class UsersCache {
   /**
    * Get user by phone number
    */
-  getByPhone(phone: string): CachedUser | null {
+  getByPhone(phone: string) {
     const normalized = phone.replace(/[\s+\-()]/g, "");
     return this.statements.getByPhone.get({ $phone: normalized }) ?? null;
   }
@@ -89,7 +89,7 @@ export class UsersCache {
   /**
    * Insert or update user
    */
-  upsert(user: UserCacheInput): void {
+  upsert(user: UserCacheInput) {
     const now = Date.now();
     const displayName = computeDisplayName(user.first_name, user.last_name);
     const normalizedUsername = user.username?.toLowerCase() ?? null;
@@ -117,7 +117,7 @@ export class UsersCache {
    * input without an access hash is an incomplete record: it fills only
    * the fields it has and keeps the stored raw_json and fetched_at.
    */
-  mergeMany(users: UserCacheInput[]): void {
+  mergeMany(users: UserCacheInput[]) {
     const transaction = this.db.transaction(() => {
       for (const user of users) {
         const stored = this.getById(user.user_id);
@@ -151,7 +151,7 @@ export class UsersCache {
   /**
    * Bulk upsert multiple users
    */
-  upsertMany(users: UserCacheInput[]): void {
+  upsertMany(users: UserCacheInput[]) {
     const transaction = this.db.transaction(() => {
       for (const user of users) {
         this.upsert(user);
@@ -163,7 +163,7 @@ export class UsersCache {
   /**
    * Search users by query (name, username, phone)
    */
-  search(query: string, limit = 50): CachedUser[] {
+  search(query: string, limit = 50) {
     const searchPattern = `%${query}%`;
     return this.statements.search.all({
       $query: searchPattern,
@@ -174,7 +174,7 @@ export class UsersCache {
   /**
    * Get all users
    */
-  getAll(opts?: { limit?: number; offset?: number }): CachedUser[] {
+  getAll(opts?: { limit?: number; offset?: number }) {
     const limit = opts?.limit ?? 100;
     const offset = opts?.offset ?? 0;
     return this.statements.getAll.all({ $limit: limit, $offset: offset });
@@ -183,14 +183,14 @@ export class UsersCache {
   /**
    * Get all cached contacts
    */
-  getContacts(): CachedUser[] {
+  getContacts() {
     return this.statements.getContacts.all();
   }
 
   /**
    * Count total cached users
    */
-  count(): number {
+  count() {
     return (this.statements.count.get() as { count: number } | null)?.count ?? 0;
   }
 }
@@ -266,6 +266,6 @@ function createStatements(db: Database) {
 /**
  * Create a users cache instance
  */
-export function createUsersCache(db: Database): UsersCache {
+export function createUsersCache(db: Database) {
   return new UsersCache(db);
 }

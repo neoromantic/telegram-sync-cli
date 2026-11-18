@@ -18,7 +18,7 @@ export interface FetchedMessage {
   users: tl.TypeUser[];
 }
 
-function messageNotFound(chatId: number, messageId: number): MediaError {
+function messageNotFound(chatId: number, messageId: number) {
   return new MediaError(
     ErrorCodes.MESSAGE_NOT_FOUND,
     `Message ${messageId} not found in chat ${chatId}`,
@@ -37,7 +37,7 @@ export async function fetchMessageById(
   chat: HistoryChat,
   messageId: number,
   signal?: AbortSignal,
-): Promise<FetchedMessage> {
+) {
   const page = await fetchMessagesByIdRaw(client, chat.inputPeer, [messageId], signal);
   const message = (page.messages as tl.TypeMessage[]).find(
     (item): item is FetchedRawMessage => item._ !== "messageEmpty" && item.id === messageId,
@@ -59,7 +59,7 @@ export function cacheFetchedMessage(
   chatId: number,
   message: FetchedRawMessage,
   users: tl.TypeUser[],
-): void {
+) {
   const input = parseRawMessage(message, chatId);
   if (!input) return;
   const usersCache = createUsersCache(cacheDb);

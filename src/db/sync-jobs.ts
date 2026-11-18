@@ -156,7 +156,7 @@ export interface SyncJobsService {
 /**
  * Create a sync jobs service
  */
-export function createSyncJobsService(db: Database): SyncJobsService {
+export function createSyncJobsService(db: Database) {
   const stmts = {
     create: db.prepare(`
       INSERT INTO sync_jobs (chat_id, job_type, priority, status, cursor_start, cursor_end, created_at)
@@ -339,7 +339,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     getLastInsertId: db.query(`SELECT last_insert_rowid() as id`),
   };
 
-  function dropRunning(id: number): "cancelled" | "not_running" {
+  function dropRunning(id: number) {
     const deleted = stmts.deleteRunning.run({
       $id: id,
       $running_status: SyncJobStatus.Running,
@@ -348,7 +348,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
   }
 
   return {
-    create(input: SyncJobInput): SyncJobRow {
+    create(input: SyncJobInput) {
       const now = Date.now();
       stmts.create.run({
         $chat_id: input.chat_id,
@@ -364,11 +364,11 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return this.getById(result.id)!;
     },
 
-    getById(id: number): SyncJobRow | null {
+    getById(id: number) {
       return stmts.getById.get({ $id: id }) ?? null;
     },
 
-    getNextPending(): SyncJobRow | null {
+    getNextPending() {
       return (
         stmts.getNextPending.get({
           $status: SyncJobStatus.Pending,
@@ -377,7 +377,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       );
     },
 
-    getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null {
+    getNextPendingOfTypes(jobTypes: readonly SyncJobType[]) {
       if (jobTypes.length === 0) return null;
       const placeholders = jobTypes.map((_, i) => `$type${i}`).join(", ");
       const params: Record<string, string | number> = {
@@ -401,11 +401,11 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       );
     },
 
-    getPendingJobs(): SyncJobRow[] {
+    getPendingJobs() {
       return stmts.getPendingJobs.all({ $status: SyncJobStatus.Pending });
     },
 
-    markRunning(id: number): boolean {
+    markRunning(id: number) {
       const result = stmts.markRunning.run({
         $id: id,
         $status: SyncJobStatus.Running,
@@ -415,7 +415,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return result.changes === 1;
     },
 
-    markCompleted(id: number): boolean {
+    markCompleted(id: number) {
       const result = stmts.markCompleted.run({
         $id: id,
         $status: SyncJobStatus.Completed,
@@ -425,7 +425,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return result.changes === 1;
     },
 
-    markFailed(id: number, errorMessage: string): boolean {
+    markFailed(id: number, errorMessage: string) {
       const result = stmts.markFailed.run({
         $id: id,
         $status: SyncJobStatus.Failed,
@@ -436,7 +436,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return result.changes === 1;
     },
 
-    failOrDrop(id: number, errorMessage: string): SyncJobFailResult {
+    failOrDrop(id: number, errorMessage: string) {
       const updated = stmts.failIfEnabled.run({
         $id: id,
         $status: SyncJobStatus.Failed,
@@ -447,7 +447,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return updated.changes === 1 ? "failed" : dropRunning(id);
     },
 
-    retryLater(id: number, retry: SyncJobRetry): SyncJobRetryResult {
+    retryLater(id: number, retry: SyncJobRetry) {
       const updated = stmts.retryLater.run({
         $id: id,
         $pending_status: SyncJobStatus.Pending,
@@ -459,7 +459,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return updated.changes === 1 ? "retrying" : dropRunning(id);
     },
 
-    updateProgress(id: number, progress: SyncJobProgress): void {
+    updateProgress(id: number, progress: SyncJobProgress) {
       stmts.updateProgress.run({
         $id: id,
         $cursor_start: progress.cursor_start ?? null,
@@ -468,15 +468,15 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       });
     },
 
-    getRunningJobs(): SyncJobRow[] {
+    getRunningJobs() {
       return stmts.getRunningJobs.all({ $status: SyncJobStatus.Running });
     },
 
-    getJobsForChat(chatId: number): SyncJobRow[] {
+    getJobsForChat(chatId: number) {
       return stmts.getJobsForChat.all({ $chat_id: chatId });
     },
 
-    hasActiveJobForChat(chatId: number, jobType: SyncJobType): boolean {
+    hasActiveJobForChat(chatId: number, jobType: SyncJobType) {
       const result = stmts.hasActiveJobForChat.get({
         $chat_id: chatId,
         $job_type: jobType,
@@ -487,7 +487,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return result !== null;
     },
 
-    deleteFailed(chatId?: number): number {
+    deleteFailed(chatId?: number) {
       if (chatId === undefined) {
         return stmts.deleteFailed.run({ $status: SyncJobStatus.Failed }).changes;
       }
@@ -497,14 +497,14 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       }).changes;
     },
 
-    getFailedJobs(limit: number): SyncJobRow[] {
+    getFailedJobs(limit: number) {
       return stmts.getFailedJobs.all({
         $status: SyncJobStatus.Failed,
         $limit: limit,
       });
     },
 
-    countJobs(): SyncJobCounts {
+    countJobs() {
       return stmts.countJobs.get({
         $pending_status: SyncJobStatus.Pending,
         $running_status: SyncJobStatus.Running,
@@ -512,7 +512,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       }) as SyncJobCounts;
     },
 
-    cancelPendingForChat(chatId: number): number {
+    cancelPendingForChat(chatId: number) {
       const result = stmts.cancelPendingForChat.run({
         $chat_id: chatId,
         $status: SyncJobStatus.Pending,
@@ -520,7 +520,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return result.changes;
     },
 
-    deletePendingOfType(jobType: SyncJobType): number {
+    deletePendingOfType(jobType: SyncJobType) {
       const result = stmts.deletePendingOfType.run({
         $job_type: jobType,
         $status: SyncJobStatus.Pending,
@@ -528,13 +528,13 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       return result.changes;
     },
 
-    deletePendingForInactiveChats(): number {
+    deletePendingForInactiveChats() {
       return stmts.deletePendingForInactiveChats.run({
         $status: SyncJobStatus.Pending,
       }).changes;
     },
 
-    queueRefetch(chatId: number): boolean {
+    queueRefetch(chatId: number) {
       return (
         stmts.queueRefetch.run({
           $chat_id: chatId,
@@ -546,7 +546,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       );
     },
 
-    deletePendingHistoryOfFirstPageOnlyChats(): number {
+    deletePendingHistoryOfFirstPageOnlyChats() {
       return stmts.deletePendingHistoryOfFirstPageOnlyChats.run({
         $status: SyncJobStatus.Pending,
         $backward: SyncJobType.BackwardHistory,
@@ -554,13 +554,13 @@ export function createSyncJobsService(db: Database): SyncJobsService {
       }).changes;
     },
 
-    alignPendingPriorities(): number {
+    alignPendingPriorities() {
       return stmts.alignPendingPriorities.run({
         $status: SyncJobStatus.Pending,
       }).changes;
     },
 
-    recoverCrashedJobs(): number {
+    recoverCrashedJobs() {
       const result = stmts.recoverCrashedJobs.run({
         $oldStatus: SyncJobStatus.Running,
         $newStatus: SyncJobStatus.Pending,

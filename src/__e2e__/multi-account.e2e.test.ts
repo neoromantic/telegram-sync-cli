@@ -103,7 +103,7 @@ function seedBeta(db: Database) {
 function createTwoAccounts(
   name: string,
   options: { active: 1 | 2 | null; betaCache?: boolean } = { active: 1 },
-): TestEnvironment {
+) {
   const env = createTestEnvironment(name);
   env.initDatabase();
   env.seedAccounts([

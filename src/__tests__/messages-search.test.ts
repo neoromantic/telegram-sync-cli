@@ -23,7 +23,7 @@ describe("MessagesSearch", () => {
     chatsCache = createChatsCache(db);
   });
 
-  function seedBaseData(): void {
+  function seedBaseData() {
     const now = Date.now();
 
     usersCache.upsert({
@@ -341,7 +341,7 @@ describe("toFts5Query", () => {
 });
 
 describe("MessagesSearch on a contentless and a regular index", () => {
-  function buildCache(contentlessSearch: boolean): Database {
+  function buildCache(contentlessSearch: boolean) {
     const realNow = Date.now;
     Date.now = () => 1_760_000_000_000;
     try {
@@ -351,7 +351,7 @@ describe("MessagesSearch on a contentless and a regular index", () => {
     }
   }
 
-  function seedCache(contentlessSearch: boolean): Database {
+  function seedCache(contentlessSearch: boolean) {
     const db = new Database(":memory:");
     initCacheSchema(db);
     initSyncSchema(db, { contentlessSearch });

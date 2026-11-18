@@ -99,7 +99,7 @@ describe("E2E: errors say whether a retry can work", () => {
     });
   }
 
-  function errorOf(stderr: string): Record<string, unknown> {
+  function errorOf(stderr: string) {
     const json = stderr.slice(stderr.indexOf("{"), stderr.lastIndexOf("}") + 1);
     return (JSON.parse(json) as { error: Record<string, unknown> }).error;
   }

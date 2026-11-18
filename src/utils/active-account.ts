@@ -23,7 +23,7 @@ export async function keepActiveAccountInConfig(
     details?: Record<string, unknown>;
     suggestion?: string;
   } = {},
-): Promise<void> {
+) {
   const { dataDir, context, details, suggestion } = options;
   try {
     const configured = await getConfigValue("activeAccount", { dataDir });

@@ -18,20 +18,25 @@ export const MESSAGE_TYPE_BY_MEDIA_TYPE: Record<string, string> = {
 };
 
 /** The cached message_type of a message whose media has this mtcute type */
-export function messageTypeOfMediaType(type: string | undefined | null): string {
+export function messageTypeOfMediaType(type: string | undefined | null) {
   return (type && MESSAGE_TYPE_BY_MEDIA_TYPE[type]) || "unknown";
 }
 
 type RawObject = Record<string, unknown>;
 
-function asObject(value: unknown): RawObject | null {
+function asObject(value: unknown) {
   return typeof value === "object" && value !== null ? (value as RawObject) : null;
 }
 
-function attributesOf(doc: RawObject): RawObject[] {
+function attributesOf(doc: RawObject) {
   const attributes = doc.attributes;
   if (!Array.isArray(attributes)) return [];
   return attributes.filter((attr): attr is RawObject => asObject(attr) !== null);
+}
+
+interface DocumentClass {
+  type: "sticker" | "voice" | "audio" | "video" | "document";
+  attr: RawObject | null;
 }
 
 /**
@@ -40,28 +45,25 @@ function attributesOf(doc: RawObject): RawObject[] {
  * (voice or audio), video attribute, or image size of a GIF decides; else a
  * plain document. `attr` is the attribute that decided.
  */
-export function classifyDocument(doc: RawObject): {
-  type: "sticker" | "voice" | "audio" | "video" | "document";
-  attr: RawObject | null;
-} {
+export function classifyDocument(doc: RawObject) {
   const attributes = attributesOf(doc);
   const sticker = attributes.find(
     (attr) => attr._ === "documentAttributeSticker" || attr._ === "documentAttributeCustomEmoji",
   );
-  if (sticker) return { type: "sticker", attr: sticker };
+  if (sticker) return { type: "sticker", attr: sticker } satisfies DocumentClass;
 
   for (const attr of attributes) {
     switch (attr._) {
       case "documentAttributeAudio":
-        return { type: attr.voice ? "voice" : "audio", attr };
+        return { type: attr.voice ? "voice" : "audio", attr } satisfies DocumentClass;
       case "documentAttributeVideo":
-        return { type: "video", attr };
+        return { type: "video", attr } satisfies DocumentClass;
       case "documentAttributeImageSize":
-        if (doc.mimeType === "image/gif") return { type: "video", attr };
+        if (doc.mimeType === "image/gif") return { type: "video", attr } satisfies DocumentClass;
         break;
     }
   }
-  return { type: "document", attr: null };
+  return { type: "document", attr: null } satisfies DocumentClass;
 }
 
 /**
@@ -69,7 +71,7 @@ export function classifyDocument(doc: RawObject): {
  * or null where mtcute gives no media (unsupported media, a photo or file
  * that expired, a link preview still pending)
  */
-export function rawMediaType(media: unknown): string | null {
+export function rawMediaType(media: unknown) {
   const m = asObject(media);
   if (!m) return null;
 
@@ -113,10 +115,7 @@ export function rawMediaType(media: unknown): string | null {
  * The message_type and has_media of a raw TL message, as a live update of
  * the same message stores them
  */
-export function resolveRawMessageType(message: unknown): {
-  messageType: string;
-  hasMedia: boolean;
-} {
+export function resolveRawMessageType(message: unknown) {
   const m = asObject(message);
   if (m?._ === "messageService") {
     return { messageType: "service", hasMedia: false };

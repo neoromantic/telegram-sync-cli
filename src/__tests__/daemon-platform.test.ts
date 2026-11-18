@@ -5,10 +5,7 @@ import { join } from "node:path";
 
 const CHILD = join(import.meta.dir, "helpers", "session-exit-child.ts");
 
-function runChild(
-  mode: "signal" | "exit" | "read",
-  dir: string,
-): { exitCode: number; output: string; json: Record<string, unknown> } {
+function runChild(mode: "signal" | "exit" | "read", dir: string) {
   const result = Bun.spawnSync(["bun", "--no-env-file", CHILD, mode, dir], {
     stdout: "pipe",
     stderr: "pipe",

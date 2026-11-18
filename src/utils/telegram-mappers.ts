@@ -1,11 +1,10 @@
 import type { tl } from "@mtcute/bun";
 
 import type { CachedUser, UserCacheInput } from "../db/users-cache";
-import type { Contact } from "../types";
 import { toRawJson } from "./raw-json";
 
-export function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
-  return {
+export function apiUserToCacheInput(user: tl.RawUser) {
+  const result: UserCacheInput = {
     user_id: String(user.id),
     username: user.username ?? null,
     first_name: user.firstName ?? null,
@@ -18,6 +17,7 @@ export function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
     fetched_at: Date.now(),
     raw_json: toRawJson(user),
   };
+  return result;
 }
 
 /**
@@ -26,10 +26,10 @@ export function apiUserToCacheInput(user: tl.RawUser): UserCacheInput {
  * rather than gone, a missing `contact` flag says nothing about the contact
  * list, and without an access hash the other flags say nothing either.
  */
-export function apiPageUserToCacheInput(user: tl.RawUser): UserCacheInput {
+export function apiPageUserToCacheInput(user: tl.RawUser) {
   const complete = user.accessHash !== undefined;
   const flag = (value: boolean | undefined) => (value ? 1 : complete ? 0 : undefined);
-  return {
+  const result: UserCacheInput = {
     user_id: String(user.id),
     username: user.username ?? undefined,
     first_name: user.firstName ?? undefined,
@@ -42,9 +42,10 @@ export function apiPageUserToCacheInput(user: tl.RawUser): UserCacheInput {
     fetched_at: Date.now(),
     raw_json: toRawJson(user),
   };
+  return result;
 }
 
-export function apiUserToContact(user: tl.RawUser): Contact {
+export function apiUserToContact(user: tl.RawUser) {
   return {
     id: user.id,
     firstName: user.firstName ?? "",
@@ -54,7 +55,7 @@ export function apiUserToContact(user: tl.RawUser): Contact {
   };
 }
 
-export function cachedUserToContact(cached: CachedUser): Contact {
+export function cachedUserToContact(cached: CachedUser) {
   return {
     id: Number(cached.user_id),
     firstName: cached.first_name ?? "",

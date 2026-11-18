@@ -11,15 +11,15 @@ import { c, icons, jobStatusIcon, printHeader, printRow } from "./formatters";
 export type StatusSnapshot = Awaited<ReturnType<typeof collectStatus>>;
 type StatusJob = StatusSnapshot["sync"]["jobs"][number];
 
-function hasSeveralAccounts(status: StatusSnapshot): boolean {
+function hasSeveralAccounts(status: StatusSnapshot) {
   return status.accounts.total > 1;
 }
 
-function accountTag(status: StatusSnapshot, accountId: number): string {
+function accountTag(status: StatusSnapshot, accountId: number) {
   return hasSeveralAccounts(status) ? ` ${c.dim(`acct:${accountId}`)}` : "";
 }
 
-function printDaemonSection(status: StatusSnapshot): void {
+function printDaemonSection(status: StatusSnapshot) {
   printHeader("Daemon");
 
   const daemonIcon = status.daemon.status === "running" ? icons.running : icons.stopped;
@@ -69,7 +69,7 @@ function printDaemonSection(status: StatusSnapshot): void {
   if (version_mismatch) printDaemonVersionHint(version, status.cli_version);
 }
 
-function isNewerVersion(version: string, than: string): boolean {
+function isNewerVersion(version: string, than: string) {
   try {
     return Bun.semver.order(version, than) > 0;
   } catch {
@@ -77,7 +77,7 @@ function isNewerVersion(version: string, than: string): boolean {
   }
 }
 
-function printDaemonVersionHint(version: string | null, cliVersion: string): void {
+function printDaemonVersionHint(version: string | null, cliVersion: string) {
   console.log();
   if (version !== null && isNewerVersion(version, cliVersion)) {
     console.log(
@@ -97,7 +97,7 @@ function printDaemonVersionHint(version: string | null, cliVersion: string): voi
   console.log(`    ${c.value("tg daemon start")}`);
 }
 
-function jobRetryDetail(job: StatusJob): string {
+function jobRetryDetail(job: StatusJob) {
   const error = job.error ? `: ${job.error}` : "";
 
   if (job.status === SyncJobStatus.Failed) {
@@ -117,13 +117,13 @@ function jobRetryDetail(job: StatusJob): string {
   return next ? c.dim(` ${next}`) : "";
 }
 
-function retrySyncCommand(chatId: number, mode: SyncMode | null, accountId: number | null): string {
+function retrySyncCommand(chatId: number, mode: SyncMode | null, accountId: number | null) {
   const flag = mode === "on" ? "" : mode === "off" ? " --off" : " --auto";
   const account = accountId === null ? "" : ` --account ${accountId}`;
   return `tg chats sync ${chatId}${flag}${account}`;
 }
 
-function printSyncJobsSection(status: StatusSnapshot): void {
+function printSyncJobsSection(status: StatusSnapshot) {
   printHeader("Sync Jobs");
 
   const { pending_jobs, running_jobs, failed_jobs, retrying_jobs } = status.sync;
@@ -181,7 +181,7 @@ function printSyncJobsSection(status: StatusSnapshot): void {
   }
 }
 
-function printSyncProgressSection(status: StatusSnapshot): void {
+function printSyncProgressSection(status: StatusSnapshot) {
   printHeader("Sync Progress");
 
   printRow("Chats Tracked", c.number(status.progress.chats_total));
@@ -227,7 +227,7 @@ function printSyncProgressSection(status: StatusSnapshot): void {
   }
 }
 
-function printHistoryProgress(status: StatusSnapshot): void {
+function printHistoryProgress(status: StatusSnapshot) {
   const history = status.progress.history;
   if (history.messages_known > 0) {
     const share = Math.floor((history.messages_cached / history.messages_known) * 100);
@@ -275,7 +275,7 @@ function printHistoryProgress(status: StatusSnapshot): void {
   }
 }
 
-function printRateLimitsSection(status: StatusSnapshot): void {
+function printRateLimitsSection(status: StatusSnapshot) {
   printHeader("Rate Limits");
   printRow("API Calls (1m)", c.number(status.rate_limits.api_calls_last_minute));
 
@@ -307,7 +307,7 @@ function printRateLimitsSection(status: StatusSnapshot): void {
   }
 }
 
-function printAccountsSection(status: StatusSnapshot): void {
+function printAccountsSection(status: StatusSnapshot) {
   printHeader("Accounts");
   printRow("Total", c.number(status.accounts.total));
 
@@ -344,7 +344,7 @@ function printAccountsSection(status: StatusSnapshot): void {
 
 type StatusAccount = StatusSnapshot["accounts"]["accounts"][number];
 
-function accountSummary(acc: StatusAccount): string {
+function accountSummary(acc: StatusAccount) {
   if (acc.cache.status === "error") {
     return c.red(`cache error: ${acc.cache.error ?? "unknown"}`);
   }
@@ -378,11 +378,11 @@ function accountSummary(acc: StatusAccount): string {
 const VACUUM_HINT_FREE_SHARE = 0.1;
 const VACUUM_HINT_MIGRATED_FREE_SHARE = 0.01;
 
-function migrationRewroteRows(acc: StatusAccount): boolean {
+function migrationRewroteRows(acc: StatusAccount) {
   return acc.migrations.some((migration) => migration.state === "done" && migration.done > 0);
 }
 
-function printCacheSizeSection(status: StatusSnapshot): void {
+function printCacheSizeSection(status: StatusSnapshot) {
   const sized = status.accounts.accounts.filter((acc) => acc.cache.size);
   if (sized.length === 0) return;
 
@@ -432,7 +432,7 @@ function printCacheSizeSection(status: StatusSnapshot): void {
   }
 }
 
-function printMigrationsSection(status: StatusSnapshot): void {
+function printMigrationsSection(status: StatusSnapshot) {
   if (status.migrations.length === 0) return;
 
   printHeader("Migrations");
@@ -463,7 +463,7 @@ function printMigrationsSection(status: StatusSnapshot): void {
   }
 }
 
-function printMediaCacheSection(status: StatusSnapshot): void {
+function printMediaCacheSection(status: StatusSnapshot) {
   const sized = status.accounts.accounts.filter((acc) => acc.media);
   if (sized.length === 0) return;
 
@@ -481,7 +481,7 @@ function printMediaCacheSection(status: StatusSnapshot): void {
   }
 }
 
-function printStorageSection(status: StatusSnapshot): void {
+function printStorageSection(status: StatusSnapshot) {
   const { legacy_caches, migration } = status.storage;
   if (legacy_caches.length === 0 && !migration) return;
 
@@ -503,7 +503,7 @@ function printStorageSection(status: StatusSnapshot): void {
   }
 }
 
-function printScope(status: StatusSnapshot): void {
+function printScope(status: StatusSnapshot) {
   if (status.account_id === null) return;
   const account = status.accounts.accounts.find((acc) => acc.id === status.account_id);
   const label = account?.label ? ` [${account.label}]` : "";
@@ -513,7 +513,7 @@ function printScope(status: StatusSnapshot): void {
   );
 }
 
-function printAccess(status: StatusSnapshot): void {
+function printAccess(status: StatusSnapshot) {
   const { read_only, allowed_chats } = status.access;
   const parts = [
     ...(read_only ? ["read-only"] : []),
@@ -522,7 +522,7 @@ function printAccess(status: StatusSnapshot): void {
   if (parts.length > 0) console.log(c.warning(`  ${parts.join("; ")}`));
 }
 
-export function printPrettyStatus(status: StatusSnapshot): void {
+export function printPrettyStatus(status: StatusSnapshot) {
   console.log();
   console.log(c.bold("  Telegram Sync CLI Status"));
   console.log(c.dim(`  ${status.timestamp}`));

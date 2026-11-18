@@ -3,7 +3,7 @@ import { BunPlatform } from "@mtcute/bun";
 const closeOnExit = new Set<() => void>();
 let exitListenerInstalled = false;
 
-function closeSessionsOnExit(): void {
+function closeSessionsOnExit() {
   for (const close of closeOnExit) {
     try {
       close();
@@ -14,7 +14,7 @@ function closeSessionsOnExit(): void {
 }
 
 export class DaemonPlatform extends BunPlatform {
-  override beforeExit = (fn: () => void): (() => void) => {
+  override beforeExit = (fn: () => void) => {
     if (!exitListenerInstalled) {
       exitListenerInstalled = true;
       process.once("exit", closeSessionsOnExit);

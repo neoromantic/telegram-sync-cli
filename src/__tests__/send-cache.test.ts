@@ -31,10 +31,8 @@ const CHANNEL_ID = 3330001;
 const CHANNEL_PEER_ID = -1000003330001;
 const DATE = 1_760_000_000;
 
-function shortSent(
-  overrides: Partial<tl.RawUpdateShortSentMessage> = {},
-): tl.RawUpdateShortSentMessage {
-  return {
+function shortSent(overrides: Partial<tl.RawUpdateShortSentMessage> = {}) {
+  const result: tl.RawUpdateShortSentMessage = {
     _: "updateShortSentMessage",
     out: true,
     id: 101,
@@ -43,10 +41,11 @@ function shortSent(
     date: DATE,
     ...overrides,
   };
+  return result;
 }
 
-function rawMessage(overrides: Partial<tl.RawMessage> = {}): tl.RawMessage {
-  return {
+function rawMessage(overrides: Partial<tl.RawMessage> = {}) {
+  const result: tl.RawMessage = {
     _: "message",
     id: 202,
     out: true,
@@ -56,14 +55,12 @@ function rawMessage(overrides: Partial<tl.RawMessage> = {}): tl.RawMessage {
     message: "hello channel",
     ...overrides,
   };
+  return result;
 }
 
-function updatesWith(
-  updates: tl.TypeUpdate[],
-  kind: "updates" | "updatesCombined" = "updates",
-): tl.TypeUpdates {
+function updatesWith(updates: tl.TypeUpdate[], kind: "updates" | "updatesCombined" = "updates") {
   if (kind === "updatesCombined") {
-    return {
+    const result: tl.TypeUpdates = {
       _: "updatesCombined",
       updates,
       users: [],
@@ -72,8 +69,17 @@ function updatesWith(
       seqStart: 0,
       seq: 0,
     };
+    return result;
   }
-  return { _: "updates", updates, users: [], chats: [], date: DATE, seq: 0 };
+  const result: tl.TypeUpdates = {
+    _: "updates",
+    updates,
+    users: [],
+    chats: [],
+    date: DATE,
+    seq: 0,
+  };
+  return result;
 }
 
 const selfRequest: SentMessageRequest = {

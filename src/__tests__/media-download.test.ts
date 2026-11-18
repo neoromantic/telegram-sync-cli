@@ -196,11 +196,11 @@ async function* chunksOf(bytes: Uint8Array) {
   }
 }
 
-function noClient(): TelegramClient {
+const noClient: () => TelegramClient = () => {
   throw new Error("a cache hit needs no client");
-}
+};
 
-function historyDeps(): DownloadDeps["history"] {
+function historyDeps() {
   const client: HistoryClient = {
     call: (() => {
       throw new Error("--chat resolves offline");
@@ -223,8 +223,8 @@ function historyDeps(): DownloadDeps["history"] {
   };
 }
 
-function deps(overrides: Partial<DownloadDeps> = {}): DownloadDeps {
-  return {
+function deps(overrides: Partial<DownloadDeps> = {}) {
+  const result: DownloadDeps = {
     cacheDb: db,
     mediaDir,
     getClient: noClient,
@@ -232,13 +232,10 @@ function deps(overrides: Partial<DownloadDeps> = {}): DownloadDeps {
     now: () => NOW,
     ...overrides,
   };
+  return result;
 }
 
-function request(
-  chat: string,
-  messageId: number,
-  extra: Partial<DownloadRequest> = {},
-): DownloadRequest {
+function request(chat: string, messageId: number, extra: Partial<DownloadRequest> = {}) {
   return { chat, messageId, thumb: false, fresh: false, ...extra };
 }
 
@@ -264,7 +261,7 @@ function expectBytes(actual: Uint8Array, expected: Uint8Array) {
   expect(Buffer.compare(actual, expected)).toBe(0);
 }
 
-async function mediaError(promise: Promise<unknown>): Promise<MediaError> {
+async function mediaError(promise: Promise<unknown>) {
   const err = await promise.then(
     () => {
       throw new Error("expected the download to fail");

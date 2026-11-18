@@ -31,14 +31,14 @@ function statOrNull(path: string) {
   }
 }
 
-function outTarget(out: string, fileName: string): string {
+function outTarget(out: string, fileName: string) {
   const isDir = /[/\\]$/.test(out) || statOrNull(out)?.isDirectory() === true;
   const target = resolve(isDir ? join(out, fileName) : out);
   mkdirSync(dirname(target), { recursive: true });
   return target;
 }
 
-async function copyOut(result: DownloadResult, out: string, overwrite: boolean): Promise<string> {
+async function copyOut(result: DownloadResult, out: string, overwrite: boolean) {
   let target: string;
   try {
     target = outTarget(out, result.fileName);

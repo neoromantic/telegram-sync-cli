@@ -26,14 +26,14 @@ export interface NewMessagesFeed {
 type FeedRow = MessageSearchRow & { row_id: number };
 
 /** Oldest first: by date, then chat and message ID */
-export function oldestFirst(a: MessageSearchRow, b: MessageSearchRow): number {
+export function oldestFirst(a: MessageSearchRow, b: MessageSearchRow) {
   return a.date - b.date || a.chat_id - b.chat_id || a.message_id - b.message_id;
 }
 
 export function createNewMessagesFeed(
   db: Database,
   { chatId, after, chatIds }: NewMessagesOptions = {},
-): NewMessagesFeed {
+) {
   const chatFilter =
     chatId !== undefined
       ? "AND m.chat_id = $chat"

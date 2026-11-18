@@ -1,7 +1,7 @@
 const MASK_64 = (1n << 64n) - 1n;
 
 /** Telegram's xor-shift hash of the values, as a signed 64-bit integer */
-export function telegramHash(values: readonly bigint[]): bigint {
+export function telegramHash(values: readonly bigint[]) {
   let h = 0n;
   for (const value of values) {
     h ^= h >> 21n;

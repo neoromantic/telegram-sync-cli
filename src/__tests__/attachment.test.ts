@@ -23,7 +23,7 @@ import { fakeBytes, photoMessage } from "./helpers/photo-message";
 
 const peer = { _: "peerUser" as const, userId: 1001 };
 
-function mtcuteUniqueFileId(message: { media: unknown }): string {
+function mtcuteUniqueFileId(message: { media: unknown }) {
   const media = message.media as { photo?: { sizes: Array<{ _: string }> } };
   const raw = media.photo
     ? {
@@ -116,8 +116,8 @@ const webpageDocumentMessage = {
   },
 };
 
-function base(info: Partial<AttachmentInfo>): AttachmentInfo {
-  return {
+function base(info: Partial<AttachmentInfo>) {
+  const result: AttachmentInfo = {
     kind: "document",
     source: "message",
     fileName: null,
@@ -130,6 +130,7 @@ function base(info: Partial<AttachmentInfo>): AttachmentInfo {
     groupedId: null,
     ...info,
   };
+  return result;
 }
 
 describe("extractAttachment", () => {

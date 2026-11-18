@@ -34,7 +34,7 @@ describe("Authentication Commands", () => {
 
   type UserResult = Awaited<ReturnType<TelegramClient["getMe"]>>;
 
-  const createUser = (overrides: Partial<UserResult> = {}): UserResult =>
+  const createUser = (overrides: Partial<UserResult> = {}) =>
     ({
       id: 123,
       firstName: "Test",
@@ -43,7 +43,7 @@ describe("Authentication Commands", () => {
       ...overrides,
     }) as UserResult;
 
-  const createMockClient = (overrides: Partial<MockAuthClient> = {}): TelegramClient => {
+  const createMockClient = (overrides: Partial<MockAuthClient> = {}) => {
     const client = {
       start: mock(() =>
         Promise.resolve(

@@ -13,14 +13,14 @@ const PHOTO_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 export const PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 
 /** A photo for a JPEG, PNG or WebP image up to 10 MB, otherwise a document */
-export function chooseSendKind(mime: string, size: number, forceDocument: boolean): SendFileKind {
+export function chooseSendKind(mime: string, size: number, forceDocument: boolean) {
   return !forceDocument && PHOTO_MIME_TYPES.has(mime) && size <= PHOTO_MAX_BYTES
     ? "photo"
     : "document";
 }
 
 /** MIME type from the file's extension, without parameters such as `;charset=utf-8` */
-export function fileMimeType(path: string): string {
+export function fileMimeType(path: string) {
   const type = Bun.file(path).type.split(";")[0]?.trim();
   return type || "application/octet-stream";
 }
@@ -59,7 +59,7 @@ export async function sendFile(
   client: TelegramClient,
   request: SendFileRequest,
   deps: SendFileDeps = {},
-): Promise<SentFile> {
+) {
   const file = Bun.file(request.path);
   const fileName = basename(request.path);
   const size = file.size;
@@ -103,18 +103,26 @@ export async function sendFile(
   }
 
   const result = await client.call(sendRequest);
-  return { result, kind, fileName, mimeType: uploaded.mime, size };
+  const value: SentFile = { result, kind, fileName, mimeType: uploaded.mime, size };
+  return value;
 }
 
 /** The file of the message a messages.sendMedia response carries */
-export function sentAttachment(result: tl.TypeUpdates): AttachmentInfo | null {
+export function sentAttachment(result: tl.TypeUpdates) {
   if (result._ === "updateShortSentMessage") return extractAttachment(result);
-  if (!("updates" in result)) return null;
+  if (!("updates" in result)) {
+    const value: AttachmentInfo | null = null;
+    return value;
+  }
   for (const update of result.updates) {
     if (update._ === "updateNewMessage" || update._ === "updateNewChannelMessage") {
       const attachment = extractAttachment(update.message);
-      if (attachment) return attachment;
+      if (attachment) {
+        const value: AttachmentInfo | null = attachment;
+        return value;
+      }
     }
   }
-  return null;
+  const value: AttachmentInfo | null = null;
+  return value;
 }

@@ -412,7 +412,7 @@ describe("determineSyncPolicy", () => {
     history: false,
   };
   const off = { priority: SyncPriority.Low, enabled: false, history: false };
-  const policy = (tier: Omit<SyncPolicy, "reason">, reason: SyncPolicyReason): SyncPolicy => ({
+  const policy = (tier: Omit<SyncPolicy, "reason">, reason: SyncPolicyReason) => ({
     ...tier,
     reason,
   });
@@ -515,7 +515,7 @@ describe("migration from 0.1.4", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function createOldDatabase(path: string): Database {
+  function createOldDatabase(path: string) {
     const db = new Database(path);
     initCacheSchema(db);
     db.run(CHAT_SYNC_STATE_0_1_4);
@@ -715,7 +715,7 @@ describe("contentless message_search", () => {
     );
   }
 
-  function openCache(contentlessSearch?: boolean): Database {
+  function openCache(contentlessSearch?: boolean) {
     const db = new Database(":memory:");
     initCacheSchema(db);
     initSyncSchema(db, { contentlessSearch });
@@ -829,7 +829,7 @@ describe("messages_cache writes on a cache from 0.5.0", () => {
     raw_json: "{}",
   };
 
-  function oldCache(path: string, contentlessSearch: boolean): void {
+  function oldCache(path: string, contentlessSearch: boolean) {
     const old = new Database(path);
     initCacheSchema(old);
     initSyncSchema(old, { contentlessSearch });

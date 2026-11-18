@@ -6,7 +6,7 @@ import { settleCacheLayoutBeforeAccountChange } from "../utils/account-cache";
 import { keepActiveAccountInConfig } from "../utils/active-account";
 import { error, success } from "../utils/output";
 
-function listAccountIds(): string | undefined {
+function listAccountIds() {
   return accountsDb.getAll().length > 0
     ? "Run tg accounts list to see the account IDs, then pass one to --id"
     : undefined;

@@ -13,12 +13,10 @@ import { createFakeAccountsDb } from "./db-mock";
 type LogFn = Mock<(message: string) => void>;
 
 /** A daemon context with no accounts, mock loggers and a no-op PID file */
-export function testDaemonContext(
-  overrides: Partial<Omit<DaemonContext, "logger">> = {},
-): DaemonContext & {
-  logger: { info: LogFn; debug: LogFn; warn: LogFn; error: LogFn };
-} {
-  return {
+export function testDaemonContext(overrides: Partial<Omit<DaemonContext, "logger">> = {}) {
+  const result: DaemonContext & {
+    logger: { info: LogFn; debug: LogFn; warn: LogFn; error: LogFn };
+  } = {
     dataDir: "/tmp/tgcli",
     pidPath: "/tmp/tgcli/daemon.pid",
     verbosity: "normal",
@@ -48,6 +46,7 @@ export function testDaemonContext(
     runtime: createDaemonRuntime(),
     ...overrides,
   };
+  return result;
 }
 
 /** Give the context a runtime for the account, on its own cache */
@@ -56,7 +55,7 @@ export function addAccountRuntime(
   accountId: number,
   db: Database = createAccountCacheDb(),
   overrides: Partial<AccountRuntime> = {},
-): AccountRuntime {
+) {
   const rt: AccountRuntime = {
     accountId,
     db,

@@ -12,7 +12,7 @@ const TOKEN = /[\p{L}\p{N}\p{Co}\p{M}]+/gu;
 
 const MAX_SNIPPET_LENGTH = 300;
 
-function fold(token: string): string {
+function fold(token: string) {
   return token
     .toLowerCase()
     .normalize("NFD")
@@ -22,16 +22,16 @@ function fold(token: string): string {
     .normalize("NFC");
 }
 
-function keepPair(text: string, at: number): number {
+function keepPair(text: string, at: number) {
   const code = text.charCodeAt(at);
   return at > 0 && code >= 0xdc00 && code <= 0xdfff ? at - 1 : at;
 }
 
-function tokenize(text: string): string[] {
+function tokenize(text: string) {
   return text.match(TOKEN) ?? [];
 }
 
-function phraseTerms(text: string, prefix: boolean): SnippetTerm[] {
+function phraseTerms(text: string, prefix: boolean) {
   const words = tokenize(text).map(fold);
   return words.map((word, i) => ({
     text: word,
@@ -39,7 +39,7 @@ function phraseTerms(text: string, prefix: boolean): SnippetTerm[] {
   }));
 }
 
-function lexQuery(query: string): Array<{ kind: string; text: string }> {
+function lexQuery(query: string) {
   const tokens: Array<{ kind: string; text: string }> = [];
   let i = 0;
   while (i < query.length) {
@@ -81,7 +81,7 @@ const OPERATORS = new Set(["AND", "OR", "NOT", "NEAR"]);
  * Terms under a column filter without `text` (`sender:alice`, `chat:team`)
  * and under `NOT` are left out, since they don't occur in the text.
  */
-export function snippetTerms(query: string, options: { phrase?: boolean } = {}): SnippetTerm[] {
+export function snippetTerms(query: string, options: { phrase?: boolean } = {}) {
   if (options.phrase || !hasFts5Syntax(query)) return phraseTerms(query, false);
 
   const tokens = lexQuery(query);
@@ -89,7 +89,7 @@ export function snippetTerms(query: string, options: { phrase?: boolean } = {}):
   const peek = () => tokens[pos];
   const isOperator = (token = peek()) => token?.kind === "word" && OPERATORS.has(token.text);
 
-  function phrase(): SnippetTerm[] {
+  function phrase() {
     const terms: SnippetTerm[] = [];
     while (pos < tokens.length) {
       if (peek()!.kind === "^") pos++;
@@ -106,7 +106,7 @@ export function snippetTerms(query: string, options: { phrase?: boolean } = {}):
     return terms;
   }
 
-  function columnFilter(): boolean | undefined {
+  function columnFilter() {
     const start = pos;
     const negated = peek()?.kind === "-";
     if (negated) pos++;
@@ -127,7 +127,7 @@ export function snippetTerms(query: string, options: { phrase?: boolean } = {}):
     return negated ? !text : text;
   }
 
-  function operand(): SnippetTerm[] {
+  function operand() {
     const inText = columnFilter() ?? true;
     let terms: SnippetTerm[];
     if (peek()?.kind === "(") {
@@ -154,7 +154,7 @@ export function snippetTerms(query: string, options: { phrase?: boolean } = {}):
     return inText ? terms : [];
   }
 
-  function expression(): SnippetTerm[] {
+  function expression() {
     const terms: SnippetTerm[] = [];
     while (pos < tokens.length && peek()!.kind !== ")") {
       const token = peek()!;
@@ -173,7 +173,7 @@ export function snippetTerms(query: string, options: { phrase?: boolean } = {}):
   return expression();
 }
 
-function matches(word: string, terms: SnippetTerm[]): boolean {
+function matches(word: string, terms: SnippetTerm[]) {
   const folded = fold(word);
   return terms.some((term) => (term.prefix ? folded.startsWith(term.text) : folded === term.text));
 }
@@ -185,7 +185,7 @@ function matches(word: string, terms: SnippetTerm[]): boolean {
  * by its sender or chat) it is the start of the text. Whitespace runs read
  * as one space.
  */
-export function buildSnippet(text: string | null, terms: SnippetTerm[]): string {
+export function buildSnippet(text: string | null, terms: SnippetTerm[]) {
   if (!text) return "";
   const words = [...text.matchAll(TOKEN)].map((match) => ({
     start: match.index,

@@ -22,10 +22,7 @@ import { AmbiguousPeerError, createDmLookup, resolvePeer } from "./send/peer-res
 import { sendFile, sentAttachment } from "./send/send-file";
 import { cacheSentMessage, resolveSelfId } from "./send/sent-message-cache";
 
-function extractMessageInfo(result: tl.TypeUpdates): {
-  messageId: number | null;
-  timestamp: number | null;
-} {
+function extractMessageInfo(result: tl.TypeUpdates) {
   if (result._ === "updateShortSentMessage") {
     return { messageId: result.id, timestamp: result.date };
   }
@@ -98,10 +95,12 @@ function handleSendError(recipient: string, err: unknown, rich: boolean): never 
 
 type RichFormat = "markdown" | "html";
 
-function richMessage(text: string, format: RichFormat): tl.TypeInputRichMessage {
-  return format === "markdown"
-    ? { _: "inputRichMessageMarkdown", markdown: text }
-    : { _: "inputRichMessageHTML", html: text };
+function richMessage(text: string, format: RichFormat) {
+  const result: tl.TypeInputRichMessage =
+    format === "markdown"
+      ? { _: "inputRichMessageMarkdown", markdown: text }
+      : { _: "inputRichMessageHTML", html: text };
+  return result;
 }
 
 function sendMessageRequest(
@@ -110,7 +109,7 @@ function sendMessageRequest(
   silent: boolean,
   replyTo: number | undefined,
   format: RichFormat | null,
-): tl.messages.RawSendMessageRequest {
+) {
   const request: tl.messages.RawSendMessageRequest = {
     _: "messages.sendMessage",
     peer,
@@ -135,7 +134,7 @@ type SendContent =
   | { file: null; text: string; format: RichFormat | null }
   | { file: string; caption: string; forceDocument: boolean };
 
-function checkSendableFile(path: string): void {
+function checkSendableFile(path: string) {
   let size: number;
   try {
     const stats = statSync(path);
@@ -162,7 +161,7 @@ function readSendContent(
     html?: boolean;
   },
   rawArgs: string[],
-): SendContent {
+) {
   if (args.markdown && args.html) {
     error(ErrorCodes.INVALID_ARGS, "Use --markdown or --html, not both");
   }
@@ -189,7 +188,8 @@ function readSendContent(
     if (args.message.trim() === "") {
       error(ErrorCodes.INVALID_ARGS, "Message text cannot be empty");
     }
-    return { file: null, text: args.message, format };
+    const result: SendContent = { file: null, text: args.message, format };
+    return result;
   }
 
   if (format) {
@@ -200,11 +200,12 @@ function readSendContent(
     error(ErrorCodes.INVALID_ARGS, "Use --caption for the text sent with --file");
   }
   checkSendableFile(file);
-  return {
+  const result: SendContent = {
     file,
     caption: args.caption ?? "",
     forceDocument: args["force-document"] ?? false,
   };
+  return result;
 }
 
 /**

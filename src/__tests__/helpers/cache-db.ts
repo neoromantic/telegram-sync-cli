@@ -5,7 +5,7 @@ import { initSyncSchema } from "../../db/sync-schema";
 import type { ChatType } from "../../db/types";
 
 /** An in-memory account cache with the cache and sync schemas */
-export function createAccountCacheDb(): Database {
+export function createAccountCacheDb() {
   const db = new Database(":memory:");
   initCacheSchema(db);
   initSyncSchema(db);
@@ -17,7 +17,7 @@ export function chatRow(
   chatId: number | string,
   type: ChatType,
   overrides: Partial<CachedChatInput> = {},
-): CachedChatInput {
+) {
   return {
     chat_id: String(chatId),
     type,

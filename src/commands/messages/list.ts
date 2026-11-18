@@ -1,5 +1,5 @@
 import { type ArgsDef, defineCommand } from "citty";
-import { ErrorCodes, type NextCommand } from "../../types";
+import { ErrorCodes } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { error, success } from "../../utils/output";
@@ -100,7 +100,7 @@ export const listMessagesCommand = defineCommand({
 function nextPage(
   args: Record<string, unknown>,
   { items, limit, after, nextBefore, nextAfter }: ListHistoryResult,
-): NextCommand[] {
+) {
   if (items.length < limit) return [];
   if (after !== null) {
     return [

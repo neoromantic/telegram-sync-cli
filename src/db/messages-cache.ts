@@ -128,7 +128,7 @@ const UPSERT_COLUMNS = [
 /**
  * Create a messages cache service
  */
-export function createMessagesCache(db: Database): MessagesCache {
+export function createMessagesCache(db: Database) {
   const stmts = {
     upsert: db.prepare(`
       INSERT INTO messages_cache (
@@ -203,7 +203,7 @@ export function createMessagesCache(db: Database): MessagesCache {
 
   const attachments = createMessageAttachmentsStore(db);
 
-  function writeMessage(message: MessageInput): void {
+  function writeMessage(message: MessageInput) {
     const now = Date.now();
     stmts.upsert.run({
       $chat_id: message.chat_id,
@@ -234,7 +234,7 @@ export function createMessagesCache(db: Database): MessagesCache {
 
   const participation = createGroupParticipation(db);
 
-  const upsertMany = db.transaction((messages: MessageInput[]): CacheWriteResult => {
+  const upsertMany = db.transaction((messages: MessageInput[]) => {
     const now = nowSeconds();
     const own = messages
       .filter((message) => message.chat_id < 0 && isOwnOrdinaryMessage(message))
@@ -264,11 +264,11 @@ export function createMessagesCache(db: Database): MessagesCache {
   return {
     participation,
 
-    upsert(message: MessageInput): CacheWriteResult {
+    upsert(message: MessageInput) {
       return upsertMany.immediate([message]);
     },
 
-    listEmptyRawJsonIds(chatId: number, afterId: number, limit: number): number[] {
+    listEmptyRawJsonIds(chatId: number, afterId: number, limit: number) {
       const rows = stmts.listEmptyRawJsonIds.all({
         $chat_id: chatId,
         $after: afterId,
@@ -277,15 +277,15 @@ export function createMessagesCache(db: Database): MessagesCache {
       return rows.map((row) => row.message_id);
     },
 
-    upsertBatch(messages: MessageInput[]): CacheWriteResult {
+    upsertBatch(messages: MessageInput[]) {
       return upsertMany.immediate(messages);
     },
 
-    get(chatId: number, messageId: number): MessageCacheRow | null {
+    get(chatId: number, messageId: number) {
       return stmts.get.get({ $chat_id: chatId, $message_id: messageId }) ?? null;
     },
 
-    findChatIdsByMessageIds(messageIds: number[]): MessageChatLookup {
+    findChatIdsByMessageIds(messageIds: number[]) {
       const chatIds = new Map<number, number>();
       const ambiguous: AmbiguousMessageId[] = [];
 
@@ -308,7 +308,7 @@ export function createMessagesCache(db: Database): MessagesCache {
       return { chatIds, ambiguous };
     },
 
-    markDeleted(chatId: number, messageIds: number[]): void {
+    markDeleted(chatId: number, messageIds: number[]) {
       const now = Date.now();
       const transaction = db.transaction(() => {
         for (const messageId of messageIds) {
@@ -322,7 +322,7 @@ export function createMessagesCache(db: Database): MessagesCache {
       transaction();
     },
 
-    markDeletedByMessageIds(messageIds: number[]): DeleteWithoutChatResult {
+    markDeletedByMessageIds(messageIds: number[]) {
       if (messageIds.length === 0) return { deleted: 0, ambiguous: [] };
 
       const lookup = this.findChatIdsByMessageIds(messageIds);
@@ -344,7 +344,7 @@ export function createMessagesCache(db: Database): MessagesCache {
       return { deleted: lookup.chatIds.size, ambiguous: lookup.ambiguous };
     },
 
-    updateText(chatId: number, messageId: number, newText: string, editDate: number): void {
+    updateText(chatId: number, messageId: number, newText: string, editDate: number) {
       stmts.updateText.run({
         $chat_id: chatId,
         $message_id: messageId,
@@ -354,21 +354,21 @@ export function createMessagesCache(db: Database): MessagesCache {
       });
     },
 
-    getLatestMessageId(chatId: number): number | null {
+    getLatestMessageId(chatId: number) {
       const result = stmts.getLatestMessageId.get({ $chat_id: chatId }) as {
         max_id: number | null;
       } | null;
       return result?.max_id ?? null;
     },
 
-    getOldestMessageId(chatId: number): number | null {
+    getOldestMessageId(chatId: number) {
       const result = stmts.getOldestMessageId.get({ $chat_id: chatId }) as {
         min_id: number | null;
       } | null;
       return result?.min_id ?? null;
     },
 
-    countByChatId(chatId: number): number {
+    countByChatId(chatId: number) {
       const result = stmts.countByChatId.get({ $chat_id: chatId }) as {
         count: number;
       } | null;

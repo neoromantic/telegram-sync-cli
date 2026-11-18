@@ -60,7 +60,7 @@ export function spawnCli(args: string[], options: Omit<CliOptions, "timeout"> = 
 /**
  * Run the CLI with given arguments
  */
-export async function runCli(args: string[], options: CliOptions = {}): Promise<CliResult> {
+export async function runCli(args: string[], options: CliOptions = {}) {
   const { timeout = 10000 } = options;
 
   const startTime = performance.now();
@@ -103,7 +103,7 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
  * Run CLI and expect success (exit code 0)
  * Throws if exit code is non-zero
  */
-export async function runCliSuccess(args: string[], options: CliOptions = {}): Promise<CliResult> {
+export async function runCliSuccess(args: string[], options: CliOptions = {}) {
   const result = await runCli(args, options);
 
   if (result.exitCode !== 0) {
@@ -125,7 +125,7 @@ export async function runCliFailure(
   args: string[],
   expectedExitCode?: number,
   options: CliOptions = {},
-): Promise<CliResult> {
+) {
   const result = await runCli(args, options);
 
   if (result.exitCode === 0) {
@@ -151,10 +151,7 @@ export async function runCliFailure(
  * Run a command line as a POSIX shell reads it, with `tg` on PATH running
  * this checkout's CLI: the way an agent runs a `next` command it copied
  */
-export async function runShellCommand(
-  command: string,
-  options: Omit<CliOptions, "entry"> = {},
-): Promise<CliResult> {
+export async function runShellCommand(command: string, options: Omit<CliOptions, "entry"> = {}) {
   const shimDir = join(process.cwd(), ".tmp", `tg-shim-${process.pid}`);
   const shim = join(shimDir, "tg");
   if (!existsSync(shim)) {

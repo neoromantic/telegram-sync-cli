@@ -7,9 +7,7 @@ import { SyncPriority } from "../db/sync-schema";
 import { NO_CREDENTIALS, runCliSuccess } from "./helpers/cli";
 import { createTestEnvironment, type TestEnvironment } from "./helpers/setup";
 
-function chat(
-  input: Pick<CachedChatInput, "chat_id" | "type"> & Partial<CachedChatInput>,
-): CachedChatInput {
+function chat(input: Pick<CachedChatInput, "chat_id" | "type"> & Partial<CachedChatInput>) {
   return {
     title: null,
     username: null,

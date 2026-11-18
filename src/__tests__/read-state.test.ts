@@ -9,7 +9,6 @@ import {
   readHistoryRequest,
   readUnread,
   type UnreadState,
-  type UnreadTarget,
 } from "../commands/messages/read-state";
 import { createUpdateHandlers, readInboxFromUpdate } from "../daemon/handlers";
 import { createChatSyncStateService } from "../db/chat-sync-state";
@@ -60,18 +59,14 @@ const PEERS: Record<string, HistoryChat> = {
   },
 };
 
-function createCacheDb(): Database {
+function createCacheDb() {
   const db = new Database(":memory:");
   initCacheSchema(db);
   initSyncSchema(db);
   return db;
 }
 
-function chatInput(
-  chatId: number,
-  type: ChatType,
-  extra: Partial<CachedChatInput> = {},
-): CachedChatInput {
+function chatInput(chatId: number, type: ChatType, extra: Partial<CachedChatInput> = {}) {
   return {
     chat_id: String(chatId),
     type,
@@ -271,7 +266,7 @@ describe("readUnread", () => {
     db = createCacheDb();
   });
 
-  function target(chat: HistoryChat, state: UnreadState): UnreadTarget {
+  function target(chat: HistoryChat, state: UnreadState) {
     return {
       chat: { id: chat.chatId, title: null, username: null, type: null },
       state,

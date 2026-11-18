@@ -116,11 +116,11 @@ export class RateLimitsService {
       .as(RateLimitRow);
   }
 
-  private nowSeconds(): number {
+  private nowSeconds() {
     return Math.floor(this.now() / 1000);
   }
 
-  private getCurrentWindowStart(): number {
+  private getCurrentWindowStart() {
     const now = this.nowSeconds();
     return Math.floor(now / RATE_WINDOW_SECONDS) * RATE_WINDOW_SECONDS;
   }
@@ -128,7 +128,7 @@ export class RateLimitsService {
   /**
    * Record an API call for rate tracking
    */
-  recordCall(method: string): void {
+  recordCall(method: string) {
     const now = this.nowSeconds();
     const windowStart = this.getCurrentWindowStart();
 
@@ -142,7 +142,7 @@ export class RateLimitsService {
   /**
    * Set flood wait for a method
    */
-  setFloodWait(method: string, seconds: number): void {
+  setFloodWait(method: string, seconds: number) {
     const now = this.nowSeconds();
     const windowStart = this.getCurrentWindowStart();
     const blockedUntil = now + seconds;
@@ -158,7 +158,7 @@ export class RateLimitsService {
   /**
    * Get flood wait info for a method
    */
-  getFloodWait(method: string): FloodWaitInfo | null {
+  getFloodWait(method: string) {
     const now = this.nowSeconds();
 
     const row = this.getFloodWaitStmt.get({
@@ -181,14 +181,14 @@ export class RateLimitsService {
   /**
    * Check if a method is currently blocked
    */
-  isBlocked(method: string): boolean {
+  isBlocked(method: string) {
     return this.getFloodWait(method) !== null;
   }
 
   /**
    * Get time until method is unblocked (0 if not blocked)
    */
-  getWaitTime(method: string): number {
+  getWaitTime(method: string) {
     const floodWait = this.getFloodWait(method);
     if (!floodWait) {
       return 0;
@@ -211,7 +211,7 @@ export class RateLimitsService {
     error_message?: string | null;
     response_ms?: number | null;
     context?: string | null;
-  }): void {
+  }) {
     this.logActivityStmt.run({
       $timestamp: entry.timestamp,
       $method: entry.method,
@@ -226,7 +226,7 @@ export class RateLimitsService {
    * Get rate limit status summary: the calls of the last 60 seconds, from
    * api_activity, and the FLOOD_WAITs still running
    */
-  getStatus(): RateLimitStatus {
+  getStatus() {
     const now = this.nowSeconds();
 
     const methodRows = this.getRecentCallsStmt.all({
@@ -265,9 +265,6 @@ export class RateLimitsService {
 /**
  * Create a rate limits service for a database
  */
-export function createRateLimitsService(
-  db: Database,
-  options?: RateLimitsOptions,
-): RateLimitsService {
+export function createRateLimitsService(db: Database, options?: RateLimitsOptions) {
   return new RateLimitsService(db, options);
 }

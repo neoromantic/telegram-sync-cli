@@ -16,12 +16,7 @@ import { accountLabel, routeClientLogs } from "./daemon-logger";
 import { daemonPlatform } from "./daemon-platform";
 import { rebuildSyncWorker } from "./daemon-scheduler";
 import { calculateReconnectDelay, formatError, getErrorMessage } from "./daemon-utils";
-import {
-  createUpdateHandlers,
-  type NewMessageData,
-  readInboxFromUpdate,
-  type UpdateContext,
-} from "./handlers";
+import { createUpdateHandlers, type NewMessageData, readInboxFromUpdate } from "./handlers";
 import { formatPace } from "./sync-pacing";
 import { extractForwardFromId } from "./sync-worker-real-helpers";
 import type { AccountConnectionState, AccountEventHandlers } from "./types";
@@ -29,7 +24,7 @@ import type { AccountConnectionState, AccountEventHandlers } from "./types";
 export function resolveRealtimeMessageType(msg: {
   isService?: boolean;
   media?: { type?: string } | null;
-}): { messageType: string; hasMedia: boolean } {
+}) {
   if (msg.isService) {
     return { messageType: "service", hasMedia: false };
   }
@@ -49,7 +44,7 @@ export function resolveSyncChatType(
       }
     | null
     | undefined,
-): SyncChatType | undefined {
+) {
   let resolved: SyncChatType | undefined;
 
   if (chat?.type === "user") {
@@ -79,11 +74,7 @@ export function resolveSyncChatType(
   return resolved;
 }
 
-export async function closeClientSafe(
-  ctx: DaemonContext,
-  client: TelegramClient,
-  reason: string,
-): Promise<void> {
+export async function closeClientSafe(ctx: DaemonContext, client: TelegramClient, reason: string) {
   try {
     await client.destroy();
     ctx.logger.debug(`Closed client (${reason})`);
@@ -92,7 +83,7 @@ export async function closeClientSafe(
   }
 }
 
-export function setupSignalHandlers(ctx: DaemonContext): void {
+export function setupSignalHandlers(ctx: DaemonContext) {
   if (ctx.runtime.signalHandlersSetup) return;
   ctx.runtime.signalHandlersSetup = true;
 
@@ -105,7 +96,7 @@ export function setupSignalHandlers(ctx: DaemonContext): void {
   process.on("SIGINT", () => handleShutdown("SIGINT"));
 }
 
-export function setupEventHandlers(ctx: DaemonContext, accountState: AccountConnectionState): void {
+export function setupEventHandlers(ctx: DaemonContext, accountState: AccountConnectionState) {
   const { client, accountId } = accountState;
   if (!client) {
     ctx.logger.warn(`Cannot setup handlers: no client for account ${accountId}`);
@@ -132,7 +123,7 @@ export function setupEventHandlers(ctx: DaemonContext, accountState: AccountConn
     },
   });
 
-  const createContext = (): UpdateContext => ({
+  const createContext = () => ({
     accountId,
     receivedAt: Date.now(),
   });
@@ -265,7 +256,7 @@ export function removeEventHandlers(
   ctx: DaemonContext,
   accountState: AccountConnectionState,
   client = accountState.client,
-): void {
+) {
   const { eventHandlers, accountId } = accountState;
 
   if (!client || !eventHandlers) {
@@ -329,11 +320,7 @@ function basicDaemonMiddlewares(ctx: DaemonContext, accountId: number) {
   });
 }
 
-function createDaemonClient(
-  ctx: DaemonContext,
-  accountId: number,
-  sessionPath: string,
-): TelegramClient {
+function createDaemonClient(ctx: DaemonContext, accountId: number, sessionPath: string) {
   const telegramConfig = getDefaultConfig();
   const validation = validateConfig(telegramConfig);
   if (!validation.valid) {
@@ -361,7 +348,7 @@ export async function connectAccount(
   accountId: number,
   phone: string,
   name: string | null,
-): Promise<boolean> {
+) {
   const accountState: AccountConnectionState = {
     accountId,
     phone,
@@ -451,7 +438,7 @@ export async function connectAccount(
   }
 }
 
-function dropAccountRuntime(ctx: DaemonContext, accountId: number): void {
+function dropAccountRuntime(ctx: DaemonContext, accountId: number) {
   const rt = ctx.runtime.accounts.get(accountId);
   if (!rt) return;
   ctx.runtime.accounts.delete(accountId);
@@ -464,7 +451,7 @@ function dropAccountRuntime(ctx: DaemonContext, accountId: number): void {
   }
 }
 
-export function scheduleReconnect(ctx: DaemonContext, accountState: AccountConnectionState): void {
+export function scheduleReconnect(ctx: DaemonContext, accountState: AccountConnectionState) {
   const attempts = (accountState.reconnectAttempts ?? 0) + 1;
   accountState.reconnectAttempts = attempts;
 
@@ -487,7 +474,7 @@ async function releaseClient(
   ctx: DaemonContext,
   accountState: AccountConnectionState,
   reason: string,
-): Promise<void> {
+) {
   const { client, accountId } = accountState;
   if (!client) return;
 
@@ -505,10 +492,7 @@ async function releaseClient(
   }
 }
 
-export async function attemptReconnect(
-  ctx: DaemonContext,
-  accountState: AccountConnectionState,
-): Promise<boolean> {
+export async function attemptReconnect(ctx: DaemonContext, accountState: AccountConnectionState) {
   ctx.logger.info(
     `Attempting reconnection for ${accountLabel(accountState)} (attempt ${accountState.reconnectAttempts}/${ctx.reconnectConfig.maxAttempts})`,
   );
@@ -585,7 +569,7 @@ export async function attemptReconnect(
  * clients close in parallel: one slow close doesn't use up the shutdown
  * timeout for the rest.
  */
-export async function disconnectAllAccounts(ctx: DaemonContext): Promise<void> {
+export async function disconnectAllAccounts(ctx: DaemonContext) {
   ctx.logger.debug("Disconnecting all accounts...");
 
   await Promise.all(

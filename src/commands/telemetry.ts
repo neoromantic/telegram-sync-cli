@@ -14,7 +14,7 @@ const REASONS: Record<string, string> = {
   default: "the default",
 };
 
-function printPretty(status: ReturnType<typeof telemetryStatus>): void {
+function printPretty(status: ReturnType<typeof telemetryStatus>) {
   const state = status.debug
     ? "debug, printed to stderr and not sent"
     : status.enabled

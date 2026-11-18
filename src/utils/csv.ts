@@ -15,7 +15,7 @@ const DEFAULT_OPTIONS: Required<CsvOptions> = {
   delimiter: ",",
 };
 
-function escapeValue(value: unknown, delimiter: string): string {
+function escapeValue(value: unknown, delimiter: string) {
   if (value === null || value === undefined) {
     return "";
   }
@@ -40,7 +40,7 @@ export function stringify<T extends Record<string, unknown>>(
   data: T[],
   columns?: string[],
   options: CsvOptions = {},
-): string {
+) {
   const opts: Required<CsvOptions> = { ...DEFAULT_OPTIONS, ...options };
 
   if (data.length === 0) {
@@ -77,6 +77,6 @@ export function stringifyTable(
   columns: string[],
   rows: Record<string, unknown>[],
   options: CsvOptions = {},
-): string {
+) {
   return stringify(rows, columns, options);
 }

@@ -51,7 +51,7 @@ interface ExtendedTestEnvironment {
   getCliOptions(): { env: Record<string, string> };
 }
 
-function initAccountsSchema(db: Database): void {
+function initAccountsSchema(db: Database) {
   db.run("PRAGMA journal_mode = WAL");
 
   db.run(`
@@ -76,7 +76,7 @@ function initAccountsSchema(db: Database): void {
   db.run("CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts(is_active)");
 }
 
-function initCacheSchema(db: Database): void {
+function initCacheSchema(db: Database) {
   db.run("PRAGMA journal_mode = WAL");
 
   db.run(`
@@ -135,7 +135,7 @@ function initCacheSchema(db: Database): void {
   );
 }
 
-function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironment {
+function createExtendedTestEnvironment(testName: string) {
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 8);
   const dataDir = join(E2E_TEST_BASE, `${testName}-${timestamp}-${randomSuffix}`);
@@ -145,17 +145,17 @@ function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironmen
   let db: Database | null = null;
   let cacheDb: Database | null = null;
 
-  return {
+  const result: ExtendedTestEnvironment = {
     dataDir,
 
-    initDatabase(): Database {
+    initDatabase() {
       const dbPath = join(dataDir, "data.db");
       db = new Database(dbPath);
       initAccountsSchema(db);
       return db;
     },
 
-    initCacheDatabase(): Database {
+    initCacheDatabase() {
       const accountDir = join(dataDir, "accounts", "1");
       mkdirSync(accountDir, { recursive: true, mode: 0o700 });
       cacheDb = new Database(join(accountDir, "cache.db"));
@@ -163,7 +163,7 @@ function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironmen
       return cacheDb;
     },
 
-    seedAccounts(accounts): void {
+    seedAccounts(accounts) {
       if (!db) {
         this.initDatabase();
       }
@@ -186,7 +186,7 @@ function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironmen
       }
     },
 
-    seedUsers(users): void {
+    seedUsers(users) {
       if (!cacheDb) {
         this.initCacheDatabase();
       }
@@ -223,7 +223,7 @@ function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironmen
       }
     },
 
-    seedChats(chats): void {
+    seedChats(chats) {
       if (!cacheDb) {
         this.initCacheDatabase();
       }
@@ -260,7 +260,7 @@ function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironmen
       }
     },
 
-    cleanup(): void {
+    cleanup() {
       if (db) {
         db.close();
         db = null;
@@ -274,7 +274,7 @@ function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironmen
       }
     },
 
-    getCliOptions(): { env: Record<string, string> } {
+    getCliOptions() {
       return {
         env: {
           TELEGRAM_SYNC_CLI_DATA_DIR: dataDir,
@@ -282,6 +282,7 @@ function createExtendedTestEnvironment(testName: string): ExtendedTestEnvironmen
       };
     },
   };
+  return result;
 }
 
 describe("E2E: Contacts Commands", () => {

@@ -34,7 +34,7 @@ describe("createNewMessagesFeed", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function store(chatId: number, ids: number[], extra: { is_deleted?: boolean } = {}): void {
+  function store(chatId: number, ids: number[], extra: { is_deleted?: boolean } = {}) {
     takePartIn(writer, CHAT);
     createMessagesCache(writer).upsertBatch(
       ids.map((id) => ({

@@ -90,7 +90,7 @@ describe("E2E: chats sync", () => {
     return createChatSyncStateService(cacheDb).get(chatId);
   }
 
-  async function listedId(): Promise<string> {
+  async function listedId() {
     const list = await runCliSuccess(["chats", "list"], options());
     const items = (list.json as { data: { items: Array<{ id: number; username: string }> } }).data
       .items;

@@ -75,7 +75,7 @@ describe("E2E: status", () => {
     next_run_at?: number;
     error_message?: string | null;
     completed_at?: number | null;
-  }): number {
+  }) {
     cacheDb.run(
       `INSERT INTO sync_jobs
          (chat_id, job_type, priority, status, attempts, next_run_at, error_message, completed_at)
@@ -787,7 +787,7 @@ describe("E2E: status cache size", () => {
     env.cleanup();
   });
 
-  async function sizeStatus(args: string[] = []): Promise<SizeStatus> {
+  async function sizeStatus(args: string[] = []) {
     const result = await runCliSuccess(["status", "--json", ...args], {
       env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
     });

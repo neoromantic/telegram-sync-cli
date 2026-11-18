@@ -28,7 +28,7 @@ describe("HistoryRanges", () => {
     db.close();
   });
 
-  function stored(chatId = CHAT_ID): HistoryRange[] {
+  function stored(chatId = CHAT_ID) {
     return db
       .query("SELECT low, high FROM history_ranges WHERE chat_id = ? ORDER BY low")
       .all(chatId) as HistoryRange[];

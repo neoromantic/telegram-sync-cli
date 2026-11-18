@@ -25,10 +25,10 @@ import { cell, richTlMessage } from "./helpers/rich-message";
 
 let commandCacheDb: Database;
 let secondCacheDb: Database;
-const commandCall = mock(async (_request: unknown): Promise<unknown> => {
+const commandCall = mock<(request: unknown) => Promise<unknown>>(async (_request) => {
   throw new Error("Unexpected API call");
 });
-const secondCall = mock(async (_request: unknown): Promise<unknown> => {
+const secondCall = mock<(request: unknown) => Promise<unknown>>(async (_request) => {
   throw new Error("Unexpected API call");
 });
 let commandClient = { call: commandCall };
@@ -49,7 +49,7 @@ mock.module("../services/telegram", () => ({ getClientForAccount }));
 
 type UserResult = Awaited<ReturnType<TelegramClient["getMe"]>>;
 
-const createUser = (overrides: Partial<UserResult> = {}): UserResult =>
+const createUser = (overrides: Partial<UserResult> = {}) =>
   ({
     id: 123,
     firstName: "Test",

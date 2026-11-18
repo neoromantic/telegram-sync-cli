@@ -19,7 +19,7 @@ const SEED_SCRIPT = `
 /** Seeders this helper can run, by name: exports of seeders.ts */
 export type Seeder = keyof typeof import("./seeders");
 
-export function seedInChild(path: string, seeder: Seeder, args: unknown = null): void {
+export function seedInChild(path: string, seeder: Seeder, args: unknown = null) {
   const result = Bun.spawnSync(["bun", "--no-env-file", "-e", SEED_SCRIPT], {
     env: {
       ...process.env,

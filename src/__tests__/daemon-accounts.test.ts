@@ -56,7 +56,7 @@ class MockEmitter<T> {
   forwardTo = (_emitter: MockEmitter<T>) => {};
 }
 
-const createClientWithEvents = (): TelegramClient => {
+const createClientWithEvents = () => {
   const client = {
     onNewMessage: new MockEmitter<Message>(),
     onEditMessage: new MockEmitter<Message>(),
@@ -68,7 +68,7 @@ const createClientWithEvents = (): TelegramClient => {
   return client as unknown as TelegramClient;
 };
 
-const asTelegramClient = (client: unknown): TelegramClient => client as TelegramClient;
+const asTelegramClient = (client: unknown) => client as TelegramClient;
 
 describe("removeEventHandlers", () => {
   it("clears handlers and unregisters events", () => {
@@ -382,7 +382,7 @@ describe("daemonNetworkMiddlewares", () => {
       teardownSignal: new AbortController().signal,
       _log: { warn: () => {} },
     } as unknown as RpcCallMiddlewareContext["manager"];
-    const rpc = (method: string): RpcCallMiddlewareContext => ({
+    const rpc = (method: string) => ({
       request: { _: method } as unknown as tl.RpcMethod,
       manager,
     });

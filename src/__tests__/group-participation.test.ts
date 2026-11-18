@@ -42,7 +42,7 @@ const W = PARTICIPATION_WINDOW_SECONDS;
 const DAY = 24 * 60 * 60;
 const NOW = 1_780_000_000;
 
-function createDb(): Database {
+function createDb() {
   const db = createAccountCacheDb();
   createChatsCache(db).upsertMany(
     [
@@ -59,12 +59,7 @@ function createDb(): Database {
   return db;
 }
 
-function message(
-  chatId: number,
-  id: number,
-  date: number,
-  extra: Partial<MessageInput> = {},
-): MessageInput {
+function message(chatId: number, id: number, date: number, extra: Partial<MessageInput> = {}) {
   return {
     chat_id: chatId,
     message_id: id,
@@ -83,7 +78,7 @@ function setNow(seconds: number) {
   setSystemTime(new Date(seconds * 1000));
 }
 
-function count(db: Database, sql: string): number {
+function count(db: Database, sql: string) {
   return (db.query(sql).get() as { n: number }).n;
 }
 
@@ -353,10 +348,8 @@ describe("the daemon under the participation rule", () => {
     createChatSyncStateService(db).setSyncMode(chatId, "on");
   }
 
-  function workerContext(
-    call: (request: { _: string }, params?: RpcCallOptions) => unknown,
-  ): RealSyncWorkerContext {
-    return {
+  function workerContext(call: (request: { _: string }, params?: RpcCallOptions) => unknown) {
+    const result: RealSyncWorkerContext = {
       client: { call: mock(call) } as unknown as TelegramClient,
       messagesCache: createMessagesCache(db),
       historyRanges: createHistoryRanges(db),
@@ -368,6 +361,7 @@ describe("the daemon under the participation rule", () => {
       senderLookups: createSenderLookups(db),
       config: { apiMethod: "messages.getHistory", batchSize: 3 },
     };
+    return result;
   }
 
   function rawGroupMessage(id: number, date: number, extra = {}) {

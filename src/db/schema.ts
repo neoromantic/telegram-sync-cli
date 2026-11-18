@@ -7,7 +7,7 @@ const JOURNAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
 const WAL_SWITCH_TIMEOUT_MS = 5000;
 const WAL_SWITCH_RETRY_MS = 10;
 
-function isBusy(err: unknown): boolean {
+function isBusy(err: unknown) {
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" && code.startsWith("SQLITE_BUSY");
 }
@@ -19,7 +19,7 @@ function isBusy(err: unknown): boolean {
  * at once, without the busy handler, as waiting could deadlock. Those try
  * again until the file is in WAL, for up to 5 s.
  */
-export function enableWal(db: Database): void {
+export function enableWal(db: Database) {
   const deadline = Date.now() + WAL_SWITCH_TIMEOUT_MS;
   for (;;) {
     try {
@@ -37,7 +37,7 @@ export function enableWal(db: Database): void {
  * Initialize the cache schema
  * Creates all tables and indexes for caching
  */
-export function initCacheSchema(db: Database): void {
+export function initCacheSchema(db: Database) {
   db.run("PRAGMA busy_timeout = 5000");
 
   const { page_count } = db.query("PRAGMA page_count").get() as {

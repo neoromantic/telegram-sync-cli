@@ -22,7 +22,7 @@ export function messageRowToItem(
   row: MessageSearchRow,
   attachment: AttachmentInfo | null,
   action: MessageAction | null,
-): MessageSearchItem {
+) {
   return {
     chatId: row.chat_id,
     messageId: row.message_id,
@@ -63,11 +63,11 @@ export function messageRowToItem(
  * row without text). Every cached message has raw_json, so this works for
  * rows cached before message_attachments existed too.
  */
-export function messageItemReader(db: Database): (row: MessageRow) => MessageSearchItem {
+export function messageItemReader(db: Database) {
   const rawJson = db.query<{ raw_json: string }, [number, number]>(
     "SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?",
   );
-  return (row) => {
+  const result: (row: MessageRow) => MessageSearchItem = (row) => {
     const isService = row.message_type === "service";
     const mayBeRich = !row.text && row.message_type === "text";
     const raw =
@@ -82,6 +82,7 @@ export function messageItemReader(db: Database): (row: MessageRow) => MessageSea
       isService ? extractServiceAction(raw) : null,
     );
   };
+  return result;
 }
 
 /**
@@ -91,7 +92,7 @@ export function messageItemReader(db: Database): (row: MessageRow) => MessageSea
 export type MessageRow = MessageSearchRow & { raw_json?: string };
 
 /** Items for rows, each with its attachment and action (see messageItemReader) */
-export function messageRowsToItems(db: Database, rows: MessageRow[]): MessageSearchItem[] {
+export function messageRowsToItems(db: Database, rows: MessageRow[]) {
   return rows.map(messageItemReader(db));
 }
 
@@ -126,7 +127,7 @@ export function parseIntegerArg(
   value: string | undefined,
   name: string,
   { min, max, default: fallback }: IntegerRange & { default?: number },
-): number | undefined {
+) {
   if (value === undefined) return fallback;
 
   const bounds = max === undefined ? `>= ${min}` : `from ${min} to ${max}`;
@@ -179,7 +180,7 @@ export type HistoryClient = Pick<TelegramClient, "call" | "getMe">;
  * A client that is created on first use, so a read the cache answers needs
  * no credentials and opens no connection.
  */
-export function createLazyClient(create: () => HistoryClient): HistoryClient {
+export function createLazyClient(create: () => HistoryClient) {
   let client: HistoryClient | undefined;
   const get = () => {
     client ??= create();

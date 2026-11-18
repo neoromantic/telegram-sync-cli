@@ -2,7 +2,7 @@
  * Parse named arguments from argv-style array into an object
  * Supports: --key value, --key=value, --nested.key value
  */
-export function parseNamedArgs(args: Record<string, unknown>): Record<string, unknown> {
+export function parseNamedArgs(args: Record<string, unknown>) {
   const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(args)) {
@@ -18,7 +18,7 @@ export function parseNamedArgs(args: Record<string, unknown>): Record<string, un
   return result;
 }
 
-function setNestedValue(obj: Record<string, unknown>, path: string[], value: unknown): void {
+function setNestedValue(obj: Record<string, unknown>, path: string[], value: unknown) {
   let current = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i]!;
@@ -33,7 +33,7 @@ function setNestedValue(obj: Record<string, unknown>, path: string[], value: unk
   }
 }
 
-function parseValue(value: unknown): unknown {
+function parseValue(value: unknown) {
   if (value === undefined || value === null || typeof value !== "string") {
     return value;
   }
@@ -65,16 +65,14 @@ function parseValue(value: unknown): unknown {
 /**
  * Merge CLI arguments with JSON input
  */
-export function mergeArgs(
-  cliArgs: Record<string, unknown>,
-  jsonInput?: string,
-): Record<string, unknown> {
+export function mergeArgs(cliArgs: Record<string, unknown>, jsonInput?: string) {
   const parsed = parseNamedArgs(cliArgs);
 
   if (jsonInput) {
     try {
       const jsonArgs = JSON.parse(jsonInput);
-      return { ...parsed, ...jsonArgs };
+      const result: Record<string, unknown> = { ...parsed, ...jsonArgs };
+      return result;
     } catch (e) {
       throw new Error(`Invalid JSON input: ${e instanceof Error ? e.message : "unknown error"}`);
     }
@@ -89,11 +87,7 @@ const NEGATIVE_NUMBER = /^-\d+(\.\d+)?$/;
  * Values of method arguments written as `--name value` after the method.
  * citty reads an undeclared `--name` without `=` as `true` and leaves the value as a positional.
  */
-export function spacedFlagValues(
-  rawArgs: string[],
-  method: string,
-  args: Record<string, unknown>,
-): Map<string, string> {
+export function spacedFlagValues(rawArgs: string[], method: string, args: Record<string, unknown>) {
   const values = new Map<string, string>();
   for (let i = rawArgs.indexOf(method) + 1; i < rawArgs.length - 1; i++) {
     const arg = rawArgs[i]!;
@@ -116,7 +110,7 @@ export function spacedFlagValues(
  * Every value of a flag given more than once (`--name a --name=b`), up to a
  * bare `--`. citty keeps only the last value of a repeated string flag.
  */
-export function flagValues(rawArgs: string[], name: string): string[] {
+export function flagValues(rawArgs: string[], name: string) {
   const flag = `--${name}`;
   const values: string[] = [];
   for (let i = 0; i < rawArgs.length; i++) {
@@ -146,7 +140,7 @@ export const outputFormatArg = {
  * know (the global --format pretty) as the positional, so a marked ID in
  * rawArgs wins.
  */
-export function positionalChat(value: unknown, rawArgs: string[]): string | undefined {
+export function positionalChat(value: unknown, rawArgs: string[]) {
   const input = rawArgs.find((arg) => /^-\d+$/.test(arg)) ?? value;
   return typeof input === "string" ? input.trim() : undefined;
 }

@@ -15,7 +15,7 @@ const originalCredentials = {
   apiHash: process.env.TELEGRAM_API_HASH,
 };
 
-function setEnv(key: string, value: string | undefined): void {
+function setEnv(key: string, value: string | undefined) {
   if (value === undefined) {
     delete process.env[key];
   } else {
@@ -23,7 +23,7 @@ function setEnv(key: string, value: string | undefined): void {
   }
 }
 
-function withCredentials(apiId: string | undefined, apiHash: string | undefined): void {
+function withCredentials(apiId: string | undefined, apiHash: string | undefined) {
   setEnv("TELEGRAM_API_ID", apiId);
   setEnv("TELEGRAM_API_HASH", apiHash);
 }

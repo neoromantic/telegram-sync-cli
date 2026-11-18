@@ -40,7 +40,7 @@ import { error, getOutputFormat, success } from "../utils/output";
 import { VERSION } from "../version";
 import { printPrettyStatus } from "./status/pretty";
 
-async function getProcessMemory(pid: number): Promise<number | null> {
+async function getProcessMemory(pid: number) {
   try {
     const procFile = Bun.file(`/proc/${pid}/status`);
     if (await procFile.exists()) {
@@ -233,8 +233,8 @@ export interface AccountStatusSnapshot {
   };
 }
 
-function emptyAccountSnapshot(accountId: number): AccountStatusSnapshot {
-  return {
+function emptyAccountSnapshot(accountId: number) {
+  const result: AccountStatusSnapshot = {
     accountId,
     cache: { status: "missing", size: null },
     media: null,
@@ -267,14 +267,15 @@ function emptyAccountSnapshot(accountId: number): AccountStatusSnapshot {
       active_flood_waits: [],
     },
   };
+  return result;
 }
 
-function count(db: Database, sql: string): number {
+function count(db: Database, sql: string) {
   return (db.query(sql).get() as { count: number } | null)?.count ?? 0;
 }
 
-function failedAccountSnapshot(accountId: number, err: unknown): AccountStatusSnapshot {
-  return {
+function failedAccountSnapshot(accountId: number, err: unknown) {
+  const result: AccountStatusSnapshot = {
     ...emptyAccountSnapshot(accountId),
     cache: {
       status: "error",
@@ -282,6 +283,7 @@ function failedAccountSnapshot(accountId: number, err: unknown): AccountStatusSn
       size: null,
     },
   };
+  return result;
 }
 
 /**
@@ -290,10 +292,7 @@ function failedAccountSnapshot(accountId: number, err: unknown): AccountStatusSn
  * query (a corrupt page, say) reads as `error` with zeroed figures, so the
  * other accounts and the daemon section still report.
  */
-export function readAccountStatus(
-  accountId: number,
-  options: { sizes?: boolean } = {},
-): AccountStatusSnapshot {
+export function readAccountStatus(accountId: number, options: { sizes?: boolean } = {}) {
   let cacheDb: Database | null;
   try {
     cacheDb = openExistingAccountCacheDb(accountId);
@@ -309,11 +308,7 @@ export function readAccountStatus(
   }
 }
 
-function readOpenAccountStatus(
-  accountId: number,
-  cacheDb: Database,
-  sizes: boolean,
-): AccountStatusSnapshot {
+function readOpenAccountStatus(accountId: number, cacheDb: Database, sizes: boolean) {
   const snapshot = emptyAccountSnapshot(accountId);
   snapshot.cache = {
     status: "ok",
@@ -332,7 +327,7 @@ function readOpenAccountStatus(
 
   const chatSyncState = createChatSyncStateService(cacheDb);
   const nowMs = Date.now();
-  const toStatusJob = (job: ReturnType<typeof syncService.getPendingJobs>[number]): StatusJob => ({
+  const toStatusJob = (job: ReturnType<typeof syncService.getPendingJobs>[number]) => ({
     account_id: accountId,
     id: job.id,
     chat_id: job.chat_id,
@@ -421,7 +416,7 @@ function readOpenAccountStatus(
   return snapshot;
 }
 
-function withAccountId(history: HistoryProgress, accountId: number): StatusHistoryProgress {
+function withAccountId(history: HistoryProgress, accountId: number) {
   return {
     ...history,
     pacing: null,
@@ -432,7 +427,7 @@ function withAccountId(history: HistoryProgress, accountId: number): StatusHisto
   };
 }
 
-function sumPacing(total: StatusPacing | null, pacing: StatusPacing | null): StatusPacing | null {
+function sumPacing(total: StatusPacing | null, pacing: StatusPacing | null) {
   if (!pacing) return total;
   if (!total) return { ...pacing };
   return {
@@ -443,7 +438,7 @@ function sumPacing(total: StatusPacing | null, pacing: StatusPacing | null): Sta
   };
 }
 
-function sumHistoryProgress(histories: StatusHistoryProgress[]): StatusHistoryProgress {
+function sumHistoryProgress(histories: StatusHistoryProgress[]) {
   const total: StatusHistoryProgress = {
     ...emptyHistoryProgress(),
     pacing: null,
@@ -483,7 +478,7 @@ function sumHistoryProgress(histories: StatusHistoryProgress[]): StatusHistoryPr
   return total;
 }
 
-function readAccountMediaUsage(dataDir: string, accountId: number): MediaUsage | null {
+function readAccountMediaUsage(dataDir: string, accountId: number) {
   try {
     return readMediaUsage(accountMediaPath(dataDir, accountId));
   } catch {
@@ -536,21 +531,20 @@ export interface LastCatchUp {
   chats: number;
 }
 
-/** The live daemon's view of an account, or null without one */
-export function liveConnection(
-  snapshot: AccountStatusSnapshot,
-  livePid: number | null,
-): {
+interface LiveConnection {
   status: string;
   last_error: string | null;
   last_catch_up: LastCatchUp | null;
-} | null {
+}
+
+/** The live daemon's view of an account, or null without one */
+export function liveConnection(snapshot: AccountStatusSnapshot, livePid: number | null) {
   const daemon = snapshot.daemon;
   if (livePid === null || !daemon || daemon.status !== "running" || daemon.pid !== livePid) {
     return null;
   }
   const catchUp = daemon.lastCatchUp;
-  return {
+  const connection: LiveConnection = {
     status: daemon.connectionStatus ?? "unknown",
     last_error: daemon.lastError,
     last_catch_up: catchUp && {
@@ -560,9 +554,10 @@ export function liveConnection(
       chats: catchUp.chats,
     },
   };
+  return connection;
 }
 
-function livePacing(snapshot: AccountStatusSnapshot, livePid: number | null): StatusPacing | null {
+function livePacing(snapshot: AccountStatusSnapshot, livePid: number | null) {
   const pacing = snapshot.daemon?.pacing;
   if (!pacing || !liveConnection(snapshot, livePid)) return null;
   return {

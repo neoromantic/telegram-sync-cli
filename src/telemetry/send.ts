@@ -4,7 +4,7 @@ import { createTgTelemetry } from "./index";
 const SEND_MS = 3500;
 const GIVE_UP_MS = 5000;
 
-export async function sendHandoff(json: string | undefined): Promise<never> {
+export async function sendHandoff(json: string | undefined) {
   setTimeout(() => process.exit(0), GIVE_UP_MS);
   try {
     const handoff = JSON.parse(json ?? "") as Handoff;

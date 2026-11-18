@@ -52,7 +52,7 @@ describe("wrapClientCallWithRateLimits", () => {
     return { call, send: () => client.call(request) };
   }
 
-  async function failureOf(send: () => Promise<unknown>): Promise<unknown> {
+  async function failureOf(send: () => Promise<unknown>) {
     try {
       await send();
     } catch (err) {

@@ -44,7 +44,7 @@ export interface TestEnvironment {
   getCliOptions(): { env: Record<string, string> };
 }
 
-function initSchema(db: Database): void {
+function initSchema(db: Database) {
   db.run("PRAGMA journal_mode = WAL");
 
   db.run(`
@@ -74,7 +74,7 @@ function initSchema(db: Database): void {
  *
  * @param testName - Unique name for this test (used in directory path)
  */
-export function createTestEnvironment(testName: string): TestEnvironment {
+export function createTestEnvironment(testName: string) {
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 8);
   const dataDir = join(E2E_TEST_BASE, `${testName}-${timestamp}-${randomSuffix}`);
@@ -85,12 +85,12 @@ export function createTestEnvironment(testName: string): TestEnvironment {
   const cacheDbs = new Map<number, Database>();
   const cachePath = (accountId = 1) => join(dataDir, "accounts", String(accountId), "cache.db");
 
-  return {
+  const result: TestEnvironment = {
     dataDir,
 
     cachePath,
 
-    openCacheDb(accountId = 1): Database {
+    openCacheDb(accountId = 1) {
       const open = cacheDbs.get(accountId);
       if (open) return open;
       const path = cachePath(accountId);
@@ -102,14 +102,14 @@ export function createTestEnvironment(testName: string): TestEnvironment {
       return cacheDb;
     },
 
-    initDatabase(): Database {
+    initDatabase() {
       const dbPath = join(dataDir, "data.db");
       db = new Database(dbPath);
       initSchema(db);
       return db;
     },
 
-    seedAccounts(accounts): void {
+    seedAccounts(accounts) {
       if (!db) {
         this.initDatabase();
       }
@@ -132,7 +132,7 @@ export function createTestEnvironment(testName: string): TestEnvironment {
       }
     },
 
-    cleanup(): void {
+    cleanup() {
       if (db) {
         db.close();
         db = null;
@@ -145,7 +145,7 @@ export function createTestEnvironment(testName: string): TestEnvironment {
       }
     },
 
-    getCliOptions(): { env: Record<string, string> } {
+    getCliOptions() {
       return {
         env: {
           TELEGRAM_SYNC_CLI_DATA_DIR: dataDir,
@@ -153,13 +153,14 @@ export function createTestEnvironment(testName: string): TestEnvironment {
       };
     },
   };
+  return result;
 }
 
 /**
  * Clean up all E2E test directories
  * Useful for manual cleanup if tests fail
  */
-export function cleanupAllTestEnvironments(): void {
+export function cleanupAllTestEnvironments() {
   if (existsSync(E2E_TEST_BASE)) {
     rmSync(E2E_TEST_BASE, { recursive: true, force: true });
   }

@@ -37,7 +37,7 @@ function isGetHistoryRequest(request: tl.RpcMethod): request is tl.messages.RawG
   return request._ === "messages.getHistory";
 }
 
-function createMockClient(overrides: Partial<MockClient> = {}): TelegramClient {
+function createMockClient(overrides: Partial<MockClient> = {}) {
   const client = {
     call: mock<MockCall>(async () => {
       throw new Error("Unexpected API call");
@@ -254,10 +254,13 @@ describe("sync-worker real helpers/context", () => {
 
     it("returns no messages or senders when Telegram reports no change", async () => {
       const client = createMockClient({
-        call: mock<MockCall>(async (): Promise<tl.messages.RawMessagesNotModified> => ({
-          _: "messages.messagesNotModified",
-          count: 5,
-        })),
+        call: mock<MockCall>(async () => {
+          const result: tl.messages.RawMessagesNotModified = {
+            _: "messages.messagesNotModified",
+            count: 5,
+          };
+          return result;
+        }),
       });
 
       const result = await fetchMessagesRaw(
@@ -274,16 +277,16 @@ describe("sync-worker real helpers/context", () => {
       userId: 10,
       accessHash: toLong("1111"),
     };
-    const emptyPage = async (
-      _request: tl.RpcMethod,
-      _params?: { abortSignal?: AbortSignal },
-    ): Promise<tl.messages.RawMessages> => ({
-      _: "messages.messages",
-      messages: [],
-      chats: [],
-      users: [],
-      topics: [],
-    });
+    const emptyPage = async (_request: tl.RpcMethod, _params?: { abortSignal?: AbortSignal }) => {
+      const result: tl.messages.RawMessages = {
+        _: "messages.messages",
+        messages: [],
+        chats: [],
+        users: [],
+        topics: [],
+      };
+      return result;
+    };
 
     it("passes the stop signal to the request", async () => {
       const call = mock(emptyPage);

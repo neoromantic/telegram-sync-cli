@@ -7,7 +7,7 @@ import { createAccountCacheDb } from "./helpers/cache-db";
 
 const WORDS = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"];
 
-function writeMessages(db: Database, to: number, perWrite: number, from = 1): void {
+function writeMessages(db: Database, to: number, perWrite: number, from = 1) {
   const insert = db.query(`
     INSERT INTO messages_cache (chat_id, message_id, from_id, text, date, fetched_at, raw_json)
     VALUES (100, ?, 1, ?, ?, 0, '{}')
@@ -21,7 +21,7 @@ function writeMessages(db: Database, to: number, perWrite: number, from = 1): vo
   }
 }
 
-function segments(db: Database): number {
+function segments(db: Database) {
   return (
     db
       .query(
@@ -31,13 +31,13 @@ function segments(db: Database): number {
   ).n;
 }
 
-function indexBytes(db: Database): number {
+function indexBytes(db: Database) {
   return (
     db.query("SELECT SUM(LENGTH(block)) AS n FROM message_search_data").get() as { n: number }
   ).n;
 }
 
-function matches(db: Database, word: string): number[] {
+function matches(db: Database, word: string) {
   return (
     db
       .query("SELECT rowid FROM message_search WHERE message_search MATCH ? ORDER BY rowid")
@@ -45,7 +45,7 @@ function matches(db: Database, word: string): number[] {
   ).map((row) => row.rowid);
 }
 
-function mergeAll(db: Database): number {
+function mergeAll(db: Database) {
   let batches = 0;
   for (;;) {
     batches += 1;
@@ -65,7 +65,7 @@ describe("search index merges", () => {
     expect(WORDS.map((word) => matches(db, word))).toEqual(before);
   });
 
-  function reindex(db: Database, from: number, to: number): void {
+  function reindex(db: Database, from: number, to: number) {
     const rows = db
       .query("SELECT rowid, text FROM messages_cache WHERE rowid BETWEEN ? AND ?")
       .all(from, to) as { rowid: number; text: string }[];
@@ -83,7 +83,7 @@ describe("search index merges", () => {
     }
   }
 
-  function deletedPages(db: Database): number {
+  function deletedPages(db: Database) {
     return (
       db.query("SELECT COUNT(*) AS n FROM message_search_data WHERE (id >> 37) >= 65536").get() as {
         n: number;

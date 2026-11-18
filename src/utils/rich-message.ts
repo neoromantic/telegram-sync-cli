@@ -2,15 +2,15 @@ import { longToDecimal } from "./attachment";
 
 type RawObject = Record<string, unknown>;
 
-function asObject(value: unknown): RawObject | null {
+function asObject(value: unknown) {
   return typeof value === "object" && value !== null ? (value as RawObject) : null;
 }
 
-function str(value: unknown): string {
+function str(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
-function list(value: unknown): RawObject[] {
+function list(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is RawObject => asObject(item) !== null)
     : [];
@@ -41,16 +41,17 @@ const DATE_FORMAT_FLAGS: Array<[string, string]> = [
   ["longTime", "T"],
 ];
 
-function footnoteId(url: string, prefix: string): string | null {
+function footnoteId(url: string, prefix: string) {
   return url.startsWith(prefix) ? url.slice(prefix.length) : null;
 }
 
-function flatten(node: RawObject): RawObject[] {
+function flatten(node: RawObject) {
   if (node._ !== "textConcat") return [node];
-  return list(node.texts).flatMap(flatten);
+  const parts: RawObject[] = list(node.texts).flatMap(flatten);
+  return parts;
 }
 
-function footnoteReference(node: RawObject): string | null {
+function footnoteReference(node: RawObject) {
   const parts = flatten(node).filter(
     (part) => part._ !== "textEmpty" && !(part._ === "textAnchor" && renderText(part.text) === ""),
   );
@@ -60,18 +61,18 @@ function footnoteReference(node: RawObject): string | null {
   return id === null ? null : `[^${id}]`;
 }
 
-function buttonPlaceholder(label: string, type: unknown): string {
+function buttonPlaceholder(label: string, type: unknown) {
   const url = str(asObject(type)?.url);
   const text = label || "button";
   return url ? `[button: ${text} (${url})]` : `[button: ${text}]`;
 }
 
 /** Inline rich text as rich Markdown */
-export function renderText(input: unknown): string {
+export function renderText(input: unknown) {
   const node = asObject(input);
   if (!node) return "";
   const kind = str(node._);
-  const inner = () => renderText(node.text);
+  const inner: () => string = () => renderText(node.text);
 
   const wrap = INLINE_WRAP[kind];
   if (wrap) {
@@ -89,7 +90,7 @@ export function renderText(input: unknown): string {
     case "textPlain":
       return str(node.text);
     case "textConcat":
-      return list(node.texts).map(renderText).join("");
+      return renderTexts(node.texts);
     case "textUrl": {
       const url = str(node.url);
       if (url.startsWith("#") || url === "") return inner();
@@ -120,12 +121,17 @@ export function renderText(input: unknown): string {
       return buttonPlaceholder(inner(), node.type);
     default:
       if ("text" in node) return inner();
-      if (Array.isArray(node.texts)) return list(node.texts).map(renderText).join("");
+      if (Array.isArray(node.texts)) return renderTexts(node.texts);
       return `[${kind || "unknown text"}]`;
   }
 }
 
-function renderCaption(input: unknown): string {
+function renderTexts(texts: unknown) {
+  const rendered: string[] = list(texts).map(renderText);
+  return rendered.join("");
+}
+
+function renderCaption(input: unknown) {
   const caption = asObject(input);
   if (!caption) return "";
   if (caption._ !== "pageCaption") return renderText(caption);
@@ -134,12 +140,12 @@ function renderCaption(input: unknown): string {
   return [text, credit].filter(Boolean).join(" — ");
 }
 
-function placeholder(label: string, caption: unknown): string {
+function placeholder(label: string, caption: unknown) {
   const text = renderCaption(caption);
   return text ? `[${label}: ${text}]` : `[${label}]`;
 }
 
-function fileLabel(kind: string, idField: unknown, context: RenderContext): string {
+function fileLabel(kind: string, idField: unknown, context: RenderContext) {
   const id = longToDecimal(idField);
   const doc = id ? context.documents.get(id) : undefined;
   let name = "";
@@ -153,39 +159,39 @@ function fileLabel(kind: string, idField: unknown, context: RenderContext): stri
   return name ? `${kind} ${name}` : kind;
 }
 
-function indent(text: string, prefix: string, first = prefix): string {
+function indent(text: string, prefix: string, first = prefix) {
   return text
     .split("\n")
     .map((line, i) => (i === 0 ? first + line : line === "" ? "" : prefix + line))
     .join("\n");
 }
 
-function quote(text: string): string {
+function quote(text: string) {
   return text
     .split("\n")
     .map((line) => (line === "" ? ">" : `> ${line}`))
     .join("\n");
 }
 
-function fence(text: string, info: string): string {
+function fence(text: string, info: string) {
   const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((match) => match[0].length));
   const marker = "`".repeat(longest + 1);
   return `${marker}${info}\n${text}\n${marker}`;
 }
 
-function renderListItem(item: RawObject, marker: string, context: RenderContext): string {
+function renderListItem(item: RawObject, marker: string, context: RenderContext) {
   const box = item.checkbox === true ? (item.checked ? "[x] " : "[ ] ") : "";
   const body = "blocks" in item ? renderBlocks(item.blocks, context) : renderText(item.text);
   return indent(`${box}${body}`, " ".repeat(marker.length), marker);
 }
 
-function renderList(block: RawObject, context: RenderContext): string {
+function renderList(block: RawObject, context: RenderContext) {
   return list(block.items)
     .map((item) => renderListItem(item, "- ", context))
     .join("\n");
 }
 
-function renderOrderedList(block: RawObject, context: RenderContext): string {
+function renderOrderedList(block: RawObject, context: RenderContext) {
   const start = typeof block.start === "number" ? block.start : 1;
   return list(block.items)
     .map((item, i) => {
@@ -195,17 +201,17 @@ function renderOrderedList(block: RawObject, context: RenderContext): string {
     .join("\n");
 }
 
-function cellText(cell: RawObject): string {
+function cellText(cell: RawObject) {
   return renderText(cell.text).replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 }
 
-function alignment(cell: RawObject | undefined): string {
+function alignment(cell: RawObject | undefined) {
   if (cell?.alignCenter === true) return ":---:";
   if (cell?.alignRight === true) return "---:";
   return "---";
 }
 
-function renderTable(block: RawObject): string {
+function renderTable(block: RawObject) {
   const rows = list(block.rows).map((row) =>
     list(row.cells).flatMap((cell) => {
       const span = typeof cell.colspan === "number" ? cell.colspan : 1;
@@ -227,7 +233,7 @@ function renderTable(block: RawObject): string {
   return title ? `${title}\n\n${table}` : table;
 }
 
-function renderFooter(text: unknown): string {
+function renderFooter(text: unknown) {
   const parts = flatten(asObject(text) ?? {});
   const anchor = parts.find(
     (part) => part._ === "textAnchor" && footnoteId(str(part.name), "fn-") !== null,
@@ -240,27 +246,27 @@ function renderFooter(text: unknown): string {
   return `[^${id}]: ${renderText(anchor.text)}${definition.map(renderText).join("")}`.trimEnd();
 }
 
-function renderButtons(block: RawObject): string {
+function renderButtons(block: RawObject) {
   return list(block.buttons)
     .map((button) => buttonPlaceholder(renderText(button.text), button.type))
     .join(" ");
 }
 
-function renderMap(block: RawObject): string {
+function renderMap(block: RawObject) {
   const geo = asObject(block.geo);
   const at =
     typeof geo?.lat === "number" && typeof geo.long === "number" ? ` ${geo.lat}, ${geo.long}` : "";
   return placeholder(`map${at}`, block.caption);
 }
 
-function renderMediaGroup(tag: string, block: RawObject, context: RenderContext): string {
-  const items = list(block.items).map((item) => renderBlock(item, context));
+function renderMediaGroup(tag: string, block: RawObject, context: RenderContext) {
+  const items: string[] = list(block.items).map((item) => renderBlock(item, context));
   const caption = renderCaption(block.caption);
   const body = caption ? [...items, `<figcaption>${caption}</figcaption>`] : items;
   return `<${tag}>\n\n${body.join("\n")}\n\n</${tag}>`;
 }
 
-function renderBlock(block: RawObject, context: RenderContext): string {
+function renderBlock(block: RawObject, context: RenderContext) {
   const kind = str(block._);
   const text = () => renderText(block.text);
   const heading = /^pageBlockHeading([1-6])$/.exec(kind);
@@ -339,8 +345,10 @@ function renderBlock(block: RawObject, context: RenderContext): string {
       return renderMediaGroup("tg-collage", block, context);
     case "pageBlockSlideshow":
       return renderMediaGroup("tg-slideshow", block, context);
-    case "pageBlockCover":
-      return renderBlock(asObject(block.cover) ?? {}, context);
+    case "pageBlockCover": {
+      const cover: string = renderBlock(asObject(block.cover) ?? {}, context);
+      return cover;
+    }
     case "pageBlockChannel": {
       const chat = asObject(block.channel);
       const name = [str(chat?.title), chat?.username ? `@${chat.username}` : ""]
@@ -366,15 +374,13 @@ function renderBlock(block: RawObject, context: RenderContext): string {
   }
 }
 
-function renderBlocks(blocks: unknown, context: RenderContext): string {
-  return list(blocks)
-    .map((block) => renderBlock(block, context))
-    .filter((text) => text !== "")
-    .join("\n\n");
+function renderBlocks(blocks: unknown, context: RenderContext) {
+  const rendered: string[] = list(blocks).map((block) => renderBlock(block, context));
+  return rendered.filter((text) => text !== "").join("\n\n");
 }
 
 /** A richMessage object as rich Markdown */
-export function renderRichMessage(input: unknown): string {
+export function renderRichMessage(input: unknown) {
   const rich = asObject(input);
   if (!rich) return "";
   const documents = new Map<string, RawObject>();
@@ -389,17 +395,25 @@ export function renderRichMessage(input: unknown): string {
  * The text of a TL message's rich content, from the message object or its
  * raw_json; null when it has none, so a caller keeps the message's own text
  */
-export function richMessageText(message: unknown): string | null {
+export function richMessageText(message: unknown) {
   let value = message;
   if (typeof value === "string") {
-    if (!value.includes('"richMessage"')) return null;
+    if (!value.includes('"richMessage"')) {
+      const result: string | null = null;
+      return result;
+    }
     try {
       value = JSON.parse(value);
     } catch {
-      return null;
+      const result: string | null = null;
+      return result;
     }
   }
   const rich = asObject(asObject(value)?.richMessage);
-  if (rich?._ !== "richMessage") return null;
-  return renderRichMessage(rich) || null;
+  if (rich?._ !== "richMessage") {
+    const result: string | null = null;
+    return result;
+  }
+  const result: string | null = renderRichMessage(rich) || null;
+  return result;
 }

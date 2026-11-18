@@ -4,11 +4,11 @@ const FTS5_SYNTAX =
   /["*:()]|(?<!\S)\^(?=\S)|(?<![^\s"])\+(?![^\s"])|(?<![\p{L}\p{N}_])(?:AND|OR|NOT|NEAR)(?![\p{L}\p{N}_])/u;
 
 /** Whether a query uses FTS5 syntax: phrases, operators, prefixes or column filters */
-export function hasFts5Syntax(query: string): boolean {
+export function hasFts5Syntax(query: string) {
   return FTS5_SYNTAX.test(query);
 }
 
-function quotePhrase(text: string): string {
+function quotePhrase(text: string) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
@@ -18,7 +18,7 @@ function quotePhrase(text: string): string {
  * is never syntax. A query with FTS5 syntax goes to FTS5 as written, and
  * `phrase` makes the whole query one phrase.
  */
-export function toFts5Query(query: string, options: { phrase?: boolean } = {}): string {
+export function toFts5Query(query: string, options: { phrase?: boolean } = {}) {
   if (options.phrase) return quotePhrase(query);
   if (hasFts5Syntax(query)) return query;
   return query.split(/\s+/).filter(Boolean).map(quotePhrase).join(" ");
@@ -29,7 +29,7 @@ export function toFts5Query(query: string, options: { phrase?: boolean } = {}): 
  * column filter (`foo:bar`, `10:30`) or an unclosed quote. The search's own
  * SQL never changes, so these come from the query.
  */
-export function isFts5QueryError(err: unknown): boolean {
+export function isFts5QueryError(err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   return /^fts5:|no such column|unterminated string|unknown special query/i.test(message);
 }
@@ -81,7 +81,7 @@ export const MESSAGE_ROW_JOINS = CHAT_JOIN + SENDER_JOIN;
  * is back, so a rebuilt index needs no new view. Created once, so opening a
  * cache that has it never waits for the write lock.
  */
-export function createMessageSearchTextView(db: Database): void {
+export function createMessageSearchTextView(db: Database) {
   const exists = db
     .query(`SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = 'message_search_text'`)
     .get();
@@ -152,10 +152,7 @@ export interface MessagesSearchService {
   count(query: string, options?: MessageSearchOptions): number;
 }
 
-function searchFilter(options: MessageSearchOptions): {
-  conditions: string[];
-  params: Array<string | number>;
-} {
+function searchFilter(options: MessageSearchOptions) {
   const conditions: string[] = [];
   const params: Array<string | number> = [];
 
@@ -228,7 +225,7 @@ function sortedPage(
   fromParam: string,
   options: MessageSearchOptions,
   order: string,
-): MessageSearchRow[] {
+) {
   const { conditions, params } = searchFilter(options);
   return db
     .query(
@@ -261,7 +258,7 @@ export function searchNewestFirst(
   query: string,
   options: MessageSearchOptions = {},
   tuning: NewestFirstTuning = {},
-): { rows: MessageSearchRow[]; way: NewestFirstWay } {
+) {
   const now = tuning.now ?? (() => performance.now());
   const limit = options.limit ?? 50;
   const offset = options.offset ?? 0;
@@ -292,7 +289,7 @@ export function searchNewestFirst(
   if (matches < enough) {
     if (rowids === null) return sorted();
     const rows = sortedPage(db, ROWIDS_FROM, rowids, options, NEWEST_FIRST);
-    return { rows, way: "sort" };
+    return { rows, way: "sort" as const };
   }
 
   const window = Math.ceil(pageTimesMessages / enough);
@@ -322,7 +319,7 @@ export function searchNewestFirst(
   const matchesBetween = db.query(
     "SELECT rowid FROM message_search WHERE message_search MATCH ? AND rowid BETWEEN ? AND ?",
   );
-  const matching = (rowids: number[]): Set<number> => {
+  const matching = (rowids: number[]) => {
     const runs: Array<[number, number]> = [];
     for (const rowid of [...rowids].sort((a, b) => a - b)) {
       const run = runs.at(-1);
@@ -363,7 +360,7 @@ export function searchNewestFirst(
       );
     }
     if (found.length === wanted || rowids.length < size) {
-      return { rows: found.slice(offset), way: "messages" };
+      return { rows: found.slice(offset), way: "messages" as const };
     }
     const spent = now() - started;
     if (spent >= budgetMs) return sorted();
@@ -375,9 +372,9 @@ export function searchNewestFirst(
   return sorted();
 }
 
-export function createMessagesSearch(db: Database): MessagesSearchService {
+export function createMessagesSearch(db: Database) {
   return {
-    search(query: string, options: MessageSearchOptions = {}): MessageSearchRow[] {
+    search(query: string, options: MessageSearchOptions = {}) {
       if (options.sort !== "relevance") {
         return searchNewestFirst(db, query, options).rows;
       }
@@ -390,7 +387,7 @@ export function createMessagesSearch(db: Database): MessagesSearchService {
       );
     },
 
-    count(query: string, options: MessageSearchOptions = {}): number {
+    count(query: string, options: MessageSearchOptions = {}) {
       const { conditions, params } = searchFilter(options);
       const row = db
         .query(

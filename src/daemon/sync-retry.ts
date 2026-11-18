@@ -14,7 +14,7 @@ export const SYNC_RETRY_CONFIG: ReconnectConfig = {
 };
 
 /** The wait before the next try of a job that failed `failures` times */
-export function retryDelayMs(failures: number): number {
+export function retryDelayMs(failures: number) {
   return calculateReconnectDelay(failures, SYNC_RETRY_CONFIG);
 }
 
@@ -26,7 +26,7 @@ const PERMANENT_RPC_CODES = [400, 403, 404];
  * and 406, which are about the account and are left to the connection
  * health check.
  */
-export function isPermanentSyncError(err: unknown): boolean {
+export function isPermanentSyncError(err: unknown) {
   if (!tl.RpcError.is(err)) return false;
   return PERMANENT_RPC_CODES.includes(err.code) || err.text === "CHANNEL_PRIVATE";
 }

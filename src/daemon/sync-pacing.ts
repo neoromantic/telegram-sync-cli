@@ -27,7 +27,7 @@ export const PACING_CLEAN_RUN_CALLS = 30;
 
 export type SyncPacingMode = DaemonPacing["mode"];
 
-function historyIntervalMs(callsPerSecond: number): number {
+function historyIntervalMs(callsPerSecond: number) {
   return Math.ceil(1000 / callsPerSecond);
 }
 
@@ -53,27 +53,27 @@ export class SyncPacer {
    * The interval between job starts in the current mode, in ms; rounded up,
    * so the pace never goes above the cap
    */
-  intervalMs(): number {
+  intervalMs() {
     return this.mode === "history" ? historyIntervalMs(this.rate) : this.calmIntervalMs;
   }
 
   /** Whether history is due; the scheduler asks before each pick */
-  setHistoryDue(due: boolean): void {
+  setHistoryDue(due: boolean) {
     this.mode = due ? "history" : "calm";
   }
 
   /** When the next job may start */
-  nextStartAt(): number {
+  nextStartAt() {
     const paced = this.lastStartAt === null ? 0 : this.lastStartAt + this.intervalMs();
     return Math.max(paced, this.notBefore);
   }
 
-  isDue(now: number): boolean {
+  isDue(now: number) {
     return now >= this.nextStartAt();
   }
 
   /** A job started, or a pick failed and the account waits an interval */
-  recordStart(now: number): void {
+  recordStart(now: number) {
     this.lastStartAt = now;
   }
 
@@ -81,7 +81,7 @@ export class SyncPacer {
    * A job's call went through without a FLOOD_WAIT. Returns the new history
    * pace when this call ended a clean run and sped it up, else null.
    */
-  recordCleanCall(): number | null {
+  recordCleanCall() {
     if (this.mode !== "history") return null;
     this.cleanCalls++;
     if (this.cleanCalls < PACING_CLEAN_RUN_CALLS) return null;
@@ -99,7 +99,7 @@ export class SyncPacer {
    * wait ends, so the next job comes one interval after that retry. Returns
    * the new history pace.
    */
-  recordFloodWait(now: number, seconds: number): number {
+  recordFloodWait(now: number, seconds: number) {
     this.floodWaits++;
     this.cleanCalls = 0;
     this.rate = Math.max(this.minRate, this.rate / 2);
@@ -109,7 +109,7 @@ export class SyncPacer {
   }
 
   /** What the daemon writes to the account's daemon_status every tick */
-  snapshot(): DaemonPacing {
+  snapshot() {
     return {
       mode: this.mode,
       targetCallsPerSecond: 1000 / this.intervalMs(),
@@ -119,10 +119,10 @@ export class SyncPacer {
 }
 
 /** A pace for logs and `tg status`: calls per second, two decimals */
-export function formatPace(callsPerSecond: number): string {
+export function formatPace(callsPerSecond: number) {
   return callsPerSecond.toFixed(2);
 }
 
-export function createSyncPacer(config?: SyncPacingConfig): SyncPacer {
+export function createSyncPacer(config?: SyncPacingConfig) {
   return new SyncPacer(config);
 }

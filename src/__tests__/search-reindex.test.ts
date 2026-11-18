@@ -47,7 +47,7 @@ const chat: CachedChatInput = {
   raw_json: "{}",
 };
 
-function open(path = ":memory:"): Database {
+function open(path = ":memory:") {
   const db = new Database(path);
   initCacheSchema(db);
   initSyncSchema(db);
@@ -55,7 +55,7 @@ function open(path = ":memory:"): Database {
   return db;
 }
 
-function seedMessages(db: Database): void {
+function seedMessages(db: Database) {
   createMessagesCache(db).upsertBatch(
     Array.from({ length: MESSAGES }, (_, i) => ({
       chat_id: CHAT_ID,
@@ -77,7 +77,7 @@ const channel: CachedChatInput = {
   username: "rosenews",
 };
 
-function seedChannelPosts(db: Database): void {
+function seedChannelPosts(db: Database) {
   createMessagesCache(db).upsertBatch(
     [CHANNEL_ID, CHANNEL_ID, CHANNEL_ID, CHAT_ID].map((chatId, i) => ({
       chat_id: chatId,
@@ -95,7 +95,7 @@ function queue(db: Database) {
   return db.query("SELECT kind, peer_id, cursor FROM search_reindex_queue").all();
 }
 
-function matches(db: Database, query: string): number {
+function matches(db: Database, query: string) {
   return (
     db
       .query("SELECT COUNT(*) AS n FROM message_search WHERE message_search MATCH ?")
@@ -103,7 +103,7 @@ function matches(db: Database, query: string): number {
   ).n;
 }
 
-async function drain(db: Database): Promise<number> {
+async function drain(db: Database) {
   return runPendingMigrations(db, { limits: SMALL });
 }
 
@@ -286,7 +286,7 @@ describe("the one-off re-index of an older cache", () => {
 });
 
 describe("search disabled by an older SQLite", () => {
-  function cacheWithReindexWork(): Database {
+  function cacheWithReindexWork() {
     const db = open();
     seedMessages(db);
     createUsersCache(db).upsert(user);

@@ -61,9 +61,9 @@ function fakeUpload() {
   return { upload, calls };
 }
 
-function sentUpdates(made: { id: number }): tl.TypeUpdates {
+function sentUpdates(made: { id: number }) {
   const message = made as unknown as tl.RawMessage;
-  return {
+  const result: tl.TypeUpdates = {
     _: "updates",
     updates: [
       { _: "updateMessageID", id: message.id, randomId: toLong(1) },
@@ -74,6 +74,7 @@ function sentUpdates(made: { id: number }): tl.TypeUpdates {
     date: DATE,
     seq: 0,
   };
+  return result;
 }
 
 function fakeClient(response: tl.TypeUpdates) {
@@ -92,9 +93,7 @@ function fakeClient(response: tl.TypeUpdates) {
   };
 }
 
-function sendMediaRequest(
-  call: ReturnType<typeof fakeClient>["call"],
-): tl.messages.RawSendMediaRequest {
+function sendMediaRequest(call: ReturnType<typeof fakeClient>["call"]) {
   const request = call.mock.calls
     .map(([request]) => request)
     .find((request) => request._ === "messages.sendMedia");
@@ -145,7 +144,7 @@ describe("sendFile", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function place(name: string, size: number): string {
+  function place(name: string, size: number) {
     const dir = join(root, "nested", "dir");
     mkdirSync(dir, { recursive: true });
     const path = join(dir, name);

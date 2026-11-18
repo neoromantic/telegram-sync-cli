@@ -731,10 +731,10 @@ describe("sync-worker real jobs", () => {
         ctx,
         job,
         {
-          [SyncJobType.BackwardHistory]: async (): Promise<RealJobResult> => ({
-            success: false,
-            messagesFetched: 0,
-          }),
+          [SyncJobType.BackwardHistory]: async () => {
+            const result: RealJobResult = { success: false, messagesFetched: 0 };
+            return result;
+          },
         },
         () => ({ success: false, messagesFetched: 0 }),
       );
@@ -754,7 +754,7 @@ describe("sync-worker real jobs", () => {
         ctx,
         job,
         {
-          [SyncJobType.BackwardHistory]: async (): Promise<RealJobResult> => {
+          [SyncJobType.BackwardHistory]: async () => {
             throw new Error("database is locked");
           },
         },
@@ -775,7 +775,7 @@ describe("sync-worker real jobs", () => {
         ctx,
         job,
         {
-          [SyncJobType.BackwardHistory]: async (): Promise<RealJobResult> => {
+          [SyncJobType.BackwardHistory]: async () => {
             throw new tl.RpcError(400, "CHANNEL_PRIVATE");
           },
         },
@@ -1131,7 +1131,7 @@ describe("sync-worker real jobs", () => {
       return processForwardCatchupReal(ctx, job);
     }
 
-    function cachedIds(): number[] {
+    function cachedIds() {
       return range(1, 2000).filter((id) => ctx.messagesCache.get(chatId, id) !== null);
     }
 

@@ -314,21 +314,24 @@ describe("DaemonStatusService", () => {
 });
 
 describe("summarizeDaemonStatus", () => {
-  const info = (overrides: Partial<DaemonInfo>): DaemonInfo => ({
-    status: "running",
-    pid: 4242,
-    version: "0.4.0",
-    startedAt: 1_000,
-    lastUpdate: 5_000,
-    connectionStatus: "connected",
-    lastError: null,
-    messagesSynced: 10,
-    pendingJobs: 0,
-    runningJobs: 0,
-    lastCatchUp: null,
-    pacing: null,
-    ...overrides,
-  });
+  const info = (overrides: Partial<DaemonInfo>) => {
+    const result: DaemonInfo = {
+      status: "running",
+      pid: 4242,
+      version: "0.4.0",
+      startedAt: 1_000,
+      lastUpdate: 5_000,
+      connectionStatus: "connected",
+      lastError: null,
+      messagesSynced: 10,
+      pendingJobs: 0,
+      runningJobs: 0,
+      lastCatchUp: null,
+      pacing: null,
+      ...overrides,
+    };
+    return result;
+  };
 
   it("sums only the rows the live daemon wrote", () => {
     const summary = summarizeDaemonStatus(

@@ -33,7 +33,7 @@ import { REPORT_BLOCKS, REPORT_TEXT, richTlMessage } from "./helpers/rich-messag
 const MESSAGES = 21;
 const SMALL = { maxRows: 4, maxMs: 1_000 };
 
-function oldCache(): Database {
+function oldCache() {
   const db = new Database(":memory:");
   seedOldFormCache(db, { messages: MESSAGES });
   return db;
@@ -305,7 +305,7 @@ describe("stops and resumes", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function fileCache(): string {
+  function fileCache() {
     const path = join(dir, "cache.db");
     const db = new Database(path);
     db.run("PRAGMA journal_mode = WAL");
@@ -314,7 +314,7 @@ describe("stops and resumes", () => {
     return path;
   }
 
-  function open(path: string): Database {
+  function open(path: string) {
     const db = new Database(path);
     db.run("PRAGMA busy_timeout = 5000");
     return db;

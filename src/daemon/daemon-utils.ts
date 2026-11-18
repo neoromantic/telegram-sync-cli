@@ -3,7 +3,7 @@ import { DEFAULT_RECONNECT_CONFIG, type ReconnectConfig } from "./types";
 export function calculateReconnectDelay(
   attemptNumber: number,
   config: ReconnectConfig = DEFAULT_RECONNECT_CONFIG,
-): number {
+) {
   return Math.min(
     config.initialDelayMs * config.backoffMultiplier ** (attemptNumber - 1),
     config.maxDelayMs,
@@ -26,7 +26,7 @@ export function isDaemonStopError(err: unknown): err is DaemonStopError {
   return err instanceof DaemonStopError;
 }
 
-export function formatError(err: unknown): string {
+export function formatError(err: unknown) {
   if (err instanceof Error) {
     return err.stack ?? err.message;
   }
@@ -40,7 +40,7 @@ export function formatError(err: unknown): string {
   }
 }
 
-export function getErrorMessage(err: unknown): string {
+export function getErrorMessage(err: unknown) {
   if (err instanceof Error) {
     return err.message;
   }

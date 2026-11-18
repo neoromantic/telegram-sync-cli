@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 
-import { type CachedChat, createChatsCache } from "../../db/chats-cache";
+import { createChatsCache } from "../../db/chats-cache";
 import { createUsersCache } from "../../db/users-cache";
 import { AmbiguousPeerError, createDmLookup, isKnownUserId } from "../send/peer-resolver";
 
@@ -17,7 +17,7 @@ import { AmbiguousPeerError, createDmLookup, isKnownUserId } from "../send/peer-
  *
  * Throws AmbiguousPeerError when that bare ID names two cached chats.
  */
-export function findCachedChatById(db: Database, input: string): CachedChat | null {
+export function findCachedChatById(db: Database, input: string) {
   if (!/^-?\d+$/.test(input)) return null;
   const id = Number(input);
   if (!Number.isSafeInteger(id) || id === 0) return null;

@@ -19,7 +19,7 @@ const READ_PRAGMAS_WITH_ARGUMENT = new Set([
  * first, so the rest would be dropped without a word. Semicolons inside
  * strings, quoted names and comments don't count, nor one at the end.
  */
-export function hasSeveralStatements(query: string): boolean {
+export function hasSeveralStatements(query: string) {
   let i = 0;
   let ended = false;
   while (i < query.length) {
@@ -46,7 +46,7 @@ export function hasSeveralStatements(query: string): boolean {
   return false;
 }
 
-export function isReadOnlyQuery(query: string): boolean {
+export function isReadOnlyQuery(query: string) {
   const normalized = query.trim().replace(/\s+/g, " ").toUpperCase();
 
   const startsWithAllowed =
@@ -69,7 +69,7 @@ export function isReadOnlyQuery(query: string): boolean {
   return !WRITE_KEYWORDS.test(normalized);
 }
 
-export function applyQueryLimit(query: string, limit: number): string {
+export function applyQueryLimit(query: string, limit: number) {
   const trimmed = query.trim();
   const withoutSemicolon = trimmed.endsWith(";") ? trimmed.slice(0, -1).trimEnd() : trimmed;
 

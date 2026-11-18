@@ -35,7 +35,7 @@ export interface FakeDialogInput {
   readInboxMaxId?: number;
 }
 
-export function fakeDialog(input: FakeDialogInput): Dialog {
+export function fakeDialog(input: FakeDialogInput) {
   const { kind, id } = input;
   const title = input.title ?? `Chat ${id}`;
 
@@ -118,7 +118,7 @@ export function communityDialog({
   id,
   title = "Example Community",
   accessHash,
-}: CommunityDialogInput): Dialog {
+}: CommunityDialogInput) {
   return new Dialog(
     {
       _: "dialog",
@@ -179,8 +179,8 @@ export function fakeRawCommunity({
   title = "Example Community",
   accessHash,
   forbidden = false,
-}: FakeCommunityInput): tl.RawCommunity | tl.RawCommunityForbidden {
-  return forbidden
+}: FakeCommunityInput) {
+  const result: tl.RawCommunity | tl.RawCommunityForbidden = forbidden
     ? { _: "communityForbidden", id, accessHash: toLong(accessHash), title }
     : {
         _: "community",
@@ -190,6 +190,7 @@ export function fakeRawCommunity({
         photo: { _: "chatPhotoEmpty" },
         date: 1_700_000_000,
       };
+  return result;
 }
 
 /**
@@ -226,7 +227,7 @@ export function fakeDialogClient(
   }
 
   function getJoinedCommunitiesWith(callParams?: RpcCallOptions) {
-    return async function getJoinedCommunities(): Promise<Chat[]> {
+    return async function getJoinedCommunities() {
       communityCalls.push(callParams);
       if (options.communitiesWaitUntilAbort) await nextPage(callParams);
       if (options.communitiesError) throw options.communitiesError;

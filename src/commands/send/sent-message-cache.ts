@@ -27,7 +27,7 @@ function fromShortSentMessage(
   result: tl.RawUpdateShortSentMessage,
   request: SentMessageRequest,
   selfId: number,
-): MessageInput | null {
+) {
   const chatId = toPeerIdFromInputPeer(request.peer, selfId);
   if (chatId === null) return null;
 
@@ -52,7 +52,7 @@ function fromShortSentMessage(
   return { ...parsed, raw_json: toRawJson(result) };
 }
 
-function fromUpdates(updates: tl.TypeUpdate[]): MessageInput[] {
+function fromUpdates(updates: tl.TypeUpdate[]) {
   const inputs: MessageInput[] = [];
   for (const update of updates) {
     if (update._ !== "updateNewMessage" && update._ !== "updateNewChannelMessage") {
@@ -75,7 +75,7 @@ export function buildSentMessageInputs(
   result: tl.TypeUpdates,
   request: SentMessageRequest,
   selfId: number | null,
-): MessageInput[] {
+) {
   if (result._ === "updateShortSentMessage") {
     if (selfId === null) return [];
     const input = fromShortSentMessage(result, request, selfId);
@@ -96,7 +96,7 @@ export async function cacheSentMessage(
   deps: SentMessageCacheDeps,
   result: tl.TypeUpdates,
   request: SentMessageRequest,
-): Promise<number> {
+) {
   try {
     const selfId = result._ === "updateShortSentMessage" ? await deps.getSelfId() : null;
     const inputs = buildSentMessageInputs(result, request, selfId);
@@ -121,7 +121,7 @@ export async function resolveSelfId(
   client: Pick<TelegramClient, "getMe">,
   accountId: number | undefined,
   accounts: Pick<AccountsDbInterface, "getById" | "getActive" | "update">,
-): Promise<number> {
+) {
   const account = accountId !== undefined ? accounts.getById(accountId) : accounts.getActive();
   if (account?.user_id) return account.user_id;
 

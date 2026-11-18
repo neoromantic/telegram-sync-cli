@@ -22,7 +22,7 @@ import { createAccountCacheDb } from "./helpers/cache-db";
 import { communityDialog, fakeDialog, fakeRawCommunity } from "./helpers/fake-dialogs";
 import { assertPeerIdInvariants } from "./helpers/peer-id-invariants";
 
-function createTestChat(overrides: Partial<CachedChatInput> = {}): CachedChatInput {
+function createTestChat(overrides: Partial<CachedChatInput> = {}) {
   return {
     chat_id: "123456",
     type: "private" as ChatType,
@@ -40,7 +40,7 @@ function createTestChat(overrides: Partial<CachedChatInput> = {}): CachedChatInp
   };
 }
 
-function seedChatsWithTypes(chatsCache: ChatsCache): void {
+function seedChatsWithTypes(chatsCache: ChatsCache) {
   const chatTypes: Array<{
     id: string;
     type: ChatType;

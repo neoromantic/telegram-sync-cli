@@ -12,7 +12,7 @@ const HEALTH_CHECK_INTERVAL_TICKS = 60;
 const HEALTH_CHECK_COOLDOWN_MS = 60_000;
 const SCHEDULER_REFRESH_INTERVAL_TICKS = 30;
 
-function jobCounts(rt: AccountRuntime): { pending: number; running: number } {
+function jobCounts(rt: AccountRuntime) {
   const row = rt.db
     .query(
       `SELECT COALESCE(SUM(status = $pending), 0) AS pending,
@@ -32,7 +32,7 @@ function jobCounts(rt: AccountRuntime): { pending: number; running: number } {
  * after the schedulers start, so tg status is current during a long dialog
  * pass.
  */
-export async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
+export async function updateDaemonStatus(ctx: DaemonContext) {
   for (const rt of ctx.runtime.accounts.values()) {
     const accountState = ctx.state.accounts.get(rt.accountId);
     try {
@@ -53,9 +53,9 @@ export async function updateDaemonStatus(ctx: DaemonContext): Promise<void> {
   }
 }
 
-function sleepUnlessStopped(ms: number, signal: AbortSignal): Promise<void> {
+function sleepUnlessStopped(ms: number, signal: AbortSignal) {
   if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const done = () => {
       if (timer !== undefined) clearTimeout(timer);
@@ -79,7 +79,7 @@ export async function waitForNextTick(
     now: () => number;
     sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   } = { now: () => Date.now(), sleep: sleepUnlessStopped },
-): Promise<void> {
+) {
   const signal = ctx.runtime.shutdown.signal;
   let now = clock.now();
   const end = now + tickMs;
@@ -96,7 +96,7 @@ export async function waitForNextTick(
   await clock.sleep(Math.max(0, end - now), signal);
 }
 
-async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
+async function runHealthChecks(ctx: DaemonContext, now: number) {
   for (const accountState of ctx.state.accounts.values()) {
     if (accountState.status === "connected" && accountState.client) {
       const lastActivity = accountState.lastActivity ?? 0;
@@ -130,7 +130,7 @@ async function runHealthChecks(ctx: DaemonContext, now: number): Promise<void> {
   }
 }
 
-export async function mainLoop(ctx: DaemonContext): Promise<void> {
+export async function mainLoop(ctx: DaemonContext) {
   ctx.logger.debug("Starting main event loop...");
 
   let loopIteration = 0;

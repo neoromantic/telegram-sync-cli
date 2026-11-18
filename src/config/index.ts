@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_SYNC_PACING, type SyncPacingConfig } from "../daemon/sync-pacing";
+import { DEFAULT_SYNC_PACING } from "../daemon/sync-pacing";
 import { type AccountsDbInterface, accountsDb } from "../db";
 import type { CacheConfig, CacheRetentionConfig, DurationString } from "../db/types";
 import { getDefaultCacheConfig, getDefaultRetentionConfig, parseDuration } from "../db/types";
@@ -130,11 +130,11 @@ export class ConfigReadError extends Error {
   }
 }
 
-function resolveDataDir(dataDir?: string): string {
+function resolveDataDir(dataDir?: string) {
   return dataDir ?? process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? join(homedir(), ".telegram-sync-cli");
 }
 
-export function getConfigPath(dataDir?: string): string {
+export function getConfigPath(dataDir?: string) {
   return join(resolveDataDir(dataDir), "config.json");
 }
 
@@ -142,7 +142,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function getPathValue(data: Record<string, unknown>, path: string[]): unknown {
+function getPathValue(data: Record<string, unknown>, path: string[]) {
   let current: unknown = data;
   for (const key of path) {
     if (!isPlainObject(current)) return undefined;
@@ -151,7 +151,7 @@ function getPathValue(data: Record<string, unknown>, path: string[]): unknown {
   return current;
 }
 
-function setPathValue(data: Record<string, unknown>, path: string[], value: unknown): void {
+function setPathValue(data: Record<string, unknown>, path: string[], value: unknown) {
   let current: Record<string, unknown> = data;
   for (const [index, key] of path.entries()) {
     if (index === path.length - 1) {
@@ -168,7 +168,7 @@ function setPathValue(data: Record<string, unknown>, path: string[], value: unkn
 
 function normalizeDuration(value: DurationString): DurationString;
 function normalizeDuration(value: string): string;
-function normalizeDuration(value: string): string {
+function normalizeDuration(value: string) {
   return value.trim().toLowerCase();
 }
 
@@ -194,7 +194,7 @@ function isValidRate(value: unknown): value is number {
   );
 }
 
-function isChatEntry(value: unknown): boolean {
+function isChatEntry(value: unknown) {
   if (typeof value !== "string") return false;
   const entry = value.trim();
   return (
@@ -204,7 +204,7 @@ function isChatEntry(value: unknown): boolean {
   );
 }
 
-function validateValue(type: ConfigValueType, value: unknown): boolean {
+function validateValue(type: ConfigValueType, value: unknown) {
   switch (type) {
     case "number":
       return typeof value === "number" && Number.isInteger(value) && value > 0;
@@ -223,10 +223,7 @@ function validateValue(type: ConfigValueType, value: unknown): boolean {
   }
 }
 
-function sanitizeConfig(raw: Record<string, unknown>): {
-  config: ConfigFile;
-  errors: ConfigIssue[];
-} {
+function sanitizeConfig(raw: Record<string, unknown>) {
   const config: ConfigFile = {};
   const errors: ConfigIssue[] = [];
 
@@ -254,10 +251,7 @@ function sanitizeConfig(raw: Record<string, unknown>): {
   return { config, errors };
 }
 
-async function readConfigJson(dataDir?: string): Promise<{
-  raw: Record<string, unknown>;
-  exists: boolean;
-}> {
+async function readConfigJson(dataDir?: string) {
   const path = getConfigPath(dataDir);
   const file = Bun.file(path);
   if (!(await file.exists())) {
@@ -288,11 +282,7 @@ async function readConfigJson(dataDir?: string): Promise<{
   return { raw: parsed, exists: true };
 }
 
-export async function loadConfig(options: { strict?: boolean; dataDir?: string } = {}): Promise<{
-  config: ConfigFile;
-  exists: boolean;
-  errors: ConfigIssue[];
-}> {
+export async function loadConfig(options: { strict?: boolean; dataDir?: string } = {}) {
   const { strict = false, dataDir } = options;
 
   const { raw, exists } = await readConfigJson(dataDir);
@@ -305,7 +295,7 @@ export async function loadConfig(options: { strict?: boolean; dataDir?: string }
   return { config, exists, errors };
 }
 
-export function isConfigKey(key: string): boolean {
+export function isConfigKey(key: string) {
   return key in CONFIG_LEAF_TYPES || CONFIG_PREFIX_KEYS.has(key);
 }
 
@@ -313,7 +303,7 @@ export function isConfigLeafKey(key: string): key is ConfigLeafKey {
   return key in CONFIG_LEAF_TYPES;
 }
 
-export function parseConfigValue(key: ConfigLeafKey, rawValue: string): unknown {
+export function parseConfigValue(key: ConfigLeafKey, rawValue: string) {
   const type = CONFIG_LEAF_TYPES[key];
   const trimmed = rawValue.trim();
 
@@ -325,14 +315,16 @@ export function parseConfigValue(key: ConfigLeafKey, rawValue: string): unknown 
           { path: key, message: "Expected a positive integer" },
         ]);
       }
-      return parsed;
+      const result: unknown = parsed;
+      return result;
     }
     case "boolean": {
       const normalized = trimmed.toLowerCase();
       if (normalized !== "true" && normalized !== "false") {
         throw new ConfigError("Invalid value", [{ path: key, message: "Expected true or false" }]);
       }
-      return normalized === "true";
+      const result: unknown = normalized === "true";
+      return result;
     }
     case "duration": {
       const normalized = normalizeDuration(trimmed);
@@ -341,7 +333,8 @@ export function parseConfigValue(key: ConfigLeafKey, rawValue: string): unknown 
           { path: key, message: "Expected duration like 7d, 1h, 30m" },
         ]);
       }
-      return normalized;
+      const result: unknown = normalized;
+      return result;
     }
     case "positiveDuration": {
       const normalized = normalizeDuration(trimmed);
@@ -353,7 +346,8 @@ export function parseConfigValue(key: ConfigLeafKey, rawValue: string): unknown 
           },
         ]);
       }
-      return normalized;
+      const result: unknown = normalized;
+      return result;
     }
     case "rate": {
       const parsed = Number(trimmed);
@@ -365,14 +359,17 @@ export function parseConfigValue(key: ConfigLeafKey, rawValue: string): unknown 
           },
         ]);
       }
-      return parsed;
+      const result: unknown = parsed;
+      return result;
     }
-    case "chats":
-      return parseChatList(key, trimmed);
+    case "chats": {
+      const result: unknown = parseChatList(key, trimmed);
+      return result;
+    }
   }
 }
 
-function parseChatList(path: string, value: string): string[] {
+function parseChatList(path: string, value: string) {
   const entries = value === "" ? [] : value.split(",").map((entry) => entry.trim());
   const bad = entries.filter((entry) => !isChatEntry(entry));
   if (bad.length > 0) {
@@ -404,7 +401,7 @@ export const ALLOWED_CHATS_ENV = "TELEGRAM_SYNC_CLI_ALLOWED_CHATS";
  */
 export async function loadAccessSettings(
   options: { dataDir?: string; env?: Record<string, string | undefined> } = {},
-): Promise<AccessSettings> {
+) {
   const env = options.env ?? process.env;
   const { config } = await loadConfig({
     dataDir: options.dataDir,
@@ -424,7 +421,7 @@ export async function loadAccessSettings(
 export async function getConfigValue(
   key: string,
   options: { dataDir?: string; strict?: boolean } = {},
-): Promise<unknown> {
+) {
   const { config } = await loadConfig({
     dataDir: options.dataDir,
     strict: options.strict ?? false,
@@ -436,7 +433,7 @@ export async function setConfigValue(
   key: ConfigLeafKey,
   value: unknown,
   options: { dataDir?: string } = {},
-): Promise<void> {
+) {
   if (!validateValue(CONFIG_LEAF_TYPES[key], value)) {
     throw new ConfigError("Invalid value", [
       {
@@ -451,9 +448,7 @@ export async function setConfigValue(
   await Bun.write(getConfigPath(options.dataDir), `${JSON.stringify(raw, null, 2)}\n`);
 }
 
-export async function getResolvedCacheConfig(
-  options: { dataDir?: string } = {},
-): Promise<CacheConfig> {
+export async function getResolvedCacheConfig(options: { dataDir?: string } = {}) {
   const { config } = await loadConfig({
     dataDir: options.dataDir,
     strict: true,
@@ -484,7 +479,7 @@ export async function getResolvedCacheConfig(
   return resolved;
 }
 
-function resolveRetention(config: ConfigFile): CacheRetentionConfig {
+function resolveRetention(config: ConfigFile) {
   const retention = getDefaultRetentionConfig();
   for (const field of Object.keys(RETENTION_KEYS) as Array<keyof CacheRetentionConfig>) {
     const value = config.cache?.retention?.[field];
@@ -493,7 +488,7 @@ function resolveRetention(config: ConfigFile): CacheRetentionConfig {
   return retention;
 }
 
-function resolvePacing(config: ConfigFile): SyncPacingConfig {
+function resolvePacing(config: ConfigFile) {
   const pacing = { ...DEFAULT_SYNC_PACING };
   const file = config.sync?.pacing;
   if (file?.maxCallsPerSecond) pacing.maxCallsPerSecond = file.maxCallsPerSecond;
@@ -509,11 +504,7 @@ const DAEMON_KEY_PREFIXES = ["cache.retention.", "sync.pacing."];
  * value gives one warning, and every key that can't be read keeps its
  * default.
  */
-export async function loadDaemonConfig(options: { dataDir?: string } = {}): Promise<{
-  retention: CacheRetentionConfig;
-  pacing: SyncPacingConfig;
-  warning: string | null;
-}> {
+export async function loadDaemonConfig(options: { dataDir?: string } = {}) {
   const fallback = "using the defaults";
   let loaded: Awaited<ReturnType<typeof loadConfig>>;
   try {
@@ -548,7 +539,7 @@ export async function loadDaemonConfig(options: { dataDir?: string } = {}): Prom
 export async function syncActiveAccountFromConfig(
   accounts: AccountsDbInterface = accountsDb,
   options: { dataDir?: string } = {},
-): Promise<void> {
+) {
   const { config } = await loadConfig({
     dataDir: options.dataDir,
     strict: true,

@@ -39,7 +39,7 @@ function readIndexInfo(db: Database, tableName: string) {
   });
 }
 
-function handleSingleTable(tableName: string, format: string): void {
+function handleSingleTable(tableName: string, format: string) {
   const annotation = getTableAnnotation(tableName);
   if (!annotation) {
     const available = getTableNames().join(", ");
@@ -92,7 +92,7 @@ function handleSingleTable(tableName: string, format: string): void {
   });
 }
 
-function handleAllTables(format: string): void {
+function handleAllTables(format: string) {
   if (format === "text") {
     const tableNames = getTableNames();
     for (const name of tableNames) {

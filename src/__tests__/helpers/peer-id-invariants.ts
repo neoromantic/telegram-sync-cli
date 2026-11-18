@@ -12,7 +12,7 @@ const KINDS_BY_TYPE: Record<string, string[]> = {
 
 const CHAT_ID_TABLES = ["messages_cache", "sync_jobs", "history_ranges"];
 
-function peerType(id: number): string {
+function peerType(id: number) {
   try {
     return parseMarkedPeerId(id)[0];
   } catch {
@@ -27,7 +27,7 @@ function peerType(id: number): string {
  * a positive chat ID (a user) that chats_cache or chat_sync_state knows as
  * a group or channel
  */
-export function assertPeerIdInvariants(db: Database): void {
+export function assertPeerIdInvariants(db: Database) {
   const violations: string[] = [];
 
   const typed = [

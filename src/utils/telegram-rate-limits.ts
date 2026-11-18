@@ -42,7 +42,7 @@ export function reportRateLimit(err: RateLimitError): never {
 }
 
 /** Report a config error or a rate limit and exit; any other error returns */
-export function reportConfigOrRateLimitError(err: unknown): void {
+export function reportConfigOrRateLimitError(err: unknown) {
   if (err instanceof ConfigError) {
     error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues });
   }
@@ -56,7 +56,7 @@ const services = new Map<number, { db: Database; service: RateLimitsService }>()
  * coordinate per account, and a FLOOD_WAIT one account recorded never
  * blocks another
  */
-export function getRateLimitsService(accountId: number): RateLimitsService {
+export function getRateLimitsService(accountId: number) {
   const db = getAccountCacheDb(accountId);
   const cached = services.get(accountId);
   if (cached && cached.db === db) return cached.service;
@@ -65,7 +65,7 @@ export function getRateLimitsService(accountId: number): RateLimitsService {
   return service;
 }
 
-function extractFloodWaitSeconds(error: unknown): number | null {
+function extractFloodWaitSeconds(error: unknown) {
   if (error instanceof Error) {
     const match = error.message.match(/FLOOD_WAIT_(\d+)/);
     if (match?.[1]) {
@@ -86,12 +86,12 @@ function extractFloodWaitSeconds(error: unknown): number | null {
   return null;
 }
 
-function isFloodWait(error: unknown): boolean {
+function isFloodWait(error: unknown) {
   if (tl.RpcError.is(error)) return error.code === tl.RpcError.FLOOD;
   return error instanceof Error && /FLOOD_WAIT_\d+/.test(error.message);
 }
 
-function apiErrorCode(error: unknown): number | null {
+function apiErrorCode(error: unknown) {
   if (tl.RpcError.is(error)) return error.code;
   return extractFloodWaitSeconds(error) ? tl.RpcError.FLOOD : null;
 }
@@ -108,7 +108,7 @@ export async function trackApiCall<T>(
   method: string,
   call: () => Promise<T>,
   context?: string,
-): Promise<T> {
+) {
   const start = rateLimits.now();
   rateLimits.recordCall(method);
 
@@ -150,7 +150,7 @@ async function callWithRateLimits<T>({
   call: () => Promise<T>;
   rateLimits: RateLimitsService;
   context?: string;
-}): Promise<T> {
+}) {
   if (rateLimits.isBlocked(method)) {
     throw new RateLimitError(method, rateLimits.getWaitTime(method));
   }
@@ -178,10 +178,7 @@ export type RateLimitsTarget = { context?: string } & (
  * Check and record every call of the client in the rate limits of the
  * account it belongs to
  */
-export function wrapClientCallWithRateLimits(
-  client: TelegramClient,
-  options: RateLimitsTarget,
-): TelegramClient {
+export function wrapClientCallWithRateLimits(client: TelegramClient, options: RateLimitsTarget) {
   const rateLimits =
     options.rateLimits === undefined ? getRateLimitsService(options.accountId) : options.rateLimits;
   const clientAny = client as TelegramClient & {

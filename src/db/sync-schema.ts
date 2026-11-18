@@ -30,7 +30,7 @@ const CONTENTLESS_SEARCH_MIN_VERSION = [3, 43, 0] as const;
  * deletes (3.43.0 and newer). On macOS Bun uses the system libsqlite3, so
  * this depends on the OS version there.
  */
-export function supportsContentlessSearch(db: Database): boolean {
+export function supportsContentlessSearch(db: Database) {
   const { version } = db.query("SELECT sqlite_version() AS version").get() as {
     version: string;
   };
@@ -43,21 +43,21 @@ export function supportsContentlessSearch(db: Database): boolean {
 }
 
 /** Whether the cache's message_search is the contentless table */
-export function isContentlessSearch(db: Database): boolean {
+export function isContentlessSearch(db: Database) {
   const row = db
     .query(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_search'`)
     .get() as { sql: string | null } | null;
   return /contentless_delete\s*=\s*1/i.test(row?.sql ?? "");
 }
 
-function dropMessageSearchSchema(db: Database): void {
+function dropMessageSearchSchema(db: Database) {
   for (const trigger of SEARCH_TRIGGERS) {
     db.run(`DROP TRIGGER IF EXISTS ${trigger}`);
   }
   db.run("DROP TABLE IF EXISTS message_search");
 }
 
-function createSearchMetaTable(db: Database): void {
+function createSearchMetaTable(db: Database) {
   db.run(`
     CREATE TABLE IF NOT EXISTS search_meta (
       key TEXT PRIMARY KEY,
@@ -67,7 +67,7 @@ function createSearchMetaTable(db: Database): void {
   `);
 }
 
-function setSearchIndexVersion(db: Database, version: number): void {
+function setSearchIndexVersion(db: Database, version: number) {
   db.query(
     `
       INSERT INTO search_meta (key, value, updated_at)
@@ -81,7 +81,7 @@ function setSearchIndexVersion(db: Database, version: number): void {
   });
 }
 
-function createMessageSearchSchema(db: Database, contentless: boolean): void {
+function createMessageSearchSchema(db: Database, contentless: boolean) {
   db.run(`
     CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
       text,
@@ -109,7 +109,7 @@ function createMessageSearchSchema(db: Database, contentless: boolean): void {
   createSearchReindexSchema(db);
 }
 
-function createSearchInsertTrigger(db: Database): void {
+function createSearchInsertTrigger(db: Database) {
   db.run(`
     CREATE TRIGGER IF NOT EXISTS messages_cache_ai
     AFTER INSERT ON messages_cache
@@ -126,7 +126,7 @@ function createSearchInsertTrigger(db: Database): void {
   `);
 }
 
-function createSearchUpdateTrigger(db: Database): void {
+function createSearchUpdateTrigger(db: Database) {
   db.run(`
     CREATE TRIGGER IF NOT EXISTS messages_cache_au
     AFTER UPDATE OF text, from_id, media_path ON messages_cache
@@ -147,11 +147,7 @@ function createSearchUpdateTrigger(db: Database): void {
   `);
 }
 
-function messagesCacheWritesWork(db: Database): {
-  insertTrigger: boolean;
-  updateTrigger: boolean;
-  index: boolean;
-} {
+function messagesCacheWritesWork(db: Database) {
   const rows = db
     .query(
       `SELECT name, sql FROM sqlite_master
@@ -170,7 +166,7 @@ function messagesCacheWritesWork(db: Database): {
   };
 }
 
-function upgradeMessagesCacheWrites(db: Database): void {
+function upgradeMessagesCacheWrites(db: Database) {
   const pending = messagesCacheWritesWork(db);
   if (!pending.insertTrigger && !pending.updateTrigger && !pending.index) {
     return;
@@ -196,7 +192,7 @@ function upgradeMessagesCacheWrites(db: Database): void {
  * Fill the search index again from messages_cache, in one transaction. It
  * reads the names cached now, so no queued re-index is left.
  */
-export function rebuildMessageSearchIndex(db: Database): void {
+export function rebuildMessageSearchIndex(db: Database) {
   const senderExpr = buildSenderSearchExpr("m");
   const chatExpr = buildChatSearchExpr("m");
 
@@ -223,7 +219,7 @@ export function rebuildMessageSearchIndex(db: Database): void {
   })();
 }
 
-function getMessageSearchColumns(db: Database): string[] {
+function getMessageSearchColumns(db: Database) {
   try {
     return (
       db.query("PRAGMA table_info(message_search)").all() as Array<{
@@ -235,7 +231,7 @@ function getMessageSearchColumns(db: Database): string[] {
   }
 }
 
-function searchIndexWork(db: Database, contentless: boolean): "none" | "rows" | "schema" {
+function searchIndexWork(db: Database, contentless: boolean) {
   const result = db
     .query(`SELECT value FROM search_meta WHERE key = 'search_index_version'`)
     .get() as { value?: string } | null;
@@ -248,7 +244,7 @@ function searchIndexWork(db: Database, contentless: boolean): "none" | "rows" | 
   return storedVersion === SEARCH_INDEX_VERSION ? "none" : "rows";
 }
 
-function ensureMessageSearchIndex(db: Database, contentless: boolean): void {
+function ensureMessageSearchIndex(db: Database, contentless: boolean) {
   if (searchIndexWork(db, contentless) === "none") return;
 
   withBusyTimeout(db, INDEX_BUILD_BUSY_TIMEOUT_MS, () => {
@@ -264,7 +260,7 @@ function ensureMessageSearchIndex(db: Database, contentless: boolean): void {
   });
 }
 
-function disableUnsupportedSearch(db: Database, contentless: boolean): boolean {
+function disableUnsupportedSearch(db: Database, contentless: boolean) {
   if (contentless || !isContentlessSearch(db)) return false;
 
   const triggers = db
@@ -287,7 +283,7 @@ function disableUnsupportedSearch(db: Database, contentless: boolean): boolean {
   return true;
 }
 
-function ensureColumn(db: Database, table: string, column: string, definition: string): void {
+function ensureColumn(db: Database, table: string, column: string, definition: string) {
   const columns = db.query(`PRAGMA table_info(${table})`).all() as Array<{
     name: string;
   }>;
@@ -306,7 +302,7 @@ function ensureColumn(db: Database, table: string, column: string, definition: s
 export const INDEX_BUILD_BUSY_TIMEOUT_MS = 60_000;
 
 /** Run `work` with busy_timeout raised to `timeoutMs`, then restore it */
-export function withBusyTimeout<T>(db: Database, timeoutMs: number, work: () => T): T {
+export function withBusyTimeout<T>(db: Database, timeoutMs: number, work: () => T) {
   const { timeout } = db.query("PRAGMA busy_timeout").get() as {
     timeout: number;
   };
@@ -318,7 +314,7 @@ export function withBusyTimeout<T>(db: Database, timeoutMs: number, work: () => 
   }
 }
 
-function ensureIndex(db: Database, name: string, definition: string): void {
+function ensureIndex(db: Database, name: string, definition: string) {
   const exists = db
     .query(`SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?`)
     .get(name);
@@ -335,7 +331,7 @@ function ensureIndex(db: Database, name: string, definition: string): void {
  * written by this version on; older ones are filled by a later backfill.
  * Created once, so opening a cache that has it never waits for the write lock.
  */
-export function createMessageAttachmentsSchema(db: Database): void {
+export function createMessageAttachmentsSchema(db: Database) {
   const exists = db
     .query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_attachments'`)
     .get();
@@ -373,7 +369,7 @@ export function createMessageAttachmentsSchema(db: Database): void {
  * so a protection seen online once also refuses cached files offline.
  * Created once, so opening a cache that has it never waits for the write lock.
  */
-export function createChatContentProtectionSchema(db: Database): void {
+export function createChatContentProtectionSchema(db: Database) {
   const exists = db
     .query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_content_protection'`)
     .get();
@@ -403,7 +399,7 @@ export interface SyncSchemaOptions {
  * Initialize the sync schema
  * Creates all tables and indexes for the sync system
  */
-export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}): void {
+export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}) {
   const contentless = options.contentlessSearch ?? supportsContentlessSearch(db);
 
   db.run(`
@@ -750,7 +746,7 @@ export const FIRST_PAGE_ONLY_POLICIES: readonly SyncPolicyReason[] = ["bot", "de
  * SQL condition: the chat in `table` gets older history. A chat turned on
  * by hand always does; under the policy, bots and deleted accounts don't.
  */
-export function historyAllowedSql(table: string): string {
+export function historyAllowedSql(table: string) {
   const reasons = FIRST_PAGE_ONLY_POLICIES.map((reason) => `'${reason}'`);
   return `(${table}.sync_mode = 'on' OR ${table}.sync_policy IS NULL OR ${table}.sync_policy NOT IN (${reasons.join(", ")}))`;
 }
@@ -759,7 +755,7 @@ export function historyAllowedSql(table: string): string {
  * SQL condition: the chat in `table` needs no more history, because it
  * reached the start or because it gets its newest page only and had it
  */
-export function historyDoneSql(table: string): string {
+export function historyDoneSql(table: string) {
   return `(${table}.history_complete = 1 OR (${table}.forward_cursor IS NOT NULL AND NOT ${historyAllowedSql(table)}))`;
 }
 
@@ -767,7 +763,7 @@ export function historyDoneSql(table: string): string {
 export function isHistoryAllowed(state: {
   sync_mode: SyncMode;
   sync_policy: SyncPolicyReason | null;
-}): boolean {
+}) {
   return (
     state.sync_mode === "on" ||
     state.sync_policy === null ||
@@ -790,15 +786,20 @@ export interface SyncPolicy {
 }
 
 /** Whether a raw Telegram user is a bot or a deleted account; a chat is neither */
-export function rawUserPolicy(raw: unknown): SyncPolicyUser {
+export function rawUserPolicy(raw: unknown) {
   const user = raw as { _?: string; bot?: boolean; deleted?: boolean } | null;
-  if (user?._ !== "user") return {};
-  return { bot: Boolean(user.bot), deleted: Boolean(user.deleted) };
+  if (user?._ !== "user") {
+    const result: SyncPolicyUser = {};
+    return result;
+  }
+  const result: SyncPolicyUser = { bot: Boolean(user.bot), deleted: Boolean(user.deleted) };
+  return result;
 }
 
 /** The user flags a stored policy reason stands for */
-export function policyUserFromReason(reason: SyncPolicyReason | null | undefined): SyncPolicyUser {
-  return { bot: reason === "bot", deleted: reason === "deleted_account" };
+export function policyUserFromReason(reason: SyncPolicyReason | null | undefined) {
+  const result: SyncPolicyUser = { bot: reason === "bot", deleted: reason === "deleted_account" };
+  return result;
 }
 
 /**
@@ -820,8 +821,8 @@ export function determineSyncPolicy(
   chatType: SyncChatType,
   memberCount?: number | null,
   user: SyncPolicyUser = {},
-): SyncPolicy {
-  const off = (reason: SyncPolicyReason): SyncPolicy => ({
+) {
+  const off = (reason: SyncPolicyReason) => ({
     priority: SyncPriority.Low,
     enabled: false,
     history: false,
@@ -831,19 +832,23 @@ export function determineSyncPolicy(
   switch (chatType) {
     case "private":
       if (user.bot || user.deleted) {
-        return {
+        const result: SyncPolicy = {
           priority: SyncPriority.Medium,
           enabled: true,
           history: false,
           reason: user.bot ? "bot" : "deleted_account",
         };
+        return result;
       }
-      return {
-        priority: SyncPriority.High,
-        enabled: true,
-        history: true,
-        reason: "dm",
-      };
+      {
+        const result: SyncPolicy = {
+          priority: SyncPriority.High,
+          enabled: true,
+          history: true,
+          reason: "dm",
+        };
+        return result;
+      }
 
     case "group":
     case "supergroup":
@@ -851,20 +856,22 @@ export function determineSyncPolicy(
         return off("unknown_size");
       }
       if (memberCount < 20) {
-        return {
+        const result: SyncPolicy = {
           priority: SyncPriority.High,
           enabled: true,
           history: true,
           reason: "small_group",
         };
+        return result;
       }
       if (memberCount <= 100) {
-        return {
+        const result: SyncPolicy = {
           priority: SyncPriority.Medium,
           enabled: true,
           history: true,
           reason: "medium_group",
         };
+        return result;
       }
       return off("large_group");
 

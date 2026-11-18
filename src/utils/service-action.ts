@@ -64,23 +64,23 @@ export type MessageAction =
 
 type RawObject = Record<string, unknown>;
 
-function asObject(value: unknown): RawObject | null {
+function asObject(value: unknown) {
   return typeof value === "object" && value !== null ? (value as RawObject) : null;
 }
 
-function num(value: unknown): number | null {
+function num(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function str(value: unknown): string | null {
+function str(value: unknown) {
   return typeof value === "string" ? value : null;
 }
 
-function ids(value: unknown): number[] {
+function ids(value: unknown) {
   return Array.isArray(value) ? value.filter((id): id is number => num(id) !== null) : [];
 }
 
-function snakeName(tlName: string, prefix: string): string {
+function snakeName(tlName: string, prefix: string) {
   return tlName
     .slice(prefix.length)
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
@@ -88,7 +88,7 @@ function snakeName(tlName: string, prefix: string): string {
     .toLowerCase();
 }
 
-function parse(input: unknown): RawObject | null {
+function parse(input: unknown) {
   if (typeof input !== "string") return asObject(input);
   try {
     return asObject(JSON.parse(input));
@@ -102,7 +102,7 @@ function parse(input: unknown): RawObject | null {
  * anything that isn't a message; never throws. `type` is the TL name in
  * snake case without `messageAction`, for actions it doesn't map too.
  */
-export function extractServiceAction(input: unknown): MessageAction | null {
+export function extractServiceAction(input: unknown) {
   const message = parse(input);
   if (message?._ !== "messageService") return null;
   const action = asObject(message.action);

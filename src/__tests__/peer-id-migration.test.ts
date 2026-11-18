@@ -34,11 +34,11 @@ import { takePartIn } from "./helpers/participation";
 import { assertPeerIdInvariants } from "./helpers/peer-id-invariants";
 import { photoMessage } from "./helpers/photo-message";
 
-function userVersion(db: Database): number {
+function userVersion(db: Database) {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 }
 
-function chatIds(db: Database): Record<string, string> {
+function chatIds(db: Database) {
   const rows = db.query("SELECT chat_id, title FROM chats_cache ORDER BY title").all() as {
     chat_id: string;
     title: string;
@@ -46,19 +46,19 @@ function chatIds(db: Database): Record<string, string> {
   return Object.fromEntries(rows.map((row) => [row.title, row.chat_id]));
 }
 
-function dump(db: Database, table: string): unknown[] {
+function dump(db: Database, table: string) {
   return db.query(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all();
 }
 
-function totalChanges(db: Database): number {
+function totalChanges(db: Database) {
   return (db.query("SELECT total_changes() AS n").get() as { n: number }).n;
 }
 
-function busyTimeout(db: Database): number {
+function busyTimeout(db: Database) {
   return (db.query("PRAGMA busy_timeout").get() as { timeout: number }).timeout;
 }
 
-function senderIds(db: Database): unknown[] {
+function senderIds(db: Database) {
   return db
     .query(
       "SELECT chat_id, message_id, from_id, forward_from_id FROM messages_cache ORDER BY chat_id, message_id",
@@ -579,7 +579,7 @@ describe("peer ID migration on a shared file", () => {
   });
 });
 
-function openCache(db: Database): void {
+function openCache(db: Database) {
   initCacheSchema(db);
   initSyncSchema(db);
 }

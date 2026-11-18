@@ -19,11 +19,11 @@ const NOT_PROTECTED: ProtectionResult = { protected: false };
 
 type RawObject = Record<string, unknown>;
 
-function asObject(value: unknown): RawObject | null {
+function asObject(value: unknown) {
   return typeof value === "object" && value !== null ? (value as RawObject) : null;
 }
 
-function parseJson(text: string | null): RawObject | null {
+function parseJson(text: string | null) {
   if (text === null) return null;
   try {
     return asObject(JSON.parse(text));
@@ -32,19 +32,21 @@ function parseJson(text: string | null): RawObject | null {
   }
 }
 
-function messageProtection(message: RawObject | null): ProtectionResult {
+function messageProtection(message: RawObject | null) {
   if (!message) return NOT_PROTECTED;
   if (message.noforwards === true) {
-    return { protected: true, reason: "message" };
+    const result: ProtectionResult = { protected: true, reason: "message" };
+    return result;
   }
   const ttl = asObject(message.media)?.ttlSeconds;
   if (typeof ttl === "number" && ttl > 0) {
-    return { protected: true, reason: "self_destructing" };
+    const result: ProtectionResult = { protected: true, reason: "self_destructing" };
+    return result;
   }
   return NOT_PROTECTED;
 }
 
-function chatObjectProtected(chat: RawObject | null): boolean {
+function chatObjectProtected(chat: RawObject | null) {
   return (chat?._ === "chat" || chat?._ === "channel") && chat.noforwards === true;
 }
 
@@ -63,9 +65,10 @@ export interface CachedChatState {
 export function knownChatProtection(
   chat: CachedChatState | null,
   stored: ChatProtectionRow | null,
-): ProtectionResult {
+) {
   if (stored?.protected === 1) {
-    return { protected: true, reason: stored.reason ?? "chat" };
+    const result: ProtectionResult = { protected: true, reason: stored.reason ?? "chat" };
+    return result;
   }
   if (!chat || !chatObjectProtected(parseJson(chat.raw_json))) {
     return NOT_PROTECTED;
@@ -73,7 +76,8 @@ export function knownChatProtection(
   if (stored !== null && chat.fetched_at <= stored.fetched_at) {
     return NOT_PROTECTED;
   }
-  return { protected: true, reason: "chat" };
+  const result: ProtectionResult = { protected: true, reason: "chat" };
+  return result;
 }
 
 /**
@@ -84,9 +88,12 @@ export function checkCachedProtection(
   messageRawJson: string,
   chat: CachedChatState | null,
   stored: ChatProtectionRow | null,
-): ProtectionResult {
+) {
   const message = messageProtection(parseJson(messageRawJson));
-  if (message.protected) return message;
+  if (message.protected) {
+    const result: ProtectionResult = message;
+    return result;
+  }
   return knownChatProtection(chat, stored);
 }
 
@@ -107,7 +114,7 @@ export async function checkOnlineProtection(
   message: FetchedRawMessage,
   chats: tl.TypeChat[],
   signal?: AbortSignal,
-): Promise<OnlineProtection> {
+) {
   const result: OnlineProtection = {
     message: messageProtection(message as unknown as RawObject),
     chat: null,

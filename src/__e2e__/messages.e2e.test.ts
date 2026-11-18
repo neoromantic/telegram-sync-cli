@@ -94,7 +94,7 @@ describe("E2E: Messages Search", () => {
     expect(messageIds).toEqual([1, 2]);
   });
 
-  async function search(...args: string[]): Promise<MessageSearchItem[]> {
+  async function search(...args: string[]) {
     const result = await runCliSuccess(["messages", "search", ...args], env.getCliOptions());
     return (result.json as { data: { results: MessageSearchItem[] } }).data.results;
   }
@@ -180,7 +180,7 @@ describe("E2E: Messages Search on a cache from 0.2.0", () => {
     env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
   });
 
-  async function search(query: string): Promise<MessageSearchItem[]> {
+  async function search(query: string) {
     const result = await runCliSuccess(["messages", "search", "--query", query], options());
     return (result.json as { data: { results: MessageSearchItem[] } }).data.results;
   }
@@ -273,7 +273,7 @@ function syncedMessage(
   )!;
 }
 
-function seedCacheData(db: Database): void {
+function seedCacheData(db: Database) {
   const now = Date.now();
   const usersCache = createUsersCache(db);
 
@@ -391,12 +391,12 @@ function useSeededHistory(name: string) {
 describe("E2E: Messages List", () => {
   const options = useSeededHistory("messages-list");
 
-  async function list(...args: string[]): Promise<ListData> {
+  async function list(...args: string[]) {
     const result = await runCliSuccess(["messages", "list", ...args], options());
     return (result.json as { data: ListData }).data;
   }
 
-  async function ids(...args: string[]): Promise<number[]> {
+  async function ids(...args: string[]) {
     return (await list(...args)).items.map((item) => item.messageId);
   }
 
@@ -580,7 +580,7 @@ interface GetData {
 describe("E2E: Messages Get", () => {
   const options = useSeededHistory("messages-get");
 
-  async function get(...args: string[]): Promise<GetData> {
+  async function get(...args: string[]) {
     const result = await runCliSuccess(["messages", "get", ...args], options());
     return (result.json as { data: GetData }).data;
   }
@@ -1068,7 +1068,7 @@ describe("E2E: Rich messages", () => {
   });
 });
 
-function seedHistory(db: Database): void {
+function seedHistory(db: Database) {
   const now = Date.now();
   const usersCache = createUsersCache(db);
   takePartIn(db, -4242, -1001234567890);
@@ -1167,7 +1167,7 @@ function seedHistory(db: Database): void {
   }
 }
 
-function seedSecondAccount(db: Database): void {
+function seedSecondAccount(db: Database) {
   createMessagesCache(db).upsertBatch([
     {
       chat_id: SECOND_SELF_ID,

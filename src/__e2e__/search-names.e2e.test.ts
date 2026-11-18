@@ -43,7 +43,7 @@ describe("E2E: names in the search index", () => {
     env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
   });
 
-  function seedMessages(): void {
+  function seedMessages() {
     const db = env.openCacheDb(1);
     takePartIn(db, -1009000000002);
     createMessagesCache(db).upsertBatch(
@@ -59,14 +59,14 @@ describe("E2E: names in the search index", () => {
     );
   }
 
-  async function ids(query: string): Promise<number[]> {
+  async function ids(query: string) {
     const result = await runCliSuccess(["messages", "search", "--query", query], options());
     return (result.json as { data: { results: MessageSearchItem[] } }).data.results
       .map((item) => item.messageId)
       .sort((a, b) => a - b);
   }
 
-  async function migrate(): Promise<void> {
+  async function migrate() {
     await runCliSuccess(["db", "migrate", "--account", "1"], options());
   }
 

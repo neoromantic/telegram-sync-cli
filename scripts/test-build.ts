@@ -8,7 +8,7 @@ const outputBase = join("dist", "tg-test");
 const OUTPUT = isWindows ? `${outputBase}.exe` : outputBase;
 const RUN_PATH = isWindows ? OUTPUT : `./${OUTPUT}`;
 
-async function runBinary(args: string[]): Promise<string> {
+async function runBinary(args: string[]) {
   const proc = Bun.spawn([RUN_PATH, ...args], {
     stdout: "pipe",
     stderr: "pipe",

@@ -2,7 +2,7 @@ import { $ } from "bun";
 
 const pkg = await Bun.file("package.json").json();
 
-async function runTg(args: string[]): Promise<string> {
+async function runTg(args: string[]) {
   const proc = Bun.spawn(["tg", ...args], {
     stdout: "pipe",
     stderr: "pipe",

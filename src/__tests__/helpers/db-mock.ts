@@ -8,7 +8,7 @@ import type { AccountsDbInterface } from "../../db/index";
 import type { Account } from "../../types";
 import { createAccountCacheDb } from "./cache-db";
 
-export function testAccount(overrides: Partial<Account> = {}): Account {
+export function testAccount(overrides: Partial<Account> = {}) {
   return {
     id: 1,
     phone: "+15550000001",
@@ -25,12 +25,12 @@ export function testAccount(overrides: Partial<Account> = {}): Account {
 }
 
 /** An in-memory AccountsDbInterface over the given accounts */
-export function createFakeAccountsDb(seed: Account[] = [testAccount()]): AccountsDbInterface {
+export function createFakeAccountsDb(seed: Account[] = [testAccount()]) {
   const accounts = new Map(seed.map((account) => [account.id, { ...account }]));
   let nextId = Math.max(0, ...accounts.keys()) + 1;
   const all = () => [...accounts.values()].sort((a, b) => a.id - b.id);
 
-  return {
+  const result: AccountsDbInterface = {
     getAll: () => all(),
     getById: (id) => accounts.get(id) ?? null,
     getByPhone: (phone) => all().find((a) => a.phone === phone) ?? null,
@@ -77,6 +77,7 @@ export function createFakeAccountsDb(seed: Account[] = [testAccount()]): Account
     delete: (id) => accounts.delete(id),
     count: () => accounts.size,
   };
+  return result;
 }
 
 /**

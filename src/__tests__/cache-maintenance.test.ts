@@ -28,7 +28,7 @@ const NOW_SEC = NOW / SECOND;
 let dir: string;
 let db: Database;
 
-function openCache(path: string): Database {
+function openCache(path: string) {
   const cache = new Database(path);
   initCacheSchema(cache);
   initSyncSchema(cache);
@@ -60,7 +60,7 @@ function addWindow(windowStart: number, floodWaitUntil: number | null = null) {
   ).run(windowStart, windowStart, floodWaitUntil);
 }
 
-function addJob(status: string, completedAt: number | null): number {
+function addJob(status: string, completedAt: number | null) {
   const row = db
     .query(
       `INSERT INTO sync_jobs (chat_id, job_type, status, completed_at)

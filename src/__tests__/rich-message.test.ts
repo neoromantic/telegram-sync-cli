@@ -16,7 +16,7 @@ import {
 
 const peerId = { _: "peerUser" as const, userId: 1001 };
 
-function render(blocks: tl.TypePageBlock[], extra: Partial<tl.RawRichMessage> = {}): string | null {
+function render(blocks: tl.TypePageBlock[], extra: Partial<tl.RawRichMessage> = {}) {
   const message = richTlMessage(peerId, 7, blocks, extra);
   const cached = richMessageText(toRawJson(message));
   expect(richMessageText(message)).toBe(cached);
@@ -25,18 +25,24 @@ function render(blocks: tl.TypePageBlock[], extra: Partial<tl.RawRichMessage> = 
 
 const inline = (text: tl.TypeRichText) => render([paragraph(text)]);
 
-const url = (text: string, href: string): tl.RawTextUrl => ({
-  _: "textUrl",
-  text: plain(text),
-  url: href,
-  webpageId: Long.ZERO,
-});
+const url = (text: string, href: string) => {
+  const result: tl.RawTextUrl = {
+    _: "textUrl",
+    text: plain(text),
+    url: href,
+    webpageId: Long.ZERO,
+  };
+  return result;
+};
 
-const caption = (text: string, credit = ""): tl.RawPageCaption => ({
-  _: "pageCaption",
-  text: text ? plain(text) : { _: "textEmpty" },
-  credit: credit ? plain(credit) : { _: "textEmpty" },
-});
+const caption = (text: string, credit = "") => {
+  const result: tl.RawPageCaption = {
+    _: "pageCaption",
+    text: text ? plain(text) : { _: "textEmpty" },
+    credit: credit ? plain(credit) : { _: "textEmpty" },
+  };
+  return result;
+};
 
 describe("richMessageText: inline text", () => {
   it("writes each style in its rich Markdown syntax", () => {
@@ -173,10 +179,13 @@ describe("richMessageText: inline text", () => {
 describe("richMessageText: blocks", () => {
   it("writes headings, a paragraph and a table", () => {
     expect(render(REPORT_BLOCKS)).toBe(REPORT_TEXT);
-    const headings = ([1, 2, 3, 4, 5, 6] as const).map((level): tl.TypePageBlock => ({
-      _: `pageBlockHeading${level}`,
-      text: plain(`Level ${level}`),
-    }));
+    const headings = ([1, 2, 3, 4, 5, 6] as const).map((level) => {
+      const result: tl.TypePageBlock = {
+        _: `pageBlockHeading${level}`,
+        text: plain(`Level ${level}`),
+      };
+      return result;
+    });
     expect(render(headings)).toBe(
       "# Level 1\n\n## Level 2\n\n### Level 3\n\n#### Level 4\n\n##### Level 5\n\n###### Level 6",
     );
@@ -541,11 +550,14 @@ describe("richMessageText: blocks", () => {
   });
 
   it("writes collages and slideshows in their tags, with the caption", () => {
-    const photo = (n: number): tl.RawPageBlockPhoto => ({
-      _: "pageBlockPhoto",
-      photoId: Long.fromNumber(n),
-      caption: caption(""),
-    });
+    const photo = (n: number) => {
+      const result: tl.RawPageBlockPhoto = {
+        _: "pageBlockPhoto",
+        photoId: Long.fromNumber(n),
+        caption: caption(""),
+      };
+      return result;
+    };
     expect(
       render([
         {

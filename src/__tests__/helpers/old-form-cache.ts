@@ -49,7 +49,7 @@ export function oldFormMessages(count: number) {
   });
 }
 
-function oldMessageType(message: { media?: unknown }): string {
+function oldMessageType(message: { media?: unknown }) {
   const media = message.media as { _?: string } | undefined;
   if (!media) return "text";
   if (media._ === "messageMediaDocument") return "document";
@@ -91,7 +91,7 @@ export function oldFormChats() {
  * Write the fixture into `db` with the current schema, then register the
  * background migrations as an upgraded cache would on its first open
  */
-export function seedOldFormCache(db: Database, args: { messages: number }): void {
+export function seedOldFormCache(db: Database, args: { messages: number }) {
   initCacheSchema(db);
   initSyncSchema(db);
   db.run("DROP TABLE cache_migrations");

@@ -26,8 +26,8 @@ export interface MessagesHistory {
   countIncomingAfter(chatId: number, after: number): number;
 }
 
-export function createMessagesHistory(db: Database): MessagesHistory {
-  return {
+export function createMessagesHistory(db: Database) {
+  const result: MessagesHistory = {
     list(chatId, { limit, before, after, includeDeleted = false, incomingOnly = false }) {
       const conditions = ["m.chat_id = ?"];
       const params: number[] = [chatId];
@@ -85,4 +85,5 @@ export function createMessagesHistory(db: Database): MessagesHistory {
       return row.n;
     },
   };
+  return result;
 }

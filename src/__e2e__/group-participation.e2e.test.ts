@@ -49,7 +49,7 @@ describe("E2E: groups the account does not take part in", () => {
     env.cleanup();
   });
 
-  async function recordNewestPage(): Promise<void> {
+  async function recordNewestPage() {
     const now = Math.floor(Date.now() / 1000);
     const messages = [3, 2, 1].map((id) => ({
       _: "message",
@@ -85,7 +85,7 @@ describe("E2E: groups the account does not take part in", () => {
     };
   }
 
-  function cachedCount(): number {
+  function cachedCount() {
     return (
       env.openCacheDb(1).query("SELECT COUNT(*) AS n FROM messages_cache").get() as { n: number }
     ).n;

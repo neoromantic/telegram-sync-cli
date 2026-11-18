@@ -38,7 +38,7 @@ export interface JobResultLike {
   outcome?: JobOutcome;
 }
 
-function droppedOutcome(state: "cancelled" | "not_running", job: SyncJobRow): JobOutcome {
+function droppedOutcome(state: "cancelled" | "not_running", job: SyncJobRow) {
   if (state === "not_running") {
     console.warn(`[sync-worker] Job ${job.id} was not running when it ended`);
   }
@@ -54,13 +54,15 @@ export function finalizeJobResult(
   jobsService: SyncJobsService,
   job: SyncJobRow,
   result: JobResultLike,
-): JobOutcome {
+) {
   if (result.success) {
     if (!jobsService.markCompleted(job.id)) {
       console.warn(`[sync-worker] Failed to mark job ${job.id} completed`);
-      return { state: "not_running", attempts: job.attempts, nextRunAt: null };
+      const value: JobOutcome = { state: "not_running", attempts: job.attempts, nextRunAt: null };
+      return value;
     }
-    return { state: "completed", attempts: job.attempts, nextRunAt: null };
+    const value: JobOutcome = { state: "completed", attempts: job.attempts, nextRunAt: null };
+    return value;
   }
 
   if (result.stopped) {
@@ -69,9 +71,11 @@ export function finalizeJobResult(
       runAt: job.next_run_at,
       countAttempt: false,
     });
-    return retried === "retrying"
-      ? { state: "stopped", attempts: job.attempts, nextRunAt: job.next_run_at }
-      : droppedOutcome(retried, job);
+    const value: JobOutcome =
+      retried === "retrying"
+        ? { state: "stopped", attempts: job.attempts, nextRunAt: job.next_run_at }
+        : droppedOutcome(retried, job);
+    return value;
   }
 
   const now = Date.now();
@@ -84,9 +88,11 @@ export function finalizeJobResult(
       runAt,
       countAttempt: false,
     });
-    return retried === "retrying"
-      ? { state: "deferred", attempts: job.attempts, nextRunAt: runAt }
-      : droppedOutcome(retried, job);
+    const value: JobOutcome =
+      retried === "retrying"
+        ? { state: "deferred", attempts: job.attempts, nextRunAt: runAt }
+        : droppedOutcome(retried, job);
+    return value;
   }
 
   const error = result.error ?? "Job ended without a result";
@@ -94,9 +100,11 @@ export function finalizeJobResult(
 
   if (result.permanent || failures >= SYNC_RETRY_CONFIG.maxAttempts) {
     const failed = jobsService.failOrDrop(job.id, error);
-    return failed === "failed"
-      ? { state: "failed", attempts: failures, nextRunAt: null }
-      : droppedOutcome(failed, job);
+    const value: JobOutcome =
+      failed === "failed"
+        ? { state: "failed", attempts: failures, nextRunAt: null }
+        : droppedOutcome(failed, job);
+    return value;
   }
 
   const runAt = now + retryDelayMs(failures);
@@ -105,24 +113,23 @@ export function finalizeJobResult(
     runAt,
     countAttempt: true,
   });
-  return retried === "retrying"
-    ? { state: "retrying", attempts: failures, nextRunAt: runAt }
-    : droppedOutcome(retried, job);
+  const value: JobOutcome =
+    retried === "retrying"
+      ? { state: "retrying", attempts: failures, nextRunAt: runAt }
+      : droppedOutcome(retried, job);
+  return value;
 }
 
 /** End a job whose handler threw */
-export function failJobResult(
-  jobsService: SyncJobsService,
-  job: SyncJobRow,
-  err: unknown,
-): JobResultLike {
+export function failJobResult(jobsService: SyncJobsService, job: SyncJobRow, err: unknown) {
   const result: JobResultLike = {
     success: false,
     messagesFetched: 0,
     error: err instanceof Error ? err.message : "Unknown error",
     permanent: isPermanentSyncError(err),
   };
-  return { ...result, outcome: finalizeJobResult(jobsService, job, result) };
+  const value: JobResultLike = { ...result, outcome: finalizeJobResult(jobsService, job, result) };
+  return value;
 }
 
 export async function processJobWithHandlers<
@@ -133,7 +140,7 @@ export async function processJobWithHandlers<
   job: SyncJobRow,
   handlers: Partial<Record<SyncJobType, (ctx: TContext, job: SyncJobRow) => Promise<TResult>>>,
   unknownResult: (jobType: SyncJobType) => TResult,
-): Promise<TResult> {
+) {
   const started = ctx.jobsService.markRunning(job.id);
   if (!started) {
     return {
@@ -152,10 +159,11 @@ export async function processJobWithHandlers<
     const jobType = job.job_type as SyncJobType;
     const handler = handlers[jobType];
     const result = handler ? await handler(ctx, job) : unknownResult(jobType);
-    return {
+    const finished: TResult = {
       ...result,
       outcome: finalizeJobResult(ctx.jobsService, job, result),
     };
+    return finished;
   } catch (err) {
     return failJobResult(ctx.jobsService, job, err) as TResult;
   }

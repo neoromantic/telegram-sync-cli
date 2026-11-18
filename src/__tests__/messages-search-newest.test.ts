@@ -2,14 +2,13 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import {
   createMessagesSearch,
   type MessageSearchOptions,
-  type NewestFirstWay,
   searchNewestFirst,
   toFts5Query,
 } from "../db/messages-search";
 import { buildChatSearchExpr, buildSenderSearchExpr } from "../db/search-reindex";
 import { createAccountCacheDb } from "./helpers/cache-db";
 
-function mulberry32(seed: number): () => number {
+function mulberry32(seed: number) {
   let a = seed;
   return () => {
     a = (a + 0x6d2b79f5) | 0;
@@ -29,9 +28,9 @@ const CHAT_WEIGHTS = [0.45, 0.25, 0.15, 0.1, 0.045, 0.005];
 const SENDERS = Array.from({ length: 20 }, (_, i) => 1000 + i);
 
 const random = mulberry32(118);
-const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+const pick = <T>(items: readonly T[]) => items[Math.floor(random() * items.length)] as T;
 
-function pickChat(): number {
+function pickChat() {
   let r = random();
   for (const [i, weight] of CHAT_WEIGHTS.entries()) {
     r -= weight;
@@ -40,7 +39,7 @@ function pickChat(): number {
   return CHATS[0] as number;
 }
 
-function messageText(): string {
+function messageText() {
   const words = ["filler", "lorem", "ipsum", "dolor"];
   const text = Array.from({ length: 3 }, () => pick(words));
   if (random() < 0.6) text.push("common");
@@ -49,7 +48,7 @@ function messageText(): string {
   return text.join(" ");
 }
 
-function oldMessageText(page: number): string {
+function oldMessageText(page: number) {
   return page >= 105 ? `${messageText()} ancient` : messageText();
 }
 
@@ -104,7 +103,7 @@ describe("search newest first (#118)", () => {
     })();
   });
 
-  function sortedMatches(query: string, options: MessageSearchOptions): string[] {
+  function sortedMatches(query: string, options: MessageSearchOptions) {
     const conditions = ["message_search MATCH ?"];
     const params: Array<string | number> = [toFts5Query(query, { phrase: options.phrase })];
     if (!options.includeDeleted) conditions.push("m.is_deleted = 0");
@@ -144,7 +143,7 @@ describe("search newest first (#118)", () => {
   const keys = (rows: Array<{ chat_id: number; message_id: number }>) =>
     rows.map((row) => `${row.chat_id}:${row.message_id}`);
 
-  function randomOptions(): MessageSearchOptions {
+  function randomOptions() {
     const options: MessageSearchOptions = {
       limit: pick([1, 20, 50, 50, 100]),
       offset: pick([0, 0, 0, 7, 50, 200, 1000]),
@@ -159,7 +158,7 @@ describe("search newest first (#118)", () => {
     return options;
   }
 
-  function checkRandomQueries(runs: number): Record<NewestFirstWay, number> {
+  function checkRandomQueries(runs: number) {
     const search = createMessagesSearch(db);
     const ways = { messages: 0, sort: 0 };
     for (let run = 0; run < runs; run++) {

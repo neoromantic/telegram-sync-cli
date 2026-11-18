@@ -49,12 +49,12 @@ export interface SkillInstallResult {
   manifest: SkillManifest;
 }
 
-function resolveDataDir(): string {
+function resolveDataDir() {
   return process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? join(homedir(), ".telegram-sync-cli");
 }
 
-export function buildSkillManifest(): SkillManifest {
-  return {
+export function buildSkillManifest() {
+  const result: SkillManifest = {
     name: "@goodit/telegram-sync-cli",
     description: "Agent-friendly Telegram Sync CLI",
     install_command: "bun install -g @goodit/telegram-sync-cli",
@@ -62,13 +62,14 @@ export function buildSkillManifest(): SkillManifest {
     version: VERSION,
     output: "json",
   };
+  return result;
 }
 
-export function getSkillManifestPath(): string {
+export function getSkillManifestPath() {
   return join(resolveDataDir(), "skill.json");
 }
 
-function buildEnvStatus(): SkillEnvStatus {
+function buildEnvStatus() {
   const apiIdRaw = process.env.TELEGRAM_API_ID ?? "";
   const apiHashRaw = process.env.TELEGRAM_API_HASH ?? "";
   const apiId = Number.parseInt(apiIdRaw, 10);
@@ -85,38 +86,57 @@ function buildEnvStatus(): SkillEnvStatus {
   };
 }
 
-export async function tryStat(path: string): Promise<
-  | {
-      exists: true;
-      isDirectory: boolean;
-    }
-  | {
-      exists: false;
-      error?: string;
-    }
-> {
+export async function tryStat(path: string) {
   try {
     const stat = await Bun.file(path).stat();
-    return { exists: true, isDirectory: stat.isDirectory() };
+    const result:
+      | {
+          exists: true;
+          isDirectory: boolean;
+        }
+      | {
+          exists: false;
+          error?: string;
+        } = { exists: true, isDirectory: stat.isDirectory() };
+    return result;
   } catch (err) {
     const code = typeof err === "object" && err && "code" in err ? err.code : null;
     if (code === "ENOENT") {
-      return { exists: false };
+      const result:
+        | {
+            exists: true;
+            isDirectory: boolean;
+          }
+        | {
+            exists: false;
+            error?: string;
+          } = { exists: false };
+      return result;
     }
-    return { exists: false, error: getErrorMessage(err) };
+    const result:
+      | {
+          exists: true;
+          isDirectory: boolean;
+        }
+      | {
+          exists: false;
+          error?: string;
+        } = { exists: false, error: getErrorMessage(err) };
+    return result;
   }
 }
 
-export async function checkDataDirAccess(dataDir: string): Promise<SkillDataDirStatus> {
+export async function checkDataDirAccess(dataDir: string) {
   const initialStat = await tryStat(dataDir);
   if (initialStat.exists && !initialStat.isDirectory) {
-    return {
+    const result: SkillDataDirStatus = {
       path: dataDir,
       exists: true,
       is_directory: false,
       writable: false,
       error: "Path exists but is not a directory",
     };
+    return result;
   }
 
   const probeName = `.tg-skill-probe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -140,16 +160,17 @@ export async function checkDataDirAccess(dataDir: string): Promise<SkillDataDirS
 
   const finalStat = await tryStat(dataDir);
 
-  return {
+  const result: SkillDataDirStatus = {
     path: dataDir,
     exists: finalStat.exists,
     is_directory: finalStat.exists ? finalStat.isDirectory : false,
     writable,
     ...(errorMessage ? { error: errorMessage } : {}),
   };
+  return result;
 }
 
-export async function validateSkillEnvironment(): Promise<SkillValidationResult> {
+export async function validateSkillEnvironment() {
   const envStatus = buildEnvStatus();
   const dataDirStatus = await checkDataDirAccess(resolveDataDir());
 
@@ -167,29 +188,29 @@ export async function validateSkillEnvironment(): Promise<SkillValidationResult>
     issues.push("Data directory path is not a directory");
   }
 
-  return {
+  const result: SkillValidationResult = {
     valid: issues.length === 0,
     env: envStatus,
     data_dir: dataDirStatus,
     issues,
   };
+  return result;
 }
 
-export async function installSkillManifest(
-  targetPath = getSkillManifestPath(),
-): Promise<SkillInstallResult> {
+export async function installSkillManifest(targetPath = getSkillManifestPath()) {
   const manifest = buildSkillManifest();
   const payload = `${JSON.stringify(manifest, null, 2)}\n`;
   const existed = await Bun.file(targetPath).exists();
 
   await Bun.write(targetPath, payload, { createPath: true });
 
-  return {
+  const result: SkillInstallResult = {
     path: targetPath,
     bytes: payload.length,
     overwritten: existed,
     manifest,
   };
+  return result;
 }
 
 export const skillManifestCommand = defineCommand({

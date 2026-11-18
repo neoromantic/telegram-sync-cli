@@ -76,13 +76,14 @@ describe("resolvePeer with numeric IDs", () => {
     });
   }
 
-  function resolvedPeer(users: tl.TypeUser[]): tl.contacts.RawResolvedPeer {
-    return {
+  function resolvedPeer(users: tl.TypeUser[]) {
+    const result: tl.contacts.RawResolvedPeer = {
       _: "contacts.resolvedPeer",
       peer: { _: "peerUser", userId: 0 },
       users,
       chats: [],
     };
+    return result;
   }
 
   function cacheChat(

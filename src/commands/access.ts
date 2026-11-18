@@ -1,4 +1,4 @@
-import { type AccessSettings, ConfigError, loadAccessSettings } from "../config";
+import { ConfigError, loadAccessSettings } from "../config";
 import { ErrorCodes } from "../types";
 import { openAccountCache } from "../utils/account-cache";
 import { positionalChat } from "../utils/args";
@@ -20,7 +20,7 @@ export interface CommandAccess {
 }
 
 /** `tg api` methods named get…, search…, resolve… or check… after the namespace */
-export function isReadMethod(method: string): boolean {
+export function isReadMethod(method: string) {
   const dot = method.indexOf(".");
   return dot > 0 && /^(get|search|resolve|check)/.test(method.slice(dot + 1));
 }
@@ -101,20 +101,18 @@ export interface RunContext {
 type Run = (context: RunContext) => unknown;
 
 /** Every command of the tree that runs, with its path (`chats list`) */
-export function runnableCommands(
-  cmd: CommandNode,
-  prefix: string[] = [],
-): Array<{ path: string; node: CommandNode }> {
+export function runnableCommands(cmd: CommandNode, prefix: string[] = []) {
   const subs = (cmd.subCommands ?? {}) as Record<string, CommandNode>;
   return Object.entries(subs).flatMap(([name, sub]) => {
     const path = [...prefix, name];
     const own = typeof sub.run === "function" ? [{ path: path.join(" "), node: sub }] : [];
-    return [...own, ...runnableCommands(sub, path)];
+    const below: Array<{ path: string; node: CommandNode }> = runnableCommands(sub, path);
+    return [...own, ...below];
   });
 }
 
 /** Wrap every command's run so the checks of its COMMAND_ACCESS entry come first */
-export function guardCommands(cmd: CommandNode): void {
+export function guardCommands(cmd: CommandNode) {
   for (const { path, node } of runnableCommands(cmd)) {
     const access = COMMAND_ACCESS[path];
     if (!access) {
@@ -130,7 +128,7 @@ export function guardCommands(cmd: CommandNode): void {
   }
 }
 
-async function readAccessSettings(): Promise<AccessSettings> {
+async function readAccessSettings() {
   try {
     return await loadAccessSettings();
   } catch (err) {
@@ -154,7 +152,7 @@ export async function checkAccess(
   access: CommandAccess,
   { args, rawArgs = [] }: RunContext,
   positional: string[] = [],
-): Promise<void> {
+) {
   if (!access.write && !access.chatArgs && !access.unscopable) return;
   const settings = await readAccessSettings();
 
@@ -191,7 +189,7 @@ export async function checkAccess(
 
 type HistoryDeps = ReturnType<typeof openHistory>;
 
-async function resolveAllowed(entries: string[], deps: HistoryDeps): Promise<Set<number>> {
+async function resolveAllowed(entries: string[], deps: HistoryDeps) {
   const ids = new Set<number>();
   for (const entry of entries) {
     ids.add(
@@ -210,7 +208,7 @@ async function checkChatAllowed(
   input: string,
   accountSelector: string | undefined,
   allowed: string[],
-): Promise<void> {
+) {
   const { account } = openAccountCache(accountSelector);
   const deps = openHistory(account.id, "cli:allowed-chats");
   let id: number;
@@ -235,7 +233,7 @@ async function checkChatAllowed(
  * For a command that reads across chats: the marked IDs of allowedChats,
  * or null when every chat is allowed
  */
-export async function allowedChatIds(accountId: number): Promise<Set<number> | null> {
+export async function allowedChatIds(accountId: number) {
   const { allowedChats } = await readAccessSettings();
   if (allowedChats === null) return null;
   const deps = openHistory(accountId, "cli:allowed-chats");

@@ -32,9 +32,7 @@ import type { ChatsListOutput } from "./list-output";
 
 type DialogCollectorClient = Pick<TelegramClient, "iterDialogs">;
 
-async function collectDialogs(
-  client: DialogCollectorClient,
-): Promise<{ dialogs: Dialog[]; users: tl.RawUser[] }> {
+async function collectDialogs(client: DialogCollectorClient) {
   const dialogs: Dialog[] = [];
   const users: tl.RawUser[] = [];
 
@@ -56,7 +54,7 @@ async function collectDialogs(
 export async function fetchChatsFromApi(
   client: Pick<TelegramClient, "iterDialogs" | "withParams">,
   cacheDb: Database,
-): Promise<CachedChatInput[]> {
+) {
   const { dialogs, users } = await collectDialogs(client);
 
   let communities: CachedChatInput[] = [];
@@ -140,14 +138,13 @@ export const listChatsCommand = defineCommand({
       const chatsCache = createChatsCache(cacheDb);
       const chatSyncState = createChatSyncStateService(cacheDb);
       const participation = createGroupParticipation(cacheDb);
-      const toItem = (
-        chat: Parameters<typeof chatRowToItem>[0],
-      ): ChatsListOutput["items"][number] => {
+      const toItem = (chat: Parameters<typeof chatRowToItem>[0]) => {
         const item = chatRowToItem(chat);
-        return {
+        const result: ChatsListOutput["items"][number] = {
           ...item,
           ...chatSyncView(participation, item.id, chatSyncState.get(item.id)),
         };
+        return result;
       };
       const cacheConfig = await getResolvedCacheConfig();
 

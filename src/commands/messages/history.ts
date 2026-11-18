@@ -53,7 +53,7 @@ export async function resolveHistoryChat(
   client: HistoryClient,
   identifier: string,
   deps: ResolveHistoryChatDeps,
-): Promise<HistoryChat> {
+) {
   const { inputPeer } = await resolvePeer(
     client,
     identifier,
@@ -69,7 +69,8 @@ export async function resolveHistoryChat(
   if (chatId === null) {
     throw new Error(`Could not resolve chat ${identifier}`);
   }
-  return { chatId, inputPeer };
+  const result: HistoryChat = { chatId, inputPeer };
+  return result;
 }
 
 /** A page of history. Both bounds are exclusive message IDs. */
@@ -108,7 +109,7 @@ export function cacheHistoryResponse(
   messages: unknown[],
   users: tl.TypeUser[],
   bounds: PageBounds,
-): MessageRow[] {
+) {
   const usersCache = createUsersCache(cacheDb);
   const messagesCache = createMessagesCache(cacheDb);
   const inputs = createMessageInputs(messages, chatId);
@@ -126,9 +127,9 @@ export function cacheHistoryResponse(
   const chat = createChatsCache(cacheDb).getById(String(chatId));
   const fetchedAt = Date.now();
   return inputs
-    .map((input): MessageRow => {
+    .map((input) => {
       const u = input.from_id != null ? usersCache.getById(String(input.from_id)) : null;
-      return {
+      const result: MessageRow = {
         chat_id: input.chat_id,
         message_id: input.message_id,
         from_id: input.from_id ?? null,
@@ -153,6 +154,7 @@ export function cacheHistoryResponse(
         sender_last_name: u?.last_name ?? null,
         raw_json: input.raw_json,
       };
+      return result;
     })
     .sort((a, b) => b.message_id - a.message_id);
 }
@@ -160,7 +162,7 @@ export function cacheHistoryResponse(
 const PEER_HINT = "run tg chats list --fresh or pass the @username";
 
 /** Telegram can't find a chat built from a bare ID without an access hash */
-export function withPeerHint(err: unknown): unknown {
+export function withPeerHint(err: unknown) {
   if (err instanceof Error && /CHANNEL_INVALID|PEER_ID_INVALID/.test(err.message)) {
     return new Error(`${err.message} (${PEER_HINT})`);
   }
@@ -190,7 +192,7 @@ export async function fetchHistoryPage(
   cacheDb: Database,
   chat: HistoryChat,
   window: HistoryWindow,
-): Promise<MessageSearchRow[]> {
+) {
   const { messages, users } = await callHistory(client, chat, historyRequest(window));
 
   const floor = window.after ?? 0;
@@ -237,17 +239,12 @@ export interface ListHistoryResult {
   stale: false;
 }
 
-interface CachedWindow {
-  rows: MessageSearchRow[];
-  whole: boolean;
-}
-
 function readCachedWindow(
   cacheDb: Database,
   chatId: number,
   { limit, before, after }: HistoryWindow,
   includeDeleted: boolean,
-): CachedWindow {
+) {
   const history = createMessagesHistory(cacheDb);
   const ranges = createHistoryRanges(cacheDb);
 
@@ -282,31 +279,28 @@ async function readHistoryPage({
   window,
   includeDeleted,
   fresh,
-}: ListHistoryOptions): Promise<{
-  rows: MessageSearchRow[];
-  source: "cache" | "api";
-}> {
+}: ListHistoryOptions) {
   if (!fresh) {
     const cached = readCachedWindow(cacheDb, chat.chatId, window, includeDeleted);
     if (cached.whole) {
-      return { rows: cached.rows, source: "cache" };
+      return { rows: cached.rows, source: "cache" as const };
     }
   }
 
   const rows = await fetchHistoryPage(client, cacheDb, chat, window);
-  return { rows, source: "api" };
+  return { rows, source: "api" as const };
 }
 
 /**
  * One page of a chat, newest first. The cache answers when it holds the
  * whole window without a gap; otherwise, or with `fresh`, Telegram does.
  */
-export async function listHistory(options: ListHistoryOptions): Promise<ListHistoryResult> {
+export async function listHistory(options: ListHistoryOptions) {
   const { chat, window } = options;
   const { rows, source } = await readHistoryPage(options);
   const ids = rows.map((row) => row.message_id);
 
-  return {
+  const result: ListHistoryResult = {
     chatId: chat.chatId,
     items: messageRowsToItems(options.cacheDb, rows),
     limit: window.limit,
@@ -317,6 +311,7 @@ export async function listHistory(options: ListHistoryOptions): Promise<ListHist
     source,
     stale: false,
   };
+  return result;
 }
 
 /**
@@ -357,7 +352,7 @@ export async function fetchMessageAround(
   chat: HistoryChat,
   messageId: number,
   context: number,
-): Promise<MessageAround> {
+) {
   const { messages, users } = await callHistory(client, chat, aroundRequest(messageId, context));
   const ids = messages.map(rawMessageId);
   if (!ids.includes(messageId)) {
@@ -375,11 +370,12 @@ export async function fetchMessageAround(
   if (!message) {
     throw new MessageNotFoundError(chat.chatId, messageId);
   }
-  return {
+  const result: MessageAround = {
     message,
     newer: rows.filter((row) => row.message_id > messageId),
     older: rows.filter((row) => row.message_id < messageId),
   };
+  return result;
 }
 
 export interface GetMessageOptions {
@@ -404,18 +400,13 @@ export interface GetMessageResult {
   stale: false;
 }
 
-interface CachedAround {
-  around: MessageAround;
-  complete: boolean;
-}
-
 function readAroundFromCache(
   cacheDb: Database,
   chatId: number,
   messageId: number,
   context: number,
   includeDeleted: boolean,
-): CachedAround | null {
+) {
   const history = createMessagesHistory(cacheDb);
   const message = history.get(chatId, messageId);
   if (!message) return null;
@@ -433,24 +424,22 @@ function readAroundFromCache(
   };
 }
 
-async function readAround(
-  options: GetMessageOptions,
-): Promise<{ around: MessageAround; source: "cache" | "api" }> {
+async function readAround(options: GetMessageOptions) {
   const { cacheDb, client, chat, messageId, context } = options;
   const cached = options.fresh
     ? null
     : readAroundFromCache(cacheDb, chat.chatId, messageId, context, options.includeDeleted);
   if (cached?.complete) {
-    return { around: cached.around, source: "cache" };
+    return { around: cached.around, source: "cache" as const };
   }
 
   try {
     const around = await fetchMessageAround(client, cacheDb, chat, messageId, context);
-    return { around, source: "api" };
+    return { around, source: "api" as const };
   } catch (err) {
     if (cached) {
       verbose(`Serving message ${messageId} from the cache: ${getErrorMessage(err)}`);
-      return { around: cached.around, source: "cache" };
+      return { around: cached.around, source: "cache" as const };
     }
     throw err;
   }
@@ -463,11 +452,11 @@ async function readAround(
  * call fails and the message is cached, the cache answers with what it
  * holds of the sides; `fresh` reports the failure.
  */
-export async function getMessageWithContext(options: GetMessageOptions): Promise<GetMessageResult> {
+export async function getMessageWithContext(options: GetMessageOptions) {
   const { around, source } = await readAround(options);
   const toItem = messageItemReader(options.cacheDb);
 
-  return {
+  const result: GetMessageResult = {
     chatId: options.chat.chatId,
     message: toItem(around.message),
     newer: around.newer.map(toItem),
@@ -475,4 +464,5 @@ export async function getMessageWithContext(options: GetMessageOptions): Promise
     source,
     stale: false,
   };
+  return result;
 }

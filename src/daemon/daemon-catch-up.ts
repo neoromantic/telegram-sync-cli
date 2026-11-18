@@ -35,8 +35,9 @@ export interface ConnectionWatch {
   lastCatchUpAt?: number;
 }
 
-export function createConnectionWatch(): ConnectionWatch {
-  return { online: true };
+export function createConnectionWatch() {
+  const watch: ConnectionWatch = { online: true };
+  return watch;
 }
 
 function requestCatchUp(
@@ -44,7 +45,7 @@ function requestCatchUp(
   reason: CatchUpReason,
   offlineMs: number,
   now: number,
-): void {
+) {
   const notBefore =
     watch.lastCatchUpAt === undefined
       ? now + CATCH_UP_SETTLE_MS
@@ -63,11 +64,7 @@ function requestCatchUp(
  * bring it back. Back after more than `OFFLINE_CATCH_UP_MS` asks for a
  * catch-up; a pending one waits again for the connection to settle.
  */
-export function noteConnectionState(
-  watch: ConnectionWatch,
-  state: ConnectionState,
-  now: number,
-): void {
+export function noteConnectionState(watch: ConnectionWatch, state: ConnectionState, now: number) {
   if (state === "offline" || state === "connecting") {
     if (watch.online) {
       watch.online = false;
@@ -95,7 +92,7 @@ export function noteConnectionState(
  * long counts too: the connection was down meanwhile. Returns the gap when
  * it was one.
  */
-export function detectWake(ctx: DaemonContext, now: number): number | null {
+export function detectWake(ctx: DaemonContext, now: number) {
   const last = ctx.runtime.lastTickAt;
   ctx.runtime.lastTickAt = now;
   if (last === null) return null;
@@ -110,7 +107,7 @@ export function detectWake(ctx: DaemonContext, now: number): number | null {
   return gap;
 }
 
-function takeDueCatchUp(accountState: AccountConnectionState, now: number): PendingCatchUp | null {
+function takeDueCatchUp(accountState: AccountConnectionState, now: number) {
   const { watch } = accountState;
   const pending = watch?.pending;
   if (!watch || !pending || !watch.online || now < pending.dueAt) return null;
@@ -126,7 +123,7 @@ function takeDueCatchUp(accountState: AccountConnectionState, now: number): Pend
  * scheduler queues catch-up for the chats whose newest message moved.
  * Each runs in the background; returns them for tests.
  */
-export function runDueCatchUps(ctx: DaemonContext, now: number): Promise<boolean>[] {
+export function runDueCatchUps(ctx: DaemonContext, now: number) {
   if (ctx.state.shutdownRequested) return [];
   const started: Promise<boolean>[] = [];
   for (const accountState of ctx.state.accounts.values()) {

@@ -21,11 +21,11 @@ describe("RateLimitsService", () => {
     db.close();
   });
 
-  function mockTime(timestampMs: number): void {
+  function mockTime(timestampMs: number) {
     Date.now = () => timestampMs;
   }
 
-  function nowSeconds(): number {
+  function nowSeconds() {
     return Math.floor(Date.now() / 1000);
   }
 

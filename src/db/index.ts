@@ -10,7 +10,6 @@ import {
   accountDirPath,
   accountMediaPath,
   type CacheLayoutMode,
-  type CacheLayoutResult,
   createCacheLayoutGuard,
   legacyCachePath,
 } from "./cache-layout";
@@ -18,7 +17,7 @@ import { checkCacheOwner } from "./cache-meta";
 import { enableWal, initCacheSchema } from "./schema";
 import { initSyncSchema } from "./sync-schema";
 
-function resolveDataDir(): string {
+function resolveDataDir() {
   return process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? join(homedir(), ".telegram-sync-cli");
 }
 
@@ -28,7 +27,7 @@ const DB_PATH = join(DATA_DIR, "data.db");
 /**
  * Initialize database schema
  */
-function initSchema(db: Database): void {
+function initSchema(db: Database) {
   db.run("PRAGMA busy_timeout = 5000");
   enableWal(db);
 
@@ -71,7 +70,7 @@ function initSchema(db: Database): void {
 /**
  * Extract user_id from "user:xxx" phone patterns and resolve duplicate accounts
  */
-function migrateAndResolveDuplicates(db: Database): void {
+function migrateAndResolveDuplicates(db: Database) {
   const accountsWithUserPhone = db
     .query("SELECT id, phone FROM accounts WHERE phone LIKE 'user:%' AND user_id IS NULL")
     .all() as Array<{ id: number; phone: string }>;
@@ -105,7 +104,7 @@ class AccountRow {
   updated_at!: string;
 }
 
-function normalizeUsernameValue(username?: string | null): string | null {
+function normalizeUsernameValue(username?: string | null) {
   if (username === undefined || username === null) return null;
   const trimmed = username.trim();
   if (!trimmed) return null;
@@ -113,7 +112,7 @@ function normalizeUsernameValue(username?: string | null): string | null {
   return cleaned.toLowerCase();
 }
 
-function normalizeLabelValue(label?: string | null): string | null {
+function normalizeLabelValue(label?: string | null) {
   if (label === undefined || label === null) return null;
   const trimmed = label.trim();
   return trimmed.length > 0 ? trimmed : null;
@@ -209,39 +208,39 @@ export interface AccountsDbInterface {
 /**
  * Create an AccountsDb instance for a database
  */
-export function createAccountsDb(db: Database): AccountsDbInterface {
+export function createAccountsDb(db: Database) {
   const statements = createStatements(db);
 
   return {
-    getAll(): Account[] {
+    getAll() {
       return statements.getAllAccounts.all();
     },
 
-    getById(id: number): Account | null {
+    getById(id: number) {
       return statements.getAccountById.get({ $id: id }) ?? null;
     },
 
-    getByPhone(phone: string): Account | null {
+    getByPhone(phone: string) {
       return statements.getAccountByPhone.get({ $phone: phone }) ?? null;
     },
 
-    getByUserId(userId: number): Account | null {
+    getByUserId(userId: number) {
       return statements.getAccountByUserId.get({ $user_id: userId }) ?? null;
     },
 
-    getByUsername(username: string): Account | null {
+    getByUsername(username: string) {
       const normalized = normalizeUsernameValue(username);
       if (!normalized) return null;
       return statements.getAccountByUsername.get({ $username: normalized }) ?? null;
     },
 
-    getAllByLabel(label: string): Account[] {
+    getAllByLabel(label: string) {
       const normalized = normalizeLabelValue(label);
       if (!normalized) return [];
       return statements.getAccountsByLabel.all({ $label: normalized });
     },
 
-    getActive(): Account | null {
+    getActive() {
       return statements.getActiveAccount.get() ?? null;
     },
 
@@ -253,7 +252,7 @@ export function createAccountsDb(db: Database): AccountsDbInterface {
       label?: string;
       session_data?: string;
       is_active?: boolean;
-    }): Account {
+    }) {
       const result = statements.insertAccount.get({
         $phone: data.phone,
         $user_id: data.user_id ?? null,
@@ -277,7 +276,7 @@ export function createAccountsDb(db: Database): AccountsDbInterface {
         label?: string | null;
         session_data?: string;
       },
-    ): Account | null {
+    ) {
       const current = this.getById(id);
       if (!current) return null;
 
@@ -298,20 +297,20 @@ export function createAccountsDb(db: Database): AccountsDbInterface {
       );
     },
 
-    updateSession(id: number, session_data: string): void {
+    updateSession(id: number, session_data: string) {
       statements.updateSessionData.run({ $id: id, $session_data: session_data });
     },
 
-    setActive(id: number): void {
+    setActive(id: number) {
       statements.setActiveAccount.run({ $id: id });
     },
 
-    delete(id: number): boolean {
+    delete(id: number) {
       const result = statements.deleteAccount.run({ $id: id });
       return result.changes > 0;
     },
 
-    count(): number {
+    count() {
       const result = statements.countAccounts.get() as { count: number } | null;
       return result?.count ?? 0;
     },
@@ -321,10 +320,7 @@ export function createAccountsDb(db: Database): AccountsDbInterface {
 /**
  * Create an in-memory database for testing
  */
-export function createTestDatabase(): {
-  db: Database;
-  accountsDb: AccountsDbInterface;
-} {
+export function createTestDatabase() {
   const db = new Database(":memory:");
   initSchema(db);
   return { db, accountsDb: createAccountsDb(db) };
@@ -354,33 +350,33 @@ const cacheLayout = createCacheLayoutGuard(() => ({
 export function ensureCacheLayout(options: {
   mode: CacheLayoutMode;
   notice?: (message: string) => void;
-}): CacheLayoutResult {
+}) {
   return cacheLayout.ensure(options.mode, options.notice);
 }
 
 /** `<dataDir>/accounts/<id>`: everything the account has besides its session */
-export function getAccountDir(accountId: number): string {
+export function getAccountDir(accountId: number) {
   return accountDirPath(DATA_DIR, accountId);
 }
 
 /** `<dataDir>/accounts/<id>/cache.db` */
-export function getAccountCachePath(accountId: number): string {
+export function getAccountCachePath(accountId: number) {
   return accountCachePath(DATA_DIR, accountId);
 }
 
 /** `<dataDir>/accounts/<id>/media`: the account's downloaded files */
-export function getAccountMediaDir(accountId: number): string {
+export function getAccountMediaDir(accountId: number) {
   return accountMediaPath(DATA_DIR, accountId);
 }
 
 /** The shared cache of 0.3 and older, `<dataDir>/cache.db` */
-export function getLegacyCachePath(): string {
+export function getLegacyCachePath() {
   return legacyCachePath(DATA_DIR);
 }
 
 const accountCaches = new Map<number, Database>();
 
-function openAccountCacheFile(accountId: number): Database {
+function openAccountCacheFile(accountId: number) {
   const account = accountsDb.getById(accountId);
   if (!account) {
     throw new Error(`Account with ID ${accountId} not found`);
@@ -410,7 +406,7 @@ function openAccountCacheFile(accountId: number): Database {
  * The account's cache database, created on first use. Moves a shared cache
  * first, so a single account's cache from 0.3 is never left behind.
  */
-export function getAccountCacheDb(accountId: number): Database {
+export function getAccountCacheDb(accountId: number) {
   const existing = accountCaches.get(accountId);
   if (existing) return existing;
   ensureCacheLayout({ mode: "strict" });
@@ -424,7 +420,7 @@ export function getAccountCacheDb(accountId: number): Database {
  * first, which creates and migrates it; that connection stays open, so the
  * WAL files a reader needs exist.
  */
-export function openReadOnlyAccountCacheDb(accountId: number): Database {
+export function openReadOnlyAccountCacheDb(accountId: number) {
   const db = new Database(getAccountCachePath(accountId), { readonly: true });
   db.run("PRAGMA busy_timeout = 5000");
   db.run("PRAGMA query_only = ON");
@@ -435,7 +431,7 @@ export function openReadOnlyAccountCacheDb(accountId: number): Database {
  * The account's cache if its file exists, else null; never creates one.
  * Call ensureCacheLayout first.
  */
-export function openExistingAccountCacheDb(accountId: number): Database | null {
+export function openExistingAccountCacheDb(accountId: number) {
   const existing = accountCaches.get(accountId);
   if (existing) return existing;
   if (!existsSync(getAccountCachePath(accountId))) return null;
@@ -443,7 +439,7 @@ export function openExistingAccountCacheDb(accountId: number): Database | null {
 }
 
 /** Close every account's cache connection */
-export function closeAccountCacheDbs(): void {
+export function closeAccountCacheDbs() {
   for (const cache of accountCaches.values()) {
     try {
       cache.close();
@@ -456,7 +452,7 @@ export function closeAccountCacheDbs(): void {
  * An in-memory database with the cache schema, for `tg sql print-schema`:
  * needs no account and creates no file
  */
-export function createSchemaOnlyDb(): Database {
+export function createSchemaOnlyDb() {
   const schemaDb = new Database(":memory:");
   initCacheSchema(schemaDb);
   initSyncSchema(schemaDb);
@@ -464,12 +460,12 @@ export function createSchemaOnlyDb(): Database {
 }
 
 /** Get database path for debugging */
-export function getDatabasePath(): string {
+export function getDatabasePath() {
   return DB_PATH;
 }
 
 /** Get data directory path */
-export function getDataDir(): string {
+export function getDataDir() {
   return DATA_DIR;
 }
 

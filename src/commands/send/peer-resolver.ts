@@ -57,11 +57,12 @@ export type DmLookup = {
   messagesCache: Pick<MessagesCache, "getOldestMessageId">;
 };
 
-export function createDmLookup(db: Database): DmLookup {
-  return {
+export function createDmLookup(db: Database) {
+  const result: DmLookup = {
     chatSyncState: createChatSyncStateService(db),
     messagesCache: createMessagesCache(db),
   };
+  return result;
 }
 
 /**
@@ -74,7 +75,7 @@ export function isKnownUserId(
   usersCache: Pick<UsersCache, "getById">,
   dms: DmLookup | undefined,
   id: number,
-): boolean {
+) {
   return (
     usersCache.getById(String(id)) !== null ||
     dms?.chatSyncState.get(id) != null ||
@@ -90,8 +91,8 @@ type CacheDeps = {
 
 type CachedUserRef = Pick<CachedUser, "user_id" | "access_hash" | "display_name">;
 
-function buildUserPeerFromCache(user: CachedUserRef, fallbackName: string): ResolvedPeer {
-  return {
+function buildUserPeerFromCache(user: CachedUserRef, fallbackName: string) {
+  const result: ResolvedPeer = {
     inputPeer: {
       _: "inputPeerUser",
       userId: Number(user.user_id),
@@ -99,10 +100,11 @@ function buildUserPeerFromCache(user: CachedUserRef, fallbackName: string): Reso
     },
     name: user.display_name || fallbackName,
   };
+  return result;
 }
 
-function buildUserPeerFromApi(user: tl.RawUser, fallbackName: string): ResolvedPeer {
-  return {
+function buildUserPeerFromApi(user: tl.RawUser, fallbackName: string) {
+  const result: ResolvedPeer = {
     inputPeer: {
       _: "inputPeerUser",
       userId: user.id,
@@ -110,9 +112,10 @@ function buildUserPeerFromApi(user: tl.RawUser, fallbackName: string): ResolvedP
     },
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || fallbackName,
   };
+  return result;
 }
 
-function cacheResolvedUser(usersCache: UsersCache, user: tl.RawUser): void {
+function cacheResolvedUser(usersCache: UsersCache, user: tl.RawUser) {
   if (user.min) return;
   try {
     usersCache.upsert(apiUserToCacheInput(user));
@@ -123,8 +126,8 @@ function cacheResolvedUser(usersCache: UsersCache, user: tl.RawUser): void {
 
 type ResolvedChannel = tl.RawChannel | tl.RawChannelForbidden;
 
-function buildChannelPeerFromApi(chat: ResolvedChannel, fallbackName: string): ResolvedPeer {
-  return {
+function buildChannelPeerFromApi(chat: ResolvedChannel, fallbackName: string) {
+  const result: ResolvedPeer = {
     inputPeer: {
       _: "inputPeerChannel",
       channelId: chat.id,
@@ -132,19 +135,21 @@ function buildChannelPeerFromApi(chat: ResolvedChannel, fallbackName: string): R
     },
     name: chat.title || fallbackName,
   };
+  return result;
 }
 
-function buildGroupPeer(chatId: number, fallbackName: string): ResolvedPeer {
-  return {
+function buildGroupPeer(chatId: number, fallbackName: string) {
+  const result: ResolvedPeer = {
     inputPeer: {
       _: "inputPeerChat",
       chatId,
     },
     name: fallbackName,
   };
+  return result;
 }
 
-function normalizePhone(identifier: string): string | null {
+function normalizePhone(identifier: string) {
   if (!identifier.startsWith("+") && !/^\d{10,}$/.test(identifier)) {
     return null;
   }
@@ -156,7 +161,7 @@ async function resolveByUsername(
   client: TelegramClientLike,
   username: string,
   { usersCache, chatsCache }: CacheDeps,
-): Promise<ResolvedPeer> {
+) {
   const cachedUser = usersCache.getByUsername(username);
   if (cachedUser?.access_hash) {
     verbose(`Found user @${username} in cache`);
@@ -195,12 +200,10 @@ async function resolveByUsername(
         last_message_at: known?.last_message_at ?? null,
       });
     }
-    if (resolvedChat._ === "channel" || resolvedChat._ === "channelForbidden") {
+    if (resolvedChat._ === "channel" || resolvedChat._ === "channelForbidden")
       return buildChannelPeerFromApi(resolvedChat, `@${username}`);
-    }
-    if (resolvedChat._ === "chat" || resolvedChat._ === "chatForbidden") {
+    if (resolvedChat._ === "chat" || resolvedChat._ === "chatForbidden")
       return buildGroupPeer(resolvedChat.id, `@${username}`);
-    }
   }
 
   throw new Error(`Could not resolve @${username}`);
@@ -211,7 +214,7 @@ async function resolveByPhone(
   identifier: string,
   phone: string,
   { usersCache }: CacheDeps,
-): Promise<ResolvedPeer> {
+) {
   const cachedUser = usersCache.getByPhone(phone);
   if (cachedUser?.access_hash) {
     verbose(`Found user with phone ${identifier} in cache`);
@@ -240,14 +243,21 @@ async function resolveByPhone(
   throw new Error(`Could not resolve phone number ${identifier}`);
 }
 
-function peerFromCachedChat(chat: CachedChat, fallbackName?: string): ResolvedPeer | null {
+function peerFromCachedChat(chat: CachedChat, fallbackName?: string) {
   const id = Number(chat.chat_id);
   const inputPeer = toInputPeerFromPeerId(id, chat.access_hash);
-  if (!inputPeer) return null;
-  return { inputPeer, name: chat.title || fallbackName || `Chat ${id}` };
+  if (!inputPeer) {
+    const result: ResolvedPeer | null = null;
+    return result;
+  }
+  const result: ResolvedPeer | null = {
+    inputPeer,
+    name: chat.title || fallbackName || `Chat ${id}`,
+  };
+  return result;
 }
 
-function resolveLegacyChatId(identifier: string, { chatsCache }: CacheDeps): ResolvedPeer | null {
+function resolveLegacyChatId(identifier: string, { chatsCache }: CacheDeps) {
   const matches = chatsCache.getByLegacyId(Number(identifier));
   if (matches.length > 1) {
     throw new AmbiguousPeerError(
@@ -256,24 +266,31 @@ function resolveLegacyChatId(identifier: string, { chatsCache }: CacheDeps): Res
     );
   }
   const [chat] = matches;
-  if (!chat) return null;
+  if (!chat) {
+    const result: ResolvedPeer | null = null;
+    return result;
+  }
   verbose(`Found chat ${chat.chat_id} in cache for the old ID ${identifier}`);
   return peerFromCachedChat(chat);
 }
 
-function peerFromBareChatRow(chat: CachedChat | null): ResolvedPeer | null {
-  if (!chat || chat.type === "private") return null;
+function peerFromBareChatRow(chat: CachedChat | null) {
+  if (!chat || chat.type === "private") {
+    const result: ResolvedPeer | null = null;
+    return result;
+  }
   const marked = toMarkedPeerId(Number(chat.chat_id), chat.type);
   verbose(`Found chat ${marked} in cache under the old ID ${chat.chat_id}`);
   return peerFromCachedChat({ ...chat, chat_id: String(marked) });
 }
 
-function resolveCachedId(identifier: string, deps: CacheDeps): ResolvedPeer | null {
+function resolveCachedId(identifier: string, deps: CacheDeps) {
   const { usersCache, chatsCache, dms } = deps;
   const cachedUser = usersCache.getById(identifier);
   if (cachedUser?.access_hash) {
     verbose(`Found user ID ${identifier} in cache`);
-    return buildUserPeerFromCache(cachedUser, `User ${identifier}`);
+    const result: ResolvedPeer | null = buildUserPeerFromCache(cachedUser, `User ${identifier}`);
+    return result;
   }
 
   const cachedChat = chatsCache.getById(identifier);
@@ -285,7 +302,7 @@ function resolveCachedId(identifier: string, deps: CacheDeps): ResolvedPeer | nu
   const id = Number(identifier);
   if (Number.isSafeInteger(id) && isKnownUserId(usersCache, dms, id)) {
     verbose(`Found private chat ${identifier} in cache, without an access hash`);
-    return buildUserPeerFromCache(
+    const result: ResolvedPeer | null = buildUserPeerFromCache(
       cachedUser ?? {
         user_id: identifier,
         access_hash: null,
@@ -293,19 +310,23 @@ function resolveCachedId(identifier: string, deps: CacheDeps): ResolvedPeer | nu
       },
       `User ${identifier}`,
     );
+    return result;
   }
 
-  return resolveLegacyChatId(identifier, deps) ?? peerFromBareChatRow(cachedChat);
+  const result: ResolvedPeer | null =
+    resolveLegacyChatId(identifier, deps) ?? peerFromBareChatRow(cachedChat);
+  return result;
 }
 
-function resolveUncachedId(identifier: string): ResolvedPeer {
+function resolveUncachedId(identifier: string) {
   const userId = /^\d+$/.test(identifier) ? Number(identifier) : 0;
   const inputPeer = toInputPeerFromPeerId(userId, null);
   if (!inputPeer) throw new InvalidPeerError(identifier);
-  return { inputPeer, name: `User ${userId}` };
+  const result: ResolvedPeer = { inputPeer, name: `User ${userId}` };
+  return result;
 }
 
-function resolveByMarkedId(identifier: string, { chatsCache }: CacheDeps): ResolvedPeer {
+function resolveByMarkedId(identifier: string, { chatsCache }: CacheDeps) {
   const marked = Number(identifier);
   if (!Number.isSafeInteger(marked) || marked >= 0) {
     throw new InvalidPeerError(identifier);
@@ -320,7 +341,8 @@ function resolveByMarkedId(identifier: string, { chatsCache }: CacheDeps): Resol
 
   const inputPeer = toInputPeerFromPeerId(marked, null);
   if (!inputPeer) throw new InvalidPeerError(identifier);
-  return { inputPeer, name: `Chat ${identifier}` };
+  const result: ResolvedPeer = { inputPeer, name: `Chat ${identifier}` };
+  return result;
 }
 
 const SELF_IDENTIFIERS = new Set(["me", "self"]);
@@ -331,12 +353,13 @@ export async function resolvePeer(
   usersCache: UsersCache,
   chatsCache: ChatsCache,
   dms?: DmLookup,
-): Promise<ResolvedPeer> {
+) {
   const normalized = identifier.trim();
   const deps = { usersCache, chatsCache, dms };
 
   if (SELF_IDENTIFIERS.has(normalized.toLowerCase())) {
-    return { inputPeer: { _: "inputPeerSelf" }, name: "Saved Messages" };
+    const self: ResolvedPeer = { inputPeer: { _: "inputPeerSelf" }, name: "Saved Messages" };
+    return self;
   }
 
   if (normalized.startsWith("+")) {

@@ -13,7 +13,7 @@ import { createMessagesSearch } from "../db/messages-search";
 import { createRateLimitsService } from "../db/rate-limits";
 import { createSenderLookups, SENDER_RETRY_MS } from "../db/sender-lookups";
 import { createSyncJobsService } from "../db/sync-jobs";
-import { type SyncJobRow, SyncJobStatus, SyncJobType, SyncPriority } from "../db/sync-schema";
+import { SyncJobStatus, SyncJobType, SyncPriority } from "../db/sync-schema";
 import { createUsersCache } from "../db/users-cache";
 import { toLong } from "../utils/long";
 import { chatRow, createAccountCacheDb } from "./helpers/cache-db";
@@ -53,7 +53,7 @@ function seed(
   if (extra.is_deleted) createMessagesCache(db).markDeleted(chatId, [messageId]);
 }
 
-function user(id: number, firstName: string): tl.RawUser {
+function user(id: number, firstName: string) {
   return {
     _: "user",
     id,
@@ -79,7 +79,7 @@ function lookupRows() {
     .all();
 }
 
-function fetchJob(chatId: number): SyncJobRow {
+function fetchJob(chatId: number) {
   return ctx.jobsService.create({
     chat_id: chatId,
     job_type: SyncJobType.FetchSenders,

@@ -26,27 +26,25 @@ export const LEGACY = {
  * The tables of 0.2.0, which this version keeps, with user_version 0.
  * initSyncSchema migrates the empty cache; user_version is set back after.
  */
-export function initLegacySchema(db: Database): void {
+export function initLegacySchema(db: Database) {
   initCacheSchema(db);
   initSyncSchema(db);
   setLegacyVersion(db);
 }
 
 /** Mark the cache as one 0.2.0 wrote */
-export function setLegacyVersion(db: Database): void {
+export function setLegacyVersion(db: Database) {
   db.run("PRAGMA user_version = 0");
 }
 
 /** The chats_cache row 0.2.0 wrote for a dialog: under the bare ID */
-export function legacyChatRow(
-  input: FakeDialogInput,
-  overrides: Partial<CachedChatInput> = {},
-): CachedChatInput {
-  return {
+export function legacyChatRow(input: FakeDialogInput, overrides: Partial<CachedChatInput> = {}) {
+  const result: CachedChatInput = {
     ...dialogToCacheInput(fakeDialog(input)),
     chat_id: String(input.id),
     ...overrides,
   };
+  return result;
 }
 
 type RawPeer =
@@ -73,7 +71,7 @@ export function rawMessage(
   };
 }
 
-function barePeerId(peer: RawPeer | undefined): number | null {
+function barePeerId(peer: RawPeer | undefined) {
   if (!peer) return null;
   if (peer._ === "peerUser") return peer.userId;
   if (peer._ === "peerChat") return peer.chatId;
@@ -98,7 +96,7 @@ export function legacyMessageRow(message: ReturnType<typeof rawMessage>) {
  * (@teamchat), the basic group Book Club and the channel Example News, with
  * a message in each. In Team Chat a channel posts as the sender.
  */
-export function seedLegacyCache(db: Database): void {
+export function seedLegacyCache(db: Database) {
   const { alice, teamChat, bookClub, news, senderChannel } = LEGACY;
   const now = Date.now();
 

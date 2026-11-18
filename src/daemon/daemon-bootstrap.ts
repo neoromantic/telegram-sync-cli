@@ -16,7 +16,7 @@ import {
 } from "../db/sync-schema";
 import { createUsersCache } from "../db/users-cache";
 import { apiUserToCacheInput } from "../utils/telegram-mappers";
-import type { AccountRuntime, DaemonContext } from "./daemon-context";
+import type { DaemonContext } from "./daemon-context";
 import { formatError, isDaemonStopError } from "./daemon-utils";
 import { parseRawMessage } from "./sync-worker-real-helpers";
 
@@ -31,7 +31,7 @@ export interface DialogPassResult {
   stopped: boolean;
 }
 
-function requireRuntime(ctx: DaemonContext, accountId: number): AccountRuntime {
+function requireRuntime(ctx: DaemonContext, accountId: number) {
   const rt = ctx.runtime.accounts.get(accountId);
   if (!rt) throw new Error(`Account ${accountId} has no cache open`);
   return rt;
@@ -72,7 +72,7 @@ export async function syncAccountDialogs(
   accountId: number,
   client: TelegramClient,
   options: { quiet?: boolean } = {},
-): Promise<DialogPassResult> {
+) {
   const info = (message: string) =>
     options.quiet ? ctx.logger.debug(message) : ctx.logger.info(message);
   const cacheDb = requireRuntime(ctx, accountId).db;
@@ -255,7 +255,7 @@ export async function syncAccountDialogs(
   return { visited, complete, stopped };
 }
 
-function queueParticipationChecks(cacheDb: Database, groups: number[]): void {
+function queueParticipationChecks(cacheDb: Database, groups: number[]) {
   const jobs = createSyncJobsService(cacheDb);
   cacheDb.transaction(() => {
     for (const chatId of groups) {
@@ -288,7 +288,7 @@ export function markUnvisitedChats(
   visited: Set<number>,
   passComplete: boolean,
   markLeftCaughtUp: boolean,
-): number {
+) {
   const unvisited = chatSyncState
     .getEnabledWithCursor()
     .filter((chat) => !visited.has(chat.chat_id));
@@ -317,7 +317,7 @@ export function markUnvisitedChats(
  * and a pass it ended marks nothing: the chats it didn't reach keep their
  * sync state.
  */
-export async function bootstrapDialogs(ctx: DaemonContext): Promise<void> {
+export async function bootstrapDialogs(ctx: DaemonContext) {
   for (const [accountId, accountState] of ctx.state.accounts) {
     if (ctx.state.shutdownRequested) return;
     const rt = ctx.runtime.accounts.get(accountId);
@@ -359,7 +359,7 @@ export interface CatchUpTrigger {
 }
 
 /** `25 s`, `12 min`, `9 h` */
-export function formatDuration(ms: number): string {
+export function formatDuration(ms: number) {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds} s`;
   const minutes = Math.round(ms / 60_000);
@@ -368,7 +368,7 @@ export function formatDuration(ms: number): string {
   return `${hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours)} h`;
 }
 
-function describeTrigger({ reason, offlineMs }: CatchUpTrigger): string {
+function describeTrigger({ reason, offlineMs }: CatchUpTrigger) {
   const after = offlineMs === null ? "" : ` after ${formatDuration(offlineMs)}`;
   switch (reason) {
     case "reconnect":
@@ -395,7 +395,7 @@ export async function refreshDialogsAfterReconnect(
   accountId: number,
   client: TelegramClient,
   trigger: CatchUpTrigger = { reason: "new_client", offlineMs: null },
-): Promise<boolean> {
+) {
   if (ctx.state.shutdownRequested) return false;
   if (ctx.runtime.dialogPassesInFlight.has(accountId)) return false;
   ctx.runtime.dialogPassesInFlight.add(accountId);

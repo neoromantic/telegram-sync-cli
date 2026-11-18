@@ -17,11 +17,7 @@ import { allowedChatIds } from "../access";
 import { nextCommand } from "../next";
 import { messageItemReader } from "./helpers";
 
-function parseBound(
-  value: string | undefined,
-  name: "since" | "until",
-  now: number,
-): number | undefined {
+function parseBound(value: string | undefined, name: "since" | "until", now: number) {
   if (value === undefined) return undefined;
   const seconds = parseTimeBound(value, { now, end: name === "until" });
   if (seconds === null) {
@@ -39,7 +35,7 @@ function parseIdentifier(
   input: string | undefined,
   name: "chat" | "sender",
   selfId: number | null,
-): { id?: number; username?: string } | undefined {
+) {
   if (!input) return undefined;
   const value = input.trim();
 

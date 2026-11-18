@@ -8,7 +8,7 @@ import { seedOldFormCache } from "./helpers/old-form-cache";
 
 const LIMITS = { maxRows: 4, maxMs: 1_000 };
 
-function oldCache(): Database {
+function oldCache() {
   const db = new Database(":memory:");
   seedOldFormCache(db, { messages: 10 });
   return db;

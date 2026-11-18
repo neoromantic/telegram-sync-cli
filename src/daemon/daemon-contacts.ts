@@ -31,7 +31,7 @@ export const CONTACTS_HINT_DELAY_MS = 60_000;
  * read once here; a config change takes effect at the next start. A config
  * that can't be read keeps the default and says so.
  */
-export async function loadContactsTtl(ctx: DaemonContext): Promise<void> {
+export async function loadContactsTtl(ctx: DaemonContext) {
   try {
     const config = await getResolvedCacheConfig({ dataDir: ctx.dataDir });
     ctx.runtime.contacts.peersTtlMs = config.staleness.peers;
@@ -47,7 +47,7 @@ export async function loadContactsTtl(ctx: DaemonContext): Promise<void> {
  * Start a contacts check for every connected account that is due. Returns
  * the checks it started, so a test can wait for them; the main loop doesn't.
  */
-export function maybeSyncContacts(ctx: DaemonContext, now: number): Promise<void>[] {
+export function maybeSyncContacts(ctx: DaemonContext, now: number) {
   const started: Promise<void>[] = [];
   const state = ctx.runtime.contacts;
 
@@ -92,7 +92,7 @@ export async function syncAccountContacts(
   accountId: number,
   client: TelegramClient,
   now: number,
-): Promise<void> {
+) {
   const state = ctx.runtime.contacts;
   const rt = ctx.runtime.accounts.get(accountId);
   if (!rt || state.inFlight.has(accountId)) return;
@@ -134,7 +134,7 @@ function handleContactsError(
   db: Database,
   err: unknown,
   now: number,
-): void {
+) {
   if (isDaemonStopError(err) || ctx.state.shutdownRequested) {
     ctx.logger.debug(`[Account ${accountId}] Contacts check ended by the daemon stop`);
     return;
@@ -175,7 +175,7 @@ function handleContactsError(
  * A request that a running check is serving doesn't count: that check's
  * reply may predate the change, so the hint gets a check of its own.
  */
-export function requestContactsCheck(ctx: DaemonContext, accountId: number, now: number): void {
+export function requestContactsCheck(ctx: DaemonContext, accountId: number, now: number) {
   const { checkAt, inFlight } = ctx.runtime.contacts;
   const at = checkAt.get(accountId);
   if (at === undefined || (inFlight.has(accountId) && at <= now)) {
@@ -191,7 +191,7 @@ export function requestContactsCheck(ctx: DaemonContext, accountId: number, now:
  * It drops the 15-minute wait of a failed check, which a dropped connection
  * usually caused; a FLOOD_WAIT still holds through the rate limits.
  */
-export function requestContactsCheckNow(ctx: DaemonContext, accountId: number, now: number): void {
+export function requestContactsCheckNow(ctx: DaemonContext, accountId: number, now: number) {
   ctx.runtime.contacts.checkAt.set(accountId, now);
   ctx.runtime.contacts.retryAt.delete(accountId);
 }
@@ -211,7 +211,7 @@ export function handleContactRawUpdate(
   db: Database,
   info: RawUpdateInfo,
   now: number,
-): void {
+) {
   const update = info.update;
   let userId: number;
   switch (update._) {

@@ -1,42 +1,47 @@
 import { Long, type tl } from "@mtcute/bun";
 
-export const plain = (text: string): tl.RawTextPlain => ({
-  _: "textPlain",
-  text,
-});
+export const plain = (text: string) => {
+  const result: tl.RawTextPlain = {
+    _: "textPlain",
+    text,
+  };
+  return result;
+};
 
-export const concat = (...texts: tl.TypeRichText[]): tl.RawTextConcat => ({
-  _: "textConcat",
-  texts,
-});
+export const concat = (...texts: tl.TypeRichText[]) => {
+  const result: tl.RawTextConcat = {
+    _: "textConcat",
+    texts,
+  };
+  return result;
+};
 
-export const paragraph = (text: tl.TypeRichText | string): tl.RawPageBlockParagraph => ({
-  _: "pageBlockParagraph",
-  text: typeof text === "string" ? plain(text) : text,
-});
+export const paragraph = (text: tl.TypeRichText | string) => {
+  const result: tl.RawPageBlockParagraph = {
+    _: "pageBlockParagraph",
+    text: typeof text === "string" ? plain(text) : text,
+  };
+  return result;
+};
 
-export function cell(
-  text: tl.TypeRichText | string,
-  extra: Partial<tl.RawPageTableCell> = {},
-): tl.RawPageTableCell {
-  return {
+export function cell(text: tl.TypeRichText | string, extra: Partial<tl.RawPageTableCell> = {}) {
+  const result: tl.RawPageTableCell = {
     _: "pageTableCell",
     text: typeof text === "string" ? plain(text) : text,
     ...extra,
   };
+  return result;
 }
 
-export function richMessage(
-  blocks: tl.TypePageBlock[],
-  extra: Partial<tl.RawRichMessage> = {},
-): tl.RawRichMessage {
-  return {
+export function richMessage(blocks: tl.TypePageBlock[], extra: Partial<tl.RawRichMessage> = {}) {
+  const result: tl.RawRichMessage = {
     _: "richMessage",
     blocks,
     photos: [],
     documents: [],
     ...extra,
   };
+  return result;
 }
 
 /** A message whose content is these blocks: its own text is empty */
@@ -45,8 +50,8 @@ export function richTlMessage(
   id: number,
   blocks: tl.TypePageBlock[],
   extra: Partial<tl.RawRichMessage> = {},
-): tl.RawMessage {
-  return {
+) {
+  const result: tl.RawMessage = {
     _: "message",
     id,
     peerId,
@@ -54,6 +59,7 @@ export function richTlMessage(
     message: "",
     richMessage: richMessage(blocks, extra),
   };
+  return result;
 }
 
 /** A short made-up report: a heading, a paragraph and a table */
@@ -87,8 +93,8 @@ export const REPORT_TEXT = [
 ].join("\n");
 
 /** A document of a rich message, with this file name */
-export function namedDocument(id: string, fileName: string): tl.RawDocument {
-  return {
+export function namedDocument(id: string, fileName: string) {
+  const result: tl.RawDocument = {
     _: "document",
     id: Long.fromString(id),
     accessHash: Long.fromString("5000000000000000001"),
@@ -99,4 +105,5 @@ export function namedDocument(id: string, fileName: string): tl.RawDocument {
     dcId: 2,
     attributes: [{ _: "documentAttributeFilename", fileName }],
   };
+  return result;
 }

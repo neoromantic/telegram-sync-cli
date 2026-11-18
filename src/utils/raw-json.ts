@@ -1,10 +1,10 @@
 import Long from "long";
 
-export function toRawJson(value: unknown): string {
+export function toRawJson(value: unknown) {
   return JSON.stringify(value, rawJsonReplacer);
 }
 
-function rawJsonReplacer(this: Record<string, unknown>, key: string, value: unknown): unknown {
+function rawJsonReplacer(this: Record<string, unknown>, key: string, value: unknown) {
   if (key === "fileReference") return undefined;
   const original = this[key];
   if (original instanceof Uint8Array) {
@@ -21,7 +21,7 @@ function rawJsonReplacer(this: Record<string, unknown>, key: string, value: unkn
 
 type JsonObject = Record<string, unknown>;
 
-function bytesOfByteObject(value: JsonObject): Uint8Array | null {
+function bytesOfByteObject(value: JsonObject) {
   const keys = Object.keys(value);
   if (keys.length === 0) return null;
   const bytes = new Uint8Array(keys.length);
@@ -52,7 +52,7 @@ function isInt32(value: unknown): value is number {
   );
 }
 
-function decimalOfLongObject(value: JsonObject): string | null {
+function decimalOfLongObject(value: JsonObject) {
   const keys = Object.keys(value);
   if (
     keys.length !== 3 ||
@@ -66,7 +66,7 @@ function decimalOfLongObject(value: JsonObject): string | null {
   return (value.unsigned ? BigInt.asUintN(64, bits) : BigInt.asIntN(64, bits)).toString();
 }
 
-function reencodeValue(value: unknown): { value: unknown; changed: boolean } {
+function reencodeValue(value: unknown) {
   if (Array.isArray(value)) {
     let changed = false;
     for (let i = 0; i < value.length; i++) {
@@ -105,7 +105,7 @@ function reencodeValue(value: unknown): { value: unknown; changed: boolean } {
 }
 
 /** Text that may hold a form toRawJson no longer writes; false is certain */
-export function mayNeedReencode(rawJson: string): boolean {
+export function mayNeedReencode(rawJson: string) {
   return (
     rawJson.includes('"unsigned":') ||
     rawJson.includes('"0":') ||
@@ -118,10 +118,7 @@ export function mayNeedReencode(rawJson: string): boolean {
  * whether it differs from what the row holds; `value` is null for text that
  * isn't JSON, which is kept as it is.
  */
-export function reencodeRawJson(rawJson: string): {
-  value: unknown;
-  changed: boolean;
-} {
+export function reencodeRawJson(rawJson: string) {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawJson);
