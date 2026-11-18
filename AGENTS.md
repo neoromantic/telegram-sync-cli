@@ -169,7 +169,8 @@ Prefer `bun:sqlite` (not better-sqlite3), `Bun.file()`/`Bun.write()` (not `fs`),
 
 ```
 bin/tg.js            npm bin shim
-src/index.ts         CLI entry (citty)
+src/index.ts         CLI entry: wraps every command with the access guard and usage stats
+src/cli.ts           the citty command tree
 src/commands/        one file or folder per command group (auth, accounts, chats, send, sql…)
 src/services/        Telegram client manager (lazy credentials)
 src/db/              schema, caches, sync jobs, per-chat sync state, rate limits
@@ -182,7 +183,10 @@ src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integratio
 ```
 
 New commands use `defineCommand` from citty and report through `success()`/`error()` in
-`src/utils/output.ts`.
+`src/utils/output.ts`. Every command also needs an entry in `COMMAND_ACCESS`
+(`src/commands/access.ts`): whether it changes something on Telegram (refused in read-only
+mode) and which args name a chat (checked against `allowedChats`). A command without one fails
+at start and in `access.test.ts`.
 Import mtcute values and types (`tl`, `TelegramClient`, `networkMiddlewares`) from
 `@mtcute/bun` (helpers such as `toInputUser` from `@mtcute/bun/utils.js`). `@mtcute/core` is a
 direct dependency, at the same version, only for its TL schema export
