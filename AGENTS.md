@@ -91,8 +91,9 @@ bun run src/index.ts <command>   # run the CLI from source
 bun run check                    # format:check (oxfmt) + lint (oxlint) + typecheck + check:knip
 bun run format                   # format the repo with oxfmt
 bun run check:knip               # Knip: unused files and dependencies, unlisted or unresolved imports
-bun run test                     # unit tests, offline
-bun run test:e2e                 # CLI e2e tests, offline
+bun run test                     # unit tests, offline, in parallel workers
+bun run test:e2e                 # CLI e2e tests, offline, in parallel workers
+bun test --changed=main          # quick pass: test files that import a file changed since main
 bun run build                    # compile dist/tg for this platform
 bun run build:all                # cross-compile every target
 bun run test:integration         # real Telegram API, opt-in (see Testing)
@@ -237,9 +238,15 @@ longer exists since mtcute 0.29.
 - `test-setup.ts` (preloaded via `bunfig.toml`) always overwrites `TELEGRAM_API_ID`/
   `TELEGRAM_API_HASH` with dummies, because Bun auto-loads the developer's `.env` first. Real
   values are stashed as `TELEGRAM_TEST_API_ID`/`TELEGRAM_TEST_API_HASH` for the integration
-  suite. CI has no Telegram secrets. It also always points `TELEGRAM_SYNC_CLI_DATA_DIR` at
-  `.tmp/test-data-<pid>`, even if the shell or `.env` sets it, and sets
-  `TELEGRAM_SYNC_CLI_TELEMETRY=0` (usage stats off).
+  suite. CI has no Telegram secrets. It also always points `TELEGRAM_SYNC_CLI_DATA_DIR` at a
+  new `tg-test-data-*` dir in the system temp dir for each test file, removed after the file,
+  even if the shell or `.env` sets it, and sets `TELEGRAM_SYNC_CLI_TELEMETRY=0` (usage stats
+  off).
+- Both suites run their files in parallel worker processes (`--parallel`, one per CPU core). A
+  test file owns its state: `mkdtemp` dirs, its own databases, port 0. Run the full scripts
+  before a PR. `test-timings.json` holds each file's duration, so the slowest files start
+  first; a missing or stale entry only costs speed. Refresh it after big test changes with
+  `bun run test --update-timings` and `bun run test:e2e --update-timings`.
 - Unit tests mock the mtcute client and use `createTestDatabase()` for in-memory databases.
 - E2E tests spawn the CLI with `bun --no-env-file` and an isolated
   `TELEGRAM_SYNC_CLI_DATA_DIR`:

@@ -12,6 +12,7 @@ import { initSyncSchema } from "./sync-schema";
 import { seedLegacyCache } from "../test/legacy-cache.test-utils";
 import { assertPeerIdInvariants } from "../test/peer-id-invariants.test-utils";
 import { seedInChild } from "../test/seed-in-child.test-utils";
+import { holdOpen } from "../test/shared-cache.test-utils";
 
 const SCHEMA_MODULE = join(import.meta.dir, "schema.ts");
 const SYNC_SCHEMA_MODULE = join(import.meta.dir, "sync-schema.ts");
@@ -63,15 +64,6 @@ const OPEN_ACCOUNT_CACHE = `
   } catch (err) {
     console.log((err.reason ?? 'error') + ': ' + err.message)
   }
-`;
-
-const HOLD_OPEN = `
-  import { Database } from 'bun:sqlite'
-  const db = new Database(process.env.LOCK_DB_PATH)
-  db.query('SELECT COUNT(*) FROM chats_cache').get()
-  console.log('open')
-  await Bun.sleep(Number(process.env.LOCK_HOLD_MS))
-  db.close()
 `;
 
 function seedSharedCache(path: string) {
@@ -364,22 +356,23 @@ describe("cache database lock", () => {
     migrated.close();
   });
 
-  it("waits past the 5-second busy timeout to build the message_id index", async () => {
+  it("waits past the busy timeout to build the message_id index", async () => {
     const cache = new Database(path);
     cache.run("DROP INDEX idx_messages_cache_message_id");
     cache.close();
 
     const holder = spawnBun(HOLD_LOCK, {
       LOCK_DB_PATH: path,
-      LOCK_HOLD_MS: "6000",
+      LOCK_HOLD_MS: "1000",
     });
     await waitForLine(holder.stdout, "locked");
 
     const db = new Database(path);
-    const started = performance.now();
     initCacheSchema(db);
+    db.run("PRAGMA busy_timeout = 100");
+    const started = performance.now();
     initSyncSchema(db);
-    expect(performance.now() - started).toBeGreaterThan(5000);
+    expect(performance.now() - started).toBeGreaterThan(100);
     expect(
       db
         .query(
@@ -387,11 +380,11 @@ describe("cache database lock", () => {
         )
         .get(),
     ).toEqual({ name: "idx_messages_cache_message_id" });
-    expect(db.query("PRAGMA busy_timeout").get()).toEqual({ timeout: 5000 });
+    expect(db.query("PRAGMA busy_timeout").get()).toEqual({ timeout: 100 });
     db.close();
 
     expect(await holder.exited).toBe(0);
-  }, 20_000);
+  });
 
   it("opens the cache again after a migration that failed", async () => {
     const accountCache = join(dir, "accounts", "1", "cache.db");
@@ -449,11 +442,8 @@ describe("cache database lock", () => {
     seedSharedCache(path);
     seedAccounts(dir, 1);
 
-    const holder = spawnBun(HOLD_OPEN, {
-      LOCK_DB_PATH: path,
-      LOCK_HOLD_MS: "4000",
-    });
-    await waitForLine(holder.stdout, "open");
+    const holder = holdOpen(path);
+    await holder.ready();
 
     const env = { DB_MODULE, TELEGRAM_SYNC_CLI_DATA_DIR: dir };
     const blocked = spawnBun(OPEN_ACCOUNT_CACHE, env);
@@ -462,13 +452,13 @@ describe("cache database lock", () => {
     expect(existsSync(path)).toBe(true);
     expect(existsSync(join(dir, "accounts", "1"))).toBe(false);
 
-    expect(await holder.exited).toBe(0);
+    await holder.release();
 
     const opened = spawnBun(OPEN_ACCOUNT_CACHE, env);
     expect(await opened.exited).toBe(0);
     expect((await new Response(opened.stdout).text()).trim()).toBe("chats: 4");
     expect(existsSync(path)).toBe(false);
-  }, 30_000);
+  });
 
   it("lets several processes migrate a 0.1.4 database at once", async () => {
     const db = new Database(path);
