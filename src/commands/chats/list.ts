@@ -5,14 +5,13 @@ import { ConfigError, getResolvedCacheConfig } from '../../config'
 import {
   type ChatSyncStateService,
   createChatSyncStateService,
-  type SyncReason,
   syncReason,
 } from '../../db/chat-sync-state'
 import { type CachedChatInput, createChatsCache } from '../../db/chats-cache'
 import type { ChatType } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
-import { ErrorCodes, type PaginatedResult } from '../../types'
+import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { buildCachePaginatedResponse } from '../../utils/cache-pagination'
@@ -27,13 +26,13 @@ import { allowedChatIds } from '../access'
 import { nextCommand } from '../next'
 import {
   CHAT_TYPE_VALUES,
-  type ChatItem,
   chatRowToItem,
   dialogToCacheInput,
   fetchJoinedCommunities,
   filterChatsByType,
   isValidChatType,
 } from './helpers'
+import type { ChatsListOutput } from './list-output'
 
 type DialogCollectorClient = Pick<TelegramClient, 'iterDialogs'>
 
@@ -89,18 +88,11 @@ export async function fetchChatsFromApi(
   return chatInputs
 }
 
-export interface ChatListItem extends ChatItem {
-  /** Whether the daemon syncs the chat's messages */
-  syncEnabled: boolean
-  /** Why it syncs or not; null for a chat without sync state (#131) */
-  syncReason: SyncReason | null
-}
-
 /** A chat with its sync state, one primary key lookup per listed chat */
 function withSync(
   chatSyncState: ChatSyncStateService,
   chat: Parameters<typeof chatRowToItem>[0],
-): ChatListItem {
+): ChatsListOutput['items'][number] {
   const item = chatRowToItem(chat)
   const state = chatSyncState.get(item.id)
   return {
@@ -188,12 +180,16 @@ export const listChatsCommand = defineCommand({
         // With --unread, a cache that knows unread counts answers even when
         // no chat has unread messages
         if (cachedChats.length > 0 || (unread && chatsCache.hasUnreadState())) {
-          const response = buildCachePaginatedResponse(cachedChats, toItem, {
-            offset,
-            limit,
-            ttlMs: cacheConfig.staleness.dialogs,
-            source: 'cache',
-          })
+          const response: ChatsListOutput = buildCachePaginatedResponse(
+            cachedChats,
+            toItem,
+            {
+              offset,
+              limit,
+              ttlMs: cacheConfig.staleness.dialogs,
+              source: 'cache',
+            },
+          )
 
           success(response, nextChatsPage(args, response))
           return
@@ -218,10 +214,7 @@ export const listChatsCommand = defineCommand({
       const paginatedChats = filteredChats.slice(offset, offset + limit)
       const items = paginatedChats.map(toItem)
 
-      const response: PaginatedResult<ChatListItem> & {
-        source: string
-        stale: boolean
-      } = {
+      const response: ChatsListOutput = {
         items,
         total: filteredChats.length,
         offset,
@@ -245,7 +238,7 @@ export const listChatsCommand = defineCommand({
 
 function nextChatsPage(
   args: Record<string, unknown>,
-  { hasMore, offset, limit }: PaginatedResult<unknown>,
+  { hasMore, offset, limit }: ChatsListOutput,
 ) {
   if (!hasMore) return []
   return [
