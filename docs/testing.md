@@ -385,12 +385,13 @@ By default fixtures are stored under:
 
 `.github/workflows/ci.yml` runs on every push to `main`, on pull requests and weekly:
 
-- `build` — devkit's reusable `ci-bun.yml`: `bun run check`, `bun run build`, `bun run test`,
-  `bun run test:e2e`.
+- `build` calls devkit's `ci-bun.yml`. It runs `bun run check` (formatting, lint, types and
+  Knip), builds tg, and runs the unit and E2E suites. The `pack` step installs the npm tarball
+  in a clean project and runs the installed `tg --help` and `tg --version` without credentials.
 - `hygiene` — devkit's `hygiene.yml`: actionlint, zizmor, gitleaks and a privacy scan of added
   lines.
-- `pack` — compiles the binary, packs the npm tarball, installs it globally and runs `tg` with
-  no Telegram credentials.
+- `binary` compiles the standalone executable and runs `./dist/tg --help` and
+  `./dist/tg --version` with an empty home directory and no Telegram credentials.
 - `latest-deps` — weekly (Monday) and on manual runs: `bun update` within the declared ranges,
   then typecheck and the offline suites (no lint: linter rule updates come through Renovate).
   The weekly run also builds with Bun canary.
