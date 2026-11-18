@@ -1,40 +1,24 @@
-import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { collectStatus, readAccountStatus } from "./status";
 import type { createPidFile } from "../daemon";
+import { getAccountCacheDb } from "../db";
 import { createMessagesCache } from "../db/messages-cache";
-import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { createFakeAccountsDb, mockDbModule, testAccount } from "../test/db-mock.test-utils";
-
-const caches = new Map<number, Database>();
-
-mock.module("../db", () =>
-  mockDbModule({
-    cacheFor: (accountId) => {
-      const cache = caches.get(accountId);
-      if (!cache) throw new Error(`No cache for account ${accountId}`);
-      return cache;
-    },
-    accountsDb: createFakeAccountsDb([
-      testAccount({ id: 1 }),
-      testAccount({ id: 2, phone: "+15550000002", is_active: 0 }),
-    ]),
-  }),
-);
-
-const { collectStatus, readAccountStatus } = await import("./status");
+import { testAccount, useTestDataDir } from "../test/accounts.test-utils";
 
 const noDaemon = {
   read: () => null,
   isRunning: () => false,
 } as unknown as ReturnType<typeof createPidFile>;
 
+useTestDataDir([testAccount(), testAccount({ phone: "+15550000002", is_active: false })]);
+
 beforeEach(() => {
   for (const accountId of [1, 2]) {
-    const cache = createAccountCacheDb();
+    const cache = getAccountCacheDb(accountId);
     createMessagesCache(cache).upsertBatch([
       {
         chat_id: 101,
@@ -45,14 +29,8 @@ beforeEach(() => {
         raw_json: "{}",
       },
     ]);
-    caches.set(accountId, cache);
   }
-  caches.get(1)!.run("DROP TABLE messages_cache");
-});
-
-afterEach(() => {
-  for (const cache of caches.values()) cache.close();
-  caches.clear();
+  getAccountCacheDb(1).run("DROP TABLE messages_cache");
 });
 
 describe("tg status with a cache that fails a query", () => {

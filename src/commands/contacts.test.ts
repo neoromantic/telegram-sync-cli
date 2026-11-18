@@ -1,9 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 
+import { getAccountCacheDb } from "../db";
 import { createUsersCache } from "../db/users-cache";
-import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { mockDbModule } from "../test/db-mock.test-utils";
+import { useTestDataDir } from "../test/accounts.test-utils";
 
 const createMockClient = () => ({
   call: mock(() => Promise.resolve({})),
@@ -16,19 +16,19 @@ mock.module("../services/telegram", () => ({
 }));
 
 let testCacheDb: Database;
-mock.module("../db", () => mockDbModule({ cacheFor: () => testCacheDb }));
 
 describe("contacts list --fresh", () => {
   let logSpy: ReturnType<typeof spyOn>;
 
+  useTestDataDir();
+
   beforeEach(() => {
-    testCacheDb = createAccountCacheDb();
+    testCacheDb = getAccountCacheDb(1);
     logSpy = spyOn(console, "log");
   });
 
   afterEach(() => {
     logSpy.mockRestore();
-    testCacheDb.close();
   });
 
   it("fetches the full list and unmarks a contact removed on Telegram", async () => {

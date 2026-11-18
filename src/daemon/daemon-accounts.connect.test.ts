@@ -18,13 +18,12 @@ import { createChatsCache } from "../db/chats-cache";
 import { createMessagesCache } from "../db/messages-cache";
 import type { Account } from "../types";
 import { toLong } from "../utils/long";
+import { createSeededAccountsDb } from "../test/accounts.test-utils";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
 import { addAccountRuntime, testDaemonContext } from "../test/daemon-runtime.test-utils";
 import { takePartIn } from "../test/participation.test-utils";
 import { assertPeerIdInvariants } from "../test/peer-id-invariants.test-utils";
 
-type AccountCreateInput = Parameters<AccountsDbInterface["create"]>[0];
-type AccountUpdateInput = Parameters<AccountsDbInterface["update"]>[1];
 type AccountSeed = Pick<Account, "id" | "phone"> & { user_id?: number | null };
 type MessageLike = {
   id: number;
@@ -158,66 +157,11 @@ mock.module("@mtcute/bun", () => ({
 }));
 
 function createAccountsDb(seed: AccountSeed[]) {
-  const accounts = new Map<number, Account>();
-  let activeId: number | null = null;
-
-  for (const acc of seed) {
-    accounts.set(acc.id, {
-      id: acc.id,
-      phone: acc.phone,
-      user_id: acc.user_id ?? null,
-      name: null,
-      username: null,
-      label: null,
-      session_data: "",
-      is_active: 0,
-      created_at: "",
-      updated_at: "",
-    });
-  }
-
-  return {
-    getAll: () => Array.from(accounts.values()),
-    getById: (id: number) => accounts.get(id) ?? null,
-    getByPhone: (phone: string) =>
-      Array.from(accounts.values()).find((acc) => acc.phone === phone) ?? null,
-    getByUserId: (userId: number) =>
-      Array.from(accounts.values()).find((acc) => acc.user_id === userId) ?? null,
-    getByUsername: (username: string) =>
-      Array.from(accounts.values()).find((acc) => acc.username === username) ?? null,
-    getAllByLabel: (label: string) =>
-      Array.from(accounts.values()).filter((acc) => acc.label === label),
-    getActive: () => (activeId ? (accounts.get(activeId) ?? null) : null),
-    create: (_data: AccountCreateInput) => {
-      throw new Error("not used");
-    },
-    update: mock((id: number, data: AccountUpdateInput) => {
-      const current = accounts.get(id);
-      if (!current) return null;
-      const updated = {
-        ...current,
-        phone: data.phone ?? current.phone,
-        user_id: data.user_id !== undefined ? data.user_id : current.user_id,
-        name: data.name ?? current.name,
-        username: data.username ?? current.username,
-        label: data.label ?? current.label,
-        session_data: data.session_data ?? current.session_data,
-      };
-      accounts.set(id, updated);
-      return updated;
-    }),
-    updateSession: mock((_id: number, _session: string) => {}),
-    setActive: mock((id: number) => {
-      activeId = id;
-      for (const acc of accounts.values()) {
-        acc.is_active = acc.id === id ? 1 : 0;
-      }
-    }),
-    delete: mock((id: number) => {
-      return accounts.delete(id);
-    }),
-    count: () => accounts.size,
-  };
+  const accountsDb = createSeededAccountsDb(
+    seed.map(({ phone, user_id }) => ({ phone, user_id: user_id ?? undefined })),
+  );
+  expect(accountsDb.getAll().map((account) => account.id)).toEqual(seed.map((acc) => acc.id));
+  return accountsDb;
 }
 
 function createContext(accountsDb: AccountsDbInterface) {
@@ -765,8 +709,7 @@ describe("daemon-accounts: connection + event wiring", () => {
     const connected = await connectAccount(ctx, 2, "+1999", null);
 
     expect(connected).toBe(true);
-    expect(accountsDb.delete).toHaveBeenCalledWith(1);
-    expect(accountsDb.update).toHaveBeenCalledWith(2, { user_id: 555 });
+    expect(accountsDb.getById(1)).toBeNull();
     const account = accountsDb.getById(2);
     expect(account?.user_id).toBe(555);
     expect(createdClients[0]?.startUpdatesLoop).toHaveBeenCalled();
@@ -829,8 +772,8 @@ describe("daemon-accounts: connection + event wiring", () => {
     const connected = await connectAccount(ctx, 2, "user:555", null);
 
     expect(connected).toBe(false);
-    expect(accountsDb.setActive).toHaveBeenCalledWith(1);
-    expect(accountsDb.delete).toHaveBeenCalledWith(2);
+    expect(accountsDb.getActive()?.id).toBe(1);
+    expect(accountsDb.getById(2)).toBeNull();
     expect(ctx.state.accounts.has(2)).toBe(false);
     expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1);
     expect(ctx.runtime.accounts.has(2)).toBe(false);

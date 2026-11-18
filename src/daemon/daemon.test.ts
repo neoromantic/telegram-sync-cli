@@ -5,7 +5,7 @@ import { createContext, createDaemon } from "./daemon";
 import { createLogger } from "./daemon-logger";
 import { DaemonExitCode } from "./types";
 import { getDefaultRetentionConfig } from "../db/types";
-import { createFakeAccountsDb, testAccount } from "../test/db-mock.test-utils";
+import { createSeededAccountsDb, testAccount } from "../test/accounts.test-utils";
 
 const tempDir = join(process.cwd(), ".tmp", "daemon-tests");
 const pidPath = join(tempDir, `daemon-${process.pid}.pid`);
@@ -40,7 +40,7 @@ describe("daemon start", () => {
 
     const daemon = createDaemon(
       { pidPath, shutdownTimeoutMs: 1_000_000 },
-      createFakeAccountsDb([testAccount({ id: 1, phone: "+1", is_active: 0 })]),
+      createSeededAccountsDb([testAccount({ phone: "+1", is_active: false })]),
     );
 
     const exitCode = await daemon.start();
@@ -52,7 +52,7 @@ describe("daemon start", () => {
     withCredentials("12345", "test-api-hash");
     const daemon = createDaemon(
       { pidPath, shutdownTimeoutMs: 1_000_000 },
-      createFakeAccountsDb([]),
+      createSeededAccountsDb([]),
     );
 
     const exitCode = await daemon.start();
@@ -64,7 +64,7 @@ describe("daemon start", () => {
     withCredentials(undefined, undefined);
     const daemon = createDaemon(
       { pidPath, shutdownTimeoutMs: 1_000_000 },
-      createFakeAccountsDb([testAccount({ id: 1, phone: "+1", is_active: 0 })]),
+      createSeededAccountsDb([testAccount({ phone: "+1", is_active: false })]),
     );
 
     const exitCode = await daemon.start();
@@ -75,7 +75,7 @@ describe("daemon start", () => {
 
 describe("daemon status", () => {
   it("returns baseline status when not running", () => {
-    const daemon = createDaemon({}, createFakeAccountsDb([]));
+    const daemon = createDaemon({}, createSeededAccountsDb([]));
 
     const status = daemon.getStatus();
 
@@ -85,7 +85,7 @@ describe("daemon status", () => {
   });
 
   it("stop requests shutdown", () => {
-    const daemon = createDaemon({}, createFakeAccountsDb([]));
+    const daemon = createDaemon({}, createSeededAccountsDb([]));
 
     daemon.stop();
 
@@ -95,7 +95,7 @@ describe("daemon status", () => {
 });
 
 describe("daemon context", () => {
-  const accountsDb = createFakeAccountsDb([]);
+  const accountsDb = createSeededAccountsDb([]);
   const logger = createLogger("quiet");
 
   it("keeps the retention it is given", () => {

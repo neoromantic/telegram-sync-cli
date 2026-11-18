@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { tl } from "@mtcute/bun";
 
+import { getAccountCacheDb } from "../db";
 import { getDefaultCacheConfig, isCacheStale } from "../db/types";
 import {
   type CachedUser,
@@ -10,8 +11,7 @@ import {
   type UsersCache,
 } from "../db/users-cache";
 import { toLong } from "../utils/long";
-import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { createFakeAccountsDb, mockDbModule, testAccount } from "../test/db-mock.test-utils";
+import { testAccount, useTestDataDir } from "../test/accounts.test-utils";
 import { expectLongEqual } from "../test/input-peer.test-utils";
 
 function makeRawUser(overrides: Partial<tl.RawUser> = {}) {
@@ -40,7 +40,7 @@ function requireCachedUser(value: CachedUser | null, message = "Expected cached 
 
 let mockClient = createMockClient();
 let secondClient: unknown = null;
-let secondCacheDb: Database | null = null;
+let secondCacheDb: Database;
 
 const getClientForAccount = mock((accountId: number) =>
   accountId === 2 ? secondClient : mockClient,
@@ -49,19 +49,7 @@ mock.module("../services/telegram", () => ({ getClientForAccount }));
 
 let testCacheDb: Database;
 
-mock.module("../db", () =>
-  mockDbModule({
-    cacheFor: (accountId) => {
-      if (accountId !== 2) return testCacheDb;
-      if (!secondCacheDb) throw new Error("No cache for account 2");
-      return secondCacheDb;
-    },
-    accountsDb: createFakeAccountsDb([
-      testAccount({ id: 1 }),
-      testAccount({ id: 2, phone: "+15550000002", is_active: 0 }),
-    ]),
-  }),
-);
+useTestDataDir([testAccount(), testAccount({ phone: "+15550000002", is_active: false })]);
 
 function createTestUser(overrides: Partial<UserCacheInput> = {}) {
   return {
@@ -168,7 +156,7 @@ describe("meCommand", () => {
   const cacheConfig = getDefaultCacheConfig();
 
   beforeEach(() => {
-    const db = createAccountCacheDb();
+    const db = getAccountCacheDb(1);
     testCacheDb = db;
     usersCache = createUsersCache(db);
 
@@ -493,7 +481,7 @@ describe("userCommand - by username", () => {
   const cacheConfig = getDefaultCacheConfig();
 
   beforeEach(() => {
-    const db = createAccountCacheDb();
+    const db = getAccountCacheDb(1);
     testCacheDb = db;
     usersCache = createUsersCache(db);
     mockClient = createMockClient();
@@ -713,7 +701,7 @@ describe("userCommand - by ID", () => {
   let usersCache: UsersCache;
 
   beforeEach(() => {
-    const db = createAccountCacheDb();
+    const db = getAccountCacheDb(1);
     testCacheDb = db;
     usersCache = createUsersCache(db);
     mockClient = createMockClient();
@@ -856,7 +844,7 @@ describe("userCommand - by phone", () => {
   let usersCache: UsersCache;
 
   beforeEach(() => {
-    const db = createAccountCacheDb();
+    const db = getAccountCacheDb(1);
     testCacheDb = db;
     usersCache = createUsersCache(db);
     mockClient = createMockClient();
@@ -1044,7 +1032,7 @@ describe("Edge cases", () => {
   let usersCache: UsersCache;
 
   beforeEach(() => {
-    const db = createAccountCacheDb();
+    const db = getAccountCacheDb(1);
     testCacheDb = db;
     usersCache = createUsersCache(db);
     mockClient = createMockClient();
@@ -1278,7 +1266,7 @@ describe("Response structure", () => {
   const cacheConfig = getDefaultCacheConfig();
 
   beforeEach(() => {
-    const db = createAccountCacheDb();
+    const db = getAccountCacheDb(1);
     testCacheDb = db;
     usersCache = createUsersCache(db);
   });
@@ -1490,14 +1478,14 @@ describe("userCommand with two accounts", () => {
   });
 
   beforeEach(() => {
-    testCacheDb = createAccountCacheDb();
-    secondCacheDb = createAccountCacheDb();
+    testCacheDb = getAccountCacheDb(1);
+    secondCacheDb = getAccountCacheDb(2);
     getClientForAccount.mockClear();
     mockClient = createMockClient();
   });
 
   it("fetches with --fresh on the selected account's client and caches the user there", async () => {
-    createUsersCache(secondCacheDb!).upsert(
+    createUsersCache(secondCacheDb).upsert(
       createTestUser({ user_id: "202", first_name: "Old", username: null }),
     );
     const call = mock(async (request: { _: string }) => {
@@ -1522,13 +1510,13 @@ describe("userCommand with two accounts", () => {
     expect(getClientForAccount.mock.calls).toEqual([[2]]);
     expect(call).toHaveBeenCalledTimes(1);
     expect(mockClient.call).not.toHaveBeenCalled();
-    expect(createUsersCache(secondCacheDb!).getById("202")).toMatchObject({
+    expect(createUsersCache(secondCacheDb).getById("202")).toMatchObject({
       first_name: "Bob",
       access_hash: "222",
     });
     expect(createUsersCache(testCacheDb).getById("202")).toBeNull();
     const activity = (db: Database) => db.query("SELECT method FROM api_activity").all();
-    expect(activity(secondCacheDb!)).toEqual([{ method: "users.getUsers" }]);
+    expect(activity(secondCacheDb)).toEqual([{ method: "users.getUsers" }]);
     expect(activity(testCacheDb)).toEqual([]);
   });
 });

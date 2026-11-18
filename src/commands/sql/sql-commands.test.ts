@@ -1,20 +1,18 @@
 import type { Database } from "bun:sqlite";
 import type { Mock } from "bun:test";
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 
+import { getAccountCacheDb } from "../../db";
 import { initSyncSchema } from "../../db/sync-schema";
 import { createUsersCache } from "../../db/users-cache";
 import type { ErrorCode } from "../../types";
 import { ErrorCodes } from "../../types";
 import { setOutputFormat } from "../../utils/output";
-import { createAccountCacheDb } from "../../test/cache-db.test-utils";
-import { mockDbModule } from "../../test/db-mock.test-utils";
+import { useTestDataDir } from "../../test/accounts.test-utils";
 
 let testCacheDb: Database;
 
 type CommandRun = (input: { args: Record<string, unknown> }) => Promise<void>;
-
-mock.module("../../db", () => mockDbModule({ cacheFor: () => testCacheDb }));
 
 async function expectCommandError(run: Promise<unknown>, code: ErrorCode) {
   try {
@@ -30,9 +28,10 @@ describe("SQL Commands", () => {
   let logSpy: Mock<typeof console.log>;
   let errorSpy: Mock<typeof console.error>;
 
+  useTestDataDir();
+
   beforeEach(() => {
-    const db = createAccountCacheDb();
-    testCacheDb = db;
+    testCacheDb = getAccountCacheDb(1);
     logSpy = spyOn(console, "log");
     errorSpy = spyOn(console, "error");
     setOutputFormat("json");
@@ -57,7 +56,6 @@ describe("SQL Commands", () => {
     logSpy.mockRestore();
     errorSpy.mockRestore();
     setOutputFormat("json");
-    testCacheDb.close();
   });
 
   describe("sqlQueryCommand", () => {
