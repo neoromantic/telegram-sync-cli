@@ -53,7 +53,7 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 | Telegram | mtcute (`@mtcute/bun`) | Modern, Bun support, TypeScript-first |
 | CLI | Citty | Lightweight, TypeScript-first |
 | Storage | bun:sqlite | Native, zero deps |
-| Linting | Biome | Fast, all-in-one linter + formatter |
+| Linting | oxlint + landmines, oxfmt | devkit's shared lint and format standard |
 | Type Checker | TypeScript 7 (`tsc`) | Native Go compiler, fast `--noEmit` checks |
 | Git Hooks | lefthook | Simple, parallel hook execution |
 

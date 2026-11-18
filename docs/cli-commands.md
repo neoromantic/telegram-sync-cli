@@ -83,6 +83,7 @@ account joined once a daemon start or `tg chats list --fresh` has cached them.
 
 The `data` of `tg chats list`:
 
+<!-- prettier-ignore-start -->
 <!-- output: chats list -->
 | Field | Type | Description |
 |---|---|---|
@@ -106,6 +107,7 @@ The `data` of `tg chats list`:
 | `source` | `cache` or `api` | `cache`, or `api` with `--fresh` or when the cache has no matching chat |
 | `stale` | boolean | A matching cached chat is older than `cache.staleness.dialogs`; always `false` from the API |
 <!-- /output -->
+<!-- prettier-ignore-end -->
 
 `--unread` lists only chats with unread messages, in the same order; it answers from the cache
 once a dialog list has given the chats their counts, and otherwise reads the dialog list from
