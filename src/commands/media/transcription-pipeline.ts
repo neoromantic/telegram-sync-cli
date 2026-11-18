@@ -239,7 +239,10 @@ export async function transcribeMessages(
     }
 
     const format = preparedFormat(input.formats)
-    const tmp = await mkdtemp(join(deps.tmpRoot ?? tmpdir(), 'tg-transcribe-'))
+    const tmp =
+      format === 'wav16k'
+        ? await mkdtemp(join(deps.tmpRoot ?? tmpdir(), 'tg-transcribe-'))
+        : null
     try {
       for (const [index, item] of allowed.entries()) {
         signal.throwIfAborted()
@@ -261,7 +264,9 @@ export async function transcribeMessages(
             )
             continue
           }
-          if (!ffmpeg) throw new Error('A WAV provider is ready without ffmpeg')
+          if (!ffmpeg || !tmp) {
+            throw new Error('A WAV provider is ready without ffmpeg')
+          }
           const wav = join(tmp, `${index}.wav`)
           const peakDb = await convertToWav(ffmpeg, file.path, wav, signal)
           if (peakDb < SILENCE_MAX_VOLUME_DB) {
@@ -287,7 +292,7 @@ export async function transcribeMessages(
       }
       if (toRun.length > 0) await runBatches(provider, toRun)
     } finally {
-      await rm(tmp, { recursive: true, force: true })
+      if (tmp) await rm(tmp, { recursive: true, force: true })
     }
   }
 
