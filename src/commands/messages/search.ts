@@ -1,4 +1,4 @@
-import { defineCommand } from 'citty'
+import { type ArgsDef, defineCommand } from 'citty'
 
 import {
   createMessagesSearch,
@@ -14,6 +14,7 @@ import { error, success } from '../../utils/output'
 import { buildSnippet, snippetTerms } from '../../utils/search-snippet'
 import { parseTimeBound } from '../../utils/time-bounds'
 import { allowedChatIds } from '../access'
+import { nextCommand } from '../next'
 import { messageItemReader } from './helpers'
 
 /** A --since/--until value as Unix seconds; INVALID_ARGS when it is none */
@@ -70,80 +71,82 @@ function parseIdentifier(
   )
 }
 
+const searchArgs = {
+  query: {
+    type: 'string',
+    description:
+      'Words to find (all of them, any order), or an FTS5 query: error OR timeout, "exact phrase", sender:alice, chat:team, word*',
+    required: true,
+  },
+  phrase: {
+    type: 'boolean',
+    description: 'Match the whole query as one exact phrase',
+    default: false,
+  },
+  limit: {
+    type: 'string',
+    description: 'Maximum number of results (default: 50)',
+    default: '50',
+  },
+  offset: {
+    type: 'string',
+    description: 'Offset for pagination (default: 0)',
+    default: '0',
+  },
+  chat: {
+    type: 'string',
+    description: 'Filter by chat ID, @username or me (Saved Messages)',
+  },
+  sender: {
+    type: 'string',
+    description: 'Filter by sender ID, @username or me (your own messages)',
+  },
+  includeDeleted: {
+    type: 'boolean',
+    description: 'Include deleted messages',
+    default: false,
+  },
+  since: {
+    type: 'string',
+    description:
+      'Only messages sent at or after: a date (2026-10-01), a date and time (2026-10-01T09:30) or a duration back from now (24h, 7d)',
+  },
+  until: {
+    type: 'string',
+    description:
+      'Only messages sent before: a date and time, a duration back from now, or a date (its whole day included)',
+  },
+  sort: {
+    type: 'string',
+    description:
+      'Order: date (newest first, default) or relevance (best match first)',
+    default: 'date',
+  },
+  snippet: {
+    type: 'boolean',
+    description:
+      'Add a snippet to each result: the text around the first match, matched words in **',
+    default: false,
+  },
+  count: {
+    type: 'boolean',
+    description:
+      'Also count every message that matches the query and filters (a second query)',
+    default: false,
+  },
+  account: {
+    type: 'string',
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+} satisfies ArgsDef
+
 export const searchMessagesCommand = defineCommand({
   meta: {
     name: 'search',
     description:
       'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
   },
-  args: {
-    query: {
-      type: 'string',
-      description:
-        'Words to find (all of them, any order), or an FTS5 query: error OR timeout, "exact phrase", sender:alice, chat:team, word*',
-      required: true,
-    },
-    phrase: {
-      type: 'boolean',
-      description: 'Match the whole query as one exact phrase',
-      default: false,
-    },
-    limit: {
-      type: 'string',
-      description: 'Maximum number of results (default: 50)',
-      default: '50',
-    },
-    offset: {
-      type: 'string',
-      description: 'Offset for pagination (default: 0)',
-      default: '0',
-    },
-    chat: {
-      type: 'string',
-      description: 'Filter by chat ID, @username or me (Saved Messages)',
-    },
-    sender: {
-      type: 'string',
-      description: 'Filter by sender ID, @username or me (your own messages)',
-    },
-    includeDeleted: {
-      type: 'boolean',
-      description: 'Include deleted messages',
-      default: false,
-    },
-    since: {
-      type: 'string',
-      description:
-        'Only messages sent at or after: a date (2026-10-01), a date and time (2026-10-01T09:30) or a duration back from now (24h, 7d)',
-    },
-    until: {
-      type: 'string',
-      description:
-        'Only messages sent before: a date and time, a duration back from now, or a date (its whole day included)',
-    },
-    sort: {
-      type: 'string',
-      description:
-        'Order: date (newest first, default) or relevance (best match first)',
-      default: 'date',
-    },
-    snippet: {
-      type: 'boolean',
-      description:
-        'Add a snippet to each result: the text around the first match, matched words in **',
-      default: false,
-    },
-    count: {
-      type: 'boolean',
-      description:
-        'Also count every message that matches the query and filters (a second query)',
-      default: false,
-    },
-    account: {
-      type: 'string',
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-  },
+  args: searchArgs,
   async run({ args }) {
     const query = (args.query ?? '').trim()
     if (!query) {
@@ -198,37 +201,58 @@ export const searchMessagesCommand = defineCommand({
         since,
         until,
       }
-      const results = search.search(query, { ...options, limit, offset, sort })
+      // One row past the page says whether another page follows
+      const rows = search.search(query, {
+        ...options,
+        limit: limit + 1,
+        offset,
+        sort,
+      })
+      const results = rows.slice(0, limit)
+      const next =
+        rows.length > limit
+          ? [
+              nextCommand(
+                'messages search',
+                searchArgs,
+                { ...args, query, limit, offset: offset + limit },
+                'The next page of results.',
+              ),
+            ]
+          : []
       const count = args.count ? search.count(query, options) : null
       const terms = args.snippet
         ? snippetTerms(query, { phrase: options.phrase })
         : []
       const toItem = messageItemReader(cacheDb)
 
-      success({
-        query,
-        filters: {
-          chat: args.chat ?? null,
-          sender: args.sender ?? null,
-          includeDeleted: args.includeDeleted ?? false,
-          phrase: args.phrase ?? false,
-          since: args.since ?? null,
-          until: args.until ?? null,
+      success(
+        {
+          query,
+          filters: {
+            chat: args.chat ?? null,
+            sender: args.sender ?? null,
+            includeDeleted: args.includeDeleted ?? false,
+            phrase: args.phrase ?? false,
+            since: args.since ?? null,
+            until: args.until ?? null,
+          },
+          sort,
+          results: results.map((row) => {
+            const item = toItem(row)
+            return args.snippet
+              ? { ...item, snippet: buildSnippet(item.text, terms) }
+              : item
+          }),
+          total: results.length,
+          count,
+          limit,
+          offset,
+          source: 'cache',
+          stale: false,
         },
-        sort,
-        results: results.map((row) => {
-          const item = toItem(row)
-          return args.snippet
-            ? { ...item, snippet: buildSnippet(row.text, terms) }
-            : item
-        }),
-        total: results.length,
-        count,
-        limit,
-        offset,
-        source: 'cache',
-        stale: false,
-      })
+        next,
+      )
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (isFts5QueryError(err)) {

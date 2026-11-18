@@ -50,8 +50,22 @@ describe('runMigrationsTick', () => {
 
     await runMigrationsTick(ctx, { budgetMs: 60_000, limits: LIMITS })
 
-    expect(states(first.db)).toEqual(['done', 'done', 'done', 'done', 'done'])
-    expect(states(second.db)).toEqual(['done', 'done', 'done', 'done', 'done'])
+    expect(states(first.db)).toEqual([
+      'done',
+      'done',
+      'done',
+      'done',
+      'done',
+      'done',
+    ])
+    expect(states(second.db)).toEqual([
+      'done',
+      'done',
+      'done',
+      'done',
+      'done',
+      'done',
+    ])
     expect(ctx.logger.info).toHaveBeenCalledWith(
       '[Account 1] Migration messages_raw_json_v2 done: 10 rows',
     )
@@ -70,7 +84,14 @@ describe('runMigrationsTick', () => {
     expect(messages!.done).toBeLessThan(10)
 
     await runMigrationsTick(ctx, { budgetMs: 60_000, limits: LIMITS })
-    expect(states(rt.db)).toEqual(['done', 'done', 'done', 'done', 'done'])
+    expect(states(rt.db)).toEqual([
+      'done',
+      'done',
+      'done',
+      'done',
+      'done',
+      'done',
+    ])
   })
 
   it('runs no batch once the daemon is stopping', async () => {
@@ -81,6 +102,7 @@ describe('runMigrationsTick', () => {
     await runMigrationsTick(ctx, { budgetMs: 60_000, limits: LIMITS })
 
     expect(states(rt.db)).toEqual([
+      'pending',
       'pending',
       'pending',
       'pending',

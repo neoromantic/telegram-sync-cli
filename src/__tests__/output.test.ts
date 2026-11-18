@@ -149,6 +149,42 @@ describe('Output Utilities', () => {
         expect(err.details).toEqual({ account: 1 })
       }
     })
+
+    it('marks a rate limit and a network error retryable', () => {
+      for (const code of [ErrorCodes.RATE_LIMITED, ErrorCodes.NETWORK_ERROR]) {
+        errorSpy.mockClear()
+        expect(() => error(code, 'Try later')).toThrow()
+        const output = JSON.parse(errorSpy.mock.calls[0]?.[0] as string)
+        expect(output.error.retryable).toBe(true)
+      }
+    })
+
+    it('marks other errors not retryable', () => {
+      expect(() =>
+        error(ErrorCodes.TELEGRAM_ERROR, 'API call failed: METHOD_INVALID'),
+      ).toThrow()
+      const output = JSON.parse(errorSpy.mock.calls[0]?.[0] as string)
+      expect(output.error).toEqual({
+        code: 'TELEGRAM_ERROR',
+        message: 'API call failed: METHOD_INVALID',
+        retryable: false,
+      })
+    })
+
+    it('lets the caller say an error is retryable', () => {
+      let thrown: { suggestion?: string; retryable?: boolean } = {}
+      try {
+        error(ErrorCodes.GENERAL_ERROR, 'Busy', undefined, 'Run it again', true)
+      } catch (e) {
+        thrown = e as typeof thrown
+      }
+      const output = JSON.parse(errorSpy.mock.calls[0]?.[0] as string)
+      expect(output.error.retryable).toBe(true)
+      expect(thrown).toMatchObject({
+        suggestion: 'Run it again',
+        retryable: true,
+      })
+    })
   })
 
   describe('getExitCode', () => {
