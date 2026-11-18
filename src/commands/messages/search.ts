@@ -241,7 +241,7 @@ export const searchMessagesCommand = defineCommand({
           results: results.map((row) => {
             const item = toItem(row)
             return args.snippet
-              ? { ...item, snippet: buildSnippet(row.text, terms) }
+              ? { ...item, snippet: buildSnippet(item.text, terms) }
               : item
           }),
           total: results.length,
