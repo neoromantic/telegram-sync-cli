@@ -42,7 +42,7 @@ export const LARGE_FILE_BYTES = 20 * 1024 * 1024
 const IDS_PER_FETCH = 100
 /** Longer flood waits fail the files instead of pausing the batch */
 export const MAX_BATCH_FLOOD_WAIT_SECONDS = 300
-/** Retries for one message page or one file */
+/** Flood waits in a row, with nothing downloaded between them, before a page or file fails */
 const MAX_RETRIES = 5
 
 export interface BatchRequest {
@@ -155,8 +155,16 @@ function batchTransfers(client: TelegramClient, signal?: AbortSignal) {
     return fullUser
   }) as TelegramClient['call']
 
-  async function retry<T>(action: () => Promise<T>): Promise<T> {
+  /**
+   * `parts` counts the parts the action has received so far: a wait
+   * counts against it only when none arrived since its previous wait.
+   */
+  async function retry<T>(
+    action: () => Promise<T>,
+    parts: () => number = () => 0,
+  ): Promise<T> {
     let waits = 0
+    let seen = parts()
     for (;;) {
       signal?.throwIfAborted()
       const delay = until - Date.now()
@@ -169,6 +177,10 @@ function batchTransfers(client: TelegramClient, signal?: AbortSignal) {
       } catch (err) {
         if (err === paused) continue
         if (!(err instanceof ObservedWait) && !pause(err)) throw err
+        if (parts() > seen) {
+          seen = parts()
+          waits = 0
+        }
         if (++waits > MAX_RETRIES) {
           throw err instanceof ObservedWait ? err.cause : err
         }
@@ -212,7 +224,7 @@ export async function downloadBatch(
   if (!online.length) return failures
 
   const { client, retry } = batchTransfers(deps.getClient(), deps.signal)
-  const fileDeps = { ...deps, getClient: () => client, progress: undefined }
+  const fileDeps = { ...deps, getClient: () => client }
   for (let at = 0; at < online.length; at += IDS_PER_FETCH) {
     const ids = online.slice(at, at + IDS_PER_FETCH)
     let page: Map<number, FetchedMessage>
@@ -244,9 +256,13 @@ export async function downloadBatch(
         const item = (takesLarge && large.shift()) || small.shift()
         if (!item) return
         const id = item.message.id
+        let parts = 0
+        // Counts parts instead of drawing a progress bar per file
+        const counted = { ...fileDeps, progress: () => () => void parts++ }
         try {
-          const result = await retry(() =>
-            downloadOnline(fileDeps, chat, single(id), item),
+          const result = await retry(
+            () => downloadOnline(counted, chat, single(id), item),
+            () => parts,
           )
           checkDownloadInterrupted(deps.signal)
           await handlers.done(result)

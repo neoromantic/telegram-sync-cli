@@ -1592,17 +1592,119 @@ describe('batch download', () => {
     expect([peak, peakLarge]).toEqual([5, 2])
   })
 
-  it('surfaces short waits to the batch for metadata and file parts', async () => {
-    const tg = fakeTelegram({ message: () => photoMessage(SELF, 1) })
-    const transfer = fakeTransfer(async function* ({ client }) {
-      await client.call({ _: 'upload.getFile' } as tl.upload.RawGetFileRequest)
-      yield fakeBytes(60_000)
+  /**
+   * A client that, like mtcute, sleeps through a flood wait within the
+   * call's floodSleepThreshold and throws a longer one
+   */
+  function floodingClient(messages: unknown[], waitFor: () => number | null) {
+    const getFile: number[] = []
+    const client = {
+      call: async (
+        req: { _: string },
+        options?: { floodSleepThreshold?: number },
+      ) => {
+        if (req._ !== 'upload.getFile') {
+          return { _: 'messages.messages', messages, users: [], chats: [] }
+        }
+        getFile.push(Date.now())
+        const seconds = waitFor()
+        if (seconds !== null) {
+          const threshold = options?.floodSleepThreshold ?? MEDIA_FLOOD_SLEEP_MS
+          if (seconds * 1000 > threshold) {
+            throw new RateLimitError(req._, seconds)
+          }
+          await Bun.sleep(seconds * 1000)
+        }
+        return {}
+      },
+    } as unknown as TelegramClient
+    return { client, getFile }
+  }
+
+  /** A transfer of `bytes` that, like mtcute, asks for each part and reports its end */
+  function partsTransfer(bytes: Uint8Array) {
+    return fakeTransfer(async function* ({ client, params }) {
+      for (let at = params.offset ?? 0; at < bytes.length; at += PART_BYTES) {
+        await client.call({
+          _: 'upload.getFile',
+        } as tl.upload.RawGetFileRequest)
+        const chunk = bytes.subarray(at, at + PART_BYTES)
+        params.progressCallback?.(at + chunk.length, bytes.length)
+        yield chunk
+      }
     })
-    await batch(
+  }
+
+  function largeFile(id: number, size: number) {
+    return documentMessage(SELF, id, {
+      id: String(9000 + id),
+      size,
+      mimeType: 'video/mp4',
+      attributes: [],
+    })
+  }
+
+  it('pauses every file for a short wait one file would sleep through alone', async () => {
+    const files = [1, 2].map((id) => largeFile(id, 64))
+    let first = true
+    const tg = floodingClient(files, () => {
+      if (!first) return null
+      first = false
+      return 0.15
+    })
+    const transfer = fakeTransfer(async function* ({ client, params }) {
+      if (params.fileSize === 64 && !first) await Bun.sleep(20)
+      await client.call({ _: 'upload.getFile' } as tl.upload.RawGetFileRequest)
+      yield fakeBytes(64)
+    })
+    const started = Date.now()
+    const result = await batch(
       { getClient: () => tg.client, download: transfer.download },
       [1, 2],
     )
-    expect(tg.methods()).toContain('upload.getFile')
-    expect(tg.calls.map((c) => c.options?.floodSleepThreshold)).toEqual([0, 0])
+    expect(result.done.sort()).toEqual([1, 2])
+    // The flooded call and every later one: none before the wait ends
+    expect(tg.getFile.length).toBeGreaterThanOrEqual(3)
+    expect(Math.min(...tg.getFile.slice(1))).toBeGreaterThanOrEqual(
+      started + 150,
+    )
+  })
+
+  it('completes a file that keeps moving between more waits than the retry bound', async () => {
+    const bytes = fakeBytes(8 * PART_BYTES)
+    const file = largeFile(1, bytes.length)
+    let calls = 0
+    let waits = 0
+    // Every second part request waits, as Telegram throttles a large download
+    const tg = floodingClient([file], () => {
+      if (++calls % 2 !== 0 || waits === 7) return null
+      waits++
+      return 0.001
+    })
+    const transfer = partsTransfer(bytes)
+    const result = await batch(
+      { getClient: () => tg.client, download: transfer.download },
+      [1],
+    )
+    expect(result).toEqual({ done: [1], failed: [] })
+    expect(waits).toBe(7)
+    expectBytes(readFileSync(pathsOf(file).file), bytes)
+  })
+
+  it('gives up on a file that makes no progress across the retry bound', async () => {
+    const bytes = fakeBytes(4 * PART_BYTES)
+    const file = largeFile(1, bytes.length)
+    let calls = 0
+    // One part arrives, then every request waits
+    const tg = floodingClient([file], () => (++calls > 1 ? 0.001 : null))
+    const transfer = partsTransfer(bytes)
+    const result = await batch(
+      { getClient: () => tg.client, download: transfer.download },
+      [1],
+    )
+    expect(result).toEqual({ done: [], failed: [[1, 'RATE_LIMITED']] })
+    // The first wait follows progress; five more without any give up
+    expect(tg.getFile).toHaveLength(1 + 6)
+    expect(statSync(pathsOf(file).part).size).toBe(PART_BYTES)
   })
 })

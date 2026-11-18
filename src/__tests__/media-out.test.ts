@@ -87,7 +87,9 @@ describe('copyOut on a filesystem without hard links', () => {
       throw Object.assign(new Error('EPERM: link'), { code: 'EPERM' })
     })
     try {
-      const err = await refusal(copyOut(cached(fakeBytes(70_000)), target, false))
+      const err = await refusal(
+        copyOut(cached(fakeBytes(70_000)), target, false),
+      )
       expect(err.code).toBe(ErrorCodes.FILE_EXISTS)
       expect(fs.readFileSync(target, 'utf-8')).toBe('edited copy')
       expect(parts()).toEqual([])
