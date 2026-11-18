@@ -9,12 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `tg send --markdown` and `tg send --html` send `--message` as a rich message, which Telegram
-  parses itself: headings, tables, ordered, unordered and task lists, block quotations, code
-  blocks, collapsible details, formulas and footnotes, next to bold, italic, links and the other
-  inline styles. The result says which with `format` (`null` for plain text). When Telegram
-  refuses the message, the error names its reason (`RICH_MESSAGE_TABLE_COLS_TOO_MANY`,
-  `RICH_MESSAGE_EMPTY`…) and `suggestion` lists the limits. Captions stay plain text.
+- `tg send --markdown` and `--html` send rich messages such as headings and tables on
+  supported accounts. The result includes `format`. File captions stay plain text.
 
 ### Changed
 

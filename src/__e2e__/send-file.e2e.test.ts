@@ -65,15 +65,21 @@ describe('E2E: send --file arguments', () => {
     )
   })
 
-  it('refuses --markdown with --html, and either with --file', async () => {
-    await expectInvalid(
-      ['--message', 'hi', '--markdown', '--html'],
-      'Use --markdown or --html, not both',
+  it('rejects conflicting formats before resolving an allowed chat', async () => {
+    await Bun.write(
+      join(env.dataDir, 'config.json'),
+      JSON.stringify({ allowedChats: ['55'] }),
     )
     await expectInvalid(
-      ['--file', join(filesDir, 'report.pdf'), '--caption', 'Q3', '--markdown'],
-      '--markdown formats --message: a caption is plain text',
+      ['-m', 'hi', '--markdown', '--html'],
+      'Use --markdown or --html',
     )
+    for (const flag of ['--markdown', '--html']) {
+      await expectInvalid(
+        [flag, '--file', 'report.pdf', '--caption', 'Q3'],
+        'a caption is plain text',
+      )
+    }
   })
 
   it('refuses --caption and --force-document without --file', async () => {

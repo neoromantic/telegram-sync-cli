@@ -1,6 +1,6 @@
 import { accessSync, constants, statSync } from 'node:fs'
 import { basename } from 'node:path'
-import type { tl } from '@mtcute/bun'
+import { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
 import { accountsDb } from '../db'
@@ -65,7 +65,32 @@ function extractMessageInfo(result: tl.TypeUpdates): {
   return { messageId: null, timestamp: null }
 }
 
-function handleSendError(recipient: string, message: string): never {
+const richErrorHints: Record<string, string> = {
+  RICH_MESSAGE_UNSUPPORTED:
+    'Rich sending is unavailable for this account or chat. Omit the formatting flag to send plain text.',
+  RICH_MESSAGE_EMPTY: 'Add visible content to the rich message.',
+  RICH_MESSAGE_TEXT_TOO_LONG:
+    'Shorten the rich message text to 32768 characters or fewer.',
+  RICH_MESSAGE_BLOCKS_TOO_MANY: 'Use at most 500 blocks.',
+  RICH_MESSAGE_MEDIA_TOO_MANY: 'Use at most 50 media attachments.',
+  RICH_MESSAGE_TABLE_COLS_TOO_MANY: 'Use at most 20 table columns.',
+}
+
+function handleSendError(
+  recipient: string,
+  err: unknown,
+  rich: boolean,
+): never {
+  if (rich && tl.RpcError.is(err) && err.text.startsWith('RICH_MESSAGE_')) {
+    error(
+      ErrorCodes.TELEGRAM_ERROR,
+      err.message,
+      { telegramError: err.text },
+      richErrorHints[err.text],
+    )
+  }
+  const message = err instanceof Error ? err.message : 'Unknown error'
+
   if (message.includes('PEER_ID_INVALID')) {
     error(
       ErrorCodes.TELEGRAM_ERROR,
@@ -84,16 +109,6 @@ function handleSendError(recipient: string, message: string): never {
     error(
       ErrorCodes.TELEGRAM_ERROR,
       'You do not have permission to send messages in this chat.',
-    )
-  }
-
-  const richError = message.match(/RICH_MESSAGE_[A-Z_]+/)?.[0]
-  if (richError) {
-    error(
-      ErrorCodes.TELEGRAM_ERROR,
-      `Telegram refused the rich message: ${richError}`,
-      { telegramError: richError },
-      'A rich message takes up to 32768 characters, 500 blocks, 16 levels of nesting, 50 media and 20 table columns',
     )
   }
 
@@ -288,15 +303,20 @@ export const sendCommand = defineCommand({
       description: 'Message ID to reply to',
     },
   },
-  async run({ args, rawArgs }) {
+  setup(ctx) {
+    // A chat allowlist can resolve the recipient before run().
+    if (ctx.args.markdown || ctx.args.html) {
+      ctx.data = readSendContent(ctx.args, ctx.rawArgs)
+    }
+  },
+  async run({ args, rawArgs, data }) {
     const recipient = args.to
     const silent = args.silent
     const replyTo = args['reply-to']
       ? Number.parseInt(args['reply-to'], 10)
       : undefined
 
-    // Tests call run() with args only
-    const content = readSendContent(args, rawArgs ?? [])
+    const content: SendContent = data ?? readSendContent(args, rawArgs ?? [])
 
     // The recipient resolves with this account's access hashes
     const { account, db: cacheDb } = openAccountCache(args.account)
@@ -389,8 +409,11 @@ export const sendCommand = defineCommand({
         })
       }
       reportConfigOrRateLimitError(err)
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      handleSendError(recipient, message)
+      handleSendError(
+        recipient,
+        err,
+        content.file === null && content.format !== null,
+      )
     }
   },
 })
