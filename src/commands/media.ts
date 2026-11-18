@@ -2,6 +2,7 @@ import { defineCommand } from 'citty'
 
 import { cleanMediaCommand } from './media/clean'
 import { downloadMediaCommand } from './media/download'
+import { transcribeMediaCommand } from './media/transcribe'
 
 /**
  * Media subcommand group: the account's cache of message files,
@@ -15,7 +16,8 @@ export const mediaCommand = defineCommand({
   subCommands: {
     download: downloadMediaCommand,
     clean: cleanMediaCommand,
+    transcribe: transcribeMediaCommand,
   },
 })
 
-export { cleanMediaCommand, downloadMediaCommand }
+export { cleanMediaCommand, downloadMediaCommand, transcribeMediaCommand }

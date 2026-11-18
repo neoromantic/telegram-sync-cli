@@ -492,6 +492,41 @@ export function createChatContentProtectionSchema(db: Database): void {
   }).immediate()
 }
 
+/**
+ * message_transcripts: the text `tg media transcribe` got from a voice note
+ * or video note (src/db/message-transcripts.ts). Written only by the CLI.
+ * Created once, so opening a cache that has it never waits for the write lock.
+ */
+export function createMessageTranscriptsSchema(db: Database): void {
+  const exists = db
+    .query(
+      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_transcripts'`,
+    )
+    .get()
+  if (exists) return
+
+  db.transaction(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS message_transcripts (
+        chat_id        INTEGER NOT NULL,
+        message_id     INTEGER NOT NULL,
+        unique_file_id TEXT NOT NULL,
+        text           TEXT NOT NULL,
+        language       TEXT,
+        source         TEXT NOT NULL,
+        runner         TEXT,
+        model          TEXT,
+        transcribed_at INTEGER NOT NULL,
+        PRIMARY KEY (chat_id, message_id)
+      )
+    `)
+    db.run(`
+      CREATE INDEX IF NOT EXISTS idx_message_transcripts_unique_file_id
+      ON message_transcripts(unique_file_id)
+    `)
+  }).immediate()
+}
+
 export interface SyncSchemaOptions {
   /**
    * Keep message_search as a contentless table; defaults to whether this
@@ -565,6 +600,7 @@ export function initSyncSchema(
 
   createMessageAttachmentsSchema(db)
   createChatContentProtectionSchema(db)
+  createMessageTranscriptsSchema(db)
 
   // Checked first: an older SQLite can't even inspect a contentless table
   if (!disableUnsupportedSearch(db, contentless)) {

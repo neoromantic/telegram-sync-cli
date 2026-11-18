@@ -60,6 +60,14 @@ export interface PaginatedResult<T> {
   hasMore: boolean
 }
 
+/** The stored text of a voice or video note, from `tg media transcribe` */
+export interface MessageTranscript {
+  text: string
+  language: string | null
+  source: 'local'
+  model: string | null
+}
+
 /** Message search result item */
 export interface MessageSearchItem {
   chatId: number
@@ -73,6 +81,8 @@ export interface MessageSearchItem {
   attachment: AttachmentInfo | null
   /** What a service message did (a call, a pin, a group change); null for any other message */
   action: MessageAction | null
+  /** The stored text of a voice or video note (tg media transcribe); null otherwise */
+  transcript: MessageTranscript | null
   isOutgoing: boolean
   isEdited: boolean
   isPinned: boolean
@@ -135,6 +145,7 @@ export const ErrorCodes = {
   CONTENT_PROTECTED: 'CONTENT_PROTECTED',
   MEDIA_UNSUPPORTED: 'MEDIA_UNSUPPORTED',
   FILE_EXISTS: 'FILE_EXISTS',
+  TRANSCRIBER_NOT_FOUND: 'TRANSCRIBER_NOT_FOUND',
   // Read-only mode and the chat allowlist
   READ_ONLY: 'READ_ONLY',
   CHAT_NOT_ALLOWED: 'CHAT_NOT_ALLOWED',

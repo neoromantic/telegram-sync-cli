@@ -72,6 +72,9 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Files: send one with `tg send --file`; download a message's file into a per-account media
   cache with `tg media download` (cached files need no network, partial downloads resume);
   every message item shows its attachment (kind, name, MIME type, size)
+- Voice notes and video notes to text with a speech-to-text program on your machine
+  (`tg media transcribe`, whisper.cpp or an openai-whisper CLI); `tg messages` shows the
+  transcript
 - Service messages say what happened: calls (video, duration, why they ended), pins and group
   changes in each item's `action`
 - Contacts, chats and users (`tg contacts`, `tg chats`, `tg me`, `tg user`)
@@ -98,7 +101,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Unread messages, mark as read | ✅ `tg chats list --unread`, `tg messages unread`, `tg messages read` | ✅ |
 | Send text | ✅ replies, silent | ✅ replies, Markdown/HTML |
 | Edit, delete, forward, pin | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)) | ✅ |
-| Send and download media | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`); sending albums and voice messages later | ✅ files, albums, voice, transcription |
+| Send and download media | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`), local transcription of voice and video notes (`tg media transcribe`); sending albums and voice messages later | ✅ files, albums, voice, transcription |
 | Wait for new messages | ✅ `tg messages wait` (JSON, timeout, settle) and `tg messages watch` (NDJSON), from the daemon's cache | ✅ |
 | Groups, channels, admin rights | partial: via `tg api` | ✅ |
 | Contacts | list, search, get; the rest via `tg api` | ✅ add, import, block, export |

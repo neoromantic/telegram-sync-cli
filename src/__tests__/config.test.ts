@@ -202,6 +202,33 @@ describe('config', () => {
     })
   })
 
+  describe('transcribe', () => {
+    it('takes a non-empty string, trimmed', async () => {
+      expect(parseConfigValue('transcribe.command', ' whisper-cli ')).toBe(
+        'whisper-cli',
+      )
+      expect(() => parseConfigValue('transcribe.model', '  ')).toThrow(
+        ConfigError,
+      )
+      await setConfigValue('transcribe.language', 'ru', { dataDir })
+      expect(await getConfigValue('transcribe', { dataDir })).toEqual({
+        language: 'ru',
+      })
+    })
+
+    it('rejects a non-string or blank value in config.json in strict mode', async () => {
+      await Bun.write(
+        getConfigPath(dataDir),
+        JSON.stringify({ transcribe: { command: 42, model: '' } }),
+      )
+      const error = await loadConfig({ dataDir, strict: true }).catch((e) => e)
+      expect((error as ConfigError).issues.map((i) => i.path)).toEqual([
+        'transcribe.command',
+        'transcribe.model',
+      ])
+    })
+  })
+
   describe('readOnly and allowedChats', () => {
     const writeConfig = (value: unknown) =>
       Bun.write(getConfigPath(dataDir), JSON.stringify(value))

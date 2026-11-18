@@ -51,8 +51,9 @@ export function spawnCli(
 ) {
   const { env = {}, cwd, entry = CLI_PATH } = options
 
-  // --no-env-file: never pick up a developer's .env from the working directory
-  return Bun.spawn(['bun', '--no-env-file', 'run', entry, ...args], {
+  // --no-env-file: never pick up a developer's .env from the working directory.
+  // This Bun by path, so a test can give the CLI a PATH without it.
+  return Bun.spawn([process.execPath, '--no-env-file', 'run', entry, ...args], {
     env: {
       ...process.env,
       // Don't throw on errors - let the CLI handle them and exit with codes

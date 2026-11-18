@@ -7,7 +7,11 @@ import { createChatsCache } from '../../db/chats-cache'
 import type { MessageSearchRow } from '../../db/messages-search'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
-import { ErrorCodes, type MessageSearchItem } from '../../types'
+import {
+  ErrorCodes,
+  type MessageSearchItem,
+  type MessageTranscript,
+} from '../../types'
 import { type AttachmentInfo, extractAttachment } from '../../utils/attachment'
 import { error } from '../../utils/output'
 import {
@@ -29,6 +33,7 @@ export function messageRowToItem(
   row: MessageSearchRow,
   attachment: AttachmentInfo | null,
   action: MessageAction | null,
+  transcript: MessageTranscript | null = null,
 ): MessageSearchItem {
   return {
     chatId: row.chat_id,
@@ -40,6 +45,7 @@ export function messageRowToItem(
     mediaPath: row.media_path,
     attachment,
     action,
+    transcript,
     isOutgoing: row.is_outgoing === 1,
     isEdited: row.is_edited === 1,
     isPinned: row.is_pinned === 1,
@@ -66,14 +72,18 @@ export function messageRowToItem(
 /**
  * A function that makes the item for a row, with the attachment and the
  * service action read from its raw_json (only media and service rows are
- * read). Every cached message has raw_json, so this works for rows cached
- * before message_attachments existed too.
+ * read) and the transcript of a voice or video note. Every cached message
+ * has raw_json, so this works for rows cached before message_attachments
+ * existed too.
  */
 export function messageItemReader(
   db: Database,
 ): (row: MessageSearchRow) => MessageSearchItem {
   const rawJson = db.query<{ raw_json: string }, [number, number]>(
     'SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?',
+  )
+  const transcriptOf = db.query<MessageTranscript, [number, number]>(
+    'SELECT text, language, source, model FROM message_transcripts WHERE chat_id = ? AND message_id = ?',
   )
   return (row) => {
     const isService = row.message_type === 'service'
@@ -82,10 +92,17 @@ export function messageItemReader(
         ? rawJson.get(row.chat_id, row.message_id)
         : null
     if (!raw) return messageRowToItem(row, null, null)
+    const attachment =
+      row.has_media === 1 ? extractAttachment(raw.raw_json) : null
+    const transcript =
+      attachment?.kind === 'voice' || attachment?.kind === 'round'
+        ? transcriptOf.get(row.chat_id, row.message_id)
+        : null
     return messageRowToItem(
       row,
-      row.has_media === 1 ? extractAttachment(raw.raw_json) : null,
+      attachment,
       isService ? extractServiceAction(raw.raw_json) : null,
+      transcript,
     )
   }
 }

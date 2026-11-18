@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg media transcribe --chat <peer> --id <id> [--id <id> …] [--language <code>] [--force]`
+  turns voice notes and video notes into text with a speech-to-text program installed on this
+  machine: whisper.cpp (`whisper-cli`) or an openai-whisper-compatible CLI (`mlx_whisper`,
+  `whisper-ctranslate2`, `whisper`), found on `PATH` or set with `transcribe.command`. tg
+  bundles and downloads no model. Each file comes through `tg media download`'s path (cache
+  first, content protection refused), is converted with ffmpeg to 16 kHz mono WAV, and one run
+  of the program handles all of them. Silent audio is stored as empty without running it.
+  Transcripts go into the new `message_transcripts` table, and every `tg messages` item has
+  `transcript` (`{ text, language, source, model }` or `null`). Config keys
+  `transcribe.command`, `transcribe.model` and `transcribe.language`; a missing program or
+  ffmpeg is the new error `TRANSCRIBER_NOT_FOUND` (exit 1), and every setup error (no program,
+  no ffmpeg, no whisper.cpp model) has the install, download and config commands in
+  `suggestion`
+  ([#102](https://github.com/neoromantic/telegram-sync-cli/issues/102)).
+
 ## [0.13.1] - 2026-11-18
 
 ### Fixed

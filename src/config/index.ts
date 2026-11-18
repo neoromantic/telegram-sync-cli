@@ -19,7 +19,7 @@ import {
 /**
  * `positiveDuration` is a duration above 0, such as a retention; `rate` is
  * a number of calls per second above 0 and at most MAX_CALLS_PER_SECOND;
- * `chats` is a list of chats (isChatEntry)
+ * `chats` is a list of chats (isChatEntry); `string` is any text but blank
  */
 type ConfigValueType =
   | 'number'
@@ -28,6 +28,7 @@ type ConfigValueType =
   | 'positiveDuration'
   | 'rate'
   | 'chats'
+  | 'string'
 
 /** The fastest `sync.pacing.maxCallsPerSecond` accepts */
 const MAX_CALLS_PER_SECOND = 2
@@ -39,6 +40,7 @@ const TYPE_DESCRIPTIONS: Record<ConfigValueType, string> = {
   positiveDuration: 'duration above 0',
   rate: `number above 0 and at most ${MAX_CALLS_PER_SECOND}`,
   chats: 'list of chats: @username, a chat ID as tg prints it, or me',
+  string: 'non-empty string',
 }
 
 export type ConfigLeafKey =
@@ -56,6 +58,9 @@ export type ConfigLeafKey =
   | 'cache.retention.failedJobs'
   | 'sync.pacing.maxCallsPerSecond'
   | 'sync.pacing.calmInterval'
+  | 'transcribe.command'
+  | 'transcribe.model'
+  | 'transcribe.language'
 
 const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   activeAccount: 'number',
@@ -72,6 +77,9 @@ const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   'cache.retention.failedJobs': 'positiveDuration',
   'sync.pacing.maxCallsPerSecond': 'rate',
   'sync.pacing.calmInterval': 'positiveDuration',
+  'transcribe.command': 'string',
+  'transcribe.model': 'string',
+  'transcribe.language': 'string',
 }
 
 const CONFIG_PREFIX_KEYS = new Set<string>([
@@ -80,6 +88,7 @@ const CONFIG_PREFIX_KEYS = new Set<string>([
   'cache.retention',
   'sync',
   'sync.pacing',
+  'transcribe',
 ])
 
 /** The retention keys and the CacheRetentionConfig field each one sets */
@@ -119,12 +128,20 @@ export interface SyncConfigFile {
   pacing?: SyncPacingConfigFile
 }
 
+/** The local speech-to-text program `tg media transcribe` runs */
+export interface TranscribeConfigFile {
+  command?: string
+  model?: string
+  language?: string
+}
+
 export interface ConfigFile {
   activeAccount?: number
   readOnly?: boolean
   allowedChats?: string[]
   cache?: CacheConfigFile
   sync?: SyncConfigFile
+  transcribe?: TranscribeConfigFile
 }
 
 export interface ConfigIssue {
@@ -255,6 +272,8 @@ function validateValue(type: ConfigValueType, value: unknown): boolean {
       return isValidRate(value)
     case 'chats':
       return Array.isArray(value) && value.every(isChatEntry)
+    case 'string':
+      return typeof value === 'string' && value.trim() !== ''
     default:
       return false
   }
@@ -285,7 +304,9 @@ function sanitizeConfig(raw: Record<string, unknown>): {
         ? normalizeDuration(value)
         : type === 'chats'
           ? (value as string[]).map((entry) => entry.trim())
-          : value
+          : type === 'string'
+            ? (value as string).trim()
+            : value
     setPathValue(
       config as Record<string, unknown>,
       path.split('.'),
@@ -418,6 +439,13 @@ export function parseConfigValue(
     }
     case 'chats':
       return parseChatList(key, trimmed)
+    case 'string':
+      if (trimmed === '') {
+        throw new ConfigError('Invalid value', [
+          { path: key, message: `Expected a ${TYPE_DESCRIPTIONS.string}` },
+        ])
+      }
+      return trimmed
   }
 }
 

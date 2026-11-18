@@ -278,6 +278,13 @@ Exit codes:
   `details: { reason: "cdn" }`.
 - `FILE_EXISTS`: the `--out` target exists and `--overwrite` isn't set; `details: { path }`.
 
+`tg media transcribe` adds `TRANSCRIBER_NOT_FOUND` (exit 1): no speech-to-text program or no
+ffmpeg on `PATH`; `details: { searched, runner, ffmpeg }` (the names looked for, and the path
+found for each or `null`), with install commands for the OS (and for whisper.cpp the model download and
+`tg config set transcribe.model`) as `suggestion`. A message that is
+not a voice note or video note is `MEDIA_UNSUPPORTED` with `details.reason: "not_speech"`
+([media.md](media.md#transcribe)).
+
 A download that stalls for 60 seconds or loses its connection is `NETWORK_ERROR` (exit 4) with
 `details.resumable: true`; a flood wait over 10 seconds is `RATE_LIMITED` (exit 5) with
 `details: { method: "upload.getFile", wait_seconds }`. Both keep the partial download for the

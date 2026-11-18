@@ -81,6 +81,7 @@ export const COMMAND_ACCESS: Record<string, CommandAccess> = {
   'messages read': { write: true, chatArgs: ['chat'] },
   'media download': CHAT,
   'media clean': LOCAL,
+  'media transcribe': CHAT,
   api: {
     write: (args) => !isReadMethod(String(args.method ?? '')),
     unscopable: true,
