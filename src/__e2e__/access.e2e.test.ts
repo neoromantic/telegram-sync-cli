@@ -158,6 +158,7 @@ describe('E2E: read-only mode and allowedChats', () => {
         expect.arrayContaining([
           'send',
           'messages read',
+          'messages edit',
           'auth logout',
           'auth login',
         ]),
@@ -232,6 +233,7 @@ describe('E2E: read-only mode and allowedChats', () => {
           'messages watch',
           'messages unread',
           'messages read',
+          'messages edit',
           'media download',
         ]),
       )

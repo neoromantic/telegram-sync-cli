@@ -12,7 +12,10 @@
  * channels.readHistory mark the chat read and print FAKE_CLIENT_CALL with
  * the method and max_id to stderr; messages.getPeerDialogs then returns a
  * dialog read up to that max_id, or to FAKE_TOP_MESSAGE for 0 (everything),
- * with the messages above it unread. FAKE_FLOOD_METHOD fails with a
+ * with the messages above it unread. messages.editMessage prints
+ * FAKE_CLIENT_CALL with the ID and text and returns the message edited at
+ * FAKE_EDIT_DATE, sent by FAKE_SELF_ID, or refuses FAKE_FOREIGN_MESSAGE
+ * with MESSAGE_AUTHOR_REQUIRED. FAKE_FLOOD_METHOD fails with a
  * FLOOD_WAIT of FAKE_FLOOD_SECONDS, a method of FAKE_INTERNAL_ERRORS with
  * its Telegram-side failure, and messages.sendMessage with
  * PEER_ID_INVALID. Any other method fails the way Telegram rejects an
@@ -28,6 +31,16 @@ export const FAKE_CLIENT_CALL = 'fake client: call'
 
 /** The newest message of every chat the fake client reads */
 export const FAKE_TOP_MESSAGE = 30
+
+/** The account the fake client is signed in as */
+export const FAKE_SELF_ID = 999
+
+/** A message of someone else: messages.editMessage refuses it */
+export const FAKE_FOREIGN_MESSAGE = 14
+
+export const FAKE_MESSAGE_DATE = 1_760_000_000
+
+export const FAKE_EDIT_DATE = 1_760_003_600
 
 /** The method Telegram answers with FLOOD_WAIT_<FAKE_FLOOD_SECONDS> */
 export const FAKE_FLOOD_METHOD = 'help.getNearestDc'
@@ -51,6 +64,24 @@ export const FAKE_CONFIG = {
   chatSizeMax: 200,
 }
 
+interface FakeInputPeer {
+  _: string
+  userId?: number
+  chatId?: number
+  channelId?: number
+}
+
+/** The peer a message of this input peer carries */
+function fakePeer(peer: FakeInputPeer | undefined) {
+  if (peer?._ === 'inputPeerChannel') {
+    return { _: 'peerChannel', channelId: peer.channelId }
+  }
+  if (peer?._ === 'inputPeerChat') {
+    return { _: 'peerChat', chatId: peer.chatId }
+  }
+  return { _: 'peerUser', userId: peer?.userId ?? FAKE_SELF_ID }
+}
+
 if (import.meta.main) {
   // mock.module works in a plain `bun run` script too, not only in bun test
   const { mock } = await import('bun:test')
@@ -61,8 +92,51 @@ if (import.meta.main) {
   setInterval(() => {}, 60_000)
   let readMaxId = 0
   const client = {
-    async call(request: { _: string; maxId?: number }) {
+    async call(request: {
+      _: string
+      maxId?: number
+      id?: number
+      message?: string
+      peer?: FakeInputPeer
+    }) {
       if (request._ === 'help.getConfig') return FAKE_CONFIG
+      if (request._ === 'messages.editMessage') {
+        console.error(
+          `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: request.id, message: request.message })}`,
+        )
+        if (request.id === FAKE_FOREIGN_MESSAGE) {
+          throw tl.RpcError.fromTl({
+            _: 'rpc_error',
+            errorCode: 403,
+            errorMessage: 'MESSAGE_AUTHOR_REQUIRED',
+          })
+        }
+        const channel = request.peer?._ === 'inputPeerChannel'
+        return {
+          _: 'updates',
+          updates: [
+            {
+              _: channel ? 'updateEditChannelMessage' : 'updateEditMessage',
+              message: {
+                _: 'message',
+                id: request.id,
+                out: true,
+                peerId: fakePeer(request.peer),
+                fromId: { _: 'peerUser', userId: FAKE_SELF_ID },
+                date: FAKE_MESSAGE_DATE,
+                editDate: FAKE_EDIT_DATE,
+                message: request.message,
+              },
+              pts: 1,
+              ptsCount: 1,
+            },
+          ],
+          users: [],
+          chats: [],
+          date: FAKE_EDIT_DATE,
+          seq: 0,
+        }
+      }
       if (
         request._ === 'messages.readHistory' ||
         request._ === 'channels.readHistory'

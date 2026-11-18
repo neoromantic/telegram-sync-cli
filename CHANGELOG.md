@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `tg messages edit --chat <peer> --id <id> --message <text>` replaces the text of a message you
+  sent, or the caption of a message with a file, as plain text (`messages.editMessage`; the edit
+  part of #23). It prints the edited message as `tg messages get` does and stores it in the
+  cache at once, so search finds the new text without a daemon. Telegram's refusals (not your
+  message, too old, same text, too long, no permission) are `TELEGRAM_ERROR` with the reason in
+  `details.telegramError`. It is a write: read-only mode refuses it and `allowedChats` applies.
 - Every error says whether running the same command again can work: `error.retryable` is
   `true` for `RATE_LIMITED`, `NETWORK_ERROR`, a media download that waited too long for
   another tg process and a `tg api` call Telegram failed on its side (500 or -503), `false`

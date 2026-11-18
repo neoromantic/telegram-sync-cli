@@ -262,6 +262,66 @@ describe.skipIf(!SHOULD_RUN)('Smoke: tg against the real Telegram API', () => {
   )
 
   it(
+    'messages edit changes the text on Telegram and in the cache',
+    async () => {
+      const before = uniqueMarker()
+      const after = uniqueMarker()
+      const messageId = await sendToSavedMessages(`tg smoke test ${before}`)
+
+      const edit = await runCliSuccess(
+        [
+          'messages',
+          'edit',
+          '--chat',
+          'me',
+          '--id',
+          String(messageId),
+          '--message',
+          `tg smoke test ${after}`,
+        ],
+        cli(),
+      )
+      expect(edit.json).toMatchObject({
+        success: true,
+        data: {
+          messageId,
+          edited: true,
+          message: { text: `tg smoke test ${after}`, isEdited: true },
+        },
+      })
+
+      const raw = await runCliSuccess(
+        [
+          'api',
+          'messages.getMessages',
+          '--json',
+          JSON.stringify({ id: [{ _: 'inputMessageID', id: messageId }] }),
+        ],
+        cli(),
+      )
+      const message = (
+        raw.json as Envelope<{
+          result: { messages: Array<{ id: number; message?: string }> }
+        }>
+      ).data.result.messages.find((m) => m.id === messageId)
+      expect(message?.message).toBe(`tg smoke test ${after}`)
+
+      // The cache follows without a daemon: search finds only the new text
+      const count = async (marker: string) => {
+        const result = await runCliSuccess(
+          ['messages', 'search', '--query', marker],
+          cli(),
+        )
+        return (result.json as Envelope<{ results: unknown[] }>).data.results
+          .length
+      }
+      expect(await count(after)).toBe(1)
+      expect(await count(before)).toBe(0)
+    },
+    API_TIMEOUT_MS * 3,
+  )
+
+  it(
     'messages list and get read Saved Messages from Telegram, then from the cache',
     async () => {
       type Item = {

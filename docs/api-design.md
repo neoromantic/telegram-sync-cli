@@ -142,6 +142,7 @@ tg messages read --chat @username     # mark read on Telegram (--max-id)
 tg send --to @username --message "Hello"
 tg send --to @username -m "Hello" --silent
 tg send --to @username -m "Reply" --reply-to 123
+tg messages edit --chat @username --id 124 -m "Fixed reply"   # replace a sent message's text
 tg send --to me --file ./report.pdf --caption "Q3"   # one file: a photo or a document
 
 # Media: a message's file into the account's media cache (cache-first)
