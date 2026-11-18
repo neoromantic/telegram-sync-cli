@@ -38,12 +38,17 @@ function historyPage(ids: Iterable<number>, request: GetHistoryRequest) {
   };
 }
 
-export function createFakeHistory(initialIds: Iterable<number>) {
+/**
+ * One chat's history behind a fake client. `onCall` runs before each answer,
+ * which waits for it
+ */
+export function createFakeHistory(initialIds: Iterable<number>, onCall?: () => unknown) {
   const ids = new Set(initialIds);
   const requests: GetHistoryRequest[] = [];
 
   const call = async (request: GetHistoryRequest) => {
     requests.push(request);
+    if (onCall) await onCall();
     return historyPage(ids, request);
   };
 

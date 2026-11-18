@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test";
-import type { TelegramClient, tl } from "@mtcute/bun";
+import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime, spyOn } from "bun:test";
+import { type TelegramClient, tl } from "@mtcute/bun";
 import type { DaemonContext } from "./daemon-context";
 import { requestShutdown, totalMessagesSynced } from "./daemon-context";
 import {
@@ -12,57 +12,33 @@ import {
   startDueJobs,
   waitForJobsInFlight,
 } from "./daemon-scheduler";
-import { createSyncScheduler, type SyncScheduler } from "./scheduler";
-import type { RealSyncWorker } from "./sync-worker-real";
+import { createSyncScheduler } from "./scheduler";
+import type { SyncWorkerConfig } from "./sync-worker-real-types";
 import { createChatSyncStateService } from "../db/chat-sync-state";
 import { createChatsCache } from "../db/chats-cache";
 import { createMessagesCache } from "../db/messages-cache";
 import { createRateLimitsService } from "../db/rate-limits";
 import { createSyncJobsService } from "../db/sync-jobs";
-import { type SyncJobRow, SyncJobType, SyncPriority } from "../db/sync-schema";
+import { SyncJobType, SyncPriority } from "../db/sync-schema";
 import { getDefaultRetentionConfig } from "../db/types";
-import { chatRow, createAccountCacheDb } from "../test/cache-db.test-utils";
-import { addAccountRuntime, testDaemonContext } from "../test/daemon-runtime.test-utils";
+import { chatRow, createAccountCacheDb, failWrites } from "../test/cache-db.test-utils";
+import {
+  addAccountRuntime,
+  cacheWithSyncJob,
+  queueSyncJob,
+  realSyncParts,
+  testDaemonContext,
+} from "../test/daemon-runtime.test-utils";
 import { fakeDialogClient } from "../test/fake-dialogs.test-utils";
-import { createFakeHistory, range } from "../test/fake-history.test-utils";
+import { createFakeHistory, type GetHistoryRequest, range } from "../test/fake-history.test-utils";
 import { waitLikeFloodWait } from "../test/flood-wait.test-utils";
+
+type CallParams = { abortSignal?: AbortSignal };
 
 const asTelegramClient = (client: Partial<TelegramClient>) => client as TelegramClient;
 
-const createSchedulerStub = (overrides: Partial<SyncScheduler> = {}) => {
-  const scheduler = {
-    queueForwardCatchup: mock(() => {}),
-    queueBackwardHistory: mock(() => {}),
-    queueInitialLoad: mock(() => {}),
-    initializeForStartup: mock(async () => {}),
-    refreshQueues: mock(() => {}),
-    getNextJob: () => null,
-    hasHistoryDue: () => false,
-    recordJobRun: mock(() => {}),
-    getStatus: () => ({
-      pendingJobs: 0,
-      runningJobs: 0,
-    }),
-    recoverCrashedJobs: () => 0,
-    ...overrides,
-  } satisfies SyncScheduler;
-
-  return scheduler;
-};
-
-const createWorkerStub = (overrides: Partial<RealSyncWorker> = {}) => {
-  const worker = {
-    client: asTelegramClient({}),
-    processJobReal: mock(async () => ({
-      success: true,
-      messagesFetched: 0,
-    })),
-    canMakeApiCall: () => true,
-    ...overrides,
-  } satisfies RealSyncWorker;
-
-  return worker;
-};
+const clientWithCall = (call: (request: GetHistoryRequest, params?: CallParams) => unknown) =>
+  asTelegramClient({ call } as unknown as Partial<TelegramClient>);
 
 function connect(
   ctx: DaemonContext,
@@ -81,34 +57,28 @@ function connect(
 function runAccount(
   ctx: DaemonContext,
   accountId: number,
-  parts: { scheduler?: SyncScheduler; worker?: RealSyncWorker } = {},
+  options: {
+    client?: TelegramClient;
+    db?: Database;
+    config?: Partial<SyncWorkerConfig>;
+  } = {},
 ) {
-  connect(ctx, accountId);
-  return addAccountRuntime(ctx, accountId, createAccountCacheDb(), {
-    scheduler: parts.scheduler ?? createSchedulerStub(),
-    worker: parts.worker ?? createWorkerStub(),
-  });
+  const client = options.client ?? asTelegramClient({});
+  const db = options.db ?? createAccountCacheDb();
+  connect(ctx, accountId, client);
+  return addAccountRuntime(ctx, accountId, db, realSyncParts(ctx, db, client, options.config));
 }
 
-function jobOf(jobType: SyncJobType, overrides: Partial<SyncJobRow> = {}) {
-  return {
-    id: 3,
-    chat_id: 55,
-    job_type: jobType,
-    priority: SyncPriority.High,
-    status: "pending",
-    cursor_start: null,
-    cursor_end: null,
-    messages_fetched: 0,
-    error_message: null,
-    created_at: Date.now(),
-    started_at: null,
-    completed_at: null,
-    attempts: 0,
-    next_run_at: 0,
-    ...overrides,
-  } satisfies SyncJobRow;
-}
+const failingClient = (error: () => unknown) =>
+  clientWithCall(async () => {
+    throw error();
+  });
+
+const pendingOf = (db: Database, jobType: SyncJobType) =>
+  createSyncJobsService(db)
+    .getPendingJobs()
+    .filter((job) => job.job_type === jobType)
+    .map((job) => job.chat_id);
 
 function useClock(start = 1_760_000_000_000) {
   let now = start;
@@ -149,8 +119,8 @@ describe("initializeScheduler", () => {
 describe("rebuildSyncWorker", () => {
   it("replaces the account worker while the scheduler runs", () => {
     const ctx = testDaemonContext();
-    const oldWorker = createWorkerStub();
-    const rt = runAccount(ctx, 1, { worker: oldWorker });
+    const rt = runAccount(ctx, 1);
+    const oldWorker = rt.worker;
 
     const newClient = asTelegramClient({});
     rebuildSyncWorker(ctx, 1, newClient);
@@ -162,8 +132,8 @@ describe("rebuildSyncWorker", () => {
   it("leaves the other accounts' workers alone", () => {
     const ctx = testDaemonContext();
     runAccount(ctx, 1);
-    const otherWorker = createWorkerStub();
-    const other = runAccount(ctx, 2, { worker: otherWorker });
+    const other = runAccount(ctx, 2);
+    const otherWorker = other.worker;
 
     rebuildSyncWorker(ctx, 1, asTelegramClient({}));
 
@@ -362,14 +332,8 @@ describe("rebuildSyncWorker dialog pass", () => {
   });
 
   it("logs a pass that throws and lets the next reconnect run one", async () => {
-    const ctx = testDaemonContext();
-    addAccountRuntime(ctx, 1, cacheDb, {
-      scheduler: createSchedulerStub({
-        refreshQueues: mock(() => {
-          throw new Error("disk I/O error");
-        }),
-      }),
-    });
+    const ctx = createRunningContext();
+    failWrites(cacheDb, "sync_jobs", "disk I/O error");
     const fake = fakeDialogClient([{ kind: "user", id: 1002, topMessage: 1007 }]);
 
     await expect(rebuildSyncWorker(ctx, 1, fake.client)).resolves.toBe(true);
@@ -381,11 +345,8 @@ describe("rebuildSyncWorker dialog pass", () => {
   });
 
   it("a reconnect pass stopped by a shutdown marks no unvisited chats and refreshes no queues", async () => {
-    const ctx = testDaemonContext();
-    const refreshQueues = mock(() => {});
-    addAccountRuntime(ctx, 1, cacheDb, {
-      scheduler: createSchedulerStub({ refreshQueues }),
-    });
+    const ctx = createRunningContext();
+    const refreshQueues = spyOn(ctx.runtime.accounts.get(1)!.scheduler!, "refreshQueues");
     const fake = fakeDialogClient(
       [
         { kind: "user", id: 1001, topMessage: 1000 },
@@ -414,11 +375,8 @@ describe("rebuildSyncWorker dialog pass", () => {
   });
 
   it("a stop during a FLOOD_WAIT in a reconnect pass ends the wait at once", async () => {
-    const ctx = testDaemonContext();
-    const refreshQueues = mock(() => {});
-    addAccountRuntime(ctx, 1, cacheDb, {
-      scheduler: createSchedulerStub({ refreshQueues }),
-    });
+    const ctx = createRunningContext();
+    const refreshQueues = spyOn(ctx.runtime.accounts.get(1)!.scheduler!, "refreshQueues");
     const fake = fakeDialogClient(
       [
         { kind: "user", id: 1001, topMessage: 1000 },
@@ -445,11 +403,8 @@ describe("rebuildSyncWorker dialog pass", () => {
   });
 
   it("a reconnect pass whose page fails during a stop logs at debug and marks nothing", async () => {
-    const ctx = testDaemonContext();
-    const refreshQueues = mock(() => {});
-    addAccountRuntime(ctx, 1, cacheDb, {
-      scheduler: createSchedulerStub({ refreshQueues }),
-    });
+    const ctx = createRunningContext();
+    const refreshQueues = spyOn(ctx.runtime.accounts.get(1)!.scheduler!, "refreshQueues");
     const fake = fakeDialogClient(
       [
         { kind: "user", id: 1001, topMessage: 1000 },
@@ -481,11 +436,8 @@ describe("rebuildSyncWorker dialog pass", () => {
   });
 
   it("a reconnect pass whose cache closes during a stop logs at debug", async () => {
-    const ctx = testDaemonContext();
-    const refreshQueues = mock(() => {});
-    addAccountRuntime(ctx, 1, cacheDb, {
-      scheduler: createSchedulerStub({ refreshQueues }),
-    });
+    const ctx = createRunningContext();
+    const refreshQueues = spyOn(ctx.runtime.accounts.get(1)!.scheduler!, "refreshQueues");
     const fake = fakeDialogClient(
       [
         { kind: "user", id: 1001, topMessage: 1000 },
@@ -542,46 +494,40 @@ describe("rebuildSyncWorker dialog pass", () => {
 describe("processJobs", () => {
   it("queues follow-up jobs on success with hasMore", async () => {
     const ctx = testDaemonContext();
-    const job = jobOf(SyncJobType.BackwardHistory, { id: 1, chat_id: 10 });
-    const scheduler = createSchedulerStub({
-      getNextJob: () => job,
-      queueBackwardHistory: mock(() => {}),
-      queueForwardCatchup: mock(() => {}),
+    const { db, job } = cacheWithSyncJob(SyncJobType.BackwardHistory, {
+      chatId: 10,
+      chat: { forward_cursor: 1000, backward_cursor: 1000 },
+      row: { id: 1 },
     });
-    const worker = createWorkerStub({
-      processJobReal: mock(async () => ({
-        success: true,
-        messagesFetched: 4,
-        hasMore: true,
-      })),
+    const rt = runAccount(ctx, 1, {
+      db,
+      client: createFakeHistory(range(1, 1000)).client,
+      config: { batchSize: 4 },
     });
-    const rt = runAccount(ctx, 1, { scheduler, worker });
+    const processJobReal = spyOn(rt.worker!, "processJobReal");
+    const queueBackwardHistory = spyOn(rt.scheduler!, "queueBackwardHistory");
 
     await processJobs(ctx);
 
-    expect(worker.processJobReal).toHaveBeenCalledWith(job);
-    expect(scheduler.queueBackwardHistory).toHaveBeenCalledWith(10);
+    expect(processJobReal).toHaveBeenCalledWith(job);
+    expect(queueBackwardHistory).toHaveBeenCalledWith(10);
+    expect(pendingOf(db, SyncJobType.BackwardHistory)).toEqual([10]);
     expect(rt.messagesSynced).toBe(4);
     expect(totalMessagesSynced(ctx.runtime)).toBe(4);
   });
 
   it("counts the pace from the start of a job that was rate limited", async () => {
     const ctx = testDaemonContext();
-    const job = jobOf(SyncJobType.ForwardCatchup, { id: 2, chat_id: 44 });
-    const scheduler = createSchedulerStub({
-      getNextJob: () => job,
-      queueBackwardHistory: mock(() => {}),
-      queueForwardCatchup: mock(() => {}),
+    const { db, job } = cacheWithSyncJob(SyncJobType.ForwardCatchup, {
+      chatId: 44,
+      chat: { forward_cursor: 1000 },
+      row: { id: 2 },
     });
-    const worker = createWorkerStub({
-      processJobReal: mock(async () => ({
-        success: false,
-        messagesFetched: 0,
-        rateLimited: true,
-        waitSeconds: 3,
-      })),
+    const rt = runAccount(ctx, 1, {
+      db,
+      client: failingClient(() => new tl.RpcError(420, "FLOOD_WAIT_3")),
     });
-    const rt = runAccount(ctx, 1, { scheduler, worker });
+    const queueForwardCatchup = spyOn(rt.scheduler!, "queueForwardCatchup");
     const clock = useClock();
 
     try {
@@ -592,98 +538,82 @@ describe("processJobs", () => {
 
     expect(rt.pacer.nextStartAt()).toBe(1_760_000_000_000 + 3000);
     expect(ctx.runtime.jobsInFlight.size).toBe(0);
-    expect(scheduler.queueForwardCatchup).not.toHaveBeenCalled();
+    expect(queueForwardCatchup).not.toHaveBeenCalled();
+    expect(createSyncJobsService(db).getById(job.id)?.status).toBe("pending");
   });
 
   it("moves to the next lane slot only after a job ran", async () => {
-    const job = jobOf(SyncJobType.ForwardCatchup);
-
     const idle = testDaemonContext();
-    const idleScheduler = createSchedulerStub({ getNextJob: () => job });
+    const idleCache = cacheWithSyncJob(SyncJobType.ForwardCatchup);
     connect(idle, 1);
-    addAccountRuntime(idle, 1, createAccountCacheDb(), {
-      scheduler: idleScheduler,
-    });
+    const { scheduler: idleScheduler } = realSyncParts(idle, idleCache.db, asTelegramClient({}));
+    addAccountRuntime(idle, 1, idleCache.db, { scheduler: idleScheduler });
+    const idleRecord = spyOn(idleScheduler, "recordJobRun");
     await processJobs(idle);
-    expect(idleScheduler.recordJobRun).not.toHaveBeenCalled();
+    expect(idleRecord).not.toHaveBeenCalled();
 
     const blocked = testDaemonContext();
-    const blockedScheduler = createSchedulerStub({ getNextJob: () => job });
-    runAccount(blocked, 1, {
-      scheduler: blockedScheduler,
-      worker: createWorkerStub({ canMakeApiCall: () => false }),
-    });
+    const blockedCache = cacheWithSyncJob(SyncJobType.ForwardCatchup);
+    createRateLimitsService(blockedCache.db).setFloodWait("messages.getHistory", 600);
+    const blockedRecord = spyOn(
+      runAccount(blocked, 1, { db: blockedCache.db }).scheduler!,
+      "recordJobRun",
+    );
     await processJobs(blocked);
-    expect(blockedScheduler.recordJobRun).not.toHaveBeenCalled();
+    expect(blockedRecord).not.toHaveBeenCalled();
 
     const ctx = testDaemonContext();
-    const scheduler = createSchedulerStub({ getNextJob: () => job });
-    runAccount(ctx, 1, {
-      scheduler,
-      worker: createWorkerStub({
-        processJobReal: mock(async () => {
-          throw new Error("boom");
-        }),
-      }),
-    });
+    const { db, job } = cacheWithSyncJob(SyncJobType.ForwardCatchup);
+    failWrites(db, "sync_jobs", "boom", "UPDATE");
+    const recordJobRun = spyOn(runAccount(ctx, 1, { db }).scheduler!, "recordJobRun");
     await processJobs(ctx);
-    expect(scheduler.recordJobRun).toHaveBeenCalledTimes(1);
-    expect(scheduler.recordJobRun).toHaveBeenCalledWith(job);
+    expect(recordJobRun).toHaveBeenCalledTimes(1);
+    expect(recordJobRun).toHaveBeenCalledWith(job);
+    expect(ctx.logger.error).toHaveBeenCalledWith(expect.stringContaining("boom"));
   });
 
   it("queues history right after a first page with history left", async () => {
     const ctx = testDaemonContext();
-    const scheduler = createSchedulerStub({
-      getNextJob: () => jobOf(SyncJobType.InitialLoad),
-    });
-    runAccount(ctx, 1, {
-      scheduler,
-      worker: createWorkerStub({
-        processJobReal: mock(async () => ({
-          success: true,
-          messagesFetched: 100,
-          newCursor: 300,
-          historyComplete: false,
-        })),
-      }),
-    });
+    const { db } = cacheWithSyncJob(SyncJobType.InitialLoad, { chat: {} });
+    const rt = runAccount(ctx, 1, { db, client: createFakeHistory(range(1, 300)).client });
+    const queueBackwardHistory = spyOn(rt.scheduler!, "queueBackwardHistory");
 
     await processJobs(ctx);
 
-    expect(scheduler.queueBackwardHistory).toHaveBeenCalledWith(55);
+    expect(queueBackwardHistory).toHaveBeenCalledWith(55);
+    expect(createChatSyncStateService(db).get(55)).toMatchObject({
+      forward_cursor: 300,
+      backward_cursor: 201,
+    });
+    expect(pendingOf(db, SyncJobType.BackwardHistory)).toEqual([55]);
   });
 
   it("queues no history after a first page that reached the start", async () => {
     const ctx = testDaemonContext();
-    const scheduler = createSchedulerStub({
-      getNextJob: () => jobOf(SyncJobType.InitialLoad),
-    });
-    runAccount(ctx, 1, {
-      scheduler,
-      worker: createWorkerStub({
-        processJobReal: mock(async () => ({
-          success: true,
-          messagesFetched: 12,
-          newCursor: 12,
-          historyComplete: true,
-        })),
-      }),
-    });
+    const { db } = cacheWithSyncJob(SyncJobType.InitialLoad, { chat: {} });
+    const rt = runAccount(ctx, 1, { db, client: createFakeHistory(range(1, 12)).client });
+    const queueBackwardHistory = spyOn(rt.scheduler!, "queueBackwardHistory");
 
     await processJobs(ctx);
 
-    expect(scheduler.queueBackwardHistory).not.toHaveBeenCalled();
+    expect(queueBackwardHistory).not.toHaveBeenCalled();
+    expect(createChatSyncStateService(db).get(55)?.forward_cursor).toBe(12);
+    expect(pendingOf(db, SyncJobType.BackwardHistory)).toEqual([]);
   });
 
   describe("logs a job that did not succeed by its outcome", () => {
-    async function run(result: Awaited<ReturnType<RealSyncWorker["processJobReal"]>>) {
+    async function run(
+      client: (ctx: DaemonContext, db: Database) => TelegramClient,
+      attempts = 0,
+      setup: (db: Database) => void = () => {},
+    ) {
       const ctx = testDaemonContext();
-      runAccount(ctx, 1, {
-        scheduler: createSchedulerStub({
-          getNextJob: () => jobOf(SyncJobType.BackwardHistory),
-        }),
-        worker: createWorkerStub({ processJobReal: mock(async () => result) }),
+      const { db } = cacheWithSyncJob(SyncJobType.BackwardHistory, {
+        chat: { forward_cursor: 1000 },
+        row: { id: 3, attempts },
       });
+      setup(db);
+      runAccount(ctx, 1, { db, client: client(ctx, db) });
       await processJobs(ctx);
       const lines = (level: "warn" | "debug" | "error") =>
         (ctx.logger[level] as ReturnType<typeof mock>).mock.calls.map((call) => String(call[0]));
@@ -694,14 +624,10 @@ describe("processJobs", () => {
       };
     }
 
+    const connectionReset = () => failingClient(() => new Error("connection reset"));
+
     it("warns with the attempt and the error when the job will retry", async () => {
-      const { warn } = await run({
-        success: false,
-        messagesFetched: 0,
-        error: "connection reset",
-        permanent: false,
-        outcome: { state: "retrying", attempts: 1, nextRunAt: Date.now() },
-      });
+      const { warn } = await run(connectionReset);
 
       expect(warn).toEqual([
         "[Account 1] Job 3 (backward_history, chat 55) failed, attempt 1 of 5, retry in 1m: connection reset",
@@ -709,20 +635,10 @@ describe("processJobs", () => {
     });
 
     it("warns with the error when the job failed for good", async () => {
-      const permanent = await run({
-        success: false,
-        messagesFetched: 0,
-        error: "Telegram API error 400: CHANNEL_PRIVATE",
-        permanent: true,
-        outcome: { state: "failed", attempts: 1, nextRunAt: null },
-      });
-      const exhausted = await run({
-        success: false,
-        messagesFetched: 0,
-        error: "connection reset",
-        permanent: false,
-        outcome: { state: "failed", attempts: 5, nextRunAt: null },
-      });
+      const permanent = await run(() =>
+        failingClient(() => new tl.RpcError(400, "CHANNEL_PRIVATE")),
+      );
+      const exhausted = await run(connectionReset, 4);
 
       expect(permanent.warn).toHaveLength(1);
       expect(permanent.warn[0]).toContain("failed for good (permanent error)");
@@ -733,12 +649,13 @@ describe("processJobs", () => {
     });
 
     it("only debug-logs a job that a daemon stop left pending", async () => {
-      const { warn, debug, error } = await run({
-        success: false,
-        messagesFetched: 0,
-        stopped: true,
-        outcome: { state: "stopped", attempts: 2, nextRunAt: 0 },
-      });
+      const { warn, debug, error } = await run(
+        (ctx) =>
+          clientWithCall((_request, params) =>
+            waitLikeFloodWait(params, { onWait: () => requestShutdown(ctx) }),
+          ),
+        2,
+      );
 
       expect(warn).toEqual([]);
       expect(error).toEqual([]);
@@ -746,26 +663,44 @@ describe("processJobs", () => {
     });
 
     it("only debug-logs a job that waits out a FLOOD_WAIT", async () => {
-      const { warn, debug } = await run({
-        success: false,
-        messagesFetched: 0,
-        rateLimited: true,
-        waitSeconds: 600,
-        outcome: { state: "deferred", attempts: 0, nextRunAt: Date.now() },
-      });
+      const { warn, debug } = await run(() =>
+        failingClient(() => new tl.RpcError(420, "FLOOD_WAIT_600")),
+      );
 
       expect(warn).toEqual([]);
       expect(debug).toContain("[Account 1] Job 3 waits out a FLOOD_WAIT of 600s");
+    });
+
+    it("only debug-logs a job whose chat was turned off while it ran", async () => {
+      const { warn, debug } = await run((_ctx, db) =>
+        failingClient(() => {
+          createChatSyncStateService(db).setSyncMode(55, "off");
+          return new Error("connection reset");
+        }),
+      );
+
+      expect(warn).toEqual([]);
+      expect(debug).toContain("[Account 1] Job 3 dropped: chat 55 was turned off while it ran");
+    });
+
+    it("only debug-logs a job that SQLite did not let start", async () => {
+      const { warn, debug } = await run(connectionReset, 0, (db) =>
+        db.run(
+          "CREATE TRIGGER skip_start BEFORE UPDATE ON sync_jobs WHEN NEW.status = 'running' BEGIN SELECT RAISE(IGNORE); END",
+        ),
+      );
+
+      expect(warn).toEqual([]);
+      expect(debug).toContain("[Account 1] Job 3 did not run: Job 3 is not pending");
     });
   });
 
   it("skips an account whose pace doesn't let a job start yet", async () => {
     const ctx = testDaemonContext();
     const clock = useClock();
-    const getNextJob = mock(() => null);
-    const rt = runAccount(ctx, 1, {
-      scheduler: createSchedulerStub({ getNextJob }),
-    });
+    const { db, job } = cacheWithSyncJob(SyncJobType.ForwardCatchup);
+    const rt = runAccount(ctx, 1, { db });
+    const getNextJob = spyOn(rt.scheduler!, "getNextJob");
     rt.pacer.recordStart(Date.now());
 
     try {
@@ -775,6 +710,7 @@ describe("processJobs", () => {
     }
 
     expect(getNextJob).not.toHaveBeenCalled();
+    expect(createSyncJobsService(db).getById(job.id)).toEqual(job);
   });
 
   it("runs each account's jobs on its own 3 s calm pace", async () => {
@@ -782,16 +718,11 @@ describe("processJobs", () => {
     const ran: Array<[number, number]> = [];
     let tick = 0;
     for (const accountId of [1, 2]) {
+      const { db } = cacheWithSyncJob(SyncJobType.ForwardCatchup);
       runAccount(ctx, accountId, {
-        scheduler: createSchedulerStub({
-          getNextJob: () => jobOf(SyncJobType.ForwardCatchup),
-        }),
-        worker: createWorkerStub({
-          processJobReal: mock(async () => {
-            ran.push([accountId, tick]);
-            return { success: true, messagesFetched: 1 };
-          }),
-        }),
+        db,
+        client: createFakeHistory(range(1, 100), () => ran.push([accountId, tick])).client,
+        config: { batchSize: 1 },
       });
     }
     const clock = useClock();
@@ -815,23 +746,13 @@ describe("processJobs", () => {
 
   it("runs account 2's jobs while account 1's cache fails to pick one", async () => {
     const ctx = testDaemonContext();
-    const failingGetNextJob = mock(() => {
-      throw new Error("database disk image is malformed");
-    });
-    runAccount(ctx, 1, {
-      scheduler: createSchedulerStub({ getNextJob: failingGetNextJob }),
-    });
+    const broken = cacheWithSyncJob(SyncJobType.ForwardCatchup).db;
+    broken.run("ALTER TABLE sync_jobs ADD COLUMN unreadable TEXT AS (json('{')) VIRTUAL");
+    const getNextJob = spyOn(runAccount(ctx, 1, { db: broken }).scheduler!, "getNextJob");
     const ran: number[] = [];
     runAccount(ctx, 2, {
-      scheduler: createSchedulerStub({
-        getNextJob: () => jobOf(SyncJobType.ForwardCatchup),
-      }),
-      worker: createWorkerStub({
-        processJobReal: mock(async () => {
-          ran.push(2);
-          return { success: true, messagesFetched: 1 };
-        }),
-      }),
+      db: cacheWithSyncJob(SyncJobType.ForwardCatchup).db,
+      client: createFakeHistory(range(1, 5), () => ran.push(2)).client,
     });
     const clock = useClock();
 
@@ -845,37 +766,29 @@ describe("processJobs", () => {
 
     expect(ran).toEqual([2]);
     expect(ctx.logger.warn).toHaveBeenCalledWith(
-      expect.stringMatching(
-        /^\[Account 1\] Failed to pick a job: .*database disk image is malformed/,
-      ),
+      expect.stringMatching(/^\[Account 1\] Failed to pick a job: .*malformed JSON/),
     );
-    expect(failingGetNextJob).toHaveBeenCalledTimes(1);
+    expect(getNextJob).toHaveBeenCalledTimes(1);
   });
 
   it("runs account 2's jobs while account 1's rate limits fail to read", async () => {
     const ctx = testDaemonContext();
-    runAccount(ctx, 1, {
-      worker: createWorkerStub({
-        canMakeApiCall: () => {
-          throw new Error("database is locked");
-        },
-      }),
+    const broken = cacheWithSyncJob(SyncJobType.ForwardCatchup).db;
+    runAccount(ctx, 1, { db: broken });
+    broken.run("DROP TABLE rate_limits");
+    const second = runAccount(ctx, 2, {
+      db: cacheWithSyncJob(SyncJobType.ForwardCatchup).db,
+      client: createFakeHistory(range(1, 5)).client,
     });
-    const processJobReal = mock(async () => ({
-      success: true,
-      messagesFetched: 1,
-    }));
-    runAccount(ctx, 2, {
-      scheduler: createSchedulerStub({
-        getNextJob: () => jobOf(SyncJobType.ForwardCatchup),
-      }),
-      worker: createWorkerStub({ processJobReal }),
-    });
+    const processJobReal = spyOn(second.worker!, "processJobReal");
 
     await processJobs(ctx);
 
     expect(processJobReal).toHaveBeenCalledTimes(1);
     expect(ctx.runtime.jobsInFlight.size).toBe(0);
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[Account 1\] Failed to pick a job: .*no such table: rate_limits/),
+    );
   });
 });
 
@@ -883,36 +796,30 @@ describe("history pacing (#133)", () => {
   function pacedAccount(
     ctx: DaemonContext,
     options: {
-      historyDue: () => boolean;
+      ids?: number[];
       jobMs?: (index: number) => number;
       clock: ReturnType<typeof useClock>;
     },
   ) {
     const starts: number[] = [];
-    const rt = runAccount(ctx, 1, {
-      scheduler: createSchedulerStub({
-        hasHistoryDue: options.historyDue,
-        getNextJob: () => jobOf(SyncJobType.BackwardHistory),
-      }),
-      worker: createWorkerStub({
-        processJobReal: mock(async () => {
-          starts.push(Date.now());
-          options.clock.advance(options.jobMs?.(starts.length - 1) ?? 0);
-          return { success: true, messagesFetched: 100 };
-        }),
-      }),
+    const { db } = cacheWithSyncJob(SyncJobType.BackwardHistory, {
+      chat: { forward_cursor: 1000, backward_cursor: 1000 },
     });
-    return { rt, starts };
+    const rt = runAccount(ctx, 1, {
+      db,
+      config: { batchSize: 1 },
+      client: createFakeHistory(options.ids ?? range(1, 1000), () => {
+        starts.push(Date.now());
+        options.clock.advance(options.jobMs?.(starts.length - 1) ?? 0);
+      }).client,
+    });
+    return { rt, db, starts };
   }
 
   it("runs history at 0.7 calls/s, counted from each start, whatever the tick", async () => {
     const ctx = testDaemonContext();
     const clock = useClock(0);
-    const { starts } = pacedAccount(ctx, {
-      historyDue: () => true,
-      jobMs: () => 300,
-      clock,
-    });
+    const { starts } = pacedAccount(ctx, { jobMs: () => 300, clock });
 
     try {
       while (Date.now() < 4000) {
@@ -930,7 +837,6 @@ describe("history pacing (#133)", () => {
     const ctx = testDaemonContext();
     const clock = useClock(0);
     const { starts } = pacedAccount(ctx, {
-      historyDue: () => true,
       jobMs: (index) => (index === 0 ? 5000 : 0),
       clock,
     });
@@ -948,15 +854,12 @@ describe("history pacing (#133)", () => {
   it("goes back to the calm 3 s once no history is due", async () => {
     const ctx = testDaemonContext();
     const clock = useClock(0);
-    let historyDue = true;
-    const { rt, starts } = pacedAccount(ctx, {
-      historyDue: () => historyDue,
-      clock,
-    });
+    const { rt, db, starts } = pacedAccount(ctx, { ids: [], clock });
+    queueSyncJob(db, 55, SyncJobType.ForwardCatchup, { nextRunAt: 1 });
 
     try {
       await processJobs(ctx);
-      historyDue = false;
+      expect(rt.scheduler!.hasHistoryDue()).toBe(false);
       for (let t = 0; t < 3000; t += 500) {
         clock.advance(500);
         await processJobs(ctx);
@@ -972,7 +875,7 @@ describe("history pacing (#133)", () => {
   it("starts no job until a FLOOD_WAIT and one interval at the halved pace are over", async () => {
     const ctx = testDaemonContext();
     const clock = useClock(0);
-    const { rt, starts } = pacedAccount(ctx, { historyDue: () => true, clock });
+    const { rt, starts } = pacedAccount(ctx, { clock });
 
     try {
       await processJobs(ctx);
@@ -986,6 +889,28 @@ describe("history pacing (#133)", () => {
     }
 
     expect(starts).toEqual([0, 12_858]);
+  });
+
+  it("speeds history up again after 30 pages without a FLOOD_WAIT", async () => {
+    const ctx = testDaemonContext();
+    const clock = useClock(0);
+    const { rt, starts } = pacedAccount(ctx, { clock });
+    rt.pacer.recordFloodWait(0, 1);
+    const halved = rt.pacer.snapshot().targetCallsPerSecond;
+
+    try {
+      while (starts.length < 30) {
+        clock.advance(100);
+        await processJobs(ctx);
+      }
+    } finally {
+      clock.restore();
+    }
+
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[Account 1\] No FLOOD_WAIT in 30 calls, history pace up to /),
+    );
+    expect(rt.pacer.snapshot().targetCallsPerSecond).toBeGreaterThan(halved);
   });
 });
 
@@ -1373,15 +1298,8 @@ describe("cleanupScheduler", () => {
       finish = resolve;
     });
     const rt = runAccount(ctx, 1, {
-      scheduler: createSchedulerStub({
-        getNextJob: () => jobOf(SyncJobType.ForwardCatchup),
-      }),
-      worker: createWorkerStub({
-        processJobReal: mock(async () => {
-          await blocked;
-          return { success: true, messagesFetched: 0 };
-        }),
-      }),
+      db: cacheWithSyncJob(SyncJobType.ForwardCatchup).db,
+      client: createFakeHistory(range(1, 5), () => blocked).client,
     });
     expect(startDueJobs(ctx)).toHaveLength(1);
 
