@@ -945,8 +945,8 @@ describe('listHistory with filters', () => {
     expect(result).toMatchObject({
       source: 'cache',
       complete: true,
+      missing: [],
       missingBefore: null,
-      suggestion: null,
       nextBefore: 5,
       nextAfter: 30,
     })
@@ -974,11 +974,11 @@ describe('listHistory with filters', () => {
 
     // The cached voices below the gap are listed, but 21-50 may hold more
     expect(messageIds(result.items)).toEqual([70, 65, 60, 55, 20, 15, 10, 5])
-    expect(result.complete).toBe(false)
-    expect(result.missingBefore).toBe(51)
-    expect(result.suggestion).toContain(
-      `tg messages list --chat ${TEAM_CHAT_ID} --before 51 --limit 100`,
-    )
+    expect(result).toMatchObject({
+      complete: false,
+      missing: ['history'],
+      missingBefore: 51,
+    })
   })
 
   it('is incomplete while the newest messages arrived live, outside any range', async () => {
@@ -988,8 +988,9 @@ describe('listHistory with filters', () => {
 
     const result = await list({ limit: 20 }, VOICE)
 
+    // The newest page fills the gap: there is nothing above 22 to fetch below
     expect(messageIds(result.items)).toEqual([20, 15, 10, 5])
-    expect(result).toMatchObject({ complete: false, missingBefore: 23 })
+    expect(result).toMatchObject({ complete: false, missingBefore: null })
   })
 
   it('bounds a date window by the cached messages sent around it', async () => {
@@ -1042,11 +1043,9 @@ describe('listHistory with filters', () => {
     expect(result).toMatchObject({
       items: [],
       complete: false,
+      missing: ['history'],
       missingBefore: null,
     })
-    expect(result.suggestion).toContain(
-      `tg messages list --chat ${TEAM_CHAT_ID} --limit 100`,
-    )
   })
 
   it('is incomplete for --type until older rows have their type', async () => {
@@ -1056,8 +1055,11 @@ describe('listHistory with filters', () => {
     )
 
     const typed = await list({ limit: 20 }, VOICE)
-    expect(typed).toMatchObject({ complete: false, missingBefore: null })
-    expect(typed.suggestion).toContain('tg db migrate')
+    expect(typed).toMatchObject({
+      complete: false,
+      missing: ['types'],
+      missingBefore: null,
+    })
 
     // A date window doesn't read types
     expect((await list({ limit: 20 }, { since: DATE })).complete).toBe(true)

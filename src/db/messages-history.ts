@@ -5,6 +5,7 @@
 import type { Database } from 'bun:sqlite'
 
 import {
+  AWAITING_RAW_MESSAGE,
   MESSAGE_ROW_COLUMNS,
   MESSAGE_ROW_JOINS,
   type MessageSearchRow,
@@ -61,6 +62,8 @@ export interface MessagesHistory {
     high: number,
     time: number,
   ): number | null
+  /** Whether a message from `low` to `high` has no type yet (AWAITING_RAW_MESSAGE) */
+  hasUntyped(chatId: number, low: number, high: number): boolean
 }
 
 export function createMessagesHistory(db: Database): MessagesHistory {
@@ -164,6 +167,19 @@ export function createMessagesHistory(db: Database): MessagesHistory {
         `)
         .get(chatId, low, high, time) as { id: number | null }
       return row.id
+    },
+
+    hasUntyped(chatId, low, high) {
+      return (
+        db
+          .query(`
+            SELECT 1 FROM messages_cache m
+            WHERE m.chat_id = ? AND m.message_id BETWEEN ? AND ?
+              AND ${AWAITING_RAW_MESSAGE}
+            LIMIT 1
+          `)
+          .get(chatId, low, high) !== null
+      )
     },
   }
 }

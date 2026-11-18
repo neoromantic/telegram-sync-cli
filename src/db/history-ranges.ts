@@ -40,6 +40,8 @@ export interface HistoryRanges {
   recordPage(chatId: number, ids: number[], bounds: PageBounds): void
   /** The recorded range that holds this message ID */
   find(chatId: number, messageId: number): HistoryRange | null
+  /** The newest recorded range that ends below this message ID */
+  below(chatId: number, messageId: number): HistoryRange | null
 }
 
 export function createHistoryRanges(db: Database): HistoryRanges {
@@ -47,6 +49,12 @@ export function createHistoryRanges(db: Database): HistoryRanges {
     find: db.query(`
       SELECT low, high FROM history_ranges
       WHERE chat_id = $chat_id AND low <= $id AND high >= $id
+      LIMIT 1
+    `),
+    below: db.query(`
+      SELECT low, high FROM history_ranges
+      WHERE chat_id = $chat_id AND high < $id
+      ORDER BY high DESC
       LIMIT 1
     `),
     touching: db.query(`
@@ -111,6 +119,15 @@ export function createHistoryRanges(db: Database): HistoryRanges {
     find(chatId, messageId) {
       return (
         (stmts.find.get({
+          $chat_id: chatId,
+          $id: messageId,
+        }) as HistoryRange | null) ?? null
+      )
+    },
+
+    below(chatId, messageId) {
+      return (
+        (stmts.below.get({
           $chat_id: chatId,
           $id: messageId,
         }) as HistoryRange | null) ?? null

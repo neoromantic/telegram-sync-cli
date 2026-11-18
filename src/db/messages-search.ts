@@ -171,7 +171,19 @@ export interface MessagesSearchService {
   search(query: string, options?: MessageSearchOptions): MessageSearchRow[]
   /** How many messages match, with the same filters and no page */
   count(query: string, options?: MessageSearchOptions): number
+  /**
+   * Whether a message that matches the query and the filters other than
+   * `types` has no type to filter on yet (AWAITING_RAW_MESSAGE)
+   */
+  hasUntypedMatch(query: string, options?: MessageSearchOptions): boolean
 }
+
+/**
+ * A media message an older version cached without its raw message (#130):
+ * no attachment row, and possibly the `document` type older versions gave
+ * videos and voices, until a refetch brings the raw message
+ */
+export const AWAITING_RAW_MESSAGE = "m.has_media = 1 AND m.raw_json = '{}'"
 
 /**
  * The condition that keeps messages of these `--type` values, over
@@ -491,6 +503,29 @@ export function searchNewestFirst(
 }
 
 export function createMessagesSearch(db: Database): MessagesSearchService {
+  /** Matches of the query and filters, plus `extra`, counted up to `cap` */
+  const countMatches = (
+    query: string,
+    options: MessageSearchOptions,
+    extra?: string,
+    cap?: number,
+  ): number => {
+    const { conditions, params } = searchFilter(options)
+    if (extra) conditions.push(extra)
+    // Only the joins a filter reads: each message has one chat and one sender
+    const matches = `SELECT 1
+      ${MATCHES_FROM}
+      ${options.chatUsername ? CHAT_JOIN : ''}${options.senderUsername ? SENDER_JOIN : ''}
+      ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
+      ${cap === undefined ? '' : `LIMIT ${cap}`}`
+    const row = db
+      .query(`SELECT COUNT(*) AS n FROM (${matches})`)
+      .get(toFts5Query(query, { phrase: options.phrase }), ...params) as {
+      n: number
+    }
+    return row.n
+  }
+
   return {
     search(
       query: string,
@@ -510,19 +545,12 @@ export function createMessagesSearch(db: Database): MessagesSearchService {
     },
 
     count(query: string, options: MessageSearchOptions = {}): number {
-      const { conditions, params } = searchFilter(options)
-      // Only the joins a filter reads: each message has one chat and one sender
-      const row = db
-        .query(
-          `SELECT COUNT(*) AS n
-           ${MATCHES_FROM}
-           ${options.chatUsername ? CHAT_JOIN : ''}${options.senderUsername ? SENDER_JOIN : ''}
-           ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}`,
-        )
-        .get(toFts5Query(query, { phrase: options.phrase }), ...params) as {
-        n: number
-      }
-      return row.n
+      return countMatches(query, options)
+    },
+
+    hasUntypedMatch(query, options = {}) {
+      const untyped = { ...options, types: undefined }
+      return countMatches(query, untyped, AWAITING_RAW_MESSAGE, 1) > 0
     },
   }
 }
