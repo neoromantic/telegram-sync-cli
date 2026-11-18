@@ -1,6 +1,6 @@
 import { accessSync, constants, statSync } from 'node:fs'
 import { basename } from 'node:path'
-import type { tl } from '@mtcute/bun'
+import { tl } from '@mtcute/bun'
 import { defineCommand } from 'citty'
 
 import { accountsDb } from '../db'
@@ -65,7 +65,32 @@ function extractMessageInfo(result: tl.TypeUpdates): {
   return { messageId: null, timestamp: null }
 }
 
-function handleSendError(recipient: string, message: string): never {
+const richErrorHints: Record<string, string> = {
+  RICH_MESSAGE_UNSUPPORTED:
+    'Rich sending is unavailable for this account or chat. Omit the formatting flag to send plain text.',
+  RICH_MESSAGE_EMPTY: 'Add visible content to the rich message.',
+  RICH_MESSAGE_TEXT_TOO_LONG:
+    'Shorten the rich message text to 32768 characters or fewer.',
+  RICH_MESSAGE_BLOCKS_TOO_MANY: 'Use at most 500 blocks.',
+  RICH_MESSAGE_MEDIA_TOO_MANY: 'Use at most 50 media attachments.',
+  RICH_MESSAGE_TABLE_COLS_TOO_MANY: 'Use at most 20 table columns.',
+}
+
+function handleSendError(
+  recipient: string,
+  err: unknown,
+  rich: boolean,
+): never {
+  if (rich && tl.RpcError.is(err) && err.text.startsWith('RICH_MESSAGE_')) {
+    error(
+      ErrorCodes.TELEGRAM_ERROR,
+      err.message,
+      { telegramError: err.text },
+      richErrorHints[err.text],
+    )
+  }
+  const message = err instanceof Error ? err.message : 'Unknown error'
+
   if (message.includes('PEER_ID_INVALID')) {
     error(
       ErrorCodes.TELEGRAM_ERROR,
@@ -90,22 +115,38 @@ function handleSendError(recipient: string, message: string): never {
   error(ErrorCodes.TELEGRAM_ERROR, `Failed to send message: ${message}`)
 }
 
+/** How Telegram reads --message: as a rich message it parses itself */
+type RichFormat = 'markdown' | 'html'
+
+function richMessage(
+  text: string,
+  format: RichFormat,
+): tl.TypeInputRichMessage {
+  return format === 'markdown'
+    ? { _: 'inputRichMessageMarkdown', markdown: text }
+    : { _: 'inputRichMessageHTML', html: text }
+}
+
 function sendMessageRequest(
   peer: tl.TypeInputPeer,
   text: string,
   silent: boolean,
   replyTo: number | undefined,
+  format: RichFormat | null,
 ): tl.messages.RawSendMessageRequest {
   const request: tl.messages.RawSendMessageRequest = {
     _: 'messages.sendMessage',
     peer,
-    message: text,
+    // A rich message carries its content in richMessage and has no text
+    message: format ? '' : text,
     randomId: toLong(
       BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
     ),
     noWebpage: false,
     silent,
   }
+
+  if (format) request.richMessage = richMessage(text, format)
 
   if (replyTo) {
     request.replyTo = {
@@ -118,7 +159,7 @@ function sendMessageRequest(
 
 /** What to send: text, or one file with an optional caption */
 type SendContent =
-  | { file: null; text: string }
+  | { file: null; text: string; format: RichFormat | null }
   | { file: string; caption: string; forceDocument: boolean }
 
 /** Exits with INVALID_ARGS unless path names a readable, non-empty regular file */
@@ -146,9 +187,16 @@ function readSendContent(
     file?: string
     caption?: string
     'force-document'?: boolean
+    markdown?: boolean
+    html?: boolean
   },
   rawArgs: string[],
 ): SendContent {
+  if (args.markdown && args.html) {
+    error(ErrorCodes.INVALID_ARGS, 'Use --markdown or --html, not both')
+  }
+  const format = args.markdown ? 'markdown' : args.html ? 'html' : null
+
   const files = flagValues(rawArgs, 'file')
   if (files.length > 1) {
     error(
@@ -172,7 +220,14 @@ function readSendContent(
     if (args.message.trim() === '') {
       error(ErrorCodes.INVALID_ARGS, 'Message text cannot be empty')
     }
-    return { file: null, text: args.message }
+    return { file: null, text: args.message, format }
+  }
+
+  if (format) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      `--${format} formats --message: a caption is plain text`,
+    )
   }
 
   if (args.message !== undefined) {
@@ -223,6 +278,17 @@ export const sendCommand = defineCommand({
       default: false,
       description: 'Send an image as a file (document), not as a photo',
     },
+    markdown: {
+      type: 'boolean',
+      default: false,
+      description:
+        'Send --message as a rich message written in Markdown: headings, tables, lists, quotes, code, formulas',
+    },
+    html: {
+      type: 'boolean',
+      default: false,
+      description: 'Send --message as a rich message written in HTML',
+    },
     account: {
       type: 'string',
       description: ACCOUNT_SELECTOR_DESCRIPTION,
@@ -237,15 +303,20 @@ export const sendCommand = defineCommand({
       description: 'Message ID to reply to',
     },
   },
-  async run({ args, rawArgs }) {
+  setup(ctx) {
+    // A chat allowlist can resolve the recipient before run().
+    if (ctx.args.markdown || ctx.args.html) {
+      ctx.data = readSendContent(ctx.args, ctx.rawArgs)
+    }
+  },
+  async run({ args, rawArgs, data }) {
     const recipient = args.to
     const silent = args.silent
     const replyTo = args['reply-to']
       ? Number.parseInt(args['reply-to'], 10)
       : undefined
 
-    // Tests call run() with args only
-    const content = readSendContent(args, rawArgs ?? [])
+    const content: SendContent = data ?? readSendContent(args, rawArgs ?? [])
 
     // The recipient resolves with this account's access hashes
     const { account, db: cacheDb } = openAccountCache(args.account)
@@ -275,7 +346,13 @@ export const sendCommand = defineCommand({
       if (content.file === null) {
         verbose(`Sending message to ${name}...`)
         result = await client.call(
-          sendMessageRequest(inputPeer, content.text, silent, replyTo),
+          sendMessageRequest(
+            inputPeer,
+            content.text,
+            silent,
+            replyTo,
+            content.format,
+          ),
         )
       } else {
         const fileName = basename(content.file)
@@ -321,6 +398,7 @@ export const sendCommand = defineCommand({
         timestamp: timestamp ? timestamp * 1000 : Date.now(),
         replyTo: replyTo ?? null,
         silent,
+        format: content.file === null ? content.format : null,
         ...fileOutput,
       })
     } catch (err) {
@@ -331,8 +409,11 @@ export const sendCommand = defineCommand({
         })
       }
       reportConfigOrRateLimitError(err)
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      handleSendError(recipient, message)
+      handleSendError(
+        recipient,
+        err,
+        content.file === null && content.format !== null,
+      )
     }
   },
 })

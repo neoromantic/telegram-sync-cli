@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg send --markdown` and `--html` send rich messages such as headings and tables on
+  supported accounts. The result includes `format`. File captions stay plain text.
+
 ### Changed
 
 - A group (basic group or supergroup) adds new messages to the cache only while you take part

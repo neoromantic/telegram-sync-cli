@@ -13,6 +13,7 @@
 import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import { type TelegramClient, tl } from '@mtcute/bun'
+import { runCommand } from 'citty'
 
 type MockCall = <T extends tl.RpcMethod>(
   request: T,
@@ -26,6 +27,7 @@ type MockClient = {
 import { dialogToCacheInput } from '../commands/chats/helpers'
 import { resolvePeer } from '../commands/send/peer-resolver'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
+import { createMessagesSearch } from '../db/messages-search'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
@@ -37,6 +39,7 @@ import {
 } from './helpers/db-mock'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { assertPeer, expectLongEqual } from './helpers/input-peer'
+import { cell, richTlMessage } from './helpers/rich-message'
 
 // The send command reads the cache and the client through these modules.
 // Account 1 is active; account 2 has its own cache and client, so a test
@@ -1746,5 +1749,134 @@ describe('send command', () => {
     assertPeer(request.peer, 'inputPeerUser')
     expect(request.peer.userId).toBe(4242)
     expectLongEqual(request.peer.accessHash, 0)
+  })
+
+  type SendRun = (input: { args: Record<string, unknown> }) => Promise<void>
+  type SentRequest = {
+    message: string
+    richMessage?: tl.TypeInputRichMessage
+  }
+
+  /** Runs tg send to user 4242 and gives the request and the printed result */
+  const sendTo4242 = async (
+    message: string,
+    format?: 'markdown' | 'html',
+    reply?: tl.TypeUpdates,
+  ) => {
+    commandCall.mockResolvedValueOnce(reply ?? (await sentUpdates()))
+    const { sendCommand } = await import('../commands/send')
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {})
+    let printed: string
+    try {
+      await runCommand(sendCommand, {
+        rawArgs: [
+          '--to',
+          '4242',
+          '-m',
+          message,
+          ...(format ? [`--${format}`] : []),
+        ],
+      })
+      printed = String(logSpy.mock.calls[0]?.[0])
+    } finally {
+      logSpy.mockRestore()
+    }
+    return {
+      request: commandCall.mock.calls[0]?.[0] as SentRequest,
+      data: JSON.parse(printed).data as { format: string | null },
+    }
+  }
+
+  const table = '# Prices\n\n| Item | Price |\n|:-----|------:|\n| Tea | 3 |'
+
+  it('sends --markdown as a rich message Telegram parses, with no text', async () => {
+    const { request, data } = await sendTo4242(table, 'markdown')
+
+    expect(request.message).toBe('')
+    expect(request.richMessage).toEqual({
+      _: 'inputRichMessageMarkdown',
+      markdown: table,
+    })
+    expect(data.format).toBe('markdown')
+  })
+
+  it('sends --html as a rich message', async () => {
+    const html = '<table><tr><td>Tea</td></tr></table>'
+    const message = richTlMessage({ _: 'peerUser', userId: 4242 }, 17, [
+      {
+        _: 'pageBlockTable',
+        title: { _: 'textEmpty' },
+        rows: [{ _: 'pageTableRow', cells: [cell('Tea')] }],
+      },
+    ])
+    const { request, data } = await sendTo4242(html, 'html', {
+      _: 'updates',
+      users: [],
+      chats: [],
+      date: message.date,
+      seq: 1,
+      updates: [{ _: 'updateNewMessage', message, pts: 1, ptsCount: 1 }],
+    })
+    expect(
+      createMessagesSearch(commandCacheDb).search('Tea')[0]?.text,
+    ).toContain('| Tea |')
+    expect(commandCall).toHaveBeenCalledTimes(1)
+
+    expect(request.message).toBe('')
+    expect(request.richMessage).toEqual({ _: 'inputRichMessageHTML', html })
+    expect(data.format).toBe('html')
+  })
+
+  it('sends a message without --markdown or --html as plain text', async () => {
+    const { request, data } = await sendTo4242('**not bold**')
+
+    expect(request.message).toBe('**not bold**')
+    expect(request.richMessage).toBeUndefined()
+    expect(data.format).toBeNull()
+  })
+
+  it('keeps a local recipient error even when the address contains an RPC name', async () => {
+    const { sendCommand } = await import('../commands/send')
+    const stderr = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(
+        runCommand(sendCommand, {
+          rawArgs: ['--to', '+RICH_MESSAGE_EMPTY', '--html', '-m', 'hi'],
+        }),
+      ).rejects.toThrow('Invalid peer identifier')
+      expect(commandCall).not.toHaveBeenCalled()
+    } finally {
+      stderr.mockRestore()
+    }
+  })
+
+  it.each([
+    ['RICH_MESSAGE_UNSUPPORTED', 'plain text'],
+    ['RICH_MESSAGE_TABLE_COLS_TOO_MANY', '20 table columns'],
+    ['RICH_MESSAGE_EMPTY', 'visible content'],
+  ])('explains %s from Telegram', async (name, hint) => {
+    commandCall.mockRejectedValueOnce(
+      tl.RpcError.fromTl({
+        _: 'rpc_error',
+        errorCode: 400,
+        errorMessage: name,
+      }),
+    )
+    const { sendCommand } = await import('../commands/send')
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(
+        (sendCommand.run as SendRun)({
+          args: { to: '4242', message: table, markdown: true, _: [] },
+        }),
+      ).rejects.toMatchObject({
+        code: 'TELEGRAM_ERROR',
+        details: { telegramError: name },
+        retryable: false,
+        suggestion: expect.stringContaining(hint),
+      })
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 })

@@ -471,6 +471,8 @@ tg send --to me -m "Note to self"   # Saved Messages
 tg send --to -1001234567890 -m "Hi" # a chat ID as tg messages search prints it
 tg send --to me --file ./report.pdf --caption "Q3"
 tg send --to @username --file ./photo.jpg --force-document
+tg send --to me --markdown -m "$(cat report.md)"   # a rich message: headings, tables, lists
+tg send --to me --html -m "<h1>Report</h1><p>Sales doubled.</p>"
 ```
 
 `--to` takes an `@username`, a user or chat ID as any `tg` command prints it (`tg chats list`,
@@ -489,6 +491,21 @@ that, whatever its length.
 
 A sent message goes into the message cache right away, so `tg messages search`
 finds it without the daemon.
+
+Choose `--markdown` or `--html` for headings, tables and other rich blocks. Telegram parses
+the [Rich Markdown](https://core.telegram.org/bots/api#rich-markdown-style) or
+[Rich HTML](https://core.telegram.org/bots/api#rich-html-style) and enforces its
+[limits](https://core.telegram.org/bots/api#rich-message-limits). Both flags together,
+either flag with a file, or blank message text give `INVALID_ARGS` (exit 3). Captions are plain text.
+
+Rich sending depends on the account and chat and may require Premium. A rich-message RPC refusal
+gives `TELEGRAM_ERROR` (exit 5) with its reason in `details.telegramError`, e.g.
+`RICH_MESSAGE_EMPTY` when the parsed markup has no content. The result of a successful send has
+`format` set to `markdown`, `html`, or `null` for plain text and files.
+
+Cached reads and search use the returned blocks rendered as Markdown. If Telegram returns a short
+acknowledgement, they use the submitted source. If it returns only some blocks, they include
+only those blocks until a full message reaches the cache.
 
 `--file` sends one file: JPEG, PNG and WebP images up to 10 MB as a photo, anything else as a
 document under its file name (`--force-document` sends an image as a document too). `--caption`
