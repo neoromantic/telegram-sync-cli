@@ -376,6 +376,7 @@ as long as 0.11.1, which sorted at once.
 tg messages search --query "hello"
 tg messages search --query "hello" --sender @alice
 tg messages search --query "error OR timeout" --chat @teamchat
+tg messages search --query "todo" --chat me       # Saved Messages
 
 tg messages search \
   --query "hello" \
@@ -423,9 +424,13 @@ name), returns `INVALID_ARGS` (exit 3) with a suggestion: quote the words with p
 
 ### Supported Filters
 
-- `--chat` (chat id or `@username`)
-- `--sender` (user ID, `@username`, or the marked ID of a group or channel that posts as itself,
-  such as `-1001234567890`)
+- `--chat` (chat ID, `@username`, or `me` for Saved Messages)
+- `--sender` (user ID, `@username`, `me` for your own messages, or the marked ID of a group or
+  channel that posts as itself, such as `-1001234567890`)
+
+`me` is the account's own user ID, which tg saves at login; search reads it without a Telegram
+call. If the account doesn't know it yet, `me` is `INVALID_ARGS` (exit 3): run `tg me` once.
+Any other value that is neither an ID nor a username is `INVALID_ARGS`, never an empty result.
 - `--includeDeleted` (alias: `--include-deleted`)
 - `--phrase`: the whole query as one phrase
 - `--since`, `--until`: the date range, on the date a message was sent (see below)

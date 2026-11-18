@@ -1,9 +1,8 @@
 import type { Database } from 'bun:sqlite'
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
-import { defineCommand } from 'citty'
+import { type ArgsDef, defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
 import {
-  type ChatSyncView,
   chatSyncView,
   createChatSyncStateService,
 } from '../../db/chat-sync-state'
@@ -12,7 +11,7 @@ import { createGroupParticipation } from '../../db/group-participation'
 import type { ChatType } from '../../db/types'
 import { createUsersCache } from '../../db/users-cache'
 import { getClientForAccount } from '../../services/telegram'
-import { ErrorCodes, type PaginatedResult } from '../../types'
+import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { buildCachePaginatedResponse } from '../../utils/cache-pagination'
@@ -20,17 +19,20 @@ import { error, success, verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import {
   isRateLimitError,
+  reportRateLimit,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
+import { allowedChatIds } from '../access'
+import { nextCommand } from '../next'
 import {
   CHAT_TYPE_VALUES,
-  type ChatItem,
   chatRowToItem,
   dialogToCacheInput,
   fetchJoinedCommunities,
   filterChatsByType,
   isValidChatType,
 } from './helpers'
+import type { ChatsListOutput } from './list-output'
 
 type DialogCollectorClient = Pick<TelegramClient, 'iterDialogs'>
 
@@ -86,42 +88,48 @@ export async function fetchChatsFromApi(
   return chatInputs
 }
 
-export interface ChatListItem extends ChatItem, ChatSyncView {}
+export const listChatsArgs = {
+  limit: {
+    type: 'string',
+    description: 'Maximum number of chats to return (default: 50)',
+    default: '50',
+  },
+  offset: {
+    type: 'string',
+    description: 'Offset for pagination (default: 0)',
+    default: '0',
+  },
+  type: {
+    type: 'string',
+    description: `Filter by chat type: ${CHAT_TYPE_VALUES.join(', ')} (default: all)`,
+  },
+  unread: {
+    type: 'boolean',
+    description: 'Only chats with unread messages',
+    default: false,
+  },
+  account: {
+    type: 'string',
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+  fresh: {
+    type: 'boolean',
+    description: 'Bypass cache and fetch from API',
+    default: false,
+  },
+} satisfies ArgsDef
 
 export const listChatsCommand = defineCommand({
   meta: {
     name: 'list',
     description: 'List chats and dialogs with pagination',
   },
-  args: {
-    limit: {
-      type: 'string',
-      description: 'Maximum number of chats to return (default: 50)',
-      default: '50',
-    },
-    offset: {
-      type: 'string',
-      description: 'Offset for pagination (default: 0)',
-      default: '0',
-    },
-    type: {
-      type: 'string',
-      description: `Filter by chat type: ${CHAT_TYPE_VALUES.join(', ')} (default: all)`,
-    },
-    account: {
-      type: 'string',
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-    fresh: {
-      type: 'boolean',
-      description: 'Bypass cache and fetch from API',
-      default: false,
-    },
-  },
+  args: listChatsArgs,
   async run({ args }) {
     const limit = Number.parseInt(args.limit ?? '50', 10)
     const offset = Number.parseInt(args.offset ?? '0', 10)
     const fresh = args.fresh ?? false
+    const unread = args.unread ?? false
     const rawType = args.type
     const typeFilter = rawType as ChatType | undefined
 
@@ -133,6 +141,9 @@ export const listChatsCommand = defineCommand({
     }
 
     const { account, db: cacheDb } = openAccountCache(args.account)
+    const allowed = await allowedChatIds(account.id)
+    const isAllowed = (chat: { chat_id: string }) =>
+      allowed === null || allowed.has(Number(chat.chat_id))
 
     try {
       const chatsCache = createChatsCache(cacheDb)
@@ -140,7 +151,7 @@ export const listChatsCommand = defineCommand({
       const participation = createGroupParticipation(cacheDb)
       const toItem = (
         chat: Parameters<typeof chatRowToItem>[0],
-      ): ChatListItem => {
+      ): ChatsListOutput['items'][number] => {
         const item = chatRowToItem(chat)
         return {
           ...item,
@@ -150,21 +161,31 @@ export const listChatsCommand = defineCommand({
       const cacheConfig = await getResolvedCacheConfig()
 
       if (!fresh) {
-        const cachedChats = chatsCache.list({
-          limit: 1000,
-          type: typeFilter,
-          orderBy: 'last_message_at',
-        })
-
-        if (cachedChats.length > 0) {
-          const response = buildCachePaginatedResponse(cachedChats, toItem, {
-            offset,
-            limit,
-            ttlMs: cacheConfig.staleness.dialogs,
-            source: 'cache',
+        // With allowedChats, every cached chat is a candidate (-1: no limit)
+        const cachedChats = chatsCache
+          .list({
+            limit: allowed === null ? 1000 : -1,
+            type: typeFilter,
+            orderBy: 'last_message_at',
+            unread,
           })
+          .filter(isAllowed)
 
-          success(response)
+        // With --unread, a cache that knows unread counts answers even when
+        // no chat has unread messages
+        if (cachedChats.length > 0 || (unread && chatsCache.hasUnreadState())) {
+          const response: ChatsListOutput = buildCachePaginatedResponse(
+            cachedChats,
+            toItem,
+            {
+              offset,
+              limit,
+              ttlMs: cacheConfig.staleness.dialogs,
+              source: 'cache',
+            },
+          )
+
+          success(response, nextChatsPage(args, response))
           return
         }
       }
@@ -177,7 +198,9 @@ export const listChatsCommand = defineCommand({
 
       const chatInputs = await fetchChatsFromApi(client, cacheDb)
 
-      const filteredChats = filterChatsByType(chatInputs, typeFilter)
+      const filteredChats = filterChatsByType(chatInputs, typeFilter).filter(
+        (chat) => (!unread || (chat.unread_count ?? 0) > 0) && isAllowed(chat),
+      )
       filteredChats.sort(
         (a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0),
       )
@@ -185,10 +208,7 @@ export const listChatsCommand = defineCommand({
       const paginatedChats = filteredChats.slice(offset, offset + limit)
       const items = paginatedChats.map(toItem)
 
-      const response: PaginatedResult<ChatListItem> & {
-        source: string
-        stale: boolean
-      } = {
+      const response: ChatsListOutput = {
         items,
         total: filteredChats.length,
         offset,
@@ -198,20 +218,29 @@ export const listChatsCommand = defineCommand({
         stale: false,
       }
 
-      success(response)
+      success(response, nextChatsPage(args, response))
     } catch (err) {
       if (err instanceof ConfigError) {
         error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
       }
-      if (isRateLimitError(err)) {
-        error(
-          ErrorCodes.RATE_LIMITED,
-          `Rate limited for ${err.method}. Wait ${err.waitSeconds}s before retrying.`,
-          { method: err.method, wait_seconds: err.waitSeconds },
-        )
-      }
+      if (isRateLimitError(err)) reportRateLimit(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Failed to fetch chats: ${message}`)
     }
   },
 })
+
+function nextChatsPage(
+  args: Record<string, unknown>,
+  { hasMore, offset, limit }: ChatsListOutput,
+) {
+  if (!hasMore) return []
+  return [
+    nextCommand(
+      'chats list',
+      listChatsArgs,
+      { ...args, limit, offset: offset + limit },
+      'The next page of chats.',
+    ),
+  ]
+}

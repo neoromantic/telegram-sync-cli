@@ -15,6 +15,7 @@ import {
 import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
+import { positionalChat } from '../../utils/args'
 import { isUsernameIdentifier } from '../../utils/identifiers'
 import { error, success } from '../../utils/output'
 import { AmbiguousPeerError } from '../send/peer-resolver'
@@ -170,12 +171,7 @@ export const syncChatCommand = defineCommand({
     if (args.off && args.auto) {
       error(ErrorCodes.INVALID_ARGS, 'Use either --off or --auto, not both')
     }
-    // The parser reads a marked ID such as -100… as flags and takes the
-    // value of a flag it doesn't know (the global --format pretty) as the
-    // positional, so a marked ID in rawArgs wins
-    const input = (
-      rawArgs.find((arg) => /^-\d+$/.test(arg)) ?? args.chat
-    )?.trim()
+    const input = positionalChat(args.chat, rawArgs)
     if (!input) {
       error(
         ErrorCodes.INVALID_ARGS,

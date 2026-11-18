@@ -12,7 +12,7 @@
 | `accounts` | list, switch, remove, info |
 | `contacts` | list, search, get (cached; supports `--fresh`) |
 | `chats` | list, search (cache-only), get (@username only), sync (cache-only) |
-| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only) |
+| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only), wait and watch (new messages the daemon stores), unread (cache, `--fresh`), read (marks a chat read on Telegram) |
 | `send` | send a message or one file (`--to`, `--message`, `--file`) |
 | `media` | download (cache-first), clean |
 | `api` | raw Telegram API calls |
@@ -45,7 +45,7 @@ Available on the root command:
 
 ```bash
 tg auth login --phone +15551234567
-tg auth login-qr
+tg auth login-qr          # QR code on stderr, JSON result on stdout
 tg auth logout
 tg auth status
 ```
@@ -71,6 +71,7 @@ tg contacts get --id @username
 
 ```bash
 tg chats list --type private --limit 50
+tg chats list --unread            # only chats with unread messages
 tg chats search --query "team"   # cache-only
 tg chats get --id @username       # or the ID of a cached chat (cache-only, no credentials)
 tg chats sync @examplenews        # sync this chat in the background
@@ -80,14 +81,40 @@ tg chats sync @examplenews        # sync this chat in the background
 community, a collection of linked chats). `--type community` lists the communities the
 account joined once a daemon start or `tg chats list --fresh` has cached them.
 
-Each item of `tg chats list` has `syncEnabled` (whether the daemon syncs the chat) and
-`syncReason`, why: `dm`, `bot`, `deleted_account`, `small_group`, `medium_group` (the default
-policy), `large_group`, `unknown_size`, `channel`, `community` (off by the policy),
-`on_by_hand` / `off_by_hand` (set with `tg chats sync`), or, for a group the account doesn't
-take part in, `group_participation_required` (no own message in the last 90 days) or
-`group_participation_unknown` (not checked yet). `syncReason` is `null` for a chat without sync state that takes messages: an
-archived chat that hasn't synced yet, or one no daemon start has seen. `lastOwnMessageAt` is the
-newest own message known in a group, in milliseconds since the epoch, `null` elsewhere.
+The `data` of `tg chats list`:
+
+<!-- output: chats list -->
+| Field | Type | Description |
+|---|---|---|
+| `items` | array | The page of chats, newest message first |
+| `items[].id` | integer | Marked peer ID: the user ID, `-N` for a basic group, `-100…` for a supergroup, channel or community |
+| `items[].type` | `private`, `group`, `supergroup`, `channel` or `community` | Chat type |
+| `items[].title` | string | Chat title or the user's name; empty when Telegram gave none |
+| `items[].username` | string or `null` | Public username, without `@` |
+| `items[].memberCount` | integer or `null` | Members of a group or channel; `null` when unknown |
+| `items[].lastMessageAt` | integer or `null` | Time of the newest message, Unix milliseconds |
+| `items[].isCreator` | boolean | The account created the chat |
+| `items[].isAdmin` | boolean | The account is an admin of the chat |
+| `items[].unreadCount` | integer or `null` | Unread incoming messages as Telegram counts them; `null` before a dialog list has the chat (a daemon start or `--fresh`) |
+| `items[].syncEnabled` | boolean | Whether the daemon syncs the chat's messages: its mode allows it and, in a group, the account takes part in it |
+| `items[].syncReason` | `dm`, `bot`, `deleted_account`, `small_group`, `medium_group`, `large_group`, `unknown_size`, `channel`, `community`, `on_by_hand`, `off_by_hand`, `group_participation_required`, `group_participation_unknown` or `null` | Why: the policy's reason (`medium_group` is the default; `large_group`, `unknown_size`, `channel` and `community` are off), `on_by_hand` / `off_by_hand` from `tg chats sync`, or `group_participation_required` / `group_participation_unknown` for a group that takes no new messages because the account sent none there in the last 90 days, or isn't checked yet ([sync-strategy.md](sync-strategy.md#group-participation)); `null` for a chat without sync state that takes messages: an archived chat that hasn't synced yet, or one no daemon start has seen |
+| `items[].lastOwnMessageAt` | integer or `null` | A group's newest own message known, Unix milliseconds; `null` in other chats or when none is known |
+| `total` | integer | Chats that match the filters |
+| `offset` | integer | `--offset` |
+| `limit` | integer | `--limit` |
+| `hasMore` | boolean | More chats follow this page |
+| `source` | `cache` or `api` | `cache`, or `api` with `--fresh` or when the cache has no matching chat |
+| `stale` | boolean | A matching cached chat is older than `cache.staleness.dialogs`; always `false` from the API |
+<!-- /output -->
+
+`--unread` lists only chats with unread messages, in the same order; it answers from the cache
+once a dialog list has given the chats their counts, and otherwise reads the dialog list from
+Telegram, as `--fresh` does. How fresh the count is: [real-time.md](real-time.md#unread-counts).
+
+`tg chats list` and `tg contacts list` page with `--offset`; while `hasMore` is true, `next` has
+the command for the following page ([Next commands](#next-commands)). `tg chats search` reads
+only the cache: with no result it keeps its `message` and adds `next` with
+`tg chats list --fresh` and then the same search.
 
 `tg chats get --id` reads an ID like `tg chats sync` does. A bare 0.2.0 ID that names both a
 cached basic group and a cached channel is `INVALID_ARGS` (exit 3) with
@@ -186,8 +213,17 @@ tg messages get --chat @username --id 1200 --context 3   # 3 newer and 3 older a
 tg messages search --query "hello world"           # both words, any order
 tg messages search --query '"hello world"'         # the exact phrase (or --phrase)
 tg messages search --query "error OR timeout" --chat @teamchat --sender @alice
+tg messages search --query "todo" --chat me        # Saved Messages; --sender me: your own
 tg messages search --query "квартир*" --includeDeleted   # every word form
 tg messages search --query "deploy" --since 7d --sort relevance --count --snippet
+tg messages wait --chat @username --after 1200     # the next reply after message 1200
+tg messages wait --timeout 300 --settle 3          # any chat; then 3 quiet seconds
+tg messages watch --chat @teamchat                 # one JSON line per new message
+tg messages unread                                 # unread messages of every chat
+tg messages unread --chat @username --limit 50     # of one chat
+tg messages unread --fresh                         # counts and missing messages from Telegram
+tg messages read --chat @username                  # mark the whole chat read
+tg messages read --chat @username --max-id 1200    # only up to message 1200
 ```
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
@@ -197,7 +233,8 @@ channel is `INVALID_ARGS` (exit 3) with `details: { chat, candidates }` in `list
 To page back, pass `nextBefore` as `--before`; to page forward, pass `nextAfter` as `--after`;
 stop when `items` is empty. Both bounds are exclusive message IDs, `--after 0` starts at the
 first message, and with both set the page is the one right after `--after`. `--limit` is 1-100
-(default 20).
+(default 20). After a full page the answer's `next` has the command for the following page in
+the same direction, with the chat, account and flags kept ([Next commands](#next-commands)).
 
 ```json
 { "chatId": -1001234567890, "items": [ … ], "limit": 20, "before": null, "after": null,
@@ -263,15 +300,134 @@ Any other action has only `type`, its Telegram name in snake case without `messa
 (`chat_edit_photo`, `screenshot_taken`, `history_clear`…), so nothing is dropped. Search doesn't
 index actions: `tg messages search` finds a service message only by its text, which is empty.
 
+A rich message (a heading, a table, lists, a report: page blocks instead of a text) has
+`messageType: "text"` like any other text message, and its `text` is the blocks written in
+Telegram's rich Markdown, the syntax a rich message is sent with
+([Bot API](https://core.telegram.org/bots/api#rich-messages)):
+
+```markdown
+# Garden report
+
+Harvest is **on track**
+
+| Crop | Kg |
+|---|---:|
+| Zucchini | 12 |
+```
+
+Headings are `#`, styles `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `==marked==`,
+`||spoiler||` and `[links](https://example.com)`; code blocks are fenced with their language;
+lists are `-`, `1.`, `- [ ]` and `- [x]`; quotations `>`; dividers `---`; tables are pipe
+tables with an alignment row; formulas `$…$` and `$$…$$`; footnotes `[^id]` and `[^id]: text`.
+Where Markdown has no syntax it uses Telegram's HTML tags: `<u>`, `<sub>`, `<sup>`,
+`<details><summary>…</summary>…</details>`, `<aside>` for a pull quote, `<cite>` for a
+quotation's author, `<tg-collage>` and `<tg-slideshow>` around their media. Media, maps, embeds
+and buttons can't be text, so each is a placeholder with its caption or label: `[photo: The
+lake]`, `[video]`, `[document plan.pdf: The plan]`, `[map 41.9, 12.5: Meeting point]`,
+`[embed https://example.com/widget]`, `[button: Open (https://example.com)]`. A block Telegram
+adds later shows its text, or `[pageBlockName]` when it has none. Search matches every word of
+the rendered text, a table cell's too. Messages cached by 0.13.1 and older have it as well:
+list, get, search, unread, wait and watch render it from `raw_json`, and the background
+migration `messages_rich_text` stores it so search finds them
+([tg db migrate](#tg-db-migrate)).
+
 `tg messages search` reads only the cache. A plain query matches messages that contain every
 word, in any order; a query with FTS5 syntax (`"phrase"`, `OR`, `NOT`, `sender:alice`,
 `chat:team`, `word*`) goes to FTS5 as written, and `--phrase` matches the whole query as one
-phrase. A query FTS5 can't parse is `INVALID_ARGS` (exit 3) with a suggestion. `--since` and
+phrase. A query FTS5 can't parse is `INVALID_ARGS` (exit 3) with a suggestion. `--chat` and
+`--sender` take an ID, an `@username` or `me` (the account's own user ID, read without a
+Telegram call: Saved Messages as a chat, your own messages as a sender); any other value is
+`INVALID_ARGS`, and so is `me` when the account doesn't know its ID yet (run `tg me`). `--since` and
 `--until` take a date, a date and time or a duration back from now (`24h`, `7d`); `--sort
 relevance` puts the best matches first (bm25); `--count` adds `count`, every match over all
 pages, while `total` stays the size of the page; `--snippet` adds `snippet` to each item, the
-text around the first match with matched words in `**`. The rules and examples are in
-[search.md](search.md#query-rules).
+text around the first match with matched words in `**`. When another page has matches, `next`
+has the same search with the following `--offset` ([Next commands](#next-commands)). The rules
+and examples are in [search.md](search.md#query-rules).
+
+#### Waiting for new messages
+
+`tg messages wait [--chat <peer>] [--after <id>] [--timeout 60] [--settle 0]` blocks until the
+daemon stores a new message, then prints the new messages oldest first, as items of the same
+shape as `tg messages list`; deleted ones are left out. `tg messages watch [--chat <peer>]`
+prints each new message as one JSON line (NDJSON) as it is stored, until SIGINT or SIGTERM, and
+then exits 0. Both read only the account's cache, which they check every 200 ms, so a message
+comes back within about a second of the daemon storing it. They open no Telegram connection
+(only resolving a `--chat` the cache doesn't know asks Telegram, as in `tg messages list`), and
+the daemon stays read-only. What the daemon stores live: [real-time.md](real-time.md#how-fresh-wait-and-watch-are).
+
+- New means stored after the command started and newer than every message of its chat already
+  in the cache, so history the daemon backfills meanwhile doesn't count. Messages you send, from
+  `tg send` or another device, count too: `isOutgoing` tells them apart.
+- `--chat` takes the same forms as in `tg messages list` and keeps only that chat.
+- `--after <id>` needs `--chat` (message IDs are per chat; `INVALID_ARGS`, exit 3, otherwise).
+  The chat's cached messages newer than it come back at once; with none, `wait` waits for one.
+  To never miss a reply, pass the ID of the last message you have read or sent: a reply stored
+  before `wait` started is still returned. With `--chat`, an answer with messages has `next`:
+  the same wait with `--after` the newest of them ([Next commands](#next-commands)).
+- `--timeout` is in seconds (default 60, `0` checks once).
+- `--settle N`: after the first new message, keep collecting until N seconds pass without
+  another (default 0: return at once), never past `--timeout`.
+
+```json
+{ "success": true, "data": { "messages": [ … ], "timedOut": false } }
+```
+
+When `--timeout` passes with no new message, the result is still a success (exit 0):
+
+```json
+{ "success": true, "data": { "messages": [], "timedOut": true } }
+```
+
+Both need the daemon running for the account (`tg daemon start`), since nothing else stores new
+messages. Without it they fail at once with `DAEMON_NOT_RUNNING` (exit 1),
+`details: { account_id }` and a suggestion to start it.
+
+#### Unread messages
+
+`tg messages unread` prints the unread messages of every chat with unread messages, in
+`tg chats list --unread` order, or of one chat with `--chat`. A chat's unread messages are the
+incoming ones above its read boundary (`readInboxMaxId`); outgoing and deleted messages are
+left out. For each chat it returns its oldest unread messages the cache holds, at most
+`--limit` (1-100, default 20) and newest first like a `list` page, so they read on from where
+the chat was last read:
+
+```json
+{ "chats": [
+    { "chat": { "id": -1001234567890, "title": "Team Chat", "username": "teamchat",
+                "type": "supergroup" },
+      "unreadCount": 5, "readInboxMaxId": 1180, "missing": 3, "returned": 2,
+      "nextAfter": 1185, "items": [ … ], "source": "cache" } ],
+  "unreadCount": 5, "missing": 3, "returned": 2, "limit": 20, "source": "cache", "stale": false }
+```
+
+- `unreadCount` is Telegram's count, from the cache ([real-time.md](real-time.md#unread-counts)
+  says how fresh it is); `returned` is the number of `items`; `missing` is how many unread
+  messages the cache doesn't hold. The top level sums them over the chats.
+- `missing > 0` is usual for chats whose history the daemon doesn't sync (large groups and
+  channels; see [sync-strategy.md](sync-strategy.md)): only the messages that came live are
+  cached. `--fresh` reads the unread counts from Telegram (the chat's dialog with `--chat`,
+  else the 200 newest dialogs, as `tg chats list --fresh` does) and, for each chat that lacks
+  some of its unread messages, fetches the first `--limit` messages above its read boundary and
+  caches them (`source: "api"`). Without `--fresh` the command reads only the cache, except
+  that it reads the counts from Telegram when the cache has none yet: a `--chat` that no dialog
+  list has given a count, or a cache no dialog list has filled.
+- Items are exactly the objects `tg messages list` prints. To read on past `--limit`, pass
+  `nextAfter` to `tg messages list --after`; to mark what you read, pass it to
+  `tg messages read --max-id`.
+
+`tg messages read --chat <peer>` marks the chat's incoming messages read on Telegram, all of them
+or, with `--max-id`, those up to that ID. It calls `messages.readHistory` for a private chat, a
+basic group or Saved Messages and `channels.readHistory` for a supergroup or channel, then reads
+the chat's dialog (`messages.getPeerDialogs`) and writes its new unread state to the cache:
+
+```json
+{ "chatId": -1001234567890, "maxId": null, "method": "channels.readHistory",
+  "unreadCount": 0, "readInboxMaxId": 1185 }
+```
+
+`maxId` is the `--max-id` passed, `null` for everything. Like `tg send`, it is a Telegram
+mutation, so it needs credentials and a connection; the daemon never marks anything read.
 
 ### Media
 
@@ -348,7 +504,16 @@ cache folder `tg media download` saves the file in ([media.md](media.md#send-a-f
 tg api account.checkUsername --username myuser
 tg api messages.getHistory --peer @username --limit 10
 tg api messages.sendMessage --json '{"peer":"@user","message":"Hi"}'
+tg api users.getFullUser --id me
 ```
+
+Where the method takes a chat (InputPeer, InputUser or InputChannel), pass it as `tg send --to`
+takes it: `me`, `@username`, `+phone` or a marked ID. Required numbers you leave out are 0
+(`offsetId`, `maxId`, `hash`…), and a required `randomId` is random. Details:
+[API design](api-design.md#argument-types).
+
+Read-only mode lets only `get…`, `search…`, `resolve…` and `check…` methods through, and an
+allowlist turns `tg api` off ([below](#read-only-mode-and-allowed-chats)).
 
 ### Daemon / Status / SQL
 
@@ -445,6 +610,8 @@ part counts the daemon's sync jobs and lists some of them:
   account whose free pages are over 10% of its file, or over 1% once a background migration
   has rewritten its rows. For a cache without auto_vacuum while the daemon runs, the command
   stops the daemon first: `tg daemon stop && tg db vacuum --account <id> && tg daemon start`.
+  When that command would run a full vacuum and the disk is short of what it needs, the hint
+  says so: `needs 3.5 GB of free disk, 1.2 GB free`.
 - `migrations` lists the unfinished [background migrations](database-schema.md#background-migrations)
   of the accounts in scope, each with `account_id`, `name`, `description`, `state` (`pending`
   before it starts, `running` once it has), `done` and `total` rows (`total` is `null` until it
@@ -555,6 +722,9 @@ without a daemon too, then gives the cache's free pages back to the disk:
   and switches it to incremental auto_vacuum. It waits up to a minute for another process's
   write lock. A VACUUM may renumber the rows of `messages_cache`; if it did, the search index is
   rebuilt. Don't start the daemon while it runs: the daemon would wait for the rewrite.
+  First it checks the free disk of the file system that holds the cache: it needs 2.2 times the
+  cache file plus 64 MB ([storage.md](storage.md#6-big-caches)). When the disk is short it
+  fails at once and changes nothing (see Errors below).
 - **`incremental`**, while the daemon runs, on a cache with incremental auto_vacuum (every cache
   this version creates, and every one that had a full vacuum): the free pages are released in
   steps of 1,024 pages, each a short write, so the daemon keeps writing in between.
@@ -590,6 +760,13 @@ or `disk_full` when the disk filled up (free space first). The VACUUM is rolled 
 messages are intact, but the prune commits as it goes, so rows past their retention may already
 be gone; `details.pruned` has the counts, or `null` when the prune itself failed.
 
+When the check before a full vacuum finds too little free disk, the command fails before it
+prunes or writes anything: `GENERAL_ERROR` (exit 1) with `details`
+`{ account_id, reason: "disk_full", needed_bytes, free_bytes }` (free disk, not the cache's free
+pages). The suggestion is to free some space, or, for a cache with incremental auto_vacuum, to
+start the daemon and run `tg db vacuum` again: the incremental mode releases the free pages in
+place and needs no free disk.
+
 ### tg db migrate
 
 ```bash
@@ -604,19 +781,23 @@ them on its own, a little each second ([daemon.md](daemon.md#background-migratio
 `tg db migrate` runs the pending ones of one account's cache (`--account`, else the active
 account, else the only one) in the foreground until they are done, and needs no Telegram
 credentials. `messages_refetch_empty_raw_json` only queues sync jobs for messages cached with
-an empty `raw_json`; the daemon fetches them again (#130). Then it re-indexes the messages of
+an empty `raw_json`; the daemon fetches them again (#130). `messages_rich_text` gives rich
+messages cached by 0.13.1 and older their text, so search finds them. Then it re-indexes the messages of
 senders and chats whose names changed ([search.md](search.md#names-after-a-rename)), so a
 search by a new name finds older messages without the daemon; `rows` counts those messages
 too. Last it merges the search index, which a cache written by 0.11.1 or older needs once
 ([search.md](search.md#keeping-the-index-merged)): 2.6 s on a 1M-message cache that 0.11.1 had
-re-indexed; `rows` doesn't count it. It works while the daemon runs too, and then gives way to the daemon's writes:
-each batch is followed by a 150 ms pause, so a daemon write waits for one batch at most. A
-migration batch takes at most 50 ms; one step of an index merge can't be cut short and takes
-up to about 200 ms on a 1M-message cache (a common word). That makes the run four to
-five times as long as with the daemon stopped,
-when batches go back to back: at the rates in [storage.md](storage.md), a million messages
-written by 0.5.0 take about 19 seconds alone and about 80 seconds next to the daemon, and the
-one-off re-index of names (`message_search_names`) about 27 seconds more alone. Stopping it
+re-indexed; `rows` doesn't count it. With the daemon stopped it pauses 150 ms after each
+second of work, so another `tg` command that writes the cache meanwhile (`tg messages list`
+caching a page, `tg send` caching the sent message) gets in within about a second, well inside
+its 5-second `busy_timeout`. The pauses make the run up to 15% longer: on a 1M-message cache
+written by 0.5.0, 3,003,001 rows took 60 to 64 s without them and 69 to 70 s with them
+([storage.md](storage.md#6-big-caches)). It works while the daemon runs too, and then gives
+way to the daemon's writes: each batch is followed by a 150 ms pause, so a daemon write waits
+for one batch at most. A migration batch takes at most 50 ms; one step of an index merge can't
+be cut short and takes up to about 200 ms on a 1M-message cache (a common word). That makes
+the run three to four times as long as with the daemon stopped: it works 50 ms of every 200
+instead of a second of every 1.15. Stopping it
 (Ctrl-C) loses nothing; the next run, or the daemon, goes on from there. Reads give the same
 answers before, during and after.
 
@@ -678,6 +859,21 @@ or `default`. `on` and `off` print the same object after the change, and fail wi
 `GENERAL_ERROR` when the data directory can't be written. What is sent and when:
 [configuration.md](configuration.md#usage-stats).
 
+## Read-only mode and allowed chats
+
+```bash
+TELEGRAM_SYNC_CLI_READ_ONLY=1 tg send --to me -m hi       # READ_ONLY, exit 1
+TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg chats list   # only @teamchat
+TELEGRAM_SYNC_CLI_ALLOWED_CHATS=@teamchat tg messages list --chat @alice   # CHAT_NOT_ALLOWED
+```
+
+`readOnly` refuses `tg send`, `tg messages read`, `tg api` methods that aren't `get…`,
+`search…`, `resolve…` or `check…`, and `tg auth login`, `login-qr` and `logout` with
+`READ_ONLY`. `allowedChats` makes commands that name a chat refuse others with
+`CHAT_NOT_ALLOWED`, makes `tg chats list`, `tg chats search`, `tg messages search`, `wait`,
+`watch` and `unread` show only allowed chats, and turns `tg sql` and `tg api` off. Contacts commands aren't limited. Both are guards against mistakes, not a security
+boundary; keys, variables and the full list: [configuration.md](configuration.md#read-only-mode-and-allowed-chats).
+
 ## Output Shape
 
 All commands use a consistent wrapper in JSON mode:
@@ -694,8 +890,49 @@ Errors:
 ```json
 {
   "success": false,
-  "error": { "code": "INVALID_ARGS", "message": "...", "details": {}, "suggestion": "..." }
+  "error": { "code": "INVALID_ARGS", "message": "...", "details": {}, "suggestion": "...", "retryable": false }
 }
 ```
 
-`details` and `suggestion` are optional.
+`details` and `suggestion` are optional. `retryable` is always there: whether the same command,
+run again unchanged, can succeed (`RATE_LIMITED` after `details.wait_seconds`). See
+[api-design.md](api-design.md#error-handling).
+
+### Next commands
+
+A success answer may add `next`, the commands that continue the read, beside `data`:
+
+```json
+{
+  "success": true,
+  "data": { "chatId": -1001234567890, "items": [ … ], "nextBefore": 1181, … },
+  "next": [
+    {
+      "command": "tg messages list --chat=-1001234567890 --limit=50 --before=1181 --account=2",
+      "why": "The next page of older messages."
+    }
+  ]
+}
+```
+
+- `command` is a complete command line that runs as written in a POSIX shell. It carries the
+  `--account` and every flag the command was given, except the ones the next page changes and
+  the ones at their default; each value is written as `--name=value` and single-quoted when the
+  shell would change it, so a query with spaces, quotes or `$`, or a value that starts with
+  `-`, stays one argument. It never carries the global `--format`, `--verbose` or `--quiet`.
+- `why` is one sentence for whoever decides whether to run it.
+- `next` is absent when there is nothing to suggest, and it never suggests a command that
+  read-only mode or `allowedChats` would refuse: only reads, of the chat the command already read.
+- `--format pretty` prints each suggestion on stderr as `Next: <why>` and the command on the
+  line below, so stdout stays the data's JSON; `--quiet` prints nothing.
+
+| Command | `next` |
+| --- | --- |
+| `tg messages list` | after a full page: `--before <nextBefore>` (older), or with `--after`, `--after <nextAfter>` (newer); none past message 1 |
+| `tg messages search` | when another page has matches: `--offset <offset + limit>` |
+| `tg chats list`, `tg contacts list` | when `hasMore`: `--offset <offset + limit>`; `--fresh` is kept, so the page comes from the same list |
+| `tg messages wait --chat` | after new messages: the same wait with `--after` the newest of them |
+| `tg chats search` | with no result: `tg chats list --fresh`, then the same search |
+
+The cursors (`nextBefore`, `nextAfter`, `hasMore`, `offset`) and `message` stay as they were;
+`next` only spells out the command they lead to.

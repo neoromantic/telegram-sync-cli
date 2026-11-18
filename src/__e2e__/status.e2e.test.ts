@@ -936,20 +936,67 @@ describe('E2E: status cache size', () => {
     )
     db.run('DELETE FROM messages_cache WHERE message_id > 10')
     db.run('PRAGMA wal_checkpoint(TRUNCATE)')
-    const pretty = async () =>
-      (
-        await runCliSuccess(['status', '--format', 'pretty'], {
-          env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
-        })
-      ).stdout
+    const pretty = async (freeDisk?: number) =>
+      stripAnsi(
+        (
+          await runCliSuccess(['status', '--format', 'pretty'], {
+            env: {
+              ...env.getCliOptions().env,
+              ...NO_CREDENTIALS,
+              ...(freeDisk === undefined
+                ? {}
+                : { TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES: String(freeDisk) }),
+            },
+          })
+        ).stdout,
+      )
     const stopFirst =
       'tg daemon stop && tg db vacuum --account 1 && tg daemon start'
+    const short = /needs 64\.\d MB of free disk, 1000 B free/
 
-    const stopped = await pretty()
+    const stopped = await pretty(1024 ** 3)
     expect(stopped).toContain('tg db vacuum --account 1')
     expect(stopped).not.toContain(stopFirst)
+    expect(stopped).not.toContain('of free disk')
+    // The full vacuum the hint suggests would fail at once on a short disk
+    expect(await pretty(1000)).toMatch(
+      new RegExp(`tg db vacuum --account 1\\s+${short.source}`),
+    )
 
     writeFileSync(join(env.dataDir, 'daemon.pid'), String(process.pid))
-    expect(await pretty()).toContain(stopFirst)
+    expect(await pretty(1024 ** 3)).toContain(stopFirst)
+    expect(await pretty(1000)).toMatch(short)
+  })
+
+  it("doesn't check the disk for a vacuum the running daemon allows in place", async () => {
+    const db = env.openCacheDb(1)
+    createMessagesCache(db).upsertBatch(
+      Array.from({ length: 600 }, (_, i) => ({
+        chat_id: 101,
+        message_id: i + 2,
+        text: `made-up note ${i + 2} about the weekly plan`,
+        message_type: 'text',
+        date: 1_760_000_000 + i,
+        raw_json: '{}',
+      })),
+    )
+    db.run('DELETE FROM messages_cache WHERE message_id > 10')
+    db.run('PRAGMA wal_checkpoint(TRUNCATE)')
+    writeFileSync(join(env.dataDir, 'daemon.pid'), String(process.pid))
+
+    const pretty = stripAnsi(
+      (
+        await runCliSuccess(['status', '--format', 'pretty'], {
+          env: {
+            ...env.getCliOptions().env,
+            ...NO_CREDENTIALS,
+            TELEGRAM_SYNC_CLI_TEST_FREE_DISK_BYTES: '1000',
+          },
+        })
+      ).stdout,
+    )
+
+    expect(pretty).toContain('tg db vacuum --account 1')
+    expect(pretty).not.toContain('of free disk')
   })
 })

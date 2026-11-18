@@ -17,6 +17,8 @@ source of truth for Telegram API credentials.
 | `TELEGRAM_PROXY` | Optional proxy URL for CLI and daemon connections |
 | `TELEGRAM_SYNC_CLI_DATA_DIR` | Override data directory |
 | `TELEGRAM_SYNC_CLI_TELEMETRY` | Usage stats: `0` off, `1` on, `debug` prints them; see [Usage stats](#usage-stats) |
+| `TELEGRAM_SYNC_CLI_READ_ONLY` | Anything but empty, `0`, `false` or `off` turns [read-only mode](#read-only-mode-and-allowed-chats) on |
+| `TELEGRAM_SYNC_CLI_ALLOWED_CHATS` | Comma-separated chats that replace `allowedChats`; see [allowed chats](#read-only-mode-and-allowed-chats) |
 | `DO_NOT_TRACK` | Any value but `0` or `false` turns usage stats off |
 | `MTCUTE_LOG_LEVEL` | mtcute log level |
 | `VERBOSE` | Verbose logging (`1`) |
@@ -136,6 +138,12 @@ Supported keys:
 
 - `activeAccount` (number): made active at every start; `tg accounts switch`, `tg auth login`
   and `tg auth login-qr` update it
+- `readOnly` (boolean, default `false`): refuse every command that changes something on
+  Telegram ([read-only mode](#read-only-mode-and-allowed-chats))
+- `allowedChats` (array of strings, default none): the only chats commands may use, each an
+  `@username`, a chat or user ID as tg prints it (`-100…`, `-N`, a user ID) or `me`
+  ([allowed chats](#read-only-mode-and-allowed-chats)). `tg config set allowedChats` takes them
+  comma-separated
 - `cache.staleness.peers` (duration)
 - `cache.staleness.dialogs` (duration)
 - `cache.staleness.fullInfo` (duration)
@@ -242,6 +250,62 @@ tg config set sync.pacing.maxCallsPerSecond 0.8
   command reports the file. A change to `cache.retention.*` or `sync.pacing.*` takes effect
   when the daemon restarts.
 - Cache-related commands resolve TTLs via `config.json` overrides.
+
+## Read-only mode and allowed chats
+
+Two switches keep an agent (or a script) from doing what it shouldn't by mistake. They are not a
+security boundary: anything that can run `tg` with a shell can also edit `config.json`, change
+its environment or open the SQLite files directly. For a hard limit, run the agent where it
+can't reach the data directory.
+
+```bash
+tg config set readOnly true
+tg config set allowedChats "@teamchat,-1001234567890,me"
+
+# Or for one process only, without touching config.json
+TELEGRAM_SYNC_CLI_READ_ONLY=1 TELEGRAM_SYNC_CLI_ALLOWED_CHATS="@teamchat,me" my-agent
+```
+
+**Read-only mode** (`readOnly`, or `TELEGRAM_SYNC_CLI_READ_ONLY` set to anything but empty, `0`,
+`false` or `off`; the variable turns it on, never off) refuses every command that changes
+something on Telegram, before it connects, with `READ_ONLY` (exit 1):
+
+- `tg send`, and `tg messages read`, which marks a chat read;
+- `tg api` with a method whose name after the namespace doesn't start with `get`, `search`,
+  `resolve` or `check` (`messages.getHistory`, `account.checkUsername` and `help.getConfig`
+  run; `messages.sendMessage` and `messages.readHistory` don't). The rule goes by the name, so a
+  read method that has a side effect on Telegram, such as `messages.getBotCallbackAnswer`
+  (presses a bot's button), still runs;
+- `tg auth login`, `tg auth login-qr` and `tg auth logout`, which add or end a session on
+  Telegram.
+
+Everything else runs: cache reads, `--fresh` reads, `tg media download` and `clean`,
+`tg chats sync` (it only changes what the daemon syncs), `tg db`, `tg config`, `tg daemon`,
+`tg telemetry`, `tg skill`, `tg sql`, and the account commands. The daemon is read-only anyway.
+
+**Allowed chats** (`allowedChats`, or `TELEGRAM_SYNC_CLI_ALLOWED_CHATS`, which replaces the list
+while it is set, even to an empty string) limit the commands that read or send to a chat:
+
+- A command that names a chat refuses one outside the list with `CHAT_NOT_ALLOWED` (exit 1,
+  `details: { chat, id }`: the chat as given and its marked ID). That is `--to` of `tg send`,
+  `--chat` of `tg messages list`, `get`, `search`, `wait`, `watch`, `unread` and `read` and of
+  `tg media download`, `--id` of
+  `tg chats get` and the chat of `tg chats sync`. The chat and the list resolve the same way,
+  cache-first: `@name` and its ID are the same chat, `me` is the account's own user ID (Saved
+  Messages), and an ID in the list is taken as written.
+- Commands that read across chats show only allowed ones: `tg chats list` (with `--unread`
+  too), `tg chats search`, `tg messages search` (its `chat:` query filter narrows within them),
+  and `tg messages wait`, `watch` and `unread`, all without `--chat`.
+- `tg sql` and `tg api` can't be limited to some chats, so they fail with `CHAT_NOT_ALLOWED`
+  (`details: { command }`) while a list is set.
+- Contacts are people, not chats: `tg contacts`, `tg user` and `tg me` aren't limited. Nor is
+  `tg status`, which shows counts and chat IDs, not titles or messages, or the daemon, which
+  keeps syncing every chat.
+
+An empty list allows no chat; remove the key (and unset the variable) to allow every chat. An
+`@username` the cache doesn't know is looked up on Telegram, which needs credentials. `tg status`
+shows both switches as `access: { read_only, allowed_chats }` (`allowed_chats` is `null`
+without a list), so an agent that was refused can see why.
 
 ## Usage stats
 

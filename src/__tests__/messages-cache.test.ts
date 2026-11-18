@@ -19,7 +19,13 @@ import { createMessagesSearch } from '../db/messages-search'
 import { initCacheSchema } from '../db/schema'
 import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
+import { toRawJson } from '../utils/raw-json'
 import { takePartIn } from './helpers/participation'
+import {
+  REPORT_BLOCKS,
+  REPORT_TEXT,
+  richTlMessage,
+} from './helpers/rich-message'
 
 describe('MessagesCache', () => {
   let db: Database
@@ -839,6 +845,19 @@ describe('MessagesCache writes and the search index', () => {
 
     expect(find('lighthouse')).toEqual([1])
     expect(find('harbor')).toEqual([])
+  })
+
+  it('stores and indexes the text of a rich message, which has none of its own', () => {
+    const raw = richTlMessage({ _: 'peerUser', userId: 100 }, 2, REPORT_BLOCKS)
+    cache.upsert({
+      ...message,
+      message_id: 2,
+      text: '',
+      raw_json: toRawJson(raw),
+    })
+
+    expect(cache.get(100, 2)?.text).toBe(REPORT_TEXT)
+    expect(find('zucchini')).toEqual([2])
   })
 
   it('does not re-index a message marked deleted', () => {

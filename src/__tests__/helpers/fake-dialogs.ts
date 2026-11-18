@@ -35,6 +35,8 @@ export interface FakeDialogInput {
     /** Sent by the account, as this user */
     fromSelf?: number
   }
+  unreadCount?: number
+  readInboxMaxId?: number
 }
 
 export function fakeDialog(input: FakeDialogInput): Dialog {
@@ -79,7 +81,13 @@ export function fakeDialog(input: FakeDialogInput): Dialog {
 
   const last = input.lastMessage
   return {
-    raw: { _: 'dialog', peer: rawPeer, topMessage: input.topMessage ?? 0 },
+    raw: {
+      _: 'dialog',
+      peer: rawPeer,
+      topMessage: input.topMessage ?? 0,
+      unreadCount: input.unreadCount,
+      readInboxMaxId: input.readInboxMaxId,
+    },
     peer,
     lastMessage: last
       ? {

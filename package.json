@@ -1,6 +1,6 @@
 {
   "name": "@goodit/telegram-sync-cli",
-  "version": "0.12.1",
+  "version": "0.14.0",
   "description": "Agent-friendly Telegram sync CLI with full API support",
   "type": "module",
   "bin": {
@@ -30,6 +30,7 @@
     "test:build": "bun run scripts/test-build.ts",
     "test:install": "bun run scripts/test-install.ts",
     "bench:storage": "bun run scripts/bench-storage.ts",
+    "docs:outputs": "bun run scripts/docs-outputs.ts",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
@@ -64,11 +65,13 @@
     "@biomejs/biome": "2.5.15",
     "@types/bun": "1.4.3",
     "lefthook": "^2.2.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "zod": "^4.6.7"
   },
   "dependencies": {
     "@mtcute/bun": "^0.32.6",
+    "@mtcute/core": "^0.32.6",
     "citty": "^0.2.2",
-    "qrcode-terminal": "^0.12.0"
+    "uqr": "^0.1.3"
   }
 }

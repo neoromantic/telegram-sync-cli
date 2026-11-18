@@ -178,7 +178,7 @@ export function cacheHistoryResponse(
 const PEER_HINT = 'run tg chats list --fresh or pass the @username'
 
 /** Telegram can't find a chat built from a bare ID without an access hash */
-function withPeerHint(err: unknown): unknown {
+export function withPeerHint(err: unknown): unknown {
   if (
     err instanceof Error &&
     /CHANNEL_INVALID|PEER_ID_INVALID/.test(err.message)

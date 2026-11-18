@@ -7,7 +7,6 @@ The list is in priority order.
 ## Reliability
 
 - [`tg db check` and `tg db backup`](https://github.com/neoromantic/telegram-sync-cli/issues/91)
-- [`tg db vacuum`: check free disk before a full VACUUM](https://github.com/neoromantic/telegram-sync-cli/issues/119)
 - [A soft cache size budget per account](https://github.com/neoromantic/telegram-sync-cli/issues/98)
 - [Option to cache live messages only in synced chats](https://github.com/neoromantic/telegram-sync-cli/issues/100)
 - [`raw_json`: measure zstd with a trained dictionary](https://github.com/neoromantic/telegram-sync-cli/issues/97)
@@ -15,15 +14,12 @@ The list is in priority order.
 
 ## Features
 
-- [Wait for new messages](https://github.com/neoromantic/telegram-sync-cli/issues/24)
-- [Unread messages and mark as read](https://github.com/neoromantic/telegram-sync-cli/issues/25)
 - [Transcribe voice messages and video notes](https://github.com/neoromantic/telegram-sync-cli/issues/102)
 - [Download many attachments at once, with name templates](https://github.com/neoromantic/telegram-sync-cli/issues/104)
 - [Search media on the server, beyond the cached history](https://github.com/neoromantic/telegram-sync-cli/issues/105)
 - [Background media download in the daemon, with a disk quota](https://github.com/neoromantic/telegram-sync-cli/issues/99)
 - [Extract text from documents and images (PDF, office files, OCR)](https://github.com/neoromantic/telegram-sync-cli/issues/103)
 - [Edit, delete, forward and pin messages](https://github.com/neoromantic/telegram-sync-cli/issues/23)
-- [Read-only mode and a chat allowlist for agents](https://github.com/neoromantic/telegram-sync-cli/issues/26)
 - [Semantic search over messages](https://github.com/neoromantic/telegram-sync-cli/issues/82)
 - [Search: find other word forms without a manual prefix](https://github.com/neoromantic/telegram-sync-cli/issues/92)
 - [Search attachment names, kinds and text derived from attachments](https://github.com/neoromantic/telegram-sync-cli/issues/94)
@@ -34,4 +30,3 @@ The list is in priority order.
 
 - [`tg status --sizes`: cache size per chat](https://github.com/neoromantic/telegram-sync-cli/issues/90)
 - [Pretty output for every command](https://github.com/neoromantic/telegram-sync-cli/issues/2)
-- [Replace qrcode-terminal](https://github.com/neoromantic/telegram-sync-cli/issues/10)

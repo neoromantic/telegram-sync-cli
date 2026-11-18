@@ -1,4 +1,4 @@
-import { defineCommand } from 'citty'
+import { type ArgsDef, defineCommand } from 'citty'
 import { ConfigError, getResolvedCacheConfig } from '../../config'
 import { createChatsCache } from '../../db/chats-cache'
 import { isCacheStale } from '../../db/types'
@@ -6,39 +6,52 @@ import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
 import { error, success } from '../../utils/output'
+import { allowedChatIds } from '../access'
+import { nextCommand } from '../next'
 import { chatRowToItem } from './helpers'
+import { listChatsArgs } from './list'
+
+const searchChatsArgs = {
+  query: {
+    type: 'string',
+    description: 'Search query',
+    required: true,
+  },
+  limit: {
+    type: 'string',
+    description: 'Maximum number of results (default: 20)',
+    default: '20',
+  },
+  account: {
+    type: 'string',
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+} satisfies ArgsDef
 
 export const searchChatsCommand = defineCommand({
   meta: {
     name: 'search',
     description: 'Search chats by title or username',
   },
-  args: {
-    query: {
-      type: 'string',
-      description: 'Search query',
-      required: true,
-    },
-    limit: {
-      type: 'string',
-      description: 'Maximum number of results (default: 20)',
-      default: '20',
-    },
-    account: {
-      type: 'string',
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-  },
+  args: searchChatsArgs,
   async run({ args }) {
     const query = args.query
     const limit = Number.parseInt(args.limit ?? '20', 10)
-    const { db: cacheDb } = openAccountCache(args.account)
+    const { account, db: cacheDb } = openAccountCache(args.account)
+    const allowed = await allowedChatIds(account.id)
 
     try {
       const chatsCache = createChatsCache(cacheDb)
       const cacheConfig = await getResolvedCacheConfig()
 
-      const results = chatsCache.search(query, limit)
+      // With allowedChats, search every chat (-1: no limit), then keep the allowed
+      const results =
+        allowed === null
+          ? chatsCache.search(query, limit)
+          : chatsCache
+              .search(query, -1)
+              .filter((chat) => allowed.has(Number(chat.chat_id)))
+              .slice(0, limit)
 
       if (results.length > 0) {
         const anyStale = results.some((c) =>
@@ -54,15 +67,35 @@ export const searchChatsCommand = defineCommand({
         return
       }
 
-      success({
-        query,
-        results: [],
-        total: 0,
-        source: 'cache',
-        stale: false,
-        message:
-          'No results in cache. Run "tg chats list --fresh" to populate cache first.',
-      })
+      const why =
+        chatsCache.count() === 0
+          ? 'The chat cache is empty: this fills it from Telegram.'
+          : 'No cached chat matches: this refreshes the chat list from Telegram.'
+      success(
+        {
+          query,
+          results: [],
+          total: 0,
+          source: 'cache',
+          stale: false,
+          message:
+            'No results in cache. Run "tg chats list --fresh" to populate cache first.',
+        },
+        [
+          nextCommand(
+            'chats list',
+            listChatsArgs,
+            { account: args.account, fresh: true },
+            why,
+          ),
+          nextCommand(
+            'chats search',
+            searchChatsArgs,
+            args,
+            'Then search the refreshed cache again.',
+          ),
+        ],
+      )
     } catch (err) {
       if (err instanceof ConfigError) {
         error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })

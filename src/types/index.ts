@@ -21,10 +21,18 @@ export interface Account {
 /** Output format options */
 export type OutputFormat = 'json' | 'pretty' | 'quiet'
 
+/** A command to run next: a complete `tg` command line and why */
+export interface NextCommand {
+  command: string
+  why: string
+}
+
 /** Result wrapper for consistent output */
 export interface Result<T> {
   success: true
   data: T
+  /** Commands that continue this read; absent when there is none */
+  next?: NextCommand[]
 }
 
 /** Error wrapper for consistent output */
@@ -36,6 +44,11 @@ export interface ErrorResult {
     details?: Record<string, unknown>
     /** What to do next, for errors that have a fix */
     suggestion?: string
+    /**
+     * Whether the same command, run again unchanged, can succeed: after
+     * `details.wait_seconds` for RATE_LIMITED
+     */
+    retryable: boolean
   }
 }
 
@@ -135,6 +148,9 @@ export const ErrorCodes = {
   CONTENT_PROTECTED: 'CONTENT_PROTECTED',
   MEDIA_UNSUPPORTED: 'MEDIA_UNSUPPORTED',
   FILE_EXISTS: 'FILE_EXISTS',
+  // Read-only mode and the chat allowlist
+  READ_ONLY: 'READ_ONLY',
+  CHAT_NOT_ALLOWED: 'CHAT_NOT_ALLOWED',
 } as const
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes]

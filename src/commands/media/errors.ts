@@ -3,7 +3,7 @@
  * reported by the command with the stable error schema
  */
 import type { ErrorCode } from '../../types'
-import { error } from '../../utils/output'
+import { error, isRetryableCode } from '../../utils/output'
 import { reportHistoryError } from '../messages/helpers'
 
 /** A failure with its documented error code */
@@ -11,18 +11,21 @@ export class MediaError extends Error {
   readonly code: ErrorCode
   readonly details: Record<string, unknown>
   readonly suggestion?: string
+  readonly retryable: boolean
 
   constructor(
     code: ErrorCode,
     message: string,
     details: Record<string, unknown>,
     suggestion?: string,
+    retryable = isRetryableCode(code),
   ) {
     super(message)
     this.name = 'MediaError'
     this.code = code
     this.details = details
     this.suggestion = suggestion
+    this.retryable = retryable
   }
 }
 
@@ -51,7 +54,7 @@ export class DownloadInterruptedError extends Error {
  */
 export function reportMediaError(err: unknown): never {
   if (err instanceof MediaError) {
-    error(err.code, err.message, err.details, err.suggestion)
+    error(err.code, err.message, err.details, err.suggestion, err.retryable)
   }
   reportHistoryError(err, 'download media')
 }

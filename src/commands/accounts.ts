@@ -9,6 +9,13 @@ import { settleCacheLayoutBeforeAccountChange } from '../utils/account-cache'
 import { keepActiveAccountInConfig } from '../utils/active-account'
 import { error, success } from '../utils/output'
 
+/** What to do about an ACCOUNT_NOT_FOUND error for --id, if any account exists */
+function listAccountIds(): string | undefined {
+  return accountsDb.getAll().length > 0
+    ? 'Run tg accounts list to see the account IDs, then pass one to --id'
+    : undefined
+}
+
 /**
  * List all accounts
  */
@@ -66,6 +73,8 @@ export const switchAccountCommand = defineCommand({
       error(
         ErrorCodes.ACCOUNT_NOT_FOUND,
         `Account with ID ${accountId} not found`,
+        undefined,
+        listAccountIds(),
       )
     }
 
@@ -108,6 +117,8 @@ export const removeAccountCommand = defineCommand({
       error(
         ErrorCodes.ACCOUNT_NOT_FOUND,
         `Account with ID ${accountId} not found`,
+        undefined,
+        listAccountIds(),
       )
     }
 
@@ -147,7 +158,12 @@ export const infoAccountCommand = defineCommand({
       : accountsDb.getActive()
 
     if (!account) {
-      error(ErrorCodes.ACCOUNT_NOT_FOUND, 'No account found')
+      error(
+        ErrorCodes.ACCOUNT_NOT_FOUND,
+        'No account found',
+        undefined,
+        listAccountIds(),
+      )
     }
 
     success({
