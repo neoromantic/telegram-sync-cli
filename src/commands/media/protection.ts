@@ -137,6 +137,7 @@ export async function checkOnlineProtection(
 
   const peer = chat.inputPeer
   if (peer._ === 'inputPeerUser') {
+    if (result.message.protected) return result
     const { fullUser } = await client.call(
       {
         _: 'users.getFullUser',

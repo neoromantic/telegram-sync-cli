@@ -220,6 +220,13 @@ describe('RateLimitsService', () => {
       expect(floodWait?.blockedUntil).toBe(nowSeconds() + 30)
     })
 
+    it('keeps the longest outstanding wait from concurrent calls', () => {
+      mockTime(1700000000000)
+      service.setFloodWait('upload.getFile', 60)
+      service.setFloodWait('upload.getFile', 10)
+      expect(service.getWaitTime('upload.getFile')).toBe(60)
+    })
+
     it('should allow multiple methods to be blocked', () => {
       const baseTime = 1700000000000
       mockTime(baseTime)

@@ -327,7 +327,9 @@ Exit codes:
   `chat`, `private_chat` or `self_destructing`.
 - `MEDIA_UNSUPPORTED`: the file is served from Telegram's CDN, which tg doesn't support yet;
   `details: { reason: "cdn" }`.
-- `FILE_EXISTS`: the `--out` target exists and `--overwrite` isn't set; `details: { path }`.
+- `FILE_EXISTS` includes `details.path`. A single ID requires `--overwrite` for an existing
+  target. A batch accepts identical bytes and rejects conflicting output from two IDs even
+  with `--overwrite`.
 
 A download that stalls for 60 seconds or loses its connection is `NETWORK_ERROR` (exit 4) with
 `details.resumable: true`; a flood wait over 10 seconds is `RATE_LIMITED` (exit 5) with

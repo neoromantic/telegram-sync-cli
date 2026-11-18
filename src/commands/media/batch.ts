@@ -3,9 +3,12 @@
  * one peer resolution, the messages fetched together, and a flood wait that
  * pauses the whole batch instead of failing a file
  */
-import type { TelegramClient, tl } from '@mtcute/bun'
+import {
+  setTimeout as sleep,
+  setImmediate as yieldToIO,
+} from 'node:timers/promises'
+import type { TelegramClient } from '@mtcute/bun'
 
-import { createMessagesCache } from '../../db/messages-cache'
 import { ErrorCodes } from '../../types'
 import { extractAttachment } from '../../utils/attachment'
 import { info } from '../../utils/output'
@@ -13,15 +16,19 @@ import {
   describeRateLimit,
   isRateLimitError,
 } from '../../utils/telegram-rate-limits'
-import { type HistoryChat, resolveHistoryChat } from '../messages/history'
+import { resolveHistoryChat } from '../messages/history'
 import {
   type DownloadDeps,
   type DownloadResult,
-  downloadMedia,
+  downloadOnline,
   readFromCache,
 } from './download-media'
-import { DownloadInterruptedError, MediaError } from './errors'
-import { cacheFetchedMessage, type FetchedRawMessage } from './fetch'
+import { checkDownloadInterrupted, MediaError } from './errors'
+import {
+  type FetchedMessage,
+  fetchMessagesById,
+  messageNotFound,
+} from './fetch'
 
 /**
  * Telegram's soft limits for files downloaded in parallel from one DC
@@ -35,8 +42,8 @@ export const LARGE_FILE_BYTES = 20 * 1024 * 1024
 const IDS_PER_FETCH = 100
 /** Longer flood waits fail the files instead of pausing the batch */
 export const MAX_BATCH_FLOOD_WAIT_SECONDS = 300
-/** Flood waits one file sits out before it fails */
-const MAX_WAITS_PER_FILE = 5
+/** Retries for one message page or one file */
+const MAX_RETRIES = 5
 
 export interface BatchRequest {
   chat: string
@@ -60,11 +67,6 @@ export interface BatchHandlers {
   failed: (messageId: number, failure: FileFailure) => void
 }
 
-type MessagesResponse = Extract<
-  tl.RpcCallReturn['messages.getMessages'],
-  { messages: unknown }
->
-
 function rateLimitWait(
   err: unknown,
 ): { method: string; seconds: number } | null {
@@ -86,207 +88,96 @@ function failureOf(
   messageId: number,
   err: unknown,
 ): FileFailure {
-  const ids = { chatId, messageId }
-  if (err instanceof MediaError) {
-    return {
-      code: err.code,
-      message: err.message,
-      details: { ...ids, ...err.details },
-      suggestion: err.suggestion,
-      retryable: err.retryable,
-    }
-  }
-  const wait = rateLimitWait(err)
-  if (wait) {
+  if (isRateLimitError(err)) {
     const { message, details, suggestion } = describeRateLimit(
-      wait.method,
-      wait.seconds,
+      err.method,
+      err.waitSeconds,
     )
-    return {
-      code: ErrorCodes.RATE_LIMITED,
-      message,
-      details: { ...ids, ...details },
-      suggestion,
-      retryable: true,
-    }
+    err = new MediaError(ErrorCodes.RATE_LIMITED, message, details, suggestion)
   }
-  const message = err instanceof Error ? err.message : 'Unknown error'
+  const failure =
+    err instanceof MediaError
+      ? err
+      : new MediaError(
+          ErrorCodes.TELEGRAM_ERROR,
+          `Failed to download media: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          {},
+        )
   return {
-    code: ErrorCodes.TELEGRAM_ERROR,
-    message: `Failed to download media: ${message}`,
-    details: ids,
-    retryable: false,
+    code: failure.code,
+    message: failure.message,
+    details: { chatId, messageId, ...failure.details },
+    suggestion: failure.suggestion,
+    retryable: failure.retryable,
   }
 }
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (ms <= 0 || signal?.aborted) return resolve()
-    const done = () => {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', done)
-      resolve()
-    }
-    const timer = setTimeout(done, ms)
-    signal?.addEventListener('abort', done, { once: true })
-  })
-}
-
-/** Flood waits shared by every file of the batch */
-function createPause(signal?: AbortSignal) {
+/**
+ * A part that encounters another file's pause unwinds to the resumable
+ * file boundary. Sleeping inside mtcute's iterator would trip its stall timer.
+ */
+function batchTransfers(client: TelegramClient, signal?: AbortSignal) {
   let until = 0
-  return {
-    /** Pause the batch for `seconds`; false when the wait is too long */
-    start(method: string, seconds: number): boolean {
-      if (seconds > MAX_BATCH_FLOOD_WAIT_SECONDS) return false
-      const now = Date.now()
-      if (until <= now) {
-        info(`[flood-wait] ${method}: pausing the batch for ${seconds}s`)
-      }
-      until = Math.max(until, now + seconds * 1000)
-      return true
-    },
-    wait: () => sleep(until - Date.now(), signal),
-  }
-}
-
-/**
- * The messages in one call per 100 IDs, written to the cache, each kept as
- * the response to its own getMessages (an empty one for an ID Telegram
- * doesn't have in this chat)
- */
-async function fetchAll(
-  client: TelegramClient,
-  chat: HistoryChat,
-  ids: number[],
-  deps: DownloadDeps,
-  pause: ReturnType<typeof createPause>,
-): Promise<Map<number, MessagesResponse>> {
-  const responses = new Map<number, MessagesResponse>()
-  const peer = chat.inputPeer
-  for (let at = 0; at < ids.length; at += IDS_PER_FETCH) {
-    const id = ids
-      .slice(at, at + IDS_PER_FETCH)
-      .map((messageId) => ({ _: 'inputMessageID' as const, id: messageId }))
-    let response: tl.messages.TypeMessages
-    for (;;) {
-      await pause.wait()
-      try {
-        response =
-          peer._ === 'inputPeerChannel'
-            ? await client.call(
-                {
-                  _: 'channels.getMessages',
-                  channel: {
-                    _: 'inputChannel',
-                    channelId: peer.channelId,
-                    accessHash: peer.accessHash,
-                  },
-                  id,
-                },
-                { abortSignal: deps.signal },
-              )
-            : await client.call(
-                { _: 'messages.getMessages', id },
-                { abortSignal: deps.signal },
-              )
-        break
-      } catch (err) {
-        const wait = rateLimitWait(err)
-        if (!wait || !pause.start(wait.method, wait.seconds)) throw err
-      }
-    }
-    if (response._ === 'messages.messagesNotModified') continue
-    for (const item of response.messages) {
-      if (item._ === 'messageEmpty') continue
-      const message = item as FetchedRawMessage
-      cacheFetchedMessage(deps.cacheDb, chat.chatId, message, response.users)
-      responses.set(message.id, { ...response, messages: [message] })
-    }
-  }
-  for (const messageId of ids) {
-    if (!responses.has(messageId)) {
-      responses.set(messageId, {
-        _: 'messages.messages',
-        messages: [],
-        topics: [],
-        chats: [],
-        users: [],
-      })
-    }
-  }
-  return responses
-}
-
-/**
- * The client each file's download runs on: a getMessages of one prefetched
- * ID is answered from the batch fetch once per try of the file (a file
- * reference Telegram rejects is fetched again), and users.getFullUser, the
- * protection check of a private chat, is called once per batch
- */
-function batchClient(
-  client: TelegramClient,
-  prefetched: Map<number, MessagesResponse>,
-) {
-  const served = new Map<number, MessagesResponse>()
+  const paused = new Error('Batch paused')
   const facade = Object.create(client) as TelegramClient
-  const fullUsers = new Map<string, Promise<unknown>>()
-  facade.call = ((
-    request: Parameters<TelegramClient['call']>[0],
-    options?: Parameters<TelegramClient['call']>[1],
-  ) => {
-    if (
-      request._ === 'messages.getMessages' ||
-      request._ === 'channels.getMessages'
-    ) {
-      const [only] = request.id
-      if (request.id.length === 1 && only?._ === 'inputMessageID') {
-        const hit = prefetched.get(only.id)
-        if (hit) {
-          prefetched.delete(only.id)
-          served.set(only.id, hit)
-          return Promise.resolve(hit)
+  let fullUser: Promise<unknown> | undefined
+  // Mark waits already observed at the transport boundary so unwinding an
+  // iterator does not restart its timer.
+  class ObservedWait extends Error {}
+  function pause(err: unknown): boolean {
+    const wait = rateLimitWait(err)
+    if (!wait || wait.seconds > MAX_BATCH_FLOOD_WAIT_SECONDS) return false
+    const now = Date.now()
+    if (until <= now) {
+      info(
+        `[flood-wait] ${wait.method}: pausing the batch for ${wait.seconds}s`,
+      )
+    }
+    until = Math.max(until, now + wait.seconds * 1000)
+    return true
+  }
+  facade.call = (async (request, options) => {
+    signal?.throwIfAborted()
+    if (Date.now() < until) throw paused
+    const call = () =>
+      client
+        .call(request, { ...options, floodSleepThreshold: 0 })
+        .catch((err) => {
+          if (pause(err)) throw new ObservedWait('Flood wait', { cause: err })
+          throw err
+        })
+    if (request._ !== 'users.getFullUser') return call()
+    // There is exactly one resolved peer in this batch.
+    fullUser ??= call().catch((err) => {
+      fullUser = undefined
+      throw err
+    })
+    return fullUser
+  }) as TelegramClient['call']
+
+  async function retry<T>(action: () => Promise<T>): Promise<T> {
+    let waits = 0
+    for (;;) {
+      signal?.throwIfAborted()
+      const delay = until - Date.now()
+      if (delay > 0) {
+        await sleep(delay, undefined, { signal })
+        continue // another active file may have extended the deadline
+      }
+      try {
+        return await action()
+      } catch (err) {
+        if (err === paused) continue
+        if (!(err instanceof ObservedWait) && !pause(err)) throw err
+        if (++waits > MAX_RETRIES) {
+          throw err instanceof ObservedWait ? err.cause : err
         }
       }
     }
-    if (request._ === 'users.getFullUser') {
-      const key = JSON.stringify(request.id)
-      let pending = fullUsers.get(key)
-      if (!pending) {
-        pending = client.call(request, options).catch((err: unknown) => {
-          fullUsers.delete(key)
-          throw err
-        })
-        fullUsers.set(key, pending)
-      }
-      return pending
-    }
-    return client.call(request, options)
-  }) as TelegramClient['call']
-  return {
-    client: facade,
-    /** Serve the message again: the file sat out a flood wait */
-    retry(messageId: number) {
-      const hit = served.get(messageId)
-      if (hit) prefetched.set(messageId, hit)
-    },
   }
+  return { client: facade, retry }
 }
 
-interface QueuedFile {
-  messageId: number
-  large: boolean
-  waits: number
-}
-
-/**
- * Download the files of several messages of one chat. Files the cache holds
- * are served first, without network; the rest download at most
- * MAX_PARALLEL_FILES at a time (MAX_PARALLEL_LARGE_FILES of 20 MB or more).
- * A failed file never stops the others. Resolves with the number of failed
- * files; throws DownloadInterruptedError on SIGINT/SIGTERM, and errors that
- * fail every file (--chat, credentials, the fetch of the messages).
- */
 export async function downloadBatch(
   deps: DownloadDeps,
   request: BatchRequest,
@@ -297,123 +188,80 @@ export async function downloadBatch(
     request.chat,
     deps.history,
   )
+  const single = (messageId: number) => ({ ...request, messageId })
   let failures = 0
-  const fail = (messageId: number, err: unknown) => {
+  const fail = (id: number, err: unknown) => {
+    handlers.failed(id, failureOf(chat.chatId, id, err))
     failures++
-    handlers.failed(messageId, failureOf(chat.chatId, messageId, err))
   }
-  const finish = async (result: DownloadResult) => {
-    try {
-      await handlers.done(result)
-    } catch (err) {
-      fail(result.messageId, err)
-    }
-  }
-  const single = (messageId: number) => ({
-    chat: request.chat,
-    messageId,
-    thumb: request.thumb,
-    fresh: request.fresh,
-  })
-
   const online: number[] = []
-  for (const messageId of request.messageIds) {
-    if (request.fresh) {
-      online.push(messageId)
+  for (const id of request.messageIds) {
+    checkDownloadInterrupted(deps.signal)
+    try {
+      const hit = !request.fresh && readFromCache(deps, chat, single(id))
+      if (hit) await handlers.done(hit)
+      else online.push(id)
+    } catch (err) {
+      checkDownloadInterrupted(deps.signal)
+      fail(id, err)
+    }
+    // SQLite reads and cached results may all complete synchronously.
+    await yieldToIO()
+  }
+  checkDownloadInterrupted(deps.signal)
+  if (!online.length) return failures
+
+  const { client, retry } = batchTransfers(deps.getClient(), deps.signal)
+  const fileDeps = { ...deps, getClient: () => client, progress: undefined }
+  for (let at = 0; at < online.length; at += IDS_PER_FETCH) {
+    const ids = online.slice(at, at + IDS_PER_FETCH)
+    let page: Map<number, FetchedMessage>
+    try {
+      page = await retry(() =>
+        fetchMessagesById(client, chat, ids, deps.signal),
+      )
+    } catch (err) {
+      checkDownloadInterrupted(deps.signal)
+      for (const id of ids) fail(id, err)
       continue
     }
-    try {
-      const cached = readFromCache(deps, chat, single(messageId))
-      if (cached) await finish(cached)
-      else online.push(messageId)
-    } catch (err) {
-      fail(messageId, err)
-    }
-  }
-  if (online.length === 0) return failures
-
-  const pause = createPause(deps.signal)
-  const client = deps.getClient()
-  const prefetched = await fetchAll(client, chat, online, deps, pause).catch(
-    (err: unknown) => {
-      throw deps.signal?.aborted
-        ? new DownloadInterruptedError(null, null)
-        : err
-    },
-  )
-  const files = batchClient(client, prefetched)
-  const fileDeps: DownloadDeps = {
-    ...deps,
-    getClient: () => files.client,
-    // Concurrent progress lines would overwrite each other
-    progress: undefined,
-  }
-
-  const messages = createMessagesCache(deps.cacheDb)
-  const queue: QueuedFile[] = online.map((messageId) => {
-    const row = messages.get(chat.chatId, messageId)
-    const size = row ? (extractAttachment(row.raw_json)?.size ?? 0) : 0
-    return {
-      messageId,
-      large: !request.thumb && size >= LARGE_FILE_BYTES,
-      waits: 0,
-    }
-  })
-
-  let interrupted: DownloadInterruptedError | null = null
-  const run = async (file: QueuedFile) => {
-    await pause.wait()
-    if (deps.signal?.aborted) {
-      interrupted ??= new DownloadInterruptedError(null, null)
-      return
-    }
-    try {
-      await finish(await downloadMedia(fileDeps, single(file.messageId)))
-    } catch (err) {
-      if (err instanceof DownloadInterruptedError) {
-        interrupted ??= err
-        return
+    const small: FetchedMessage[] = []
+    const large: FetchedMessage[] = []
+    for (const id of ids) {
+      const item = page.get(id)
+      if (!item) {
+        fail(id, messageNotFound(chat.chatId, id))
+        continue
       }
-      const wait = rateLimitWait(err)
-      if (
-        wait &&
-        file.waits < MAX_WAITS_PER_FILE &&
-        pause.start(wait.method, wait.seconds)
-      ) {
-        file.waits++
-        files.retry(file.messageId)
-        queue.unshift(file)
-        return
-      }
-      fail(file.messageId, err)
+      const size = request.thumb
+        ? 0
+        : (extractAttachment(item.message)?.size ?? 0)
+      const queue = size >= LARGE_FILE_BYTES ? large : small
+      queue.push(item)
     }
+    const worker = async (takesLarge: boolean) => {
+      while (!deps.signal?.aborted) {
+        const item = (takesLarge && large.shift()) || small.shift()
+        if (!item) return
+        const id = item.message.id
+        try {
+          const result = await retry(() =>
+            downloadOnline(fileDeps, chat, single(id), item),
+          )
+          checkDownloadInterrupted(deps.signal)
+          await handlers.done(result)
+        } catch (err) {
+          if (deps.signal?.aborted) return
+          fail(id, err)
+        }
+      }
+    }
+    await Promise.all(
+      Array.from({ length: MAX_PARALLEL_FILES }, (_, i) =>
+        worker(i < MAX_PARALLEL_LARGE_FILES),
+      ),
+    )
+    checkDownloadInterrupted(deps.signal)
   }
-
-  await new Promise<void>((resolve) => {
-    let active = 0
-    let activeLarge = 0
-    const pump = () => {
-      if (interrupted) queue.length = 0
-      while (active < MAX_PARALLEL_FILES) {
-        const index = queue.findIndex(
-          (file) => !file.large || activeLarge < MAX_PARALLEL_LARGE_FILES,
-        )
-        if (index < 0) break
-        const [file] = queue.splice(index, 1)
-        if (!file) break
-        active++
-        if (file.large) activeLarge++
-        void run(file).finally(() => {
-          active--
-          if (file.large) activeLarge--
-          pump()
-        })
-      }
-      if (active === 0 && queue.length === 0) resolve()
-    }
-    pump()
-  })
-
-  if (interrupted) throw interrupted
   return failures
 }

@@ -29,6 +29,7 @@ import {
   tl,
 } from '@mtcute/bun'
 
+import { type BatchHandlers, downloadBatch } from '../commands/media/batch'
 import {
   type DownloadDeps,
   type DownloadRequest,
@@ -1281,5 +1282,333 @@ describe('fetchMessageById', () => {
       _: 'messages.getMessages',
       id: [{ _: 'inputMessageID', id: 5 }],
     })
+  })
+})
+
+describe('batch download', () => {
+  function batch(
+    overrides: Partial<DownloadDeps>,
+    ids: number[],
+    chat = 'me',
+    handlers: Partial<BatchHandlers> = {},
+  ) {
+    const done: number[] = []
+    const failed: Array<[number, string]> = []
+    return downloadBatch(
+      deps(overrides),
+      { chat, messageIds: ids, thumb: false, fresh: false },
+      {
+        done: async (result) => {
+          done.push(result.messageId)
+        },
+        failed: (id, e) => {
+          failed.push([id, e.code])
+        },
+        ...handlers,
+      },
+    ).then(() => ({ done, failed }))
+  }
+
+  it('validates the peer before any cache write', async () => {
+    const tg = fakeTelegram({ message: () => photoMessage(ALICE, 1) })
+    const result = await batch({ getClient: () => tg.client }, [1, 2])
+    expect(result.failed).toContainEqual([1, 'MESSAGE_NOT_FOUND'])
+    expect(createMessagesCache(db).get(SELF_ID, 1)).toBeNull()
+  })
+
+  it('checks online protection on a newly fetched message even if its file exists', async () => {
+    const msg = photoMessage(ALICE, 1)
+    place(pathsOf(msg).file, fakeBytes(60_000))
+    const tg = fakeTelegram({
+      message: () => msg,
+      fullUser: { noforwardsPeerEnabled: true },
+    })
+    const result = await batch(
+      { getClient: () => tg.client },
+      [1, 2],
+      String(ALICE_ID),
+    )
+    expect(result.failed).toContainEqual([1, 'CONTENT_PROTECTED'])
+    expect(tg.methods()).toContain('users.getFullUser')
+  })
+
+  it('only resolves the username once', async () => {
+    const history = historyDeps()
+    let resolutions = 0
+    history.client.call = (async () => {
+      resolutions++
+      return {
+        _: 'contacts.resolvedPeer',
+        users: [],
+        chats: [teamChannel()],
+        peer: TEAM,
+      }
+    }) as HistoryClient['call']
+    const tg = fakeTelegram({ message: () => photoMessage(TEAM, 1) })
+    await batch({ history, getClient: () => tg.client }, [1, 2], '@exampleteam')
+    expect(resolutions).toBe(1)
+  })
+
+  it('keeps completed pages and reports every ID on a failed page', async () => {
+    const msg = photoMessage(SELF, 1)
+    place(pathsOf(msg).file, fakeBytes(60_000))
+    let page = 0
+    const tg = fakeTelegram({
+      message: () => {
+        if (++page === 2) throw new RateLimitError('messages.getMessages', 301)
+        return msg
+      },
+    })
+    const result = await batch(
+      { getClient: () => tg.client },
+      Array.from({ length: 101 }, (_, i) => i + 1),
+    )
+    expect(result.done).toEqual([1])
+    expect(result.failed).toHaveLength(100)
+    expect(result.failed).toContainEqual([101, 'RATE_LIMITED'])
+  })
+
+  it('bounds retries of a flooded page', async () => {
+    let calls = 0
+    const tg = fakeTelegram({
+      message: () => {
+        if (++calls > 6) throw new Error('unexpected seventh call')
+        throw new RateLimitError('messages.getMessages', 0.001)
+      },
+    })
+    const result = await batch({ getClient: () => tg.client }, [1, 2])
+    expect(calls).toBe(6)
+    expect(result.failed).toEqual([
+      [1, 'RATE_LIMITED'],
+      [2, 'RATE_LIMITED'],
+    ])
+  })
+
+  it('stops before another page RPC when its wait is interrupted', async () => {
+    const controller = new AbortController()
+    let calls = 0
+    const tg = fakeTelegram({
+      message: () => {
+        if (++calls > 1) throw new Error('unexpected repeat')
+        controller.abort()
+        throw new RateLimitError('messages.getMessages', 1)
+      },
+    })
+    await expect(
+      batch({ getClient: () => tg.client, signal: controller.signal }, [1, 2]),
+    ).rejects.toBeInstanceOf(DownloadInterruptedError)
+    expect(calls).toBe(1)
+  })
+
+  it.each([false, true])(
+    'honours cancellation between cached results (queued: %s)',
+    async (queued) => {
+      const controller = new AbortController()
+      for (const id of [1, 2]) {
+        const msg = photoMessage(SELF, id)
+        cacheMessage(SELF_ID, msg)
+        place(pathsOf(msg).file, fakeBytes(60_000))
+      }
+      const seen: number[] = []
+      await expect(
+        batch({ signal: controller.signal }, [1, 2], 'me', {
+          done: async (result) => {
+            seen.push(result.messageId)
+            if (queued) setImmediate(() => controller.abort())
+            else controller.abort()
+          },
+        }),
+      ).rejects.toBeInstanceOf(DownloadInterruptedError)
+      expect(seen).toEqual([1])
+    },
+  )
+
+  it('does not cache a new attachment until its private-chat check succeeds', async () => {
+    const msg = photoMessage(ALICE, 1)
+    place(pathsOf(msg).file, fakeBytes(60_000))
+    const tg = fakeTelegram({ message: () => msg })
+    const call = tg.client.call
+    tg.client.call = ((req, opts) =>
+      req._ === 'users.getFullUser'
+        ? Promise.reject(new RateLimitError(req._, 301))
+        : call(req, opts)) as TelegramClient['call']
+    const result = await batch(
+      { getClient: () => tg.client },
+      [1, 2],
+      String(ALICE_ID),
+    )
+    expect(result.failed).toContainEqual([1, 'RATE_LIMITED'])
+    expect(createMessagesCache(db).get(ALICE_ID, 1)).toBeNull()
+  })
+
+  it('records a message-level refusal without needing a private-chat RPC', async () => {
+    const msg = { ...photoMessage(ALICE, 1), noforwards: true }
+    const tg = fakeTelegram({ message: () => msg })
+    const result = await batch(
+      { getClient: () => tg.client },
+      [1, 2],
+      String(ALICE_ID),
+    )
+    expect(result.failed).toContainEqual([1, 'CONTENT_PROTECTED'])
+    expect(tg.methods()).not.toContain('users.getFullUser')
+    expect(createMessagesCache(db).get(ALICE_ID, 1)).not.toBeNull()
+  })
+
+  it('closes the RPC gate before the flooded transfer finishes unwinding', async () => {
+    const files = [1, 2].map((id) =>
+      documentMessage(SELF, id, {
+        id: String(7000 + id),
+        size: id,
+        mimeType: 'text/plain',
+        attributes: [],
+      }),
+    )
+    const attempts: number[] = []
+    let notify!: () => void
+    const flooded = new Promise<void>((resolve) => {
+      notify = resolve
+    })
+    const client = {
+      call: async (req: { _: string }) => {
+        if (req._ !== 'upload.getFile')
+          return {
+            _: 'messages.messages',
+            messages: files,
+            users: [],
+            chats: [],
+          }
+        attempts.push(Date.now())
+        if (attempts.length === 1) {
+          notify()
+          throw new RateLimitError(req._, 0.12)
+        }
+        return {}
+      },
+    } as unknown as TelegramClient
+    const transfer = fakeTransfer(async function* ({ client, params }) {
+      if (params.fileSize === 2) {
+        await flooded
+        await Bun.sleep(10)
+      }
+      try {
+        await client.call({
+          _: 'upload.getFile',
+        } as tl.upload.RawGetFileRequest)
+      } catch (err) {
+        await Bun.sleep(40)
+        throw err
+      }
+      yield fakeBytes(params.fileSize!)
+    })
+    expect(
+      (
+        await batch(
+          { getClient: () => client, download: transfer.download },
+          [1, 2],
+        )
+      ).done.sort(),
+    ).toEqual([1, 2])
+    expect(attempts[1]! - attempts[0]!).toBeGreaterThanOrEqual(120)
+  })
+
+  it('rechecks an extended deadline before retries and new parts of active files', async () => {
+    const ids = [1, 2, 3]
+    const files = ids.map((id) =>
+      documentMessage(SELF, id, {
+        id: String(6000 + id),
+        size: id,
+        mimeType: 'application/octet-stream',
+        attributes: [],
+      }),
+    )
+    const uploads: number[] = []
+    const client = {
+      call: async (req: { _: string }) => {
+        if (req._ === 'upload.getFile') {
+          uploads.push(Date.now())
+          return {}
+        }
+        return { _: 'messages.messages', messages: files, users: [], chats: [] }
+      },
+    } as unknown as TelegramClient
+    let until = 0
+    const started = new Set<number>()
+    const transfer = fakeTransfer(async function* ({ client, params }) {
+      const size = params.fileSize!
+      if (!started.has(size)) {
+        started.add(size)
+        if (size === 1) throw new RateLimitError('upload.getFile', 0.08)
+        if (size === 2) {
+          await Bun.sleep(20)
+          until = Date.now() + 150
+          throw new RateLimitError('upload.getFile', 0.15)
+        }
+        await Bun.sleep(40)
+      }
+      await client.call({ _: 'upload.getFile' } as tl.upload.RawGetFileRequest)
+      yield fakeBytes(size)
+    })
+    const result = await batch(
+      { getClient: () => client, download: transfer.download },
+      ids,
+    )
+    expect(result.done.sort()).toEqual(ids)
+    expect(uploads).toHaveLength(3)
+    expect(Math.min(...uploads)).toBeGreaterThanOrEqual(until)
+  })
+
+  it('runs at most five transfers including two at or above 20 MiB', async () => {
+    const limit = 20 * 1024 * 1024
+    const sizes = [limit, limit, limit, limit - 1, 64, 64, 64]
+    const messages = sizes.map((size, i) =>
+      documentMessage(SELF, i + 1, {
+        id: String(8000 + i),
+        size,
+        mimeType: 'text/plain',
+        attributes: [],
+      }),
+    )
+    const client = {
+      call: async () => ({
+        _: 'messages.messages',
+        messages,
+        users: [],
+        chats: [],
+      }),
+    } as unknown as TelegramClient
+    let active = 0,
+      large = 0,
+      peak = 0,
+      peakLarge = 0
+    const transfer = fakeTransfer(async function* ({ params }) {
+      const big = params.fileSize! >= limit
+      active++
+      if (big) large++
+      peak = Math.max(peak, active)
+      peakLarge = Math.max(peakLarge, large)
+      await Bun.sleep(20)
+      active--
+      if (big) large--
+      yield new Uint8Array()
+    })
+    await batch(
+      { getClient: () => client, download: transfer.download },
+      messages.map((m) => m.id),
+    )
+    expect([peak, peakLarge]).toEqual([5, 2])
+  })
+
+  it('surfaces short waits to the batch for metadata and file parts', async () => {
+    const tg = fakeTelegram({ message: () => photoMessage(SELF, 1) })
+    const transfer = fakeTransfer(async function* ({ client }) {
+      await client.call({ _: 'upload.getFile' } as tl.upload.RawGetFileRequest)
+      yield fakeBytes(60_000)
+    })
+    await batch(
+      { getClient: () => tg.client, download: transfer.download },
+      [1, 2],
+    )
+    expect(tg.methods()).toContain('upload.getFile')
+    expect(tg.calls.map((c) => c.options?.floodSleepThreshold)).toEqual([0, 0])
   })
 })

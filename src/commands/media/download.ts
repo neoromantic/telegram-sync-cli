@@ -4,7 +4,6 @@
  * A cached file needs no network and no credentials.
  */
 import type { Database } from 'bun:sqlite'
-import { join, resolve } from 'node:path'
 import { defineCommand } from 'citty'
 
 import { getAccountMediaDir } from '../../db'
@@ -53,7 +52,7 @@ const CONTEXT = 'cli:media.download'
 /** Exit code of a download stopped by SIGINT or SIGTERM */
 const INTERRUPTED_EXIT_CODE = 130
 
-function reportInterrupted(err: DownloadInterruptedError): never {
+function reportInterrupted(err: DownloadInterruptedError): Promise<never> {
   const kept =
     err.downloaded === null
       ? ''
@@ -61,7 +60,7 @@ function reportInterrupted(err: DownloadInterruptedError): never {
         ? `: ${formatBytes(err.downloaded)} kept`
         : `: ${formatBytes(err.downloaded)} of ${formatBytes(err.total)} kept`
   info(`Download interrupted${kept}, run the command again to resume`)
-  process.exit(INTERRUPTED_EXIT_CODE)
+  return exitAfterFlush(INTERRUPTED_EXIT_CODE)
 }
 
 /**
@@ -74,39 +73,29 @@ function targetOf(
   batch: boolean,
   cacheDb: Database,
 ): string {
-  const template = isTemplate(out)
-    ? out
-    : batch
-      ? join(out, BATCH_NAME_TEMPLATE)
-      : null
-  if (template === null) return outTarget(out, result.fileName)
-  const row = createMessagesCache(cacheDb).get(result.chatId, result.messageId)
-  return resolve(
-    expandTemplate(template, {
-      chat: String(result.chatId),
-      id: String(result.messageId),
-      date: row ? templateDate(row.date) : 'unknown',
-      name: result.fileName,
-      kind: result.kind,
-    }),
-  )
+  if (!batch && !isTemplate(out)) return outTarget(out, result.fileName)
+  const row = out.includes('{date}')
+    ? createMessagesCache(cacheDb).get(result.chatId, result.messageId)
+    : undefined
+  const values = {
+    chat: String(result.chatId),
+    id: String(result.messageId),
+    date: row ? templateDate(row.date) : 'unknown',
+    name: result.fileName,
+    kind: result.kind,
+  }
+  const name = batch
+    ? expandTemplate(BATCH_NAME_TEMPLATE, values)
+    : result.fileName
+  return isTemplate(out)
+    ? outTarget(expandTemplate(out, values), name)
+    : outTarget(`${out}/`, name)
 }
 
 /** The fields a single download prints, with `path` the --out copy */
 function outputOf(result: DownloadResult, path: string) {
   const { path: cachePath, ...fields } = result
   return { path, cachePath, ...fields }
-}
-
-/** One line per file on stdout, in the result schema */
-function printLine(
-  line:
-    | { success: true; data: ReturnType<typeof outputOf> }
-    | { success: false; error: FileFailure },
-): void {
-  const format = getOutputFormat()
-  if (format === 'quiet') return
-  console.log(JSON.stringify(line, null, format === 'pretty' ? 2 : undefined))
 }
 
 function exitWith(code: number): void {
@@ -198,12 +187,12 @@ export const downloadMediaCommand = defineCommand({
     // SIGINT/SIGTERM stop the transfer; the partial download is kept
     const controller = new AbortController()
     const stop = () => {
-      if (controller.signal.aborted) process.exit(INTERRUPTED_EXIT_CODE)
+      if (controller.signal.aborted) {
+        void exitAfterFlush(INTERRUPTED_EXIT_CODE)
+        return
+      }
       controller.abort()
     }
-    process.on('SIGINT', stop)
-    process.on('SIGTERM', stop)
-
     const history = openHistory(account.id, CONTEXT)
     // The instance the lazy history client wraps: one connection
     const getClient = () =>
@@ -222,70 +211,71 @@ export const downloadMediaCommand = defineCommand({
     const overwrite = args.overwrite ?? false
     const options = { thumb: args.thumb ?? false, fresh: args.fresh ?? false }
 
-    if (batch) {
-      let failures: number
-      try {
-        failures = await downloadBatch(
+    const published = batch ? new Set<string>() : undefined
+    const copy = (result: DownloadResult) =>
+      out === undefined
+        ? result.path
+        : copyOut(
+            result,
+            targetOf(out, result, batch, history.cacheDb),
+            overwrite,
+            published,
+            controller.signal,
+          )
+
+    process.on('SIGINT', stop)
+    process.on('SIGTERM', stop)
+    try {
+      if (batch) {
+        let processed = 0
+        function printLine(
+          line:
+            | { success: true; data: ReturnType<typeof outputOf> }
+            | { success: false; error: FileFailure },
+        ) {
+          if (getOutputFormat() === 'quiet') return
+          console.log(JSON.stringify(line))
+          if (process.stderr.isTTY && ++processed < messageIds.length) {
+            info(`Processed ${processed} of ${messageIds.length} files`)
+          }
+        }
+        const failures = await downloadBatch(
           deps,
           { chat: args.chat, messageIds, ...options },
           {
             done: async (result) => {
-              const path =
-                out === undefined
-                  ? result.path
-                  : await copyOut(
-                      result,
-                      out,
-                      targetOf(out, result, true, history.cacheDb),
-                      overwrite,
-                    )
+              const path = await copy(result)
               printLine({ success: true, data: outputOf(result, path) })
             },
             failed: (_messageId, failure) =>
               printLine({ success: false, error: failure }),
           },
         )
-      } catch (err) {
-        if (err instanceof DownloadInterruptedError) reportInterrupted(err)
-        reportMediaError(err)
+        const done = messageIds.length - failures
+        info(
+          `Downloaded ${done} of ${messageIds.length} files${failures > 0 ? `, ${failures} failed` : ''}`,
+        )
+        exitWith(failures > 0 ? 1 : 0)
+        return
       }
-      const done = messageIds.length - failures
-      info(
-        `Downloaded ${done} of ${messageIds.length} files${failures > 0 ? `, ${failures} failed` : ''}`,
-      )
-      exitWith(failures > 0 ? 1 : 0)
-      return
-    }
 
-    let result: DownloadResult
-    try {
-      result = await downloadMedia(deps, {
+      const result = await downloadMedia(deps, {
         chat: args.chat,
-        messageId: messageIds[0] ?? 0,
+        messageId: messageIds[0]!,
         ...options,
       })
-    } catch (err) {
-      if (err instanceof DownloadInterruptedError) reportInterrupted(err)
-      reportMediaError(err)
-    }
-
-    if (out === '-') {
-      await rawFile(result.path)
-      return
-    }
-    let path = result.path
-    if (out !== undefined) {
-      try {
-        path = await copyOut(
-          result,
-          out,
-          targetOf(out, result, false, history.cacheDb),
-          overwrite,
-        )
-      } catch (err) {
-        reportMediaError(err)
+      if (out === '-') {
+        await rawFile(result.path)
+        return
       }
+      const path = await copy(result)
+      success(outputOf(result, path))
+    } catch (err) {
+      if (err instanceof DownloadInterruptedError) return reportInterrupted(err)
+      reportMediaError(err)
+    } finally {
+      process.off('SIGINT', stop)
+      process.off('SIGTERM', stop)
     }
-    success(outputOf(result, path))
   },
 })

@@ -126,7 +126,7 @@ export class RateLimitsService {
       INSERT INTO rate_limits (method, window_start, call_count, last_call_at, flood_wait_until)
       VALUES ($method, $window_start, 0, $now, $flood_wait_until)
       ON CONFLICT(method, window_start) DO UPDATE SET
-        flood_wait_until = $flood_wait_until
+        flood_wait_until = MAX(COALESCE(rate_limits.flood_wait_until, 0), excluded.flood_wait_until)
     `)
 
     // Get flood wait info for a method

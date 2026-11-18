@@ -126,16 +126,17 @@ tg media download --chat @examplegroup --id 1200 --id 1201 --id 1205 --out ./dow
   fetches the other messages together (one call per 100 IDs) and checks the chat's content
   protection once. Running one `tg media download` per message in parallel repeats all of
   that in every process, and their flood waits aren't shared.
-- Up to 5 files download at a time, of which up to 2 of 20 MB or more: Telegram's own
+- Up to 5 files download at a time, of which up to 2 of 20 MiB or more: Telegram's own
   soft limits for parallel downloads from one data center
   ([client configuration](https://core.telegram.org/api/config)).
 - A flood wait pauses the whole batch, which then retries the files it stopped. A partial file
-  resumes. A wait longer than 5 minutes, or a sixth wait for the same file, fails the file with
-  `RATE_LIMITED`.
+  resumes. A wait longer than 5 minutes or a sixth wait for one file or one page of IDs
+  returns `RATE_LIMITED` for the affected IDs. Other pages continue.
 - stdout gets one JSON line per file as each finishes, in the order they finish: the result of
   a single download (`{"success":true,"data":{…}}`) or its error
   (`{"success":false,"error":{…}}`, with `chatId` and `messageId` in `details`). A failed file
-  doesn't stop the others. stderr ends with `Downloaded N of M files`, and says when a flood
+  doesn't stop the others. Both `json` and `pretty` use compact JSON lines.
+  On a terminal, stderr shows the completed file count. stderr ends with `Downloaded N of M files`, and says when a flood
   wait pauses the batch.
 - The exit code is 0 when every file downloaded, 1 when any failed, 130 on Ctrl-C. An error
   that fails the whole run (an unknown `--chat`, missing credentials) is reported as for one
@@ -160,9 +161,14 @@ tg sql "SELECT message_id FROM message_attachments WHERE chat_id = 5550001 AND k
 - A name template: a path with placeholders, such as `./media/{chat}/{date}_{id}_{name}`.
   Folders are created.
 - `-`: the bytes go to stdout with no JSON. Errors still go to stderr as JSON.
-- An existing target that already holds the same file is left as it is, so a run can be
-  repeated. One with other content is `FILE_EXISTS` (exit 1), `details: { path }`. Pass
-  `--overwrite` to replace it. `tg` never picks a numbered name.
+- A single ID returns `FILE_EXISTS` (exit 1) for an existing target unless you pass
+  `--overwrite`. A batch accepts an existing file with identical bytes. Within one batch,
+  the first file written to a path keeps it. Different bytes for that path return
+  `FILE_EXISTS` even with `--overwrite`.
+- Creating a new export without `--overwrite` uses a hard link to publish the complete copy
+  atomically. The output filesystem must support hard links for this mode.
+- A template ending in a slash or expanding to an existing directory uses the directory naming
+  rule. Paired braces in output paths denote placeholders.
 
 | Placeholder | Value |
 |-------------|-------|

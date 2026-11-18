@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -341,6 +342,9 @@ describe('E2E: media download', () => {
     expect(output.data).toMatchObject({ path: target, cachePath: file })
     expect(Buffer.compare(readFileSync(target), bytes)).toBe(0)
 
+    const identical = await runCli(['media', 'download', ...args], offline)
+    expect(identical.json).toMatchObject({ error: { code: 'FILE_EXISTS' } })
+    expect(identical.exitCode).toBe(1)
     writeFileSync(target, 'edited copy')
     const again = await runCli(['media', 'download', ...args], offline)
     expect(again.exitCode).toBe(1)
@@ -489,8 +493,8 @@ describe('E2E: media download of several messages', () => {
     env.cleanup()
   })
 
-  function run(args: string[], files: FakeMediaFile[] = []) {
-    const scenario: FakeMediaScenario = { userId: ALICE_ID, files }
+  function run(args: string[], files: FakeMediaFile[] = [], tty = false) {
+    const scenario: FakeMediaScenario = { userId: ALICE_ID, files, tty }
     return runCli(['media', 'download', ...args], {
       env: {
         ...env.getCliOptions().env,
@@ -749,6 +753,169 @@ describe('E2E: media download of several messages', () => {
       '2025-10-09_3_document_Q3 report_ draft_.pdf',
     ])
   })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'reports an unreadable equal-size export as a local error',
+    async () => {
+      const out = join(env.dataDir, 'existing')
+      mkdirSync(out)
+      const target = join(out, '11_example-voice.ogg')
+      writeFileSync(target, mediaBytes(VOICE), { mode: 0o000 })
+      try {
+        const result = await run(
+          [
+            '--chat',
+            String(ALICE_ID),
+            '--id',
+            '11',
+            '--id',
+            '13',
+            '--out',
+            out,
+          ],
+          [VOICE, NOTES],
+        )
+        expect(result.exitCode).toBe(1)
+        expect(lines(result.stdout)[0]).toMatchObject({
+          error: { code: 'GENERAL_ERROR', details: { messageId: 11 } },
+        })
+      } finally {
+        chmodSync(target, 0o600)
+      }
+    },
+  )
+
+  it('keeps a local error when the output parent is a regular file', async () => {
+    const parent = join(env.dataDir, 'regular-file')
+    writeFileSync(parent, 'unchanged')
+    const result = await run(
+      [
+        '--chat',
+        String(ALICE_ID),
+        '--id',
+        '11',
+        '--id',
+        '13',
+        '--out',
+        join(parent, '{id}'),
+      ],
+      [VOICE, NOTES],
+    )
+    expect(result.exitCode).toBe(1)
+    expect(lines(result.stdout)).toMatchObject([
+      { error: { code: 'GENERAL_ERROR' } },
+      { error: { code: 'GENERAL_ERROR' } },
+    ])
+    expect(readFileSync(parent, 'utf8')).toBe('unchanged')
+  })
+
+  it('downloads and accounts for calls in the selected account only', async () => {
+    env.seedAccounts([
+      { phone: '+15550000002', user_id: 5_550_010, is_active: false },
+    ])
+    for (const file of [VOICE, NOTES])
+      cacheFile(ALICE_ID, mediaMessage(ALICE_ID, file), mediaBytes(file))
+    const result = await run(
+      [
+        '--account',
+        '2',
+        '--chat',
+        String(ALICE_ID),
+        '--id',
+        '11',
+        '--id',
+        '13',
+      ],
+      [VOICE, NOTES],
+    )
+    expect(result.exitCode).toBe(0)
+    for (const line of lines(result.stdout) as DownloadOutput[]) {
+      expect(line.data.cached).toBe(false)
+      expect(line.data.cachePath).toStartWith(
+        join(env.dataDir, 'accounts', '2', 'media'),
+      )
+    }
+    for (const [account, expected] of [
+      [1, 0],
+      [2, 1],
+    ] as const) {
+      expect(
+        env
+          .openCacheDb(account)
+          .query(
+            "SELECT COUNT(*) AS n FROM api_activity WHERE method='users.getFullUser'",
+          )
+          .get(),
+      ).toEqual({ n: expected })
+    }
+  })
+
+  it('reports completed files on a terminal before the final summary', async () => {
+    const result = await run(
+      ['--chat', String(ALICE_ID), '--id', '11', '--id', '13'],
+      [VOICE, NOTES],
+      true,
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toContain('Processed 1 of 2 files')
+    expect(result.stderr).toContain('Downloaded 2 of 2 files')
+  })
+
+  it('prints one JSON line per ID even in pretty mode', async () => {
+    const result = await run(
+      ['--chat', String(ALICE_ID), '--id', '11', '--id', '13', '-f', 'pretty'],
+      [VOICE, NOTES],
+    )
+    expect(result.exitCode).toBe(0)
+    expect(lines(result.stdout)).toHaveLength(2)
+  })
+
+  it('uses a template ending in a slash as a directory', async () => {
+    const folder = `${join(env.dataDir, '{date}')}/`
+    const result = await run(
+      ['--chat', String(ALICE_ID), '--id', '11', '--id', '13', '--out', folder],
+      [VOICE, NOTES],
+    )
+    expect(result.exitCode).toBe(0)
+    expect(readdirSync(join(env.dataDir, '2025-10-09')).sort()).toEqual([
+      '11_example-voice.ogg',
+      '13_example-notes.txt',
+    ])
+  })
+
+  it.each([false, true])(
+    'keeps the successful bytes on a template collision (overwrite %s)',
+    async (overwrite) => {
+      const out = join(env.dataDir, '{kind}')
+      const files = [VOICE, NOTES]
+      const result = await run(
+        [
+          '--chat',
+          String(ALICE_ID),
+          '--id',
+          '11',
+          '--id',
+          '13',
+          '--out',
+          out,
+          ...(overwrite ? ['--overwrite'] : []),
+        ],
+        files,
+      )
+      expect(result.exitCode).toBe(1)
+      const output = lines(result.stdout)
+      expect(output.filter((line) => !line.success)).toEqual([
+        expect.objectContaining({
+          error: expect.objectContaining({ code: 'FILE_EXISTS' }),
+        }),
+      ])
+      const saved = output.find((line) => 'data' in line) as DownloadOutput
+      const file = files.find((file) => file.id === saved.data.messageId)!
+      expect(
+        Buffer.compare(readFileSync(saved.data.path), mediaBytes(file)),
+      ).toBe(0)
+    },
+  )
 
   it('refuses --out - and unknown placeholders', async () => {
     const offline = { env: { ...env.getCliOptions().env, ...NO_CREDENTIALS } }

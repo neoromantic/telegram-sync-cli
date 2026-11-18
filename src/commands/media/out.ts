@@ -2,13 +2,18 @@
  * Where `tg media download --out` puts a file: a directory, a file path, or
  * a name template such as `exports/{chat}/{date}_{id}_{name}`
  */
-import { mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { linkSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 import { ErrorCodes } from '../../types'
 import { sanitizeFileName } from '../../utils/media-cache'
 import type { DownloadResult } from './download-media'
-import { MediaError } from './errors'
+import {
+  checkDownloadInterrupted,
+  DownloadInterruptedError,
+  MediaError,
+} from './errors'
 
 export const TEMPLATE_PLACEHOLDERS = [
   'chat',
@@ -84,61 +89,81 @@ export function outTarget(out: string, fileName: string): string {
   return resolve(isDir ? join(out, fileName) : out)
 }
 
-async function digest(path: string): Promise<string> {
+async function digest(path: string, signal?: AbortSignal): Promise<string> {
   const hasher = new Bun.CryptoHasher('sha256')
-  for await (const chunk of Bun.file(path).stream()) hasher.update(chunk)
+  for await (const chunk of Bun.file(path).stream()) {
+    checkDownloadInterrupted(signal)
+    hasher.update(chunk)
+  }
   return hasher.digest('hex')
 }
 
-/** The target already holds this file: a rerun leaves it as it is */
-async function sameFile(target: string, source: string): Promise<boolean> {
-  const a = statOrNull(target)
-  const b = statOrNull(source)
-  if (!a?.isFile() || !b || a.size !== b.size) return false
-  return (await digest(target)) === (await digest(source))
+function fileKey(path: string): string | undefined {
+  const st = statSync(path, { bigint: true, throwIfNoEntry: false })
+  return st && `${st.dev}:${st.ino}`
 }
 
-/**
- * Copy the cached file to `target` (from the --out value `out`), never over
- * another file unless asked. Throws a MediaError: FILE_EXISTS, or
- * GENERAL_ERROR when it can't write.
- */
-export async function copyOut(
-  result: DownloadResult,
-  out: string,
+/** Publish complete bytes. False means the existing target must be compared or refused. */
+async function publishCopy(
+  source: string,
   target: string,
   overwrite: boolean,
+  published?: Set<string>,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const tmp = join(dirname(target), `.tg-${randomUUID()}.part`)
+  try {
+    await Bun.write(tmp, Bun.file(source))
+    checkDownloadInterrupted(signal)
+    if (overwrite) {
+      // Check after the async copy. Another worker may have just published here,
+      // possibly using a different spelling on a case-insensitive volume.
+      const previous = published && fileKey(target)
+      if (previous && published?.has(previous)) return false
+      renameSync(tmp, target)
+      if (published) published.add(fileKey(target)!)
+    } else {
+      linkSync(tmp, target)
+    }
+    return true
+  } catch (err) {
+    if (!overwrite && (err as NodeJS.ErrnoException).code === 'EEXIST') {
+      return false
+    }
+    throw err
+  } finally {
+    rmSync(tmp, { force: true })
+  }
+}
+
+export async function copyOut(
+  result: DownloadResult,
+  target: string,
+  overwrite: boolean,
+  published?: Set<string>,
+  signal?: AbortSignal,
 ): Promise<string> {
   try {
     mkdirSync(dirname(target), { recursive: true })
+    const exists = !overwrite && statSync(target, { throwIfNoEntry: false })
+    if (
+      !exists &&
+      (await publishCopy(result.path, target, overwrite, published, signal))
+    ) {
+      return target
+    }
+    const file = statSync(target, { throwIfNoEntry: false })
+    if (
+      published &&
+      file?.isFile() &&
+      file.size === result.size &&
+      (await digest(target, signal)) === (await digest(result.path, signal))
+    ) {
+      checkDownloadInterrupted(signal)
+      return target
+    }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    throw new MediaError(
-      ErrorCodes.GENERAL_ERROR,
-      `Failed to create --out: ${message}`,
-      { out },
-    )
-  }
-  if (!overwrite && statOrNull(target) !== null) {
-    if (await sameFile(target, result.path)) return target
-    throw new MediaError(
-      ErrorCodes.FILE_EXISTS,
-      `File already exists: ${target}`,
-      { path: target },
-      'pass --overwrite or another --out',
-    )
-  }
-
-  // Written next to the target, then renamed over it: never half a file
-  const tmp = join(
-    dirname(target),
-    `.${basename(target)}.tg-${process.pid}.part`,
-  )
-  try {
-    await Bun.write(tmp, Bun.file(result.path))
-    renameSync(tmp, target)
-  } catch (err) {
-    rmSync(tmp, { force: true })
+    if (err instanceof DownloadInterruptedError) throw err
     const message = err instanceof Error ? err.message : String(err)
     throw new MediaError(
       ErrorCodes.GENERAL_ERROR,
@@ -146,5 +171,12 @@ export async function copyOut(
       { path: target },
     )
   }
-  return target
+  throw new MediaError(
+    ErrorCodes.FILE_EXISTS,
+    `File already exists: ${target}`,
+    { path: target },
+    published
+      ? 'use a distinct output path for each file'
+      : 'pass --overwrite or another --out',
+  )
 }

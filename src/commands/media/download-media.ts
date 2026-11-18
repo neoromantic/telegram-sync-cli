@@ -60,6 +60,7 @@ import {
 import { DownloadInterruptedError, MediaError } from './errors'
 import {
   cacheFetchedMessage,
+  type FetchedMessage,
   type FetchedRawMessage,
   fetchMessageById,
 } from './fetch'
@@ -559,10 +560,11 @@ async function streamToCache({
  * content, then serve the cached file or download it under the folder's
  * lock. A file reference Telegram rejects is refreshed once.
  */
-async function downloadOnline(
+export async function downloadOnline(
   deps: DownloadDeps,
   chat: HistoryChat,
   request: DownloadRequest,
+  first?: FetchedMessage,
 ): Promise<DownloadResult> {
   const { chatId } = chat
   const { messageId } = request
@@ -574,16 +576,12 @@ async function downloadOnline(
   const client = deps.getClient()
 
   for (let attempt = 1; ; attempt++) {
-    const { message, chats, users } = await fetchMessageById(
-      client,
-      chat,
-      messageId,
-      deps.signal,
-    )
-    cacheFetchedMessage(deps.cacheDb, chatId, message, users)
-
+    const { message, chats, users } =
+      (attempt === 1 && first) ||
+      (await fetchMessageById(client, chat, messageId, deps.signal))
     const info = extractAttachment(message)
     if (!info) {
+      cacheFetchedMessage(deps.cacheDb, chatId, message, users)
       throw noMedia(
         chatId,
         messageId,
@@ -602,6 +600,8 @@ async function downloadOnline(
     )
     // A negative answer too: protection turned off clears the block
     if (verdict.chat) protection.record(chatId, verdict.chat, now())
+    // A later cache hit may serve these bytes without a network check.
+    cacheFetchedMessage(deps.cacheDb, chatId, message, users)
     if (verdict.message.protected) {
       throw contentProtected(chatId, messageId, verdict.message.reason)
     }

@@ -443,12 +443,13 @@ mimeType, size, kind, chatId, messageId, uniqueFileId, groupedId, cached, resume
   fresh file reference, checks its content protection and downloads the file. A partial
   download is kept and the next run resumes it (`resumedFrom`).
 - `--out` copies the file into a directory or to a file path; `--out -` writes the bytes to
-  stdout with no JSON. An existing target with other content is `FILE_EXISTS` unless
-  `--overwrite` is set; one that already holds the file is left as it is.
+  stdout with no JSON. An existing target is `FILE_EXISTS` unless `--overwrite` is set.
+  A batch also accepts identical bytes. Two different files mapped to the same path within
+  one batch conflict even with `--overwrite`.
 - `--out` can be a name template with `{chat}`, `{id}`, `{date}` (the message's UTC day),
   `{name}` and `{kind}`; each filled part is made a safe file name.
 - Repeat `--id` for several messages of the chat. One run fetches the messages together,
-  downloads up to 5 files at a time (2 of 20 MB or more) and pauses the whole batch for a flood
+  downloads up to 5 files at a time (2 of 20 MiB or more) and pauses the whole batch for a flood
   wait of up to 5 minutes. It prints one JSON line per file as each finishes, success or error,
   in the shapes above, then `Downloaded N of M files` on stderr. A failed file doesn't stop the
   others; the exit code is 1 when any failed. A directory `--out` names each file

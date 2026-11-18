@@ -23,7 +23,7 @@ export interface FetchedMessage {
   users: tl.TypeUser[]
 }
 
-function messageNotFound(chatId: number, messageId: number): MediaError {
+export function messageNotFound(chatId: number, messageId: number): MediaError {
   return new MediaError(
     ErrorCodes.MESSAGE_NOT_FOUND,
     `Message ${messageId} not found in chat ${chatId}`,
@@ -32,18 +32,18 @@ function messageNotFound(chatId: number, messageId: number): MediaError {
 }
 
 /**
- * The message with this ID in the chat, from Telegram. A channel or
+ * The requested messages in the resolved chat. A channel or
  * supergroup numbers its own messages (channels.getMessages); private
  * chats and basic groups share the account's numbering (messages.getMessages),
- * so the message must also belong to the chat. MESSAGE_NOT_FOUND otherwise.
+ * so validate both the ID and the peer before handing any message to the caller.
  */
-export async function fetchMessageById(
+export async function fetchMessagesById(
   client: Pick<TelegramClient, 'call'>,
   chat: HistoryChat,
-  messageId: number,
+  ids: number[],
   signal?: AbortSignal,
-): Promise<FetchedMessage> {
-  const id: tl.TypeInputMessage[] = [{ _: 'inputMessageID', id: messageId }]
+): Promise<Map<number, FetchedMessage>> {
+  const id = ids.map((id) => ({ _: 'inputMessageID' as const, id }))
   const peer = chat.inputPeer
   const response =
     peer._ === 'inputPeerChannel'
@@ -64,17 +64,37 @@ export async function fetchMessageById(
           { abortSignal: signal },
         )
 
-  if (response._ === 'messages.messagesNotModified') {
-    throw messageNotFound(chat.chatId, messageId)
+  const found = new Map<number, FetchedMessage>()
+  if (response._ !== 'messages.messagesNotModified') {
+    const wanted = new Set(ids)
+    for (const message of response.messages) {
+      if (
+        message._ === 'messageEmpty' ||
+        !wanted.has(message.id) ||
+        toPeerIdFromRawPeer(message.peerId) !== chat.chatId
+      ) {
+        continue
+      }
+      found.set(message.id, {
+        message,
+        chats: response.chats,
+        users: response.users,
+      })
+    }
   }
-  const message = response.messages.find(
-    (item): item is FetchedRawMessage =>
-      item._ !== 'messageEmpty' && item.id === messageId,
-  )
-  if (!message || toPeerIdFromRawPeer(message.peerId) !== chat.chatId) {
-    throw messageNotFound(chat.chatId, messageId)
-  }
-  return { message, chats: response.chats, users: response.users }
+  return found
+}
+
+export async function fetchMessageById(
+  client: Pick<TelegramClient, 'call'>,
+  chat: HistoryChat,
+  messageId: number,
+  signal?: AbortSignal,
+): Promise<FetchedMessage> {
+  const page = await fetchMessagesById(client, chat, [messageId], signal)
+  const item = page.get(messageId)
+  if (!item) throw messageNotFound(chat.chatId, messageId)
+  return item
 }
 
 /**

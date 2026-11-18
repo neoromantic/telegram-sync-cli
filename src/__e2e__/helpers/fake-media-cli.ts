@@ -31,6 +31,7 @@ export interface FakeMediaFile {
 export interface FakeMediaScenario {
   /** The private chat (user ID) the messages are in */
   userId: number
+  tty?: boolean
   files: FakeMediaFile[]
 }
 
@@ -62,6 +63,8 @@ if (import.meta.main) {
   const scenario = JSON.parse(
     process.env[FAKE_MEDIA_ENV] ?? '{}',
   ) as FakeMediaScenario
+  if (scenario.tty)
+    Object.defineProperty(process.stderr, 'isTTY', { value: true })
   const byDocument = new Map(
     scenario.files.map((file) => [mediaDocumentId(file.id), file]),
   )
