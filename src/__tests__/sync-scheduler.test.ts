@@ -1,20 +1,17 @@
 /**
  * Tests for sync scheduler
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { applySyncMode } from '../commands/chats/sync'
 import { createSyncScheduler, type SyncScheduler } from '../daemon/scheduler'
+import { pruneCache } from '../db/cache-maintenance'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { createMessagesCache } from '../db/messages-cache'
-import { initCacheSchema } from '../db/schema'
 import { createSyncJobsService } from '../db/sync-jobs'
-import {
-  initSyncSchema,
-  SyncJobStatus,
-  SyncJobType,
-  SyncPriority,
-} from '../db/sync-schema'
+import { SyncJobStatus, SyncJobType, SyncPriority } from '../db/sync-schema'
+import { getDefaultRetentionConfig } from '../db/types'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { takePartIn } from './helpers/participation'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -38,9 +35,7 @@ describe('SyncScheduler', () => {
   }
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     takePartIn(db, -4001, -4002, -1001234567890)
     jobsService = createSyncJobsService(db)
     chatSyncState = createChatSyncStateService(db)
@@ -541,11 +536,12 @@ describe('SyncScheduler', () => {
     })
 
     it('does not queue initial load for chats with a forward cursor', async () => {
-      chatSyncState.updateCursors(1, {
+      chatSyncState.recordFirstPage(1, {
         forward_cursor: 100,
         backward_cursor: 1,
+        history_complete: false,
+        new_messages: 100,
       })
-      chatSyncState.incrementSyncedMessages(1, 100)
 
       await scheduler.initializeForStartup()
 
@@ -696,9 +692,13 @@ describe('SyncScheduler', () => {
       ).toEqual(['pending'])
       expect(jobsOf(2, SyncJobType.InitialLoad)).toHaveLength(1)
 
-      // The cleanup deletes them a day later
+      // Pruning deletes them a day later
       Date.now = () => t0 + DAY_MS + 1
-      scheduler.cleanup()
+      pruneCache(
+        db,
+        { ...getDefaultRetentionConfig(), failedJobs: DAY_MS },
+        { now: Date.now() },
+      )
       scheduler.refreshQueues()
       for (const [chatId, jobType] of cases) {
         expect(jobsOf(chatId, jobType).map((job) => job.status)).toEqual([
@@ -918,86 +918,6 @@ describe('SyncScheduler', () => {
     })
   })
 
-  describe('claimNextJob', () => {
-    it('atomically claims and starts the highest priority job', () => {
-      jobsService.create({
-        chat_id: 100,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.Background,
-      })
-      jobsService.create({
-        chat_id: 200,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.Realtime,
-      })
-
-      const claimed = scheduler.claimNextJob()
-
-      expect(claimed).not.toBeNull()
-      expect(claimed?.chat_id).toBe(200)
-      expect(claimed?.status).toBe(SyncJobStatus.Running)
-    })
-
-    it('returns null when no pending jobs', () => {
-      expect(scheduler.claimNextJob()).toBeNull()
-    })
-
-    it('prevents race condition - only one worker gets the job', () => {
-      // Create a single job
-      jobsService.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      })
-
-      // Simulate concurrent workers claiming
-      const claim1 = scheduler.claimNextJob()
-      const claim2 = scheduler.claimNextJob()
-
-      // Only first claim should succeed
-      expect(claim1).not.toBeNull()
-      expect(claim2).toBeNull()
-
-      // Verify job is running
-      const status = scheduler.getStatus()
-      expect(status.runningJobs).toBe(1)
-      expect(status.pendingJobs).toBe(0)
-    })
-  })
-
-  describe('completeJob', () => {
-    it('marks job as completed', () => {
-      const job = jobsService.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      })
-      jobsService.markRunning(job.id)
-
-      scheduler.completeJob(job.id)
-
-      const updated = jobsService.getById(job.id)
-      expect(updated?.status).toBe(SyncJobStatus.Completed)
-    })
-  })
-
-  describe('failJob', () => {
-    it('marks job as failed with error message', () => {
-      const job = jobsService.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      })
-      jobsService.markRunning(job.id)
-
-      scheduler.failJob(job.id, 'Network error')
-
-      const updated = jobsService.getById(job.id)
-      expect(updated?.status).toBe(SyncJobStatus.Failed)
-      expect(updated?.error_message).toBe('Network error')
-    })
-  })
-
   describe('getStatus', () => {
     it('returns current scheduler status', () => {
       // Add some jobs
@@ -1017,46 +937,6 @@ describe('SyncScheduler', () => {
 
       expect(status.pendingJobs).toBe(1)
       expect(status.runningJobs).toBe(1)
-    })
-  })
-
-  describe('cleanup', () => {
-    it('deletes completed and failed jobs older than 24 hours', () => {
-      const t0 = 1_700_000_000_000
-      const finish = (chatId: number, failed: boolean) => {
-        const job = jobsService.create({
-          chat_id: chatId,
-          job_type: SyncJobType.ForwardCatchup,
-          priority: SyncPriority.High,
-        })
-        jobsService.markRunning(job.id)
-        if (failed) jobsService.markFailed(job.id, 'Network error')
-        else jobsService.markCompleted(job.id)
-        return job.id
-      }
-
-      Date.now = () => t0
-      finish(1, false)
-      finish(2, true)
-      Date.now = () => t0 + 60 * 60 * 1000
-      const kept = [finish(3, false), finish(4, true)]
-      kept.push(
-        jobsService.create({
-          chat_id: 5,
-          job_type: SyncJobType.ForwardCatchup,
-          priority: SyncPriority.High,
-        }).id,
-      )
-
-      Date.now = () => t0 + DAY_MS + 1
-      expect(scheduler.cleanup(DAY_MS)).toBe(2)
-      expect(
-        (
-          db.query('SELECT id FROM sync_jobs ORDER BY id').all() as Array<{
-            id: number
-          }>
-        ).map((row) => row.id),
-      ).toEqual(kept)
     })
   })
 

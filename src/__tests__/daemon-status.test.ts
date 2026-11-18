@@ -1,7 +1,7 @@
 /**
  * Tests for daemon status service
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it } from 'bun:test'
 import {
   createDaemonStatusService,
@@ -9,17 +9,14 @@ import {
   type DaemonStatusService,
   summarizeDaemonStatus,
 } from '../db/daemon-status'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 describe('DaemonStatusService', () => {
   let db: Database
   let service: DaemonStatusService
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     service = createDaemonStatusService(db)
   })
 
@@ -81,17 +78,6 @@ describe('DaemonStatusService', () => {
     it('returns empty object when no values', () => {
       const all = service.getAll()
       expect(all).toEqual({})
-    })
-  })
-
-  describe('clear', () => {
-    it('removes all values', () => {
-      service.set('key1', 'value1')
-      service.set('key2', 'value2')
-
-      service.clear()
-
-      expect(service.getAll()).toEqual({})
     })
   })
 
@@ -198,17 +184,6 @@ describe('DaemonStatusService', () => {
       })
     })
 
-    describe('isDaemonRunning', () => {
-      it('returns true when daemon is running', () => {
-        service.setDaemonRunning(12345, '0.3.1')
-        expect(service.isDaemonRunning()).toBe(true)
-      })
-
-      it('returns false when daemon is stopped', () => {
-        expect(service.isDaemonRunning()).toBe(false)
-      })
-    })
-
     describe('writeTick', () => {
       it("writes the account's figures and last_update", () => {
         const before = Date.now()
@@ -306,29 +281,10 @@ describe('DaemonStatusService', () => {
       })
     })
 
-    describe('updateLastUpdate', () => {
-      it('updates last update timestamp', () => {
-        const before = Date.now()
-        service.updateLastUpdate()
-        const after = Date.now()
-
-        const timestamp = parseInt(service.get('last_update')!, 10)
-        expect(timestamp).toBeGreaterThanOrEqual(before)
-        expect(timestamp).toBeLessThanOrEqual(after)
-      })
-    })
-
-    describe('setMessagesSynced', () => {
-      it('sets total messages synced count', () => {
-        service.setMessagesSynced(1000)
-        expect(service.get('messages_synced')).toBe('1000')
-      })
-    })
-
     describe('getDaemonInfo', () => {
       it('returns all daemon info', () => {
         service.setDaemonRunning(12345, '0.3.1')
-        service.setMessagesSynced(1000)
+        service.set('messages_synced', '1000')
         service.set('connection_status', 'connected')
         service.set('pending_jobs', '4')
 

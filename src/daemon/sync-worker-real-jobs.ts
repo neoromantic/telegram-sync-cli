@@ -15,8 +15,8 @@ import { toLong } from '../utils/long'
 import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
 import {
   canMakeApiCall,
-  getInputPeer,
   getWaitTime,
+  requestPeer,
   resolveJobError,
 } from './sync-worker-real-context'
 import {
@@ -84,29 +84,9 @@ export async function processForwardCatchupReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
 ): Promise<RealJobResult> {
-  let result: RealJobResult
   const chatId = job.chat_id
-
-  if (!canMakeApiCall(ctx)) {
-    result = {
-      success: false,
-      messagesFetched: 0,
-      rateLimited: true,
-      waitSeconds: getWaitTime(ctx),
-    }
-    return result
-  }
-
-  const inputPeer = getInputPeer(ctx, chatId)
-  if (!inputPeer) {
-    result = {
-      success: false,
-      messagesFetched: 0,
-      error: `Could not build InputPeer for chat ${chatId}`,
-      permanent: true,
-    }
-    return result
-  }
+  const peer = requestPeer(ctx, chatId)
+  if ('result' in peer) return peer.result
 
   const state = ctx.chatSyncState.get(chatId)
   // 0 is a real cursor: the first page of an empty chat leaves it there.
@@ -118,7 +98,7 @@ export async function processForwardCatchupReal(
     const messages = await fetchJobPage(
       ctx,
       chatId,
-      inputPeer,
+      peer.inputPeer,
       forwardPageRequest(cursor, ctx.config.batchSize),
     )
 
@@ -138,13 +118,12 @@ export async function processForwardCatchupReal(
           top_before: topBefore,
         })
       }
-      result = { success: true, messagesFetched: 0, hasMore: false }
-      return result
+      return { success: true, messagesFetched: 0, hasMore: false }
     }
 
     // Empty messages hold no data, but the cursor still moves past them.
     const top = Math.max(...above.map(rawMessageId))
-    const { inputs } = createMessageInputs(above, chatId, floor, floor)
+    const inputs = createMessageInputs(above, chatId)
 
     // Live updates already counted the messages they cached.
     const write = ctx.messagesCache.upsertBatch(inputs)
@@ -176,7 +155,7 @@ export async function processForwardCatchupReal(
       cursor_end: top,
     })
 
-    result = {
+    return {
       success: true,
       messagesFetched: newCount,
       hasMore,
@@ -185,8 +164,6 @@ export async function processForwardCatchupReal(
   } catch (err) {
     return resolveJobError(ctx, err)
   }
-
-  return result
 }
 
 export async function processBackwardHistoryReal(
@@ -194,25 +171,8 @@ export async function processBackwardHistoryReal(
   job: SyncJobRow,
 ): Promise<RealJobResult> {
   const chatId = job.chat_id
-
-  if (!canMakeApiCall(ctx)) {
-    return {
-      success: false,
-      messagesFetched: 0,
-      rateLimited: true,
-      waitSeconds: getWaitTime(ctx),
-    }
-  }
-
-  const inputPeer = getInputPeer(ctx, chatId)
-  if (!inputPeer) {
-    return {
-      success: false,
-      messagesFetched: 0,
-      error: `Could not build InputPeer for chat ${chatId}`,
-      permanent: true,
-    }
-  }
+  const peer = requestPeer(ctx, chatId)
+  if ('result' in peer) return peer.result
 
   const state = ctx.chatSyncState.get(chatId)
   if (state?.history_complete) {
@@ -239,10 +199,8 @@ export async function processBackwardHistoryReal(
   // complete.
   backwardCursor ??= 0
 
-  let result: RealJobResult
-
   try {
-    const messages = await fetchJobPage(ctx, chatId, inputPeer, {
+    const messages = await fetchJobPage(ctx, chatId, peer.inputPeer, {
       offsetId: backwardCursor,
       limit: ctx.config.batchSize,
     })
@@ -258,52 +216,50 @@ export async function processBackwardHistoryReal(
       ctx.historyRanges.recordPage(chatId, [], bounds)
       ctx.chatSyncState.markHistoryComplete(chatId)
       ctx.chatSyncState.updateLastSync(chatId, 'backward')
-      result = { success: true, messagesFetched: 0, historyComplete: true }
-    } else {
-      // Empty messages hold no data, but the cursor still moves past them.
-      const ids = messages.map(rawMessageId).filter((id) => id > 0)
-      const minId = ids.length > 0 ? Math.min(...ids) : backwardCursor
-      const { inputs } = createMessageInputs(messages, chatId, minId, minId)
+      return { success: true, messagesFetched: 0, historyComplete: true }
+    }
 
-      // The first page, live updates and pages the CLI cached may hold some
-      const write = ctx.messagesCache.upsertBatch(inputs)
-      if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
-      const newCount = write.inserted
+    // Empty messages hold no data, but the cursor still moves past them.
+    const ids = messages.map(rawMessageId).filter((id) => id > 0)
+    const minId = ids.length > 0 ? Math.min(...ids) : backwardCursor
+    const inputs = createMessageInputs(messages, chatId)
 
-      if (write.skipped === 0) {
-        ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), bounds)
-      }
+    // The first page, live updates and pages the CLI cached may hold some
+    const write = ctx.messagesCache.upsertBatch(inputs)
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
+    const newCount = write.inserted
 
-      ctx.chatSyncState.updateCursors(chatId, { backward_cursor: minId })
-      ctx.chatSyncState.incrementSyncedMessages(chatId, newCount)
-      ctx.chatSyncState.updateLastSync(chatId, 'backward')
+    if (write.skipped === 0) {
+      ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), bounds)
+    }
 
-      ctx.jobsService.updateProgress(job.id, {
-        messages_fetched: newCount,
-        cursor_end: minId,
-      })
+    ctx.chatSyncState.updateBackwardCursor(chatId, minId)
+    ctx.chatSyncState.incrementSyncedMessages(chatId, newCount)
+    ctx.chatSyncState.updateLastSync(chatId, 'backward')
 
-      // A page without message IDs can't move the cursor, so fetching the
-      // next one would fetch the same page again.
-      const historyComplete =
-        ids.length === 0 || minId <= 1 || messages.length < ctx.config.batchSize
-      if (historyComplete) {
-        ctx.chatSyncState.markHistoryComplete(chatId)
-      }
+    ctx.jobsService.updateProgress(job.id, {
+      messages_fetched: newCount,
+      cursor_end: minId,
+    })
 
-      result = {
-        success: true,
-        messagesFetched: newCount,
-        hasMore: !historyComplete,
-        newCursor: minId,
-        historyComplete,
-      }
+    // A page without message IDs can't move the cursor, so fetching the
+    // next one would fetch the same page again.
+    const historyComplete =
+      ids.length === 0 || minId <= 1 || messages.length < ctx.config.batchSize
+    if (historyComplete) {
+      ctx.chatSyncState.markHistoryComplete(chatId)
+    }
+
+    return {
+      success: true,
+      messagesFetched: newCount,
+      hasMore: !historyComplete,
+      newCursor: minId,
+      historyComplete,
     }
   } catch (err) {
     return resolveJobError(ctx, err)
   }
-
-  return result
 }
 
 /**
@@ -316,17 +272,15 @@ export async function processInitialLoadReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
 ): Promise<RealJobResult> {
-  let result: RealJobResult
   const chatId = job.chat_id
 
   if (!canMakeApiCall(ctx)) {
-    result = {
+    return {
       success: false,
       messagesFetched: 0,
       rateLimited: true,
       waitSeconds: getWaitTime(ctx),
     }
-    return result
   }
 
   // A chat with a forward cursor already had its first page; moving the
@@ -336,19 +290,11 @@ export async function processInitialLoadReal(
     return { success: true, messagesFetched: 0 }
   }
 
-  const inputPeer = getInputPeer(ctx, chatId)
-  if (!inputPeer) {
-    result = {
-      success: false,
-      messagesFetched: 0,
-      error: `Could not build InputPeer for chat ${chatId}`,
-      permanent: true,
-    }
-    return result
-  }
+  const peer = requestPeer(ctx, chatId)
+  if ('result' in peer) return peer.result
 
   try {
-    const messages = await fetchJobPage(ctx, chatId, inputPeer, {
+    const messages = await fetchJobPage(ctx, chatId, peer.inputPeer, {
       limit: ctx.config.batchSize,
     })
 
@@ -363,18 +309,17 @@ export async function processInitialLoadReal(
         history_complete: true,
         new_messages: 0,
       })
-      result = {
+      return {
         success: true,
         messagesFetched: 0,
         newCursor: 0,
         historyComplete: true,
       }
-      return result
     }
 
     const maxId = Math.max(...ids)
     const minId = Math.min(...ids)
-    const { inputs } = createMessageInputs(messages, chatId, minId, maxId)
+    const inputs = createMessageInputs(messages, chatId)
 
     // Live updates already counted the messages they cached.
     const write = ctx.messagesCache.upsertBatch(inputs)
@@ -401,7 +346,7 @@ export async function processInitialLoadReal(
       cursor_end: minId,
     })
 
-    result = {
+    return {
       success: true,
       messagesFetched: newCount,
       newCursor: maxId,
@@ -410,8 +355,6 @@ export async function processInitialLoadReal(
   } catch (err) {
     return resolveJobError(ctx, err)
   }
-
-  return result
 }
 
 /** Most message IDs one `getMessages` request asks for */
@@ -439,29 +382,13 @@ export async function processRefetchMessagesReal(
   )
   if (ids.length === 0) return { success: true, messagesFetched: 0 }
 
-  if (!canMakeApiCall(ctx)) {
-    return {
-      success: false,
-      messagesFetched: 0,
-      rateLimited: true,
-      waitSeconds: getWaitTime(ctx),
-    }
-  }
-
-  const inputPeer = getInputPeer(ctx, chatId)
-  if (!inputPeer) {
-    return {
-      success: false,
-      messagesFetched: 0,
-      error: `Could not build InputPeer for chat ${chatId}`,
-      permanent: true,
-    }
-  }
+  const peer = requestPeer(ctx, chatId)
+  if ('result' in peer) return peer.result
 
   try {
     const page = await fetchMessagesByIdRaw(
       ctx.client,
-      inputPeer,
+      peer.inputPeer,
       ids,
       ctx.signal,
     )
@@ -524,31 +451,17 @@ export async function processFetchSendersReal(
   const batch = ctx.senderLookups.nextBatch(job.chat_id, REFETCH_BATCH_SIZE)
   if (batch.length === 0) return { success: true, messagesFetched: 0 }
 
-  if (!canMakeApiCall(ctx)) {
-    return {
-      success: false,
-      messagesFetched: 0,
-      rateLimited: true,
-      waitSeconds: getWaitTime(ctx),
-    }
-  }
-
   const senderIds = batch.map((lookup) => lookup.sender_id)
-  const inputPeer = getInputPeer(ctx, job.chat_id)
-  if (!inputPeer) {
-    ctx.senderLookups.finish(senderIds, Date.now())
-    return {
-      success: false,
-      messagesFetched: 0,
-      error: `Could not build InputPeer for chat ${job.chat_id}`,
-      permanent: true,
-    }
+  const peer = requestPeer(ctx, job.chat_id)
+  if ('result' in peer) {
+    if (peer.result.permanent) ctx.senderLookups.finish(senderIds, Date.now())
+    return peer.result
   }
 
   try {
     const page = await fetchMessagesByIdRaw(
       ctx.client,
-      inputPeer,
+      peer.inputPeer,
       batch.map((lookup) => lookup.message_id),
       ctx.signal,
     )
@@ -577,31 +490,15 @@ export async function processCheckGroupParticipationReal(
   job: SyncJobRow,
 ): Promise<RealJobResult> {
   const chatId = job.chat_id
-  if (!canMakeApiCall(ctx)) {
-    return {
-      success: false,
-      messagesFetched: 0,
-      rateLimited: true,
-      waitSeconds: getWaitTime(ctx),
-    }
-  }
-
-  const inputPeer = getInputPeer(ctx, chatId)
-  if (!inputPeer) {
-    return {
-      success: false,
-      messagesFetched: 0,
-      error: `Could not build InputPeer for chat ${chatId}`,
-      permanent: true,
-    }
-  }
+  const peer = requestPeer(ctx, chatId)
+  if ('result' in peer) return peer.result
 
   try {
     ctx.signal?.throwIfAborted()
     const since = nowSeconds() - PARTICIPATION_WINDOW_SECONDS
     const request: tl.messages.RawSearchRequest = {
       _: 'messages.search',
-      peer: inputPeer,
+      peer: peer.inputPeer,
       q: '',
       fromId: { _: 'inputPeerSelf' },
       filter: { _: 'inputMessagesFilterEmpty' },

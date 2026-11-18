@@ -1,7 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { TelegramClient } from '@mtcute/bun'
 
-import { ConfigError } from '../../config'
 import { accountsDb, getAccountCacheDb } from '../../db'
 import { createChatsCache } from '../../db/chats-cache'
 import type { MessageSearchRow } from '../../db/messages-search'
@@ -16,8 +15,7 @@ import {
   type MessageAction,
 } from '../../utils/service-action'
 import {
-  isRateLimitError,
-  reportRateLimit,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import {
@@ -192,10 +190,7 @@ export function reportHistoryError(err: unknown, action: string): never {
       { chat: err.identifier },
     )
   }
-  if (err instanceof ConfigError) {
-    error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-  }
-  if (isRateLimitError(err)) reportRateLimit(err)
+  reportConfigOrRateLimitError(err)
   const message = err instanceof Error ? err.message : 'Unknown error'
   error(ErrorCodes.TELEGRAM_ERROR, `Failed to ${action}: ${message}`)
 }

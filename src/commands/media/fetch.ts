@@ -6,7 +6,10 @@
 import type { Database } from 'bun:sqlite'
 import type { TelegramClient, tl } from '@mtcute/bun'
 
-import { parseRawMessage } from '../../daemon/sync-worker-real-helpers'
+import {
+  fetchMessagesByIdRaw,
+  parseRawMessage,
+} from '../../daemon/sync-worker-real-helpers'
 import { createMessagesCache } from '../../db/messages-cache'
 import { createUsersCache } from '../../db/users-cache'
 import { ErrorCodes } from '../../types'
@@ -43,38 +46,20 @@ export async function fetchMessageById(
   messageId: number,
   signal?: AbortSignal,
 ): Promise<FetchedMessage> {
-  const id: tl.TypeInputMessage[] = [{ _: 'inputMessageID', id: messageId }]
-  const peer = chat.inputPeer
-  const response =
-    peer._ === 'inputPeerChannel'
-      ? await client.call(
-          {
-            _: 'channels.getMessages',
-            channel: {
-              _: 'inputChannel',
-              channelId: peer.channelId,
-              accessHash: peer.accessHash,
-            },
-            id,
-          },
-          { abortSignal: signal },
-        )
-      : await client.call(
-          { _: 'messages.getMessages', id },
-          { abortSignal: signal },
-        )
-
-  if (response._ === 'messages.messagesNotModified') {
-    throw messageNotFound(chat.chatId, messageId)
-  }
-  const message = response.messages.find(
+  const page = await fetchMessagesByIdRaw(
+    client,
+    chat.inputPeer,
+    [messageId],
+    signal,
+  )
+  const message = (page.messages as tl.TypeMessage[]).find(
     (item): item is FetchedRawMessage =>
       item._ !== 'messageEmpty' && item.id === messageId,
   )
   if (!message || toPeerIdFromRawPeer(message.peerId) !== chat.chatId) {
     throw messageNotFound(chat.chatId, messageId)
   }
-  return { message, chats: response.chats, users: response.users }
+  return { message, chats: page.chats, users: page.users }
 }
 
 /**

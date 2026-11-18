@@ -48,6 +48,7 @@ import {
 import { createUsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { toRawJson } from '../utils/raw-json'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { photoMessage } from './helpers/photo-message'
 
@@ -68,9 +69,7 @@ const DAY = 24 * 60 * 60
 const NOW = 1_780_000_000
 
 function createDb(): Database {
-  const db = new Database(':memory:')
-  initCacheSchema(db)
-  initSyncSchema(db)
+  const db = createAccountCacheDb()
   createChatsCache(db).upsertMany(
     [
       fakeDialog({ kind: 'supergroup', id: 9_100_000_001, membersCount: 5 }),

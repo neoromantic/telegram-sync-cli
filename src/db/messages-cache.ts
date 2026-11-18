@@ -37,15 +37,6 @@ export interface MessageInput {
   raw_json: string
 }
 
-/**
- * Options for listing messages
- */
-export interface ListMessagesOptions {
-  limit: number
-  offset?: number
-  includeDeleted?: boolean
-}
-
 /** A message ID that more than one private chat or basic group has live */
 export interface AmbiguousMessageId {
   messageId: number
@@ -104,8 +95,6 @@ export interface MessagesCache {
    * basic groups, for delete events without chat context
    */
   findChatIdsByMessageIds(messageIds: number[]): MessageChatLookup
-  /** List messages for a chat in reverse chronological order */
-  listByChatId(chatId: number, options: ListMessagesOptions): MessageCacheRow[]
   /** Mark messages as deleted */
   markDeleted(chatId: number, messageIds: number[]): void
   /**
@@ -125,7 +114,7 @@ export interface MessagesCache {
   /** Get the oldest message ID for a chat */
   getOldestMessageId(chatId: number): number | null
   /** Count messages in a chat */
-  countByChatId(chatId: number, includeDeleted?: boolean): number
+  countByChatId(chatId: number): number
 }
 
 /**
@@ -194,24 +183,6 @@ export function createMessagesCache(db: Database): MessagesCache {
       LIMIT $limit
     `),
 
-    listByChatId: db
-      .query(`
-      SELECT * FROM messages_cache
-      WHERE chat_id = $chat_id AND is_deleted = 0
-      ORDER BY date DESC
-      LIMIT $limit OFFSET $offset
-    `)
-      .as(MessageCacheRow),
-
-    listByChatIdIncludeDeleted: db
-      .query(`
-      SELECT * FROM messages_cache
-      WHERE chat_id = $chat_id
-      ORDER BY date DESC
-      LIMIT $limit OFFSET $offset
-    `)
-      .as(MessageCacheRow),
-
     markDeleted: db.prepare(`
       UPDATE messages_cache
       SET is_deleted = 1, updated_at = $now
@@ -242,11 +213,6 @@ export function createMessagesCache(db: Database): MessagesCache {
     countByChatId: db.query(`
       SELECT COUNT(*) as count FROM messages_cache
       WHERE chat_id = $chat_id AND is_deleted = 0
-    `),
-
-    countByChatIdAll: db.query(`
-      SELECT COUNT(*) as count FROM messages_cache
-      WHERE chat_id = $chat_id
     `),
   }
 
@@ -384,22 +350,6 @@ export function createMessagesCache(db: Database): MessagesCache {
       return { chatIds, ambiguous }
     },
 
-    listByChatId(
-      chatId: number,
-      options: ListMessagesOptions,
-    ): MessageCacheRow[] {
-      const params = {
-        $chat_id: chatId,
-        $limit: options.limit,
-        $offset: options.offset ?? 0,
-      }
-
-      if (options.includeDeleted) {
-        return stmts.listByChatIdIncludeDeleted.all(params)
-      }
-      return stmts.listByChatId.all(params)
-    },
-
     markDeleted(chatId: number, messageIds: number[]): void {
       const now = Date.now()
       const transaction = db.transaction(() => {
@@ -465,9 +415,10 @@ export function createMessagesCache(db: Database): MessagesCache {
       return result?.min_id ?? null
     },
 
-    countByChatId(chatId: number, includeDeleted = false): number {
-      const stmt = includeDeleted ? stmts.countByChatIdAll : stmts.countByChatId
-      const result = stmt.get({ $chat_id: chatId }) as { count: number } | null
+    countByChatId(chatId: number): number {
+      const result = stmts.countByChatId.get({ $chat_id: chatId }) as {
+        count: number
+      } | null
       return result?.count ?? 0
     },
   }

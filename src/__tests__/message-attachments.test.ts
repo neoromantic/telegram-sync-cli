@@ -2,7 +2,7 @@
  * message_attachments, written with the message it mirrors
  * (src/db/message-attachments.ts, src/db/messages-cache.ts)
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, it } from 'bun:test'
 
 import { parseRawMessage } from '../daemon/sync-worker-real-helpers'
@@ -12,12 +12,9 @@ import {
   type MessageInput,
   type MessagesCache,
 } from '../db/messages-cache'
-import { initCacheSchema } from '../db/schema'
-import {
-  createMessageAttachmentsSchema,
-  initSyncSchema,
-} from '../db/sync-schema'
+import { createMessageAttachmentsSchema } from '../db/sync-schema'
 import { extractAttachment } from '../utils/attachment'
+import { createAccountCacheDb } from './helpers/cache-db'
 import { pdfDocumentMessage } from './helpers/media-messages'
 import { takePartIn } from './helpers/participation'
 import { photoMessage } from './helpers/photo-message'
@@ -46,9 +43,7 @@ describe('message_attachments', () => {
   let cache: MessagesCache
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     cache = createMessagesCache(db)
   })
 

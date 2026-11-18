@@ -3,22 +3,14 @@
  * #142): writes pile up segments, a merge batch merges them and drops the
  * entries of deleted and re-indexed messages, and answers stay the same.
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { describe, expect, it } from 'bun:test'
 
 import { runPendingMigrations } from '../db/background-migrations'
-import { initCacheSchema } from '../db/schema'
 import { isSearchMergeDue, runSearchMergeBatch } from '../db/search-merge'
-import { initSyncSchema } from '../db/sync-schema'
+import { createAccountCacheDb } from './helpers/cache-db'
 
 const WORDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot']
-
-function open(): Database {
-  const db = new Database(':memory:')
-  initCacheSchema(db)
-  initSyncSchema(db)
-  return db
-}
 
 /** Messages `from` to `to`, each write transaction `perWrite` of them */
 function writeMessages(
@@ -79,7 +71,7 @@ function mergeAll(db: Database): number {
 
 describe('search index merges', () => {
   it('leave writes alone: segments pile up until a merge', () => {
-    const db = open()
+    const db = createAccountCacheDb()
     // A segment per message: FTS5 itself merges only a level of 16 (crisismerge)
     writeMessages(db, 400, 10)
     expect(segments(db)).toBeGreaterThan(8)
@@ -123,7 +115,7 @@ describe('search index merges', () => {
   }
 
   it("drop a re-indexed message's old entries", () => {
-    const db = open()
+    const db = createAccountCacheDb()
     writeMessages(db, 400, 400)
     mergeAll(db)
     const merged = indexBytes(db)
@@ -141,7 +133,7 @@ describe('search index merges', () => {
   })
 
   it('leave a few deleted entries for later', () => {
-    const db = open()
+    const db = createAccountCacheDb()
     writeMessages(db, 400, 400)
     mergeAll(db)
     // 5% of the entries deleted: under a tenth
@@ -156,7 +148,7 @@ describe('search index merges', () => {
   })
 
   it('stop FTS5 from merging inside writes on a new cache', () => {
-    const options = open()
+    const options = createAccountCacheDb()
       .query(
         `SELECT k, v FROM message_search_config WHERE k IN ('automerge', 'deletemerge', 'usermerge') ORDER BY k`,
       )
@@ -169,7 +161,7 @@ describe('search index merges', () => {
   })
 
   it('are due again only after a write', () => {
-    const db = open()
+    const db = createAccountCacheDb()
     writeMessages(db, 100, 10)
     expect(isSearchMergeDue(db)).toBe(true)
     mergeAll(db)
@@ -184,7 +176,7 @@ describe('search index merges', () => {
   })
 
   it('stop a batch at its time limit and go on in the next one', () => {
-    const db = open()
+    const db = createAccountCacheDb()
     writeMessages(db, 2_000, 20)
     let clock = 0
     // Each step takes 10 ms on this clock
@@ -202,7 +194,7 @@ describe('search index merges', () => {
   })
 
   it('merge only levels of four between the batches of a re-index, then the rest', () => {
-    const db = open()
+    const db = createAccountCacheDb()
     // FTS5 writes a segment per message: each insert is its own statement
     writeMessages(db, 3, 3)
     expect(segments(db)).toBe(3)
@@ -224,7 +216,7 @@ describe('search index merges', () => {
   })
 
   it('run after the background migrations, in the daemon and tg db migrate', async () => {
-    const db = open()
+    const db = createAccountCacheDb()
     writeMessages(db, 400, 10)
     await runPendingMigrations(db)
     expect(isSearchMergeDue(db)).toBe(false)

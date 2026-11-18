@@ -13,12 +13,12 @@ import { ConfigError } from '../config'
 import { createChatSyncStateService } from '../db/chat-sync-state'
 import { type ChatsCache, createChatsCache } from '../db/chats-cache'
 import { createMessagesCache, type MessagesCache } from '../db/messages-cache'
-import { createTestCacheDatabase } from '../db/schema'
-import { initSyncSchema, SyncPriority } from '../db/sync-schema'
+import { SyncPriority } from '../db/sync-schema'
 import type { ChatType } from '../db/types'
 import { createUsersCache, type UsersCache } from '../db/users-cache'
 import { toLong } from '../utils/long'
 import { RateLimitError } from '../utils/telegram-rate-limits'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
 import { fakeDialog } from './helpers/fake-dialogs'
 import { legacyChatRow } from './helpers/legacy-cache'
 
@@ -66,8 +66,7 @@ describe('resolvePeer with numeric IDs', () => {
   let messagesCache: MessagesCache
 
   beforeEach(() => {
-    db = createTestCacheDatabase().db
-    initSyncSchema(db)
+    db = createAccountCacheDb()
     usersCache = createUsersCache(db)
     chatsCache = createChatsCache(db)
     messagesCache = createMessagesCache(db)
@@ -100,20 +99,7 @@ describe('resolvePeer with numeric IDs', () => {
     title: string,
     accessHash: string | null = null,
   ) {
-    chatsCache.upsert({
-      chat_id: chatId,
-      type,
-      title,
-      username: null,
-      member_count: null,
-      access_hash: accessHash,
-      is_creator: 0,
-      is_admin: 0,
-      last_message_id: null,
-      last_message_at: null,
-      fetched_at: Date.now(),
-      raw_json: '{}',
-    })
+    chatsCache.upsert(chatRow(chatId, type, { title, access_hash: accessHash }))
   }
 
   function resolve(identifier: string, client: Pick<TelegramClient, 'call'>) {
@@ -218,20 +204,16 @@ describe('resolvePeer with numeric IDs', () => {
     })
 
     it("keeps a cached channel's dialog metadata when it resolves a new username", async () => {
-      chatsCache.upsert({
-        chat_id: '-1009100000006',
-        type: 'channel',
-        title: 'Made-up News',
-        username: 'made_up_old_alias',
-        member_count: 123,
-        access_hash: '777',
-        is_creator: 0,
-        is_admin: 0,
-        last_message_id: 77,
-        last_message_at: 1_760_000_000_000,
-        fetched_at: Date.now(),
-        raw_json: '{}',
-      })
+      chatsCache.upsert(
+        chatRow('-1009100000006', 'channel', {
+          title: 'Made-up News',
+          username: 'made_up_old_alias',
+          member_count: 123,
+          access_hash: '777',
+          last_message_id: 77,
+          last_message_at: 1_760_000_000_000,
+        }),
+      )
       const channel = {
         _: 'channel',
         id: 9_100_000_006,

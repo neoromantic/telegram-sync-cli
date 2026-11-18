@@ -3,16 +3,15 @@
  * accounts in memory, and each account's cache from a callback, so a test
  * can give every account its own in-memory database.
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import {
   accountMediaPath,
   CacheUnavailableError,
   isCacheUnavailableError,
 } from '../../db/cache-layout'
 import type { AccountsDbInterface } from '../../db/index'
-import { initCacheSchema } from '../../db/schema'
-import { initSyncSchema } from '../../db/sync-schema'
 import type { Account } from '../../types'
+import { createAccountCacheDb } from './cache-db'
 
 export function testAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -124,12 +123,7 @@ export function mockDbModule(options: {
     openReadOnlyAccountCacheDb: requireAccount,
     closeAccountCacheDbs: () => {},
     ensureCacheLayout: () => ({ state: 'none' as const }),
-    createSchemaOnlyDb: () => {
-      const db = new Database(':memory:')
-      initCacheSchema(db)
-      initSyncSchema(db)
-      return db
-    },
+    createSchemaOnlyDb: createAccountCacheDb,
     getDataDir: () => process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? '',
     getAccountMediaDir: (accountId: number) =>
       accountMediaPath(process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? '', accountId),

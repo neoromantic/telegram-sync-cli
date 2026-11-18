@@ -24,6 +24,7 @@ import { initSyncSchema } from '../db/sync-schema'
 import { extractAttachment } from '../utils/attachment'
 import { resolveRawMessageType } from '../utils/message-type'
 import { toRawJson } from '../utils/raw-json'
+import { createAccountCacheDb } from './helpers/cache-db'
 import {
   OLD_FORM_CHAT_ID,
   oldFormChats,
@@ -489,9 +490,7 @@ describe('a new cache', () => {
   })
 
   it('registers every migration as done', () => {
-    const db = new Database(':memory:')
-    initCacheSchema(db)
-    initSyncSchema(db)
+    const db = createAccountCacheDb()
     for (const status of readMigrationStatus(db)) {
       expect(status).toMatchObject({ state: 'done', done: 0, total: 0 })
     }

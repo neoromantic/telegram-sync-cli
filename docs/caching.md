@@ -187,7 +187,6 @@ The caching system uses dedicated service classes:
 - `getByPhone(phone)`
 - `upsert(user)` / `upsertMany(users)`
 - `search(query, limit)`
-- `getStale(ttlMs)` / `prune(maxAgeMs)`
 
 **ChatsCache** (`src/db/chats-cache.ts`):
 - `getById(chatId)`
@@ -195,7 +194,6 @@ The caching system uses dedicated service classes:
 - `list(opts)`
 - `search(query, limit)`
 - `upsert(chat)` / `upsertMany(chats)`
-- `getStale(ttlMs)` / `prune(maxAgeMs)`
 
 ## Cache Lookup Pattern (Implemented)
 

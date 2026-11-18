@@ -4,7 +4,7 @@
  * and an injected transfer, resume, errors and content protection. Made-up
  * messages and files in temp dirs only.
  */
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
   existsSync,
@@ -50,14 +50,13 @@ import { createChatsCache } from '../db/chats-cache'
 import { createMessageAttachmentsStore } from '../db/message-attachments'
 import { createMessagesCache } from '../db/messages-cache'
 import { createRateLimitsService } from '../db/rate-limits'
-import { initCacheSchema } from '../db/schema'
-import { initSyncSchema } from '../db/sync-schema'
 import { createUsersCache } from '../db/users-cache'
 import { type Account, ErrorCodes } from '../types'
 import { extractAttachment, pickThumb } from '../utils/attachment'
 import { mediaPaths, thumbPaths } from '../utils/media-cache'
 import { RateLimitError } from '../utils/telegram-rate-limits'
 import { MEDIA_FLOOD_SLEEP_MS } from '../utils/telegram-transfer'
+import { chatRow, createAccountCacheDb } from './helpers/cache-db'
 import { documentMessage, pdfDocumentMessage } from './helpers/media-messages'
 import { takePartIn } from './helpers/participation'
 import { fakeBytes, photoMessage } from './helpers/photo-message'
@@ -106,9 +105,7 @@ let mediaDir: string
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'tg-media-download-'))
   mediaDir = join(root, 'media')
-  db = new Database(':memory:')
-  initCacheSchema(db)
-  initSyncSchema(db)
+  db = createAccountCacheDb()
   takePartIn(db, TEAM_CHAT_ID)
   createUsersCache(db).upsert({
     user_id: String(ALICE_ID),
@@ -118,21 +115,16 @@ beforeEach(() => {
     fetched_at: NOW,
     raw_json: '{}',
   })
-  createChatsCache(db).upsert({
-    chat_id: String(TEAM_CHAT_ID),
-    type: 'supergroup',
-    title: 'Example Team',
-    username: null,
-    member_count: 30,
-    access_hash: '7000000000000000005',
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: NOW,
-    // A dialog row: no chat flags
-    raw_json: JSON.stringify({ _: 'dialog', unreadCount: 0 }),
-  })
+  createChatsCache(db).upsert(
+    chatRow(TEAM_CHAT_ID, 'supergroup', {
+      title: 'Example Team',
+      member_count: 30,
+      access_hash: '7000000000000000005',
+      fetched_at: NOW,
+      // A dialog row: no chat flags
+      raw_json: JSON.stringify({ _: 'dialog', unreadCount: 0 }),
+    }),
+  )
 })
 
 afterEach(() => {

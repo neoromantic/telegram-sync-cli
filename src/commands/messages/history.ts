@@ -118,12 +118,7 @@ export function cacheHistoryResponse(
 ): MessageRow[] {
   const usersCache = createUsersCache(cacheDb)
   const messagesCache = createMessagesCache(cacheDb)
-  const { inputs } = createMessageInputs(
-    messages,
-    chatId,
-    Number.MAX_SAFE_INTEGER,
-    0,
-  )
+  const inputs = createMessageInputs(messages, chatId)
 
   // It reads before it writes, so it takes the write lock first
   cacheDb

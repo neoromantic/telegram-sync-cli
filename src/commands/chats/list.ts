@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import type { Dialog, TelegramClient, tl } from '@mtcute/bun'
 import { type ArgsDef, defineCommand } from 'citty'
-import { ConfigError, getResolvedCacheConfig } from '../../config'
+import { getResolvedCacheConfig } from '../../config'
 import {
   chatSyncView,
   createChatSyncStateService,
@@ -14,12 +14,14 @@ import { getClientForAccount } from '../../services/telegram'
 import { ErrorCodes } from '../../types'
 import { openAccountCache } from '../../utils/account-cache'
 import { ACCOUNT_SELECTOR_DESCRIPTION } from '../../utils/account-selector'
-import { buildCachePaginatedResponse } from '../../utils/cache-pagination'
+import {
+  buildCachePaginatedResponse,
+  paginate,
+} from '../../utils/cache-pagination'
 import { error, success, verbose } from '../../utils/output'
 import { apiUserToCacheInput } from '../../utils/telegram-mappers'
 import {
-  isRateLimitError,
-  reportRateLimit,
+  reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from '../../utils/telegram-rate-limits'
 import { allowedChatIds } from '../access'
@@ -205,25 +207,17 @@ export const listChatsCommand = defineCommand({
         (a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0),
       )
 
-      const paginatedChats = filteredChats.slice(offset, offset + limit)
-      const items = paginatedChats.map(toItem)
-
+      const page = paginate(filteredChats, offset, limit)
       const response: ChatsListOutput = {
-        items,
-        total: filteredChats.length,
-        offset,
-        limit,
-        hasMore: offset + limit < filteredChats.length,
+        ...page,
+        items: page.items.map(toItem),
         source: 'api',
         stale: false,
       }
 
       success(response, nextChatsPage(args, response))
     } catch (err) {
-      if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
-      }
-      if (isRateLimitError(err)) reportRateLimit(err)
+      reportConfigOrRateLimitError(err)
       const message = err instanceof Error ? err.message : 'Unknown error'
       error(ErrorCodes.TELEGRAM_ERROR, `Failed to fetch chats: ${message}`)
     }

@@ -458,6 +458,5 @@ Rate limits are tracked per API method:
 - `src/daemon/scheduler.ts`
 - `src/daemon/sync-retry.ts`
 - `src/db/sender-lookups.ts`
-- `src/daemon/sync-worker-core.ts`
 - `src/daemon/sync-worker-real-jobs.ts`
 - `src/daemon/daemon-bootstrap.ts`
