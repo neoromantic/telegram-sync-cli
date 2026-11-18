@@ -264,8 +264,9 @@ All errors are returned as JSON on stderr (unless `--quiet`):
   "the same command" means the one that failed, unchanged.
 - `retryable` is always there. `true` means the same command, run again unchanged, can
   succeed: after `details.wait_seconds` for `RATE_LIMITED`, at once for `NETWORK_ERROR` and
-  for a download that waited too long for another tg process. `false` means something has to
-  change first, such as the arguments, the account or the daemon.
+  for a download that waited too long for another tg process, and for a `tg api` call that
+  Telegram failed on its side (`details.telegramErrorCode` 500 or -503). `false` means
+  something has to change first, such as the arguments, the account or the daemon.
 
 `RATE_LIMITED` always carries the wait in `details.wait_seconds` and the method in
 `details.method`, whichever command hit it: the first FLOOD_WAIT from Telegram, and every
@@ -309,7 +310,8 @@ A download that stalls for 60 seconds or loses its connection is `NETWORK_ERROR`
 `details.resumable: true`; a flood wait over 10 seconds is `RATE_LIMITED` (exit 5) with
 `details: { method: "upload.getFile", wait_seconds }`. Both are `retryable` and keep the partial
 download for the next run. A download that waits more than 10 minutes for another tg process
-downloading the same file is `GENERAL_ERROR`, also `retryable`. A download stopped with Ctrl-C or SIGTERM exits 130 and prints no JSON.
+downloading the same file is `GENERAL_ERROR`, also `retryable`. A download stopped with Ctrl-C
+or SIGTERM exits 130 and prints no JSON.
 
 `DAEMON_NOT_RUNNING` (exit 1) is returned by `tg daemon stop` without a daemon, and by
 `tg messages wait` and `watch` when the daemon doesn't run for the account, with

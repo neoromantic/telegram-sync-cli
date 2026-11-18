@@ -34,6 +34,9 @@ import {
   resolvePeer,
 } from './send/peer-resolver'
 
+/** Telegram's own failures, which can pass on a retry: 500 INTERNAL and the -503 timeout */
+const TRANSIENT_TELEGRAM_CODES: ReadonlySet<unknown> = new Set([500, -503])
+
 /**
  * Generic API command
  *
@@ -183,7 +186,13 @@ export const apiCommand = defineCommand({
         }
       }
 
-      error(code, `API call failed: ${message}`, details)
+      error(
+        code,
+        `API call failed: ${message}`,
+        details,
+        undefined,
+        TRANSIENT_TELEGRAM_CODES.has(details.telegramErrorCode),
+      )
     }
   },
 })
