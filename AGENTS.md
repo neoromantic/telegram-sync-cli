@@ -60,7 +60,8 @@ and raw access to any MTProto method. It runs on Bun and is built on
 
 ```bash
 bun run src/index.ts <command>   # run the CLI from source
-bun run check                    # lint (Biome) + typecheck
+bun run check                    # lint (Biome) + typecheck + check:knip
+bun run check:knip               # Knip: unused files and dependencies, unlisted or unresolved imports
 bun run test                     # unit tests, offline
 bun run test:e2e                 # CLI e2e tests, offline
 bun run build                    # compile dist/tg for this platform
@@ -74,6 +75,9 @@ bun run docs:outputs             # regenerate output tables in docs/cli-commands
 - `bin/tg.js` is a 3-line ESM shim (`#!/usr/bin/env bun`) that runs `src/index.ts`. The npm
   package ships source, not `dist/tg`, and has no `postinstall`. Requires Bun >= 1.4.
 - The version lives only in `package.json` (read by `src/version.ts`).
+- Knip (`knip.json`) checks files, dependencies and imports, not exports: exported names are
+  public API. A file that only a test spawns by path is listed under `entry`. Import a package
+  only if `package.json` declares it, even when another dependency already brings it in.
 - The compiled binary (70–100 MB, embedded Bun + SQLite) is never shipped in the npm tarball.
   The release workflow attaches one per target to the GitHub Release, and the Homebrew formula
   `neoromantic/tap/tg` installs it. Targets: darwin arm64/x64, linux x64/arm64, windows x64.
