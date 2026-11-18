@@ -471,6 +471,8 @@ tg send --to me -m "Note to self"   # Saved Messages
 tg send --to -1001234567890 -m "Hi" # a chat ID as tg messages search prints it
 tg send --to me --file ./report.pdf --caption "Q3"
 tg send --to @username --file ./photo.jpg --force-document
+tg send --to me --markdown -m "$(cat report.md)"   # a rich message: headings, tables, lists
+tg send --to me --html -m "<h1>Report</h1><table>…</table>"
 ```
 
 `--to` takes an `@username`, a user or chat ID as any `tg` command prints it (`tg chats list`,
@@ -489,6 +491,34 @@ that, whatever its length.
 
 A sent message goes into the message cache right away, so `tg messages search`
 finds it without the daemon.
+
+`--markdown` and `--html` send `--message` as a rich message: Telegram parses the text itself
+and shows headings, tables, ordered, unordered and task lists, block quotations, code blocks,
+collapsible details, formulas and footnotes, next to bold, italic, links and the other inline
+styles. Without either flag the text is sent as written, so `**bold**` arrives as asterisks.
+
+```bash
+tg send --to me --markdown -m '# Prices
+
+| Item | Price |
+|:-----|------:|
+| Tea  | **3** |
+
+- [x] ordered
+- [ ] paid'
+```
+
+The syntax is Telegram's, described under
+[Rich Markdown style](https://core.telegram.org/bots/api#rich-markdown-style) and
+[Rich HTML style](https://core.telegram.org/bots/api#rich-html-style); media in it must be an
+`http(s)` URL. A rich message takes up to 32768 characters, 500 blocks, 16 levels of nesting,
+50 media and 20 table columns. Telegram is lenient with malformed markup (an unclosed tag still
+sends); a message over a limit or with nothing in it fails with `TELEGRAM_ERROR` (exit 5),
+`details: { telegramError }` naming Telegram's reason (`RICH_MESSAGE_TABLE_COLS_TOO_MANY`,
+`RICH_MESSAGE_EMPTY`…) and the limits in `suggestion`. The result has `format`: `markdown`,
+`html`, or `null` for plain text. A rich message has no `text`: its content is in the
+`richMessage` of its `raw_json`. Both flags together, or either with `--file` (a caption is
+plain text), are `INVALID_ARGS`.
 
 `--file` sends one file: JPEG, PNG and WebP images up to 10 MB as a photo, anything else as a
 document under its file name (`--force-document` sends an image as a document too). `--caption`

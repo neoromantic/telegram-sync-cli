@@ -65,6 +65,17 @@ describe('E2E: send --file arguments', () => {
     )
   })
 
+  it('refuses --markdown with --html, and either with --file', async () => {
+    await expectInvalid(
+      ['--message', 'hi', '--markdown', '--html'],
+      'Use --markdown or --html, not both',
+    )
+    await expectInvalid(
+      ['--file', join(filesDir, 'report.pdf'), '--caption', 'Q3', '--markdown'],
+      '--markdown formats --message: a caption is plain text',
+    )
+  })
+
   it('refuses --caption and --force-document without --file', async () => {
     await expectInvalid(
       ['--message', 'hi', '--caption', 'Q3'],
