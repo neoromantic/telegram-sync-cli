@@ -1,61 +1,21 @@
-import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { RpcCallOptions, TelegramClient } from "@mtcute/bun";
+import type { RpcCallOptions } from "@mtcute/bun";
 
 import { CONTACTS_METHOD } from "./daemon-contacts";
-import type { DaemonContext } from "./daemon-context";
+import { getAccountCacheDb } from "../db";
 import { createChatSyncStateService } from "../db/chat-sync-state";
 import { createDaemonStatusService } from "../db/daemon-status";
 import { createSyncJobsService } from "../db/sync-jobs";
 import { SyncJobType, SyncPriority } from "../db/sync-schema";
-import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { createFakeAccountsDb, mockDbModule, testAccount } from "../test/db-mock.test-utils";
+import { useTestDataDir } from "../test/accounts.test-utils";
 import { type FakeDialogInput, fakeDialogClient } from "../test/fake-dialogs.test-utils";
+import { fakeTelegramClients } from "../test/fake-telegram-client.test-utils";
 import { waitLikeFloodWait } from "../test/flood-wait.test-utils";
 
-const accounts = () => createFakeAccountsDb([testAccount({ id: 1 })]);
-
-const caches = new Map<number, Database>();
-
-mock.module("../db", () =>
-  mockDbModule({
-    cacheFor: (accountId) => {
-      const cache = caches.get(accountId);
-      if (!cache) throw new Error(`No cache for account ${accountId}`);
-      return cache;
-    },
-    accountsDb: accounts(),
-  }),
-);
-
-const clients = new Map<number, TelegramClient>();
-let jobsInFlightAtDisconnect: number | null = null;
-mock.module("./daemon-accounts", () => ({
-  connectAccount: async (
-    ctx: DaemonContext,
-    accountId: number,
-    phone: string,
-    name: string | null,
-  ) => {
-    const client = clients.get(accountId);
-    ctx.state.accounts.set(accountId, {
-      accountId,
-      phone,
-      name,
-      status: client ? "connected" : "error",
-      client,
-    });
-    return client !== undefined;
-  },
-  disconnectAllAccounts: async (ctx: DaemonContext) => {
-    jobsInFlightAtDisconnect = ctx.runtime.jobsInFlight.size;
-  },
-  setupSignalHandlers: () => {},
-  attemptReconnect: async () => {},
-  scheduleReconnect: () => {},
-}));
+let onDestroy: (() => void) | null = null;
+const { clients } = fakeTelegramClients({ onDestroy: () => onDestroy?.() });
 
 const { createDaemon } = await import("./daemon");
 const { DaemonExitCode } = await import("./types");
@@ -82,9 +42,10 @@ let error: ReturnType<typeof spyOn>;
 
 const output = () => log.mock.calls.map((call: unknown[]) => String(call[0])).join("\n");
 
+useTestDataDir();
+
 beforeEach(() => {
   mkdirSync(tempDir, { recursive: true });
-  caches.set(1, createAccountCacheDb());
   log = spyOn(console, "log");
   warn = spyOn(console, "warn");
   error = spyOn(console, "error");
@@ -94,16 +55,14 @@ afterEach(() => {
   log.mockRestore();
   warn.mockRestore();
   error.mockRestore();
-  for (const cache of caches.values()) cache.close();
-  caches.clear();
   clients.clear();
-  jobsInFlightAtDisconnect = null;
+  onDestroy = null;
   rmSync(tempDir, { recursive: true, force: true });
 });
 
 describe("daemon stop during a FLOOD_WAIT", () => {
   it("ends the startup dialog pass and exits at once", async () => {
-    const daemon = createDaemon({ pidPath, verbosity: "verbose" }, accounts());
+    const daemon = createDaemon({ pidPath, verbosity: "verbose" });
     let stoppedAt = 0;
     const fake = fakeClient(
       [{ kind: "user", id: CHAT, topMessage: 10 }],
@@ -134,13 +93,13 @@ describe("daemon stop during a FLOOD_WAIT", () => {
       "[Account 1] Dialog pass stopped after 1 dialogs: the daemon is stopping",
     );
     expect(output()).not.toContain("Dialog page failed during the stop");
-    expect(createDaemonStatusService(caches.get(1)!).getAll()).toMatchObject({
+    expect(createDaemonStatusService(getAccountCacheDb(1)).getAll()).toMatchObject({
       daemon_status: "stopped",
     });
   });
 
   it("leaves the sync job pending as it was and exits at once", async () => {
-    const cache = caches.get(1)!;
+    const cache = getAccountCacheDb(1);
     createChatSyncStateService(cache).upsert({
       chat_id: CHAT,
       chat_type: "private",
@@ -158,7 +117,7 @@ describe("daemon stop during a FLOOD_WAIT", () => {
          next_run_at = 0 WHERE id = ?`,
       [created.id],
     );
-    const daemon = createDaemon({ pidPath, verbosity: "verbose" }, accounts());
+    const daemon = createDaemon({ pidPath, verbosity: "verbose" });
     let stoppedAt = 0;
     let jobRequests = 0;
     const fake = fakeClient([{ kind: "user", id: CHAT, topMessage: 10 }], {}, (request, params) => {
@@ -174,6 +133,10 @@ describe("daemon stop during a FLOOD_WAIT", () => {
       }).catch((err) => new Promise((_resolve, reject) => setTimeout(() => reject(err), 5)));
     });
     clients.set(1, fake.client);
+    const runningJobsAtDisconnect: number[] = [];
+    onDestroy = () => {
+      runningJobsAtDisconnect.push(jobs.countJobs().running);
+    };
 
     const exitCode = await daemon.start();
     const elapsed = performance.now() - stoppedAt;
@@ -187,16 +150,18 @@ describe("daemon stop during a FLOOD_WAIT", () => {
     expect(output()).toContain(
       `[Account 1] Job ${created.id} left pending: the daemon is stopping`,
     );
-    expect(jobs.getById(created.id)).toMatchObject({
+    const reopened = getAccountCacheDb(1);
+    const jobsAfter = createSyncJobsService(reopened);
+    expect(jobsAfter.getById(created.id)).toMatchObject({
       status: "pending",
       attempts: 2,
       error_message: "connection reset",
       next_run_at: 0,
       started_at: null,
     });
-    expect(jobs.countJobs().running).toBe(0);
-    expect(jobsInFlightAtDisconnect).toBe(0);
-    expect(createDaemonStatusService(cache).getAll()).toMatchObject({
+    expect(jobsAfter.countJobs().running).toBe(0);
+    expect(runningJobsAtDisconnect).toEqual([0]);
+    expect(createDaemonStatusService(reopened).getAll()).toMatchObject({
       daemon_status: "stopped",
     });
   });

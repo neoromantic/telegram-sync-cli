@@ -8,23 +8,9 @@ import {
   RateLimitError,
   wrapClientCallWithRateLimits,
 } from "./telegram-rate-limits";
+import { getAccountCacheDb } from "../db";
+import { testAccount, useTestDataDir } from "../test/accounts.test-utils";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { createFakeAccountsDb, mockDbModule, testAccount } from "../test/db-mock.test-utils";
-
-const accountCaches = new Map<number, Database>();
-mock.module("../db", () =>
-  mockDbModule({
-    cacheFor: (accountId) => {
-      const cache = accountCaches.get(accountId);
-      if (!cache) throw new Error(`No cache for account ${accountId}`);
-      return cache;
-    },
-    accountsDb: createFakeAccountsDb([
-      testAccount({ id: 1 }),
-      testAccount({ id: 2, phone: "+15550000002", is_active: 0 }),
-    ]),
-  }),
-);
 
 const METHOD = "messages.getHistory";
 
@@ -100,15 +86,7 @@ describe("wrapClientCallWithRateLimits", () => {
 });
 
 describe("rate limits per account", () => {
-  beforeEach(() => {
-    accountCaches.set(1, createAccountCacheDb());
-    accountCaches.set(2, createAccountCacheDb());
-  });
-
-  afterEach(() => {
-    for (const cache of accountCaches.values()) cache.close();
-    accountCaches.clear();
-  });
+  useTestDataDir([testAccount(), testAccount({ phone: "+15550000002", is_active: false })]);
 
   const request = { _: METHOD } as unknown as Parameters<TelegramClient["call"]>[0];
 
@@ -141,7 +119,7 @@ describe("rate limits per account", () => {
     await clientOf(2, async () => ({ _: "ok" })).call(request);
 
     const rows = (accountId: number) =>
-      accountCaches.get(accountId)!.query("SELECT method, success FROM api_activity").all();
+      getAccountCacheDb(accountId).query("SELECT method, success FROM api_activity").all();
     expect(rows(2)).toEqual([{ method: METHOD, success: 1 }]);
     expect(rows(1)).toEqual([]);
   });

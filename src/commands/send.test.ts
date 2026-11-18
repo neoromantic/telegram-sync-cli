@@ -17,8 +17,9 @@ import { createMessagesSearch } from "../db/messages-search";
 import type { ChatType } from "../db/types";
 import { createUsersCache, type UsersCache } from "../db/users-cache";
 import { toLong } from "../utils/long";
+import { getAccountCacheDb } from "../db";
+import { testAccount, useTestDataDir } from "../test/accounts.test-utils";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { createFakeAccountsDb, mockDbModule, testAccount } from "../test/db-mock.test-utils";
 import { fakeDialog } from "../test/fake-dialogs.test-utils";
 import { assertPeer, expectLongEqual } from "../test/input-peer.test-utils";
 import { cell, richTlMessage } from "../test/rich-message.test-utils";
@@ -40,15 +41,6 @@ let commandClient = { call: commandCall };
 let secondClient = { call: secondCall };
 const getClientForAccount = mock((accountId: number) =>
   accountId === 2 ? secondClient : commandClient,
-);
-mock.module("../db", () =>
-  mockDbModule({
-    cacheFor: (accountId) => (accountId === 2 ? secondCacheDb : commandCacheDb),
-    accountsDb: createFakeAccountsDb([
-      testAccount({ id: 1 }),
-      testAccount({ id: 2, phone: "+15550000002", is_active: 0 }),
-    ]),
-  }),
 );
 mock.module("../services/telegram", () => ({ getClientForAccount }));
 
@@ -1339,9 +1331,11 @@ describe("Resolution Priority", () => {
 });
 
 describe("send command", () => {
+  useTestDataDir([testAccount(), testAccount({ phone: "+15550000002", is_active: false })]);
+
   beforeEach(() => {
-    commandCacheDb = createAccountCacheDb();
-    secondCacheDb = createAccountCacheDb();
+    commandCacheDb = getAccountCacheDb(1);
+    secondCacheDb = getAccountCacheDb(2);
     commandCall.mockClear();
     commandReplies.length = 0;
     secondCall.mockClear();

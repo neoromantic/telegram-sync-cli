@@ -19,11 +19,19 @@ import { keepActiveAccountInConfig } from "../utils/active-account";
 import { error, info, success } from "../utils/output";
 import { renderQr } from "../utils/qr";
 
+/** The streams a prompt reads the answer from and writes the question to */
+export interface PromptStreams {
+  input: NodeJS.ReadableStream & { isTTY?: boolean };
+  output: NodeJS.WritableStream;
+}
+
+const terminal: PromptStreams = { input, output };
+
 /**
  * Prompt user for input
  */
-export async function prompt(message: string) {
-  const rl = readline.createInterface({ input, output });
+export async function prompt(message: string, streams: PromptStreams = terminal) {
+  const rl = readline.createInterface(streams);
   try {
     return (await rl.question(message)).trim();
   } finally {
@@ -35,16 +43,16 @@ export async function prompt(message: string) {
  * Prompt user for password input (hidden for privacy)
  * Falls back to regular prompt for non-TTY environments
  */
-export async function promptPassword(message: string) {
-  if (!process.stdin.isTTY) {
-    return prompt(message);
+export async function promptPassword(message: string, streams: PromptStreams = terminal) {
+  if (!streams.input.isTTY) {
+    return prompt(message, streams);
   }
 
   const syncReadline = await import("node:readline");
 
   const rl = syncReadline.createInterface({
-    input,
-    output,
+    input: streams.input,
+    output: streams.output,
     terminal: true,
   });
 
@@ -61,7 +69,7 @@ export async function promptPassword(message: string) {
 
   return new Promise<string>((resolve) => {
     rl.question(message, (answer) => {
-      output.write("\n");
+      streams.output.write("\n");
       rl.close();
       resolve(answer.trim());
     });

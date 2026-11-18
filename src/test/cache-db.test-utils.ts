@@ -34,3 +34,16 @@ export function chatRow(
     ...overrides,
   };
 }
+
+/** Make SQLite fail every `event` on the cache's `table` with `message` */
+export function failWrites(
+  db: Database,
+  table: string,
+  message: string,
+  event: "INSERT" | "UPDATE" | "DELETE" = "INSERT",
+) {
+  db.run(
+    `CREATE TRIGGER fail_${table}_${event.toLowerCase()} BEFORE ${event} ON ${table}
+     BEGIN SELECT RAISE(ABORT, '${message}'); END`,
+  );
+}

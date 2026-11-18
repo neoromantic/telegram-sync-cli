@@ -1,10 +1,9 @@
 import type { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import type { tl } from "@mtcute/bun";
 import { dialogToCacheInput } from "../commands/chats/helpers";
 import { createUpdateHandlers, type UpdateContext, type UpdateHandlers } from "./handlers";
 import { buildInputPeer } from "./sync-worker-real-helpers";
-import type { DaemonLogger } from "./types";
 import { createChatSyncStateService } from "../db/chat-sync-state";
 import { createChatsCache } from "../db/chats-cache";
 import { createMessagesCache } from "../db/messages-cache";
@@ -12,6 +11,7 @@ import { createSyncJobsService } from "../db/sync-jobs";
 import { type SyncChatType, SyncJobType, SyncPriority } from "../db/sync-schema";
 import { toLong } from "../utils/long";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
+import { watchedLogger } from "../test/daemon-runtime.test-utils";
 import { fakeDialog } from "../test/fake-dialogs.test-utils";
 import { assertPeerIdInvariants } from "../test/peer-id-invariants.test-utils";
 
@@ -95,12 +95,7 @@ describe("UpdateHandlers", () => {
     });
 
     it("without a raw message, stores an empty object, logs once and queues a refetch (#130)", async () => {
-      const logger: DaemonLogger = {
-        info: mock(() => {}),
-        debug: mock(() => {}),
-        warn: mock(() => {}),
-        error: mock(() => {}),
-      };
+      const logger = watchedLogger();
       handlers = createUpdateHandlers({
         db,
         messagesCache,
@@ -725,22 +720,14 @@ describe("UpdateHandlers error handling", () => {
   let db: Database;
   let messagesCache: ReturnType<typeof createMessagesCache>;
   let chatSyncState: ReturnType<typeof createChatSyncStateService>;
-  let mockLogger: DaemonLogger;
-  let errorLogs: string[];
+  let logger: ReturnType<typeof watchedLogger>;
+  const errorLogs = () => logger.error.mock.calls.map(([message]) => message);
 
   beforeEach(() => {
     db = createAccountCacheDb();
     messagesCache = createMessagesCache(db);
     chatSyncState = createChatSyncStateService(db);
-    errorLogs = [];
-    mockLogger = {
-      info: mock(() => {}),
-      debug: mock(() => {}),
-      warn: mock(() => {}),
-      error: mock((msg: string) => {
-        errorLogs.push(msg);
-      }),
-    };
+    logger = watchedLogger();
   });
 
   function seedMessages(chatId: number, messageIds: number[]) {
@@ -769,7 +756,7 @@ describe("UpdateHandlers error handling", () => {
         db,
         messagesCache,
         chatSyncState,
-        logger: mockLogger,
+        logger,
       });
 
       failMessageWrites("INSERT", "Database write failed");
@@ -788,11 +775,11 @@ describe("UpdateHandlers error handling", () => {
         isOutgoing: false,
       });
 
-      expect(errorLogs.length).toBe(1);
-      expect(errorLogs[0]).toContain("Failed to handle new message");
-      expect(errorLogs[0]).toContain("chatId=100");
-      expect(errorLogs[0]).toContain("messageId=1");
-      expect(errorLogs[0]).toContain("Database write failed");
+      expect(errorLogs().length).toBe(1);
+      expect(errorLogs()[0]).toContain("Failed to handle new message");
+      expect(errorLogs()[0]).toContain("chatId=100");
+      expect(errorLogs()[0]).toContain("messageId=1");
+      expect(errorLogs()[0]).toContain("Database write failed");
     });
   });
 
@@ -802,7 +789,7 @@ describe("UpdateHandlers error handling", () => {
         db,
         messagesCache,
         chatSyncState,
-        logger: mockLogger,
+        logger,
       });
 
       seedMessages(200, [5]);
@@ -820,11 +807,11 @@ describe("UpdateHandlers error handling", () => {
         editDate: Date.now(),
       });
 
-      expect(errorLogs.length).toBe(1);
-      expect(errorLogs[0]).toContain("Failed to handle edit message");
-      expect(errorLogs[0]).toContain("chatId=200");
-      expect(errorLogs[0]).toContain("messageId=5");
-      expect(errorLogs[0]).toContain("Update failed");
+      expect(errorLogs().length).toBe(1);
+      expect(errorLogs()[0]).toContain("Failed to handle edit message");
+      expect(errorLogs()[0]).toContain("chatId=200");
+      expect(errorLogs()[0]).toContain("messageId=5");
+      expect(errorLogs()[0]).toContain("Update failed");
     });
   });
 
@@ -834,7 +821,7 @@ describe("UpdateHandlers error handling", () => {
         db,
         messagesCache,
         chatSyncState,
-        logger: mockLogger,
+        logger,
       });
 
       seedMessages(300, [10, 11, 12]);
@@ -850,11 +837,11 @@ describe("UpdateHandlers error handling", () => {
         messageIds: [10, 11, 12],
       });
 
-      expect(errorLogs.length).toBe(1);
-      expect(errorLogs[0]).toContain("Failed to handle delete messages");
-      expect(errorLogs[0]).toContain("chatId=300");
-      expect(errorLogs[0]).toContain("messageIds=[10,11,12]");
-      expect(errorLogs[0]).toContain("Delete failed");
+      expect(errorLogs().length).toBe(1);
+      expect(errorLogs()[0]).toContain("Failed to handle delete messages");
+      expect(errorLogs()[0]).toContain("chatId=300");
+      expect(errorLogs()[0]).toContain("messageIds=[10,11,12]");
+      expect(errorLogs()[0]).toContain("Delete failed");
     });
   });
 
@@ -864,7 +851,7 @@ describe("UpdateHandlers error handling", () => {
         db,
         messagesCache,
         chatSyncState,
-        logger: mockLogger,
+        logger,
       });
 
       seedMessages(300, [1, 2]);
@@ -880,9 +867,9 @@ describe("UpdateHandlers error handling", () => {
         messageIds: [1, 2],
       });
 
-      expect(errorLogs.length).toBe(1);
-      expect(errorLogs[0]).toContain("Failed to handle delete messages");
-      expect(errorLogs[0]).toContain("chatId=300");
+      expect(errorLogs().length).toBe(1);
+      expect(errorLogs()[0]).toContain("Failed to handle delete messages");
+      expect(errorLogs()[0]).toContain("chatId=300");
     });
   });
 });

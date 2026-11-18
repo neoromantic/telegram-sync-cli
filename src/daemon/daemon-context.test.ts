@@ -1,13 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import {
-  createDaemonRuntime,
-  type DaemonContext,
-  requestShutdown,
-  totalMessagesSynced,
-} from "./daemon-context";
+import { createDaemonRuntime, requestShutdown, totalMessagesSynced } from "./daemon-context";
 import { isDaemonStopError } from "./daemon-utils";
 import { createSyncPacer } from "./sync-pacing";
+import { createDaemonStatusService } from "../db/daemon-status";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
+import { testDaemonContext } from "../test/daemon-runtime.test-utils";
 
 describe("daemon-context", () => {
   it("creates runtime with sane defaults", () => {
@@ -22,10 +19,7 @@ describe("daemon-context", () => {
   });
 
   it("requestShutdown sets the flag and aborts the stop signal once", () => {
-    const ctx = {
-      state: { running: true, accounts: new Map(), shutdownRequested: false },
-      runtime: createDaemonRuntime(),
-    } as unknown as DaemonContext;
+    const ctx = testDaemonContext();
     const { signal } = ctx.runtime.shutdown;
 
     requestShutdown(ctx);
@@ -54,7 +48,7 @@ describe("daemon-context", () => {
       runtime.accounts.set(accountId, {
         accountId,
         db,
-        statusService: {} as never,
+        statusService: createDaemonStatusService(db),
         scheduler: null,
         worker: null,
         pacer: createSyncPacer(),

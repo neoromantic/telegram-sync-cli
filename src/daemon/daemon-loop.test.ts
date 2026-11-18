@@ -1,68 +1,43 @@
-import { describe, expect, it, mock, setSystemTime } from "bun:test";
+import { describe, expect, it, mock, setSystemTime, spyOn } from "bun:test";
 import type { TelegramClient } from "@mtcute/bun";
 import type { DaemonContext } from "./daemon-context";
 import { requestShutdown } from "./daemon-context";
 import { mainLoop, waitForNextTick } from "./daemon-loop";
 import { startDueJobs, waitForJobsInFlight } from "./daemon-scheduler";
-import type { SyncScheduler } from "./scheduler";
 import { createSyncScheduler } from "./scheduler";
-import type { RealSyncWorker } from "./sync-worker-real";
 import type { AccountConnectionState } from "./types";
 import { createChatSyncStateService } from "../db/chat-sync-state";
-import type { DaemonStatusService, DaemonTick } from "../db/daemon-status";
 import { createMessagesCache } from "../db/messages-cache";
 import { createSyncJobsService } from "../db/sync-jobs";
-import { type SyncJobRow, SyncJobType, SyncPriority } from "../db/sync-schema";
-import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { addAccountRuntime, testDaemonContext } from "../test/daemon-runtime.test-utils";
+import { SyncJobType, SyncPriority } from "../db/sync-schema";
+import { createAccountCacheDb, failWrites } from "../test/cache-db.test-utils";
+import {
+  addAccountRuntime,
+  cacheWithSyncJob,
+  realSyncParts,
+  syncedPrivateChat,
+  testDaemonContext,
+} from "../test/daemon-runtime.test-utils";
 import { fakeDialogClient } from "../test/fake-dialogs.test-utils";
+import { createFakeHistory, range } from "../test/fake-history.test-utils";
 
-function createMockStatusService(overrides: Partial<DaemonStatusService> = {}) {
-  const base: DaemonStatusService = {
-    get: () => null,
-    set: () => {},
-    delete: () => {},
-    getAll: () => ({}),
-    setDaemonRunning: () => {},
-    setDaemonStopped: () => {},
-    writeTick: () => {},
-    recordCatchUp: () => {},
-    getDaemonInfo: () => ({
-      status: "running",
-      pid: null,
-      version: null,
-      startedAt: null,
-      lastUpdate: null,
-      connectionStatus: null,
-      lastError: null,
-      messagesSynced: 0,
-      pendingJobs: 0,
-      runningJobs: 0,
-      lastCatchUp: null,
-      pacing: null,
-    }),
-  };
-  return { ...base, ...overrides };
+type CallParams = { abortSignal?: AbortSignal };
+
+function clientWithCall(
+  call: (request: unknown, params?: CallParams) => Promise<unknown>,
+  rest: object = {},
+) {
+  return { ...rest, call } as unknown as TelegramClient;
 }
 
-function createMockScheduler(overrides: Partial<SyncScheduler> = {}) {
-  const base: SyncScheduler = {
-    queueForwardCatchup: () => {},
-    queueBackwardHistory: () => {},
-    queueInitialLoad: () => {},
-    initializeForStartup: async () => {},
-    refreshQueues: () => {},
-    getNextJob: () => null,
-    hasHistoryDue: () => false,
-    recordJobRun: () => {},
-    getStatus: () => ({
-      pendingJobs: 0,
-      runningJobs: 0,
-    }),
-    recoverCrashedJobs: () => 0,
-  };
-  return { ...base, ...overrides };
+function stoppingClient(ctx: DaemonContext, rest: object = {}) {
+  return clientWithCall((_request, params) => {
+    requestShutdown(ctx);
+    return Promise.reject(params?.abortSignal?.reason);
+  }, rest);
 }
+
+const emptyPage = { _: "messages.messages", messages: [], chats: [], users: [] };
 
 function createContext() {
   const result: DaemonContext = testDaemonContext({
@@ -81,38 +56,13 @@ function immediateTicks(onTick: () => void = () => {}) {
   };
 }
 
-function stopAfterTicks(
-  ctx: DaemonContext,
-  ticks: number,
-  overrides: Partial<DaemonStatusService> = {},
-) {
+function stopAfterTicks(ctx: DaemonContext, ticks: number, onTick: () => void = () => {}) {
   let count = 0;
-  return createMockStatusService({
-    ...overrides,
-    writeTick: () => {
-      count += 1;
-      if (count >= ticks) ctx.state.shutdownRequested = true;
-    },
+  return immediateTicks(() => {
+    onTick();
+    count += 1;
+    if (count >= ticks) ctx.state.shutdownRequested = true;
   });
-}
-
-function jobOf(id: number) {
-  return {
-    id,
-    chat_id: 55,
-    job_type: SyncJobType.BackwardHistory,
-    priority: SyncPriority.High,
-    status: "pending",
-    cursor_start: null,
-    cursor_end: null,
-    messages_fetched: 0,
-    error_message: null,
-    created_at: 0,
-    started_at: null,
-    completed_at: null,
-    attempts: 0,
-    next_run_at: 0,
-  };
 }
 
 function connectedState(accountId: number, client = {} as TelegramClient) {
@@ -126,29 +76,30 @@ function connectedState(accountId: number, client = {} as TelegramClient) {
   };
 }
 
-const stoppedResult = {
-  success: false,
-  messagesFetched: 0,
-  stopped: true,
-  outcome: { state: "stopped" as const, attempts: 0, nextRunAt: 0 },
-};
+function runAccount(
+  ctx: DaemonContext,
+  accountId: number,
+  db: ReturnType<typeof createAccountCacheDb>,
+  client: TelegramClient,
+  config?: Parameters<typeof realSyncParts>[3],
+) {
+  ctx.state.accounts.set(accountId, connectedState(accountId, client));
+  return addAccountRuntime(ctx, accountId, db, realSyncParts(ctx, db, client, config));
+}
 
 describe("mainLoop", () => {
   it("logs status update failures without crashing", async () => {
     const ctx = createContext();
-    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      statusService: createMockStatusService({
-        writeTick: () => {
-          ctx.state.shutdownRequested = true;
-          throw new Error("status fail");
-        },
-      }),
-    });
+    const db = createAccountCacheDb();
+    failWrites(db, "daemon_status", "status fail");
+    addAccountRuntime(ctx, 1, db);
 
-    await mainLoop(ctx, immediateTicks());
+    await mainLoop(ctx, stopAfterTicks(ctx, 1));
 
     expect(ctx.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("[Account 1] Failed to update daemon status"),
+      expect.stringContaining(
+        "[Account 1] Failed to update daemon status: SQLiteError: status fail",
+      ),
     );
   });
 
@@ -173,7 +124,7 @@ describe("mainLoop", () => {
     seedJobs(secondDb, ["pending", "pending", "pending", "running"]);
     const second = addAccountRuntime(ctx, 2, secondDb, {
       messagesSynced: 2,
-      scheduler: createMockScheduler(),
+      scheduler: realSyncParts(ctx, secondDb, {} as TelegramClient).scheduler,
     });
     ctx.state.accounts.set(1, {
       accountId: 1,
@@ -188,19 +139,11 @@ describe("mainLoop", () => {
       status: "error",
       lastError: "AUTH_KEY_UNREGISTERED",
     });
-    const ticks: Array<[number, DaemonTick]> = [];
-    for (const rt of [first, second]) {
-      const writeTick = rt.statusService.writeTick.bind(rt.statusService);
-      rt.statusService.writeTick = (tick) => {
-        ticks.push([rt.accountId, tick]);
-        writeTick(tick);
-        ctx.state.shutdownRequested = true;
-      };
-    }
+    const writes = [first, second].map((rt) => spyOn(rt.statusService, "writeTick"));
 
-    await mainLoop(ctx, immediateTicks());
+    await mainLoop(ctx, stopAfterTicks(ctx, 1));
 
-    expect(ticks).toHaveLength(2);
+    expect(writes.map((write) => write.mock.calls.length)).toEqual([1, 1]);
     expect(first.statusService.getDaemonInfo()).toMatchObject({
       connectionStatus: "connected",
       lastError: null,
@@ -219,9 +162,7 @@ describe("mainLoop", () => {
 
   it("runs health checks and schedules reconnects when idle", async () => {
     const ctx = createContext();
-    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      statusService: stopAfterTicks(ctx, 60),
-    });
+    addAccountRuntime(ctx, 1);
 
     const client = {
       getMe: () => {
@@ -243,7 +184,7 @@ describe("mainLoop", () => {
     setSystemTime(120000);
 
     try {
-      await mainLoop(ctx, immediateTicks());
+      await mainLoop(ctx, stopAfterTicks(ctx, 60));
     } finally {
       setSystemTime();
     }
@@ -267,9 +208,7 @@ describe("mainLoop", () => {
     chatSyncState.markHistoryComplete(1002);
     chatSyncState.raiseTopMessageId(1002, 1000);
     const jobsService = createSyncJobsService(db);
-    const { promise: catchUpRecorded, resolve: recordCatchUp } = Promise.withResolvers<void>();
-    addAccountRuntime(ctx, 1, db, {
-      statusService: stopAfterTicks(ctx, 72, { recordCatchUp: () => recordCatchUp() }),
+    const rt = addAccountRuntime(ctx, 1, db, {
       scheduler: createSyncScheduler({
         db,
         jobsService,
@@ -291,21 +230,27 @@ describe("mainLoop", () => {
       ...connectedState(1, client),
       watch: { online: true },
     });
+    const caughtUp = () => rt.statusService.getDaemonInfo().lastCatchUp !== null;
 
     setSystemTime(clock);
     try {
       await mainLoop(
         ctx,
-        immediateTicks(() => {
+        stopAfterTicks(ctx, 1000, () => {
           clock += 1_000;
           setSystemTime(clock);
+          if (caughtUp()) ctx.state.shutdownRequested = true;
         }),
       );
-      await catchUpRecorded;
     } finally {
       setSystemTime();
     }
 
+    expect(caughtUp()).toBe(true);
+    expect(rt.statusService.getDaemonInfo().lastCatchUp).toMatchObject({
+      reason: "wake",
+      chats: 1,
+    });
     expect(fake.calls).toHaveLength(1);
     expect(chatSyncState.get(1002)?.top_message_id).toBe(1004);
     expect(
@@ -322,103 +267,76 @@ describe("mainLoop", () => {
 
   it("refreshes every account's queues, even when one fails", async () => {
     const ctx = createContext();
-    const refreshed: number[] = [];
-    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      statusService: stopAfterTicks(ctx, 30),
-      scheduler: createMockScheduler({
-        refreshQueues: () => {
-          throw new Error("disk I/O error");
-        },
-      }),
+    const caches = [1, 2].map(() => {
+      const db = createAccountCacheDb();
+      syncedPrivateChat(db, 55, { forward_cursor: 1 });
+      const state = createChatSyncStateService(db);
+      state.markHistoryComplete(55);
+      state.raiseTopMessageId(55, 5);
+      return db;
     });
-    addAccountRuntime(ctx, 2, createAccountCacheDb(), {
-      scheduler: createMockScheduler({
-        refreshQueues: () => {
-          refreshed.push(2);
-        },
+    failWrites(caches[0]!, "sync_jobs", "disk I/O error");
+    const [first, second] = caches.map((db, i) =>
+      addAccountRuntime(ctx, i + 1, db, {
+        scheduler: realSyncParts(ctx, db, {} as TelegramClient).scheduler,
       }),
-    });
+    );
+    const refreshes = [first!, second!].map((rt) => spyOn(rt.scheduler!, "refreshQueues"));
 
-    await mainLoop(ctx, immediateTicks());
+    await mainLoop(ctx, stopAfterTicks(ctx, 30));
 
-    expect(refreshed).toEqual([2]);
+    expect(refreshes.map((refresh) => refresh.mock.calls.length)).toEqual([1, 1]);
+    expect(
+      createSyncJobsService(caches[1]!)
+        .getPendingJobs()
+        .map((job) => [job.chat_id, job.job_type]),
+    ).toEqual([[55, SyncJobType.ForwardCatchup]]);
+    expect(createSyncJobsService(caches[0]!).getPendingJobs()).toEqual([]);
     expect(ctx.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("[Account 1] Failed to refresh sync queues: Error: disk I/O error"),
+      expect.stringContaining(
+        "[Account 1] Failed to refresh sync queues: SQLiteError: disk I/O error",
+      ),
     );
   });
 
   it("ends right after a job that a daemon stop cut short, even on a 60th tick", async () => {
     const ctx = createContext();
-    let ticks = 0;
     let timeouts = 0;
-    const job: SyncJobRow = {
-      id: 7,
-      chat_id: 55,
-      job_type: SyncJobType.BackwardHistory,
-      priority: SyncPriority.High,
-      status: "pending",
-      cursor_start: null,
-      cursor_end: null,
-      messages_fetched: 0,
-      error_message: null,
-      created_at: 0,
-      started_at: null,
-      completed_at: null,
-      attempts: 0,
-      next_run_at: 0,
-    };
-    let picks = 0;
-    const worker = {
-      client: {} as TelegramClient,
-      canMakeApiCall: () => true,
-      processJobReal: mock(async () => {
-        requestShutdown(ctx);
-        return {
-          success: false,
-          messagesFetched: 0,
-          stopped: true,
-          outcome: { state: "stopped" as const, attempts: 0, nextRunAt: 0 },
-        };
-      }),
-    } as unknown as RealSyncWorker;
-    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      statusService: createMockStatusService({
-        writeTick: () => {
-          ticks += 1;
-        },
-      }),
-      scheduler: createMockScheduler({
-        getNextJob: () => (++picks === 60 ? job : null),
-      }),
-      worker,
+    let now = 120_000;
+    const { db, job } = cacheWithSyncJob(SyncJobType.ForwardCatchup, {
+      chat: { forward_cursor: 1000 },
+      row: { nextRunAt: now + 59_000 },
     });
+    const state = createChatSyncStateService(db);
+    state.markHistoryComplete(55);
+    state.raiseTopMessageId(55, 1000);
     const getMe = mock(async () => ({}));
-    ctx.state.accounts.set(1, {
-      accountId: 1,
-      phone: "+15550000001",
-      name: null,
-      status: "connected",
-      client: { getMe } as unknown as TelegramClient,
-      lastActivity: 0,
-    });
+    const rt = runAccount(ctx, 1, db, stoppingClient(ctx, { getMe }));
+    const processJobReal = spyOn(rt.worker!, "processJobReal");
+    const getNextJob = spyOn(rt.scheduler!, "getNextJob");
+    const writeTick = spyOn(rt.statusService, "writeTick");
 
-    setSystemTime(120000);
+    setSystemTime(now);
     try {
       await mainLoop(
         ctx,
         immediateTicks(() => {
           timeouts += 1;
+          now += 1000;
+          setSystemTime(now);
         }),
       );
+      await waitForJobsInFlight(ctx);
     } finally {
       setSystemTime();
     }
 
-    expect(worker.processJobReal).toHaveBeenCalledTimes(1);
-    expect(picks).toBe(60);
-    expect(ticks).toBe(59);
+    expect(processJobReal).toHaveBeenCalledTimes(1);
+    expect(getNextJob).toHaveBeenCalledTimes(60);
+    expect(writeTick).toHaveBeenCalledTimes(59);
     expect(timeouts).toBe(59);
     expect(getMe).not.toHaveBeenCalled();
+    expect(createSyncJobsService(db).getById(job.id)).toEqual(job);
   });
 
   it("looks for due contacts on the first tick and then every 30th", async () => {
@@ -438,9 +356,7 @@ describe("mainLoop", () => {
         },
       }),
     } as unknown as TelegramClient;
-    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      statusService: stopAfterTicks(ctx, 30),
-    });
+    addAccountRuntime(ctx, 1);
     ctx.state.accounts.set(1, {
       accountId: 1,
       phone: "+15550000001",
@@ -449,7 +365,7 @@ describe("mainLoop", () => {
       client,
     });
 
-    await mainLoop(ctx, immediateTicks());
+    await mainLoop(ctx, stopAfterTicks(ctx, 30));
     expect(requests).toEqual(["contacts.getContacts", "contacts.getContacts"]);
   });
 
@@ -464,9 +380,7 @@ describe("mainLoop", () => {
         },
       }),
     } as unknown as TelegramClient;
-    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      statusService: stopAfterTicks(ctx, 30),
-    });
+    addAccountRuntime(ctx, 1);
     ctx.state.accounts.set(1, {
       accountId: 1,
       phone: "+15550000001",
@@ -475,31 +389,20 @@ describe("mainLoop", () => {
       client,
     });
 
-    await mainLoop(ctx, immediateTicks());
+    await mainLoop(ctx, stopAfterTicks(ctx, 30));
     expect(requests).toEqual(["contacts.getContacts"]);
   });
 
   it("makes no contacts call after a stop during the first tick", async () => {
     const ctx = createContext();
     const call = mock(() => new Promise(() => {}));
-    addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      scheduler: createMockScheduler({
-        getNextJob: () => {
-          requestShutdown(ctx);
-          return null;
-        },
-      }),
-      worker: { canMakeApiCall: () => true } as unknown as RealSyncWorker,
-    });
-    ctx.state.accounts.set(1, {
-      accountId: 1,
-      phone: "+15550000001",
-      name: null,
-      status: "connected",
-      client: { withParams: () => ({ call }) } as unknown as TelegramClient,
-    });
+    const { db } = cacheWithSyncJob(SyncJobType.ForwardCatchup);
+    runAccount(ctx, 1, db, stoppingClient(ctx, { withParams: () => ({ call }) }));
 
     await mainLoop(ctx, immediateTicks());
+    await waitForJobsInFlight(ctx);
+
+    expect(ctx.state.shutdownRequested).toBe(true);
     expect(call).not.toHaveBeenCalled();
   });
 
@@ -510,11 +413,10 @@ describe("mainLoop", () => {
       "INSERT INTO api_activity (timestamp, method, success) VALUES (?, 'messages.getHistory', 1)",
     ).run(Math.floor(Date.now() / 1000) - 30 * 24 * 3600);
     addAccountRuntime(ctx, 1, db, {
-      statusService: stopAfterTicks(ctx, 300),
-      scheduler: createMockScheduler(),
+      scheduler: realSyncParts(ctx, db, {} as TelegramClient).scheduler,
     });
 
-    await mainLoop(ctx, immediateTicks());
+    await mainLoop(ctx, stopAfterTicks(ctx, 300));
 
     expect(ctx.logger.debug).toHaveBeenCalledWith(
       "[Account 1] Pruned 1 API activity rows, 0 rate limit windows, 0 completed and 0 failed jobs",
@@ -527,46 +429,36 @@ describe("mainLoop", () => {
     let now = 1_760_000_000_000;
     const ticks: number[] = [];
     let tick = 1;
-    const signal = ctx.runtime.shutdown.signal;
-    const firstWorker = {
-      client: {} as TelegramClient,
-      canMakeApiCall: () => true,
-      processJobReal: mock(
-        () =>
-          new Promise((resolve) => {
-            signal.addEventListener(
-              "abort",
-              () => {
-                events.push("1 stopped");
-                resolve(stoppedResult);
-              },
-              { once: true },
-            );
-          }),
-      ),
-    } as unknown as RealSyncWorker;
-    let secondRuns = 0;
-    const secondWorker = {
-      client: {} as TelegramClient,
-      canMakeApiCall: () => true,
-      processJobReal: mock(async () => {
-        secondRuns += 1;
-        ticks.push(tick);
-        events.push(`2 done ${secondRuns}`);
-        if (secondRuns === 3) requestShutdown(ctx);
-        return { success: true, messagesFetched: 1 };
-      }),
-    } as unknown as RealSyncWorker;
-    for (const [accountId, worker] of [
-      [1, firstWorker],
-      [2, secondWorker],
-    ] as const) {
-      addAccountRuntime(ctx, accountId, createAccountCacheDb(), {
-        scheduler: createMockScheduler({ getNextJob: () => jobOf(accountId) }),
-        worker,
+    const waitForStop = (_request: unknown, params?: CallParams) =>
+      new Promise((_resolve, reject) => {
+        const signal = params!.abortSignal!;
+        signal.addEventListener(
+          "abort",
+          () => {
+            events.push("1 stopped");
+            reject(signal.reason);
+          },
+          { once: true },
+        );
       });
-      ctx.state.accounts.set(accountId, connectedState(accountId));
-    }
+    let secondRuns = 0;
+    const secondHistory = createFakeHistory(range(1, 100), () => {
+      secondRuns += 1;
+      ticks.push(tick);
+      events.push(`2 done ${secondRuns}`);
+      if (secondRuns === 3) requestShutdown(ctx);
+    });
+    const [first, second] = [
+      runAccount(
+        ctx,
+        1,
+        cacheWithSyncJob(SyncJobType.ForwardCatchup).db,
+        clientWithCall(waitForStop),
+      ),
+      runAccount(ctx, 2, cacheWithSyncJob(SyncJobType.ForwardCatchup).db, secondHistory.client, {
+        batchSize: 1,
+      }),
+    ].map((rt) => spyOn(rt.worker!, "processJobReal"));
 
     setSystemTime(now);
     try {
@@ -583,8 +475,8 @@ describe("mainLoop", () => {
       setSystemTime();
     }
 
-    expect(firstWorker.processJobReal).toHaveBeenCalledTimes(1);
-    expect(secondWorker.processJobReal).toHaveBeenCalledTimes(3);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(3);
     expect(ticks).toEqual([1, 4, 7]);
     expect(events).toEqual(["2 done 1", "2 done 2", "2 done 3", "1 stopped"]);
     expect(ctx.runtime.jobsInFlight.size).toBe(0);
@@ -603,28 +495,18 @@ describe("mainLoop", () => {
 
   it("checks a busy account but waits to reconnect one until its job ends", async () => {
     const ctx = createContext();
-    const finishes: Array<(result: unknown) => void> = [];
-    const workerWithBlockedJob = () =>
-      ({
-        client: {} as TelegramClient,
-        canMakeApiCall: () => true,
-        processJobReal: mock(
-          () =>
-            new Promise((resolve) => {
-              finishes.push(resolve);
-            }),
-        ),
-      }) as unknown as RealSyncWorker;
+    const finishes: Array<(page: unknown) => void> = [];
     const getMe = mock(async () => ({}));
-    for (const accountId of [1, 2]) {
-      addAccountRuntime(ctx, accountId, createAccountCacheDb(), {
-        statusService: accountId === 1 ? stopAfterTicks(ctx, 61) : createMockStatusService(),
-        scheduler: createMockScheduler({ getNextJob: () => jobOf(accountId) }),
-        worker: workerWithBlockedJob(),
+    const blockedJob = () =>
+      new Promise((resolve) => {
+        finishes.push(resolve);
       });
-      ctx.state.accounts.set(
+    for (const accountId of [1, 2]) {
+      runAccount(
+        ctx,
         accountId,
-        connectedState(accountId, { getMe } as unknown as TelegramClient),
+        cacheWithSyncJob(SyncJobType.ForwardCatchup).db,
+        clientWithCall(blockedJob, { getMe }),
       );
     }
     const second = ctx.state.accounts.get(2) as AccountConnectionState;
@@ -634,7 +516,7 @@ describe("mainLoop", () => {
       startDueJobs(ctx);
       second.status = "error";
       second.nextReconnectAt = 1;
-      await mainLoop(ctx, immediateTicks());
+      await mainLoop(ctx, stopAfterTicks(ctx, 61));
     } finally {
       setSystemTime();
     }
@@ -644,7 +526,7 @@ describe("mainLoop", () => {
     expect(second.status).toBe("error");
     expect(second.nextReconnectAt).toBe(1);
 
-    for (const finish of finishes) finish({ success: true, messagesFetched: 0 });
+    for (const finish of finishes) finish(emptyPage);
     await waitForJobsInFlight(ctx);
     expect(finishes).toHaveLength(2);
     expect(ctx.runtime.jobsInFlight.size).toBe(0);
@@ -673,21 +555,11 @@ describe("waitForNextTick (#133)", () => {
 
   function historyAccount(ctx: DaemonContext, lastStart: number) {
     const starts: number[] = [];
-    const rt = addAccountRuntime(ctx, 1, createAccountCacheDb(), {
-      scheduler: createMockScheduler({
-        hasHistoryDue: () => true,
-        getNextJob: () => jobOf(1),
-      }),
-      worker: {
-        client: {} as TelegramClient,
-        canMakeApiCall: () => true,
-        processJobReal: mock(async () => {
-          starts.push(Date.now());
-          return { success: true, messagesFetched: 100 };
-        }),
-      } as unknown as RealSyncWorker,
+    const { db } = cacheWithSyncJob(SyncJobType.BackwardHistory, {
+      chat: { forward_cursor: 1000, backward_cursor: 1000 },
     });
-    ctx.state.accounts.set(1, connectedState(1));
+    const history = createFakeHistory(range(1, 1000), () => starts.push(Date.now()));
+    const rt = runAccount(ctx, 1, db, history.client, { batchSize: 1 });
     rt.pacer.setHistoryDue(true);
     rt.pacer.recordStart(lastStart);
     return { rt, starts };

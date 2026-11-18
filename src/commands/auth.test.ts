@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import type { TelegramClient } from "@mtcute/bun";
 import {
   type AuthDependencies,
@@ -11,14 +12,23 @@ import {
   loginWithPhone,
   loginWithQr,
   logout,
+  prompt,
+  promptPassword,
 } from "./auth";
 import { syncActiveAccountFromConfig } from "../config";
 import { type AccountsDbInterface, createTestDatabase } from "../db";
 import type { Account } from "../types";
+import { renderQr } from "../utils/qr";
 
 process.env.BUN_ENV = "test";
 
 const PHONE = "+15550000002";
+
+function answering(answer: string) {
+  const input = new PassThrough();
+  input.end(`${answer}\n`);
+  return { input, output: new PassThrough() };
+}
 
 describe("Authentication Commands", () => {
   let accountsDb: AccountsDbInterface;
@@ -82,12 +92,19 @@ describe("Authentication Commands", () => {
     return client as TelegramClient;
   };
 
+  let authDataDir: string;
+  let outerDataDir: string | undefined;
+
   beforeEach(() => {
+    outerDataDir = process.env.TELEGRAM_SYNC_CLI_DATA_DIR;
+    authDataDir = mkdtempSync(join(tmpdir(), "telegram-sync-cli-auth-deps-"));
+    process.env.TELEGRAM_SYNC_CLI_DATA_DIR = authDataDir;
     const testDb = createTestDatabase();
     accountsDb = testDb.accountsDb;
     mockClients = new Map();
 
     deps = {
+      ...getDefaultDependencies(),
       accountsDb,
       createClient: mock((accountId: number) => {
         const client = createMockClient({
@@ -119,12 +136,14 @@ describe("Authentication Commands", () => {
         }
         return client;
       }),
-      isAuthorized: mock(() => Promise.resolve(true)),
-      prompt: mock(() => Promise.resolve("123456")),
-      promptPassword: mock(() => Promise.resolve("password123")),
-      renderQr: mock(() => "QR_CODE_HERE"),
-      keepActiveAccountInConfig: mock(() => Promise.resolve()),
+      prompt: (message) => prompt(message, answering("123456")),
+      promptPassword: (message) => promptPassword(message, answering("password123")),
     };
+  });
+
+  afterEach(() => {
+    process.env.TELEGRAM_SYNC_CLI_DATA_DIR = outerDataDir;
+    rmSync(authDataDir, { recursive: true, force: true });
   });
 
   describe("loginWithPhone", () => {
@@ -225,6 +244,8 @@ describe("Authentication Commands", () => {
     });
 
     it("merges duplicate user_id accounts and keeps existing", async () => {
+      const configPath = join(authDataDir, "config.json");
+      writeFileSync(configPath, JSON.stringify({ activeAccount: 99 }));
       const accounts = new Map<number, Account>();
       let nextId = 1;
       type CreateAccountInput = Parameters<AccountsDbInterface["create"]>[0];
@@ -310,7 +331,7 @@ describe("Authentication Commands", () => {
       expect(result.account?.id).toBe(existing.id);
       expect(inMemoryDb.count()).toBe(1);
       expect(inMemoryDb.getById(existing.id)?.phone).toBe("+15550001111");
-      expect(deps.keepActiveAccountInConfig).toHaveBeenCalledWith(existing.id);
+      expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({ activeAccount: existing.id });
       expect(inMemoryDb.getActive()?.id).toBe(existing.id);
     });
 
@@ -392,8 +413,7 @@ describe("Authentication Commands", () => {
     it("prints the QR code and its prompts to stderr, never stdout", async () => {
       await loginWithQr("test", deps);
 
-      expect(deps.renderQr).toHaveBeenCalledWith("tg://login?token=abc");
-      expect(errorSpy).toHaveBeenCalledWith("QR_CODE_HERE");
+      expect(errorSpy).toHaveBeenCalledWith(renderQr("tg://login?token=abc"));
       expect(logSpy).not.toHaveBeenCalled();
     });
 
@@ -448,7 +468,6 @@ describe("Authentication Commands", () => {
       savedDataDir = process.env.TELEGRAM_SYNC_CLI_DATA_DIR;
       dataDir = mkdtempSync(join(tmpdir(), "telegram-sync-cli-auth-test-"));
       process.env.TELEGRAM_SYNC_CLI_DATA_DIR = dataDir;
-      deps.keepActiveAccountInConfig = getDefaultDependencies().keepActiveAccountInConfig;
       accountsDb.create({
         phone: "+15550000001",
         user_id: 999,
@@ -665,7 +684,6 @@ describe("Authentication Commands", () => {
         phone: "+1234567890",
         is_active: true,
       });
-      deps.isAuthorized = mock(() => Promise.resolve(true));
 
       const result = await getAuthStatus(account.id, deps);
 
@@ -696,7 +714,11 @@ describe("Authentication Commands", () => {
         phone: "+1234567890",
         is_active: true,
       });
-      deps.isAuthorized = mock(() => Promise.resolve(false));
+      deps.getClient = mock(() =>
+        createMockClient({
+          getMe: mock(() => Promise.reject(new Error("AUTH_KEY_UNREGISTERED"))),
+        }),
+      );
 
       const result = await getAuthStatus(account.id, deps);
 
@@ -709,7 +731,17 @@ describe("Authentication Commands", () => {
         phone: "+1234567890",
         is_active: true,
       });
-      deps.isAuthorized = mock(() => Promise.reject(new Error("Network error")));
+      let lookups = 0;
+      deps.getClient = mock(() =>
+        createMockClient({
+          getMe: mock(() => {
+            lookups++;
+            return lookups === 1
+              ? Promise.resolve(createUser())
+              : Promise.reject(new Error("Network error"));
+          }),
+        }),
+      );
 
       const result = await getAuthStatus(account.id, deps);
 
@@ -722,7 +754,11 @@ describe("Authentication Commands", () => {
         phone: "+1234567890",
         is_active: true,
       });
-      deps.isAuthorized = mock(() => Promise.resolve(false));
+      deps.getClient = mock(() =>
+        createMockClient({
+          getMe: mock(() => Promise.reject(new Error("AUTH_KEY_UNREGISTERED"))),
+        }),
+      );
 
       const result = await getAuthStatus(account.id, deps);
 
