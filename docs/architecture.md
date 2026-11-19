@@ -3,6 +3,7 @@
 ## Overview
 
 telegram-sync-cli is a command-line utility for interacting with Telegram's full API. It's designed for:
+
 - Agent-friendly automation
 - Multi-account support
 - Non-interactive command execution
@@ -46,20 +47,21 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 
 ## Technology Stack
 
-| Component | Choice | Rationale |
-|-----------|--------|-----------|
-| Runtime | Bun | Native SQLite, fast startup, TypeScript-first |
-| Language | TypeScript | Type safety, better DX |
-| Telegram | mtcute (`@mtcute/bun`) | Modern, Bun support, TypeScript-first |
-| CLI | Citty | Lightweight, TypeScript-first |
-| Storage | bun:sqlite | Native, zero deps |
-| Linting | Biome | Fast, all-in-one linter + formatter |
-| Type Checker | TypeScript 7 (`tsc`) | Native Go compiler, fast `--noEmit` checks |
-| Git Hooks | lefthook | Simple, parallel hook execution |
+| Component    | Choice                    | Rationale                                     |
+| ------------ | ------------------------- | --------------------------------------------- |
+| Runtime      | Bun                       | Native SQLite, fast startup, TypeScript-first |
+| Language     | TypeScript                | Type safety, better DX                        |
+| Telegram     | mtcute (`@mtcute/bun`)    | Modern, Bun support, TypeScript-first         |
+| CLI          | Citty                     | Lightweight, TypeScript-first                 |
+| Storage      | bun:sqlite                | Native, zero deps                             |
+| Linting      | oxlint + landmines, oxfmt | devkit's shared lint and format standard      |
+| Type Checker | TypeScript 7 (`tsc`)      | Native Go compiler, fast `--noEmit` checks    |
+| Git Hooks    | lefthook                  | Simple, parallel hook execution               |
 
 ## Core Components
 
 ### 1. CLI Layer (`src/commands/`)
+
 - Uses Citty for command parsing
 - Each command is a separate module
 - Commands delegate to services and cache layers
@@ -69,11 +71,13 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 - Implemented: `auth`, `accounts`, `contacts`, `chats`, `messages`, `send`, `media`, `api`, `me`, `user`, `daemon`, `status`, `sql`
 
 ### 2. Service Layer (`src/services/`)
+
 - Telegram client management
 - Rate-limit coordination
 - Shared utilities
 
 ### 3. Database Layer (`src/db/`)
+
 - **Accounts DB** (`data.db`) — account records
 - **Cache/Sync DB** (`accounts/<id>/cache.db`, one per account) — users/chats cache,
   messages, sync jobs/state, rate limits. Opened with `getAccountCacheDb(accountId)`; a command
@@ -83,12 +87,14 @@ Default data directory: `~/.telegram-sync-cli` (override with `TELEGRAM_SYNC_CLI
 > `TELEGRAM_SYNC_CLI_DATA_DIR` overrides the base data directory (defaults to `~/.telegram-sync-cli`).
 
 ### 4. Cache Services (`src/db/*-cache.ts`)
+
 - `UsersCache` — user/contact caching with search
 - `ChatsCache` — dialog/chat caching with filtering
 - Prepared statements for performance
 - Transaction support for bulk operations
 
 ### 5. Daemon & Sync (`src/daemon/`)
+
 - Long-running daemon process for real-time updates and background message sync
 - Per-account mtcute connections (max 5), each with its own cache, scheduler and sync worker
 - Sync jobs for forward catchup and backfill
@@ -203,11 +209,11 @@ Commands:
 
 ### Global Flags
 
-| Flag | Description |
-|------|-------------|
-| `--format` | Output format: `json`, `pretty`, `quiet` |
-| `--verbose` | Detailed output |
-| `--quiet` | Minimal output |
+| Flag        | Description                              |
+| ----------- | ---------------------------------------- |
+| `--format`  | Output format: `json`, `pretty`, `quiet` |
+| `--verbose` | Detailed output                          |
+| `--quiet`   | Minimal output                           |
 
 > `--account` and `--fresh` are **per-command** options where supported. `--account` accepts an ID, `@username`, or label.
 

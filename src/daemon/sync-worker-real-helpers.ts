@@ -1,71 +1,64 @@
-import type { TelegramClient, tl } from '@mtcute/bun'
-import type { ChatsCache } from '../db/chats-cache'
-import type { MessageInput } from '../db/messages-cache'
-import type { UsersCache } from '../db/users-cache'
-import { toLong } from '../utils/long'
-import { resolveRawMessageType } from '../utils/message-type'
-import { toRawJson } from '../utils/raw-json'
-import { apiPageUserToCacheInput } from '../utils/telegram-mappers'
+import type { TelegramClient, tl } from "@mtcute/bun";
+import type { ChatsCache } from "../db/chats-cache";
+import type { MessageInput } from "../db/messages-cache";
+import type { UsersCache } from "../db/users-cache";
+import { toLong } from "../utils/long";
+import { resolveRawMessageType } from "../utils/message-type";
+import { toRawJson } from "../utils/raw-json";
+import { apiPageUserToCacheInput } from "../utils/telegram-mappers";
 import {
   toInputPeerFromPeerId,
   toPeerIdFromRawPeer,
   toSenderIdFromRawMessage,
-} from '../utils/telegram-peer-ids'
+} from "../utils/telegram-peer-ids";
 
 /**
  * The InputPeer for a marked chat ID, with the access hash chats_cache holds
  * for it. Without a row a basic group needs no hash and a user gets hash 0,
  * which Telegram may refuse; a channel can't be reached without one.
  */
-export function buildInputPeer(
-  chatId: number,
-  chatsCache: ChatsCache,
-): tl.TypeInputPeer | null {
-  const chat = chatsCache.getById(String(chatId))
-  if (chat) return toInputPeerFromPeerId(chatId, chat.access_hash)
-
-  const peer = toInputPeerFromPeerId(chatId, null)
-  return peer?._ === 'inputPeerChannel' ? null : peer
-}
-
-function extractReplyToId(message: Record<string, unknown>): number | null {
-  const replyToObj = message.replyTo as Record<string, unknown> | undefined
-  if (replyToObj?.replyToMsgId) {
-    return replyToObj.replyToMsgId as number
+export function buildInputPeer(chatId: number, chatsCache: ChatsCache) {
+  const chat = chatsCache.getById(String(chatId));
+  if (chat) {
+    const result: tl.TypeInputPeer | null = toInputPeerFromPeerId(chatId, chat.access_hash);
+    return result;
   }
-  return null
+
+  const peer = toInputPeerFromPeerId(chatId, null);
+  const result: tl.TypeInputPeer | null = peer?._ === "inputPeerChannel" ? null : peer;
+  return result;
 }
 
-type RawPeerField = Parameters<typeof toPeerIdFromRawPeer>[0]
+function extractReplyToId(message: Record<string, unknown>) {
+  const replyToObj = message.replyTo as Record<string, unknown> | undefined;
+  if (replyToObj?.replyToMsgId) {
+    return replyToObj.replyToMsgId as number;
+  }
+  return null;
+}
+
+type RawPeerField = Parameters<typeof toPeerIdFromRawPeer>[0];
 
 /** Marked ID of the original sender of a forwarded message */
-export function extractForwardFromId(
-  message: Record<string, unknown>,
-): number | null {
-  const fwdFrom = message.fwdFrom as { fromId?: RawPeerField } | undefined
-  return toPeerIdFromRawPeer(fwdFrom?.fromId)
+export function extractForwardFromId(message: Record<string, unknown>) {
+  const fwdFrom = message.fwdFrom as { fromId?: RawPeerField } | undefined;
+  return toPeerIdFromRawPeer(fwdFrom?.fromId);
 }
 
-export function parseRawMessage(
-  msg: unknown,
-  chatId: number,
-): MessageInput | null {
-  const m = msg as Record<string, unknown>
+export function parseRawMessage(msg: unknown, chatId: number) {
+  const m = msg as Record<string, unknown>;
 
-  if (!m || m._ === 'messageEmpty') {
-    return null
+  if (!m || m._ === "messageEmpty") {
+    const result: MessageInput | null = null;
+    return result;
   }
 
-  const { messageType, hasMedia } = resolveRawMessageType(m)
-  // A channel or group that posts as itself gets its marked ID, like chats.
-  // Without fromId the chat is the sender, as live updates store it
-  const fromId = toSenderIdFromRawMessage(
-    m as { fromId?: RawPeerField; peerId?: RawPeerField },
-  )
-  const replyToId = extractReplyToId(m)
-  const forwardFromId = extractForwardFromId(m)
+  const { messageType, hasMedia } = resolveRawMessageType(m);
+  const fromId = toSenderIdFromRawMessage(m as { fromId?: RawPeerField; peerId?: RawPeerField });
+  const replyToId = extractReplyToId(m);
+  const forwardFromId = extractForwardFromId(m);
 
-  return {
+  const result: MessageInput | null = {
     chat_id: chatId,
     message_id: m.id as number,
     from_id: fromId,
@@ -80,27 +73,28 @@ export function parseRawMessage(
     edit_date: (m.editDate as number) || null,
     date: m.date as number,
     raw_json: toRawJson(m),
-  }
+  };
+  return result;
 }
 
-export function extractFloodWaitSeconds(error: Error): number | null {
-  const match = error.message.match(/FLOOD_WAIT_(\d+)/)
+export function extractFloodWaitSeconds(error: Error) {
+  const match = error.message.match(/FLOOD_WAIT_(\d+)/);
   if (match?.[1]) {
-    return parseInt(match[1], 10)
+    return parseInt(match[1], 10);
   }
 
-  const anyError = error as unknown as Record<string, unknown>
-  if (typeof anyError.seconds === 'number') {
-    return anyError.seconds
+  const anyError = error as unknown as Record<string, unknown>;
+  if (typeof anyError.seconds === "number") {
+    return anyError.seconds;
   }
 
-  return null
+  return null;
 }
 
 /** The `id` of a raw message from Telegram, or 0 if it has none */
-export function rawMessageId(message: unknown): number {
-  const id = (message as { id?: unknown } | null)?.id
-  return typeof id === 'number' ? id : 0
+export function rawMessageId(message: unknown) {
+  const id = (message as { id?: unknown } | null)?.id;
+  return typeof id === "number" ? id : 0;
 }
 
 /**
@@ -111,9 +105,9 @@ export function rawMessageId(message: unknown): number {
  */
 export function forwardPageRequest(cursor: number | null, limit: number) {
   if (cursor === null) {
-    return { limit }
+    return { limit };
   }
-  return { offsetId: cursor + 1, addOffset: -limit, limit, minId: cursor }
+  return { offsetId: cursor + 1, addOffset: -limit, limit, minId: cursor };
 }
 
 /**
@@ -121,22 +115,20 @@ export function forwardPageRequest(cursor: number | null, limit: number) {
  * request at once, a FLOOD_WAIT it waits out included.
  */
 export async function fetchMessagesRaw(
-  client: Pick<TelegramClient, 'call'>,
+  client: Pick<TelegramClient, "call">,
   inputPeer: tl.TypeInputPeer,
   options: {
-    offsetId?: number
-    addOffset?: number
-    limit?: number
-    minId?: number
-    maxId?: number
+    offsetId?: number;
+    addOffset?: number;
+    limit?: number;
+    minId?: number;
+    maxId?: number;
   },
   signal?: AbortSignal,
-): Promise<{ messages: unknown[]; count?: number; users: tl.TypeUser[] }> {
-  // mtcute's flood waiter never wakes on a signal that is already aborted,
-  // so a stored FLOOD_WAIT would sleep in full
-  signal?.throwIfAborted()
+) {
+  signal?.throwIfAborted();
   const request: tl.messages.RawGetHistoryRequest = {
-    _: 'messages.getHistory',
+    _: "messages.getHistory",
     peer: inputPeer,
     offsetId: options.offsetId ?? 0,
     offsetDate: 0,
@@ -145,16 +137,20 @@ export async function fetchMessagesRaw(
     maxId: options.maxId ?? 0,
     minId: options.minId ?? 0,
     hash: toLong(0),
-  }
+  };
   const result = signal
     ? await client.call(request, { abortSignal: signal })
-    : await client.call(request)
-  const messages = 'messages' in result ? result.messages : []
-  const count = 'count' in result ? result.count : undefined
-  // The senders of the page, for callers that cache them
-  const users = 'users' in result ? result.users : []
+    : await client.call(request);
+  const messages = "messages" in result ? result.messages : [];
+  const count = "count" in result ? result.count : undefined;
+  const users = "users" in result ? result.users : [];
 
-  return { messages, count, users }
+  const page: { messages: unknown[]; count?: number; users: tl.TypeUser[] } = {
+    messages,
+    count,
+    users,
+  };
+  return page;
 }
 
 /**
@@ -164,42 +160,37 @@ export async function fetchMessagesRaw(
  * has with `messageEmpty`. A `signal` ends the request at once.
  */
 export async function fetchMessagesByIdRaw(
-  client: Pick<TelegramClient, 'call'>,
+  client: Pick<TelegramClient, "call">,
   inputPeer: tl.TypeInputPeer,
   ids: number[],
   signal?: AbortSignal,
-): Promise<{
-  messages: unknown[]
-  chats: tl.TypeChat[]
-  users: tl.TypeUser[]
-}> {
-  signal?.throwIfAborted()
+) {
+  signal?.throwIfAborted();
   const id: tl.TypeInputMessage[] = ids.map((messageId) => ({
-    _: 'inputMessageID',
+    _: "inputMessageID",
     id: messageId,
-  }))
-  const request:
-    | tl.channels.RawGetMessagesRequest
-    | tl.messages.RawGetMessagesRequest =
-    inputPeer._ === 'inputPeerChannel'
+  }));
+  const request: tl.channels.RawGetMessagesRequest | tl.messages.RawGetMessagesRequest =
+    inputPeer._ === "inputPeerChannel"
       ? {
-          _: 'channels.getMessages',
+          _: "channels.getMessages",
           channel: {
-            _: 'inputChannel',
+            _: "inputChannel",
             channelId: inputPeer.channelId,
             accessHash: inputPeer.accessHash,
           },
           id,
         }
-      : { _: 'messages.getMessages', id }
+      : { _: "messages.getMessages", id };
   const result = signal
     ? await client.call(request, { abortSignal: signal })
-    : await client.call(request)
-  return {
-    messages: 'messages' in result ? result.messages : [],
-    chats: 'chats' in result ? result.chats : [],
-    users: 'users' in result ? result.users : [],
-  }
+    : await client.call(request);
+  const found: { messages: unknown[]; chats: tl.TypeChat[]; users: tl.TypeUser[] } = {
+    messages: "messages" in result ? result.messages : [],
+    chats: "chats" in result ? result.chats : [],
+    users: "users" in result ? result.users : [],
+  };
+  return found;
 }
 
 /**
@@ -210,14 +201,9 @@ export async function fetchMessagesByIdRaw(
  * Callers write them before the messages, because the search index reads a
  * sender's name when a message row is written.
  */
-export function cachePageUsers(
-  usersCache: UsersCache,
-  users: tl.TypeUser[],
-): void {
-  const full = users.filter(
-    (user): user is tl.RawUser => user._ === 'user' && !user.min,
-  )
-  if (full.length > 0) usersCache.mergeMany(full.map(apiPageUserToCacheInput))
+export function cachePageUsers(usersCache: UsersCache, users: tl.TypeUser[]) {
+  const full = users.filter((user): user is tl.RawUser => user._ === "user" && !user.min);
+  if (full.length > 0) usersCache.mergeMany(full.map(apiPageUserToCacheInput));
 }
 
 /**
@@ -230,17 +216,14 @@ export function cachePageUsers(
 export function historyTotal(
   page: { messages: unknown[]; count?: number },
   request: { offsetId?: number; minId?: number; maxId?: number },
-): number | null {
-  if (request.minId || request.maxId) return null
-  if (page.count !== undefined) return page.count
-  return request.offsetId ? null : page.messages.length
+) {
+  if (request.minId || request.maxId) return null;
+  if (page.count !== undefined) return page.count;
+  return request.offsetId ? null : page.messages.length;
 }
 
-export function createMessageInputs(
-  messages: unknown[],
-  chatId: number,
-): MessageInput[] {
+export function createMessageInputs(messages: unknown[], chatId: number) {
   return messages
     .map((message) => parseRawMessage(message, chatId))
-    .filter((input) => input !== null)
+    .filter((input) => input !== null);
 }

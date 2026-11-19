@@ -1,18 +1,10 @@
-/**
- * Skill commands for AI integration
- */
+import { constants } from "node:fs";
+import { access, lstat, mkdir, rename, rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { defineCommand } from "citty";
 
-import { constants } from 'node:fs'
-import { access, lstat, mkdir, rename, rm } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-import { defineCommand } from 'citty'
-
-// Embedded in the compiled binary, so `tg skill install` writes the file the
-// repo ships, never a copy that can drift
-import skillMarkdown from '../../skills/telegram-sync-cli/SKILL.md' with {
-  type: 'text',
-}
+import skillMarkdown from "../../skills/telegram-sync-cli/SKILL.md" with { type: "text" };
 import {
   ConfigError,
   type ConfigFile,
@@ -20,79 +12,76 @@ import {
   configuredActiveAccount,
   getConfigPath,
   loadConfig,
-} from '../config'
-import { getErrorMessage } from '../daemon/daemon-utils'
-import { type Account, ErrorCodes } from '../types'
-import { findDefaultAccount } from '../utils/account-selector'
-import { error, success } from '../utils/output'
+} from "../config";
+import { getErrorMessage } from "../daemon/daemon-utils";
+import { type Account, ErrorCodes } from "../types";
+import { findDefaultAccount } from "../utils/account-selector";
+import { error, success } from "../utils/output";
 
-export const SKILL_NAME = 'telegram-sync-cli'
+export const SKILL_NAME = "telegram-sync-cli";
 
-export const SKILL_MARKDOWN: string = skillMarkdown
+export const SKILL_MARKDOWN: string = skillMarkdown;
 
 export interface SkillEnvStatus {
   telegram_api_id: {
-    present: boolean
-    valid: boolean
-  }
+    present: boolean;
+    valid: boolean;
+  };
   telegram_api_hash: {
-    present: boolean
-    valid: boolean
-  }
+    present: boolean;
+    valid: boolean;
+  };
 }
 
 export interface SkillDataDirStatus {
-  path: string
-  exists: boolean
-  is_directory: boolean
-  writable: boolean
-  error?: string
+  path: string;
+  exists: boolean;
+  is_directory: boolean;
+  writable: boolean;
+  error?: string;
 }
 
 export interface SkillAccountStatus {
-  id: number
-  username: string | null
-  label: string | null
+  id: number;
+  username: string | null;
+  label: string | null;
 }
 
 export interface SkillDaemonStatus {
   /** `unknown`: daemon.pid exists but can't be read */
-  status: 'running' | 'stopped' | 'unknown'
-  pid: number | null
-  error?: string
+  status: "running" | "stopped" | "unknown";
+  pid: number | null;
+  error?: string;
 }
 
 export interface SkillValidationResult {
-  valid: boolean
-  env: SkillEnvStatus
-  data_dir: SkillDataDirStatus
+  valid: boolean;
+  env: SkillEnvStatus;
+  data_dir: SkillDataDirStatus;
   /** The account record the next command uses without --account, or null */
-  account: SkillAccountStatus | null
+  account: SkillAccountStatus | null;
   /** null: data.db can't be read */
-  accounts_total: number | null
-  daemon: SkillDaemonStatus
-  issues: string[]
+  accounts_total: number | null;
+  daemon: SkillDaemonStatus;
+  issues: string[];
 }
 
 export interface SkillInstallResult {
-  path: string
-  bytes: number
-  overwritten: boolean
+  path: string;
+  bytes: number;
+  overwritten: boolean;
 }
 
-function resolveDataDir(): string {
-  return (
-    process.env.TELEGRAM_SYNC_CLI_DATA_DIR ??
-    join(homedir(), '.telegram-sync-cli')
-  )
+function resolveDataDir() {
+  return process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? join(homedir(), ".telegram-sync-cli");
 }
 
-function buildEnvStatus(): SkillEnvStatus {
-  const apiIdRaw = process.env.TELEGRAM_API_ID ?? ''
-  const apiHashRaw = process.env.TELEGRAM_API_HASH ?? ''
-  const apiId = Number.parseInt(apiIdRaw, 10)
+function buildEnvStatus() {
+  const apiIdRaw = process.env.TELEGRAM_API_ID ?? "";
+  const apiHashRaw = process.env.TELEGRAM_API_HASH ?? "";
+  const apiId = Number.parseInt(apiIdRaw, 10);
 
-  return {
+  const result: SkillEnvStatus = {
     telegram_api_id: {
       present: apiIdRaw.length > 0,
       valid: Number.isFinite(apiId) && apiId > 0,
@@ -101,159 +90,160 @@ function buildEnvStatus(): SkillEnvStatus {
       present: apiHashRaw.length > 0,
       valid: apiHashRaw.length > 0,
     },
-  }
+  };
+  return result;
 }
 
-function errorCode(err: unknown): unknown {
-  return typeof err === 'object' && err && 'code' in err ? err.code : null
+function errorCode(err: unknown) {
+  return typeof err === "object" && err && "code" in err ? err.code : null;
 }
 
-/** @internal exported for testing */
-export async function tryStat(path: string): Promise<
-  | {
-      exists: true
-      isDirectory: boolean
-    }
-  | {
-      exists: false
-      error?: string
-    }
-> {
+export async function tryStat(path: string) {
   try {
-    const stat = await Bun.file(path).stat()
-    return { exists: true, isDirectory: stat.isDirectory() }
+    const stat = await Bun.file(path).stat();
+    const result:
+      | {
+          exists: true;
+          isDirectory: boolean;
+        }
+      | {
+          exists: false;
+          error?: string;
+        } = { exists: true, isDirectory: stat.isDirectory() };
+    return result;
   } catch (err) {
-    if (errorCode(err) === 'ENOENT') {
-      return { exists: false }
+    if (errorCode(err) === "ENOENT") {
+      const result:
+        | {
+            exists: true;
+            isDirectory: boolean;
+          }
+        | {
+            exists: false;
+            error?: string;
+          } = { exists: false };
+      return result;
     }
-    return { exists: false, error: getErrorMessage(err) }
+    const result:
+      | {
+          exists: true;
+          isDirectory: boolean;
+        }
+      | {
+          exists: false;
+          error?: string;
+        } = { exists: false, error: getErrorMessage(err) };
+    return result;
   }
 }
 
-export async function checkDataDirAccess(
-  dataDir: string,
-): Promise<SkillDataDirStatus> {
-  const initialStat = await tryStat(dataDir)
+export async function checkDataDirAccess(dataDir: string) {
+  const initialStat = await tryStat(dataDir);
   if (initialStat.exists && !initialStat.isDirectory) {
-    return {
+    const result: SkillDataDirStatus = {
       path: dataDir,
       exists: true,
       is_directory: false,
       writable: false,
-      error: 'Path exists but is not a directory',
-    }
+      error: "Path exists but is not a directory",
+    };
+    return result;
   }
 
-  const probeName = `.tg-skill-probe-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}`
-  const probePath = join(dataDir, probeName)
+  const probeName = `.tg-skill-probe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const probePath = join(dataDir, probeName);
 
-  let writable = false
-  let errorMessage: string | undefined
+  let writable = false;
+  let errorMessage: string | undefined;
 
   try {
-    await Bun.write(probePath, 'probe', { createPath: true })
-    writable = true
+    await Bun.write(probePath, "probe", { createPath: true });
+    writable = true;
   } catch (err) {
-    errorMessage = getErrorMessage(err)
+    errorMessage = getErrorMessage(err);
   }
 
   if (writable) {
     try {
-      await Bun.file(probePath).delete()
-    } catch {
-      // Ignore cleanup errors
-    }
+      await Bun.file(probePath).delete();
+    } catch {}
   }
 
-  const finalStat = await tryStat(dataDir)
+  const finalStat = await tryStat(dataDir);
 
-  return {
+  const result: SkillDataDirStatus = {
     path: dataDir,
     exists: finalStat.exists,
     is_directory: finalStat.exists ? finalStat.isDirectory : false,
     writable,
     ...(errorMessage ? { error: errorMessage } : {}),
-  }
+  };
+  return result;
 }
 
-/** config.json as a command's start reads it, or the issue that stops it */
-async function readConfig(): Promise<
-  { config: ConfigFile; issue: null } | { config: null; issue: string }
-> {
+async function readConfig() {
   try {
-    const { config } = await loadConfig({ strict: true })
-    return { config, issue: null }
+    const { config } = await loadConfig({ strict: true });
+    const result: { config: ConfigFile; issue: null } | { config: null; issue: string } = {
+      config,
+      issue: null,
+    };
+    return result;
   } catch (err) {
     if (err instanceof ConfigError) {
-      const details = err.issues
-        .map((issue) => `${issue.path}: ${issue.message}`)
-        .join('; ')
+      const details = err.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
       return {
         config: null,
         issue: `${getConfigPath()}: ${err.message} (${details}); fix it with tg config set or edit the file`,
-      }
+      };
     }
     if (err instanceof ConfigReadError) {
-      return { config: null, issue: err.message }
+      return { config: null, issue: err.message };
     }
-    throw err
+    throw err;
   }
 }
 
-function accountStatus(account: Account): SkillAccountStatus {
-  return {
+function accountStatus(account: Account) {
+  const result: SkillAccountStatus = {
     id: account.id,
     username: account.username ?? null,
     label: account.label ?? null,
-  }
+  };
+  return result;
 }
 
-/**
- * The account record the next command picks without --account: config.json's
- * activeAccount, else the active one, else the only one. Reads only; a
- * command's start applies activeAccount. With a config.json that stops
- * every command, no account is picked.
- */
-async function readAccounts(config: ConfigFile | null): Promise<{
-  account: SkillAccountStatus | null
-  accountsTotal: number | null
-  issues: string[]
-}> {
-  const { accountsDb, getDatabasePath } = await import('../db')
-  // No data.db means no account; opening one would create it
+async function readAccounts(config: ConfigFile | null) {
+  const { accountsDb, getDatabasePath } = await import("../db");
   if (!(await Bun.file(getDatabasePath()).exists())) {
     return {
       account: null,
       accountsTotal: 0,
-      issues: ['No account: log in with tg auth login'],
-    }
+      issues: ["No account: log in with tg auth login"],
+    };
   }
-  let found: ReturnType<typeof findDefaultAccount>
-  let configured: Account | null
+  let found: ReturnType<typeof findDefaultAccount>;
+  let configured: Account | null;
   try {
-    found = findDefaultAccount(accountsDb)
-    configured = config ? configuredActiveAccount(config, accountsDb) : null
+    found = findDefaultAccount(accountsDb);
+    configured = config ? configuredActiveAccount(config, accountsDb) : null;
   } catch (err) {
     return {
       account: null,
       accountsTotal: null,
-      issues: [
-        `Could not read the accounts in ${getDatabasePath()}: ${getErrorMessage(err)}`,
-      ],
-    }
+      issues: [`Could not read the accounts in ${getDatabasePath()}: ${getErrorMessage(err)}`],
+    };
   }
-  const total = found.accounts.length
+  const total = found.accounts.length;
   if (total === 0) {
     return {
       account: null,
       accountsTotal: 0,
-      issues: ['No account: log in with tg auth login'],
-    }
+      issues: ["No account: log in with tg auth login"],
+    };
   }
-  if (!config) return { account: null, accountsTotal: total, issues: [] }
-  const selected = configured ?? found.account
+  if (!config) return { account: null, accountsTotal: total, issues: [] };
+  const selected = configured ?? found.account;
   return {
     account: selected ? accountStatus(selected) : null,
     accountsTotal: total,
@@ -262,49 +252,53 @@ async function readAccounts(config: ConfigFile | null): Promise<{
       : [
           `${total} accounts and none is active: pass --account or run tg accounts switch --id <id>`,
         ],
-  }
+  };
 }
 
-/** Whether a live process holds daemon.pid; unknown when the file can't be read */
-async function readDaemon(dataDir: string): Promise<SkillDaemonStatus> {
-  const path = join(dataDir, 'daemon.pid')
+async function readDaemon(dataDir: string) {
+  const path = join(dataDir, "daemon.pid");
+  let status: SkillDaemonStatus;
   try {
-    await access(path, constants.R_OK)
+    await access(path, constants.R_OK);
   } catch (err) {
-    if (errorCode(err) === 'ENOENT') return { status: 'stopped', pid: null }
-    return { status: 'unknown', pid: null, error: getErrorMessage(err) }
+    if (errorCode(err) === "ENOENT") {
+      status = { status: "stopped", pid: null };
+      return status;
+    }
+    status = { status: "unknown", pid: null, error: getErrorMessage(err) };
+    return status;
   }
-  const { createPidFile } = await import('../daemon/pid-file')
-  const pid = createPidFile(path).read()
-  return pid === null ? { status: 'stopped', pid } : { status: 'running', pid }
+  const { createPidFile } = await import("../daemon/pid-file");
+  const pid = createPidFile(path).read();
+  status = pid === null ? { status: "stopped", pid } : { status: "running", pid };
+  return status;
 }
 
-/** Each check reads its own source, so one that fails leaves the others */
-export async function validateSkillEnvironment(): Promise<SkillValidationResult> {
-  const envStatus = buildEnvStatus()
-  const dataDir = resolveDataDir()
-  const dataDirStatus = await checkDataDirAccess(dataDir)
-  const { config, issue: configIssue } = await readConfig()
-  const accounts = await readAccounts(config)
-  const daemon = await readDaemon(dataDir)
+export async function validateSkillEnvironment() {
+  const envStatus = buildEnvStatus();
+  const dataDir = resolveDataDir();
+  const dataDirStatus = await checkDataDirAccess(dataDir);
+  const { config, issue: configIssue } = await readConfig();
+  const accounts = await readAccounts(config);
+  const daemon = await readDaemon(dataDir);
 
-  const issues: string[] = []
+  const issues: string[] = [];
   if (!envStatus.telegram_api_id.valid) {
-    issues.push('TELEGRAM_API_ID is missing or invalid')
+    issues.push("TELEGRAM_API_ID is missing or invalid");
   }
   if (!envStatus.telegram_api_hash.valid) {
-    issues.push('TELEGRAM_API_HASH is missing or invalid')
+    issues.push("TELEGRAM_API_HASH is missing or invalid");
   }
   if (!dataDirStatus.writable) {
-    issues.push('Data directory is not writable')
+    issues.push("Data directory is not writable");
   }
   if (dataDirStatus.exists && !dataDirStatus.is_directory) {
-    issues.push('Data directory path is not a directory')
+    issues.push("Data directory path is not a directory");
   }
-  if (configIssue) issues.push(configIssue)
-  issues.push(...accounts.issues)
+  if (configIssue) issues.push(configIssue);
+  issues.push(...accounts.issues);
 
-  return {
+  const result: SkillValidationResult = {
     valid: issues.length === 0,
     env: envStatus,
     data_dir: dataDirStatus,
@@ -312,7 +306,8 @@ export async function validateSkillEnvironment(): Promise<SkillValidationResult>
     accounts_total: accounts.accountsTotal,
     daemon,
     issues,
-  }
+  };
+  return result;
 }
 
 /** A destination install won't write through */
@@ -321,24 +316,23 @@ export class SkillInstallRefused extends Error {
     message: string,
     readonly path: string,
   ) {
-    super(message)
-    this.name = 'SkillInstallRefused'
+    super(message);
+    this.name = "SkillInstallRefused";
   }
 }
 
-/** Whether `path` exists; refuses a symbolic link, which could point into another skills tree */
-async function existsNotLink(path: string): Promise<boolean> {
-  let stat: Awaited<ReturnType<typeof lstat>>
+async function existsNotLink(path: string) {
+  let stat: Awaited<ReturnType<typeof lstat>>;
   try {
-    stat = await lstat(path)
+    stat = await lstat(path);
   } catch (err) {
-    if (errorCode(err) === 'ENOENT') return false
-    throw err
+    if (errorCode(err) === "ENOENT") return false;
+    throw err;
   }
   if (stat.isSymbolicLink()) {
-    throw new SkillInstallRefused(`${path} is a symbolic link`, path)
+    throw new SkillInstallRefused(`${path} is a symbolic link`, path);
   }
-  return true
+  return true;
 }
 
 /**
@@ -346,87 +340,86 @@ async function existsNotLink(path: string): Promise<boolean> {
  * there. `dir` itself may be a link; the skill directory and the file in it
  * may not.
  */
-export async function installSkill(dir: string): Promise<SkillInstallResult> {
-  const skillDir = join(dir, SKILL_NAME)
-  const path = join(skillDir, 'SKILL.md')
-  await existsNotLink(skillDir)
-  const existed = await existsNotLink(path)
+export async function installSkill(dir: string) {
+  const skillDir = join(dir, SKILL_NAME);
+  const path = join(skillDir, "SKILL.md");
+  await existsNotLink(skillDir);
+  const existed = await existsNotLink(path);
   if (existed && !(await lstat(path)).isFile()) {
-    throw new SkillInstallRefused(`${path} is not a regular file`, path)
+    throw new SkillInstallRefused(`${path} is not a regular file`, path);
   }
-  await mkdir(skillDir, { recursive: true })
-  // rename replaces whatever sits at path itself, never a file a link points to
-  const temp = join(skillDir, `.SKILL.md.${process.pid}.tmp`)
-  const bytes = await Bun.write(temp, SKILL_MARKDOWN)
+  await mkdir(skillDir, { recursive: true });
+  const temp = join(skillDir, `.SKILL.md.${process.pid}.tmp`);
+  const bytes = await Bun.write(temp, SKILL_MARKDOWN);
   try {
-    await rename(temp, path)
+    await rename(temp, path);
   } catch (err) {
-    await rm(temp, { force: true })
-    throw err
+    await rm(temp, { force: true });
+    throw err;
   }
-  return { path, bytes, overwritten: existed }
+  const result: SkillInstallResult = { path, bytes, overwritten: existed };
+  return result;
 }
 
 export const skillValidateCommand = defineCommand({
   meta: {
-    name: 'validate',
+    name: "validate",
     description:
-      'Check locally: the credentials in the environment, the data directory, config.json, the account record the next command uses and whether a live process holds daemon.pid',
+      "Check locally: the credentials in the environment, the data directory, config.json, the account record the next command uses and whether a live process holds daemon.pid",
   },
   async run() {
-    success(await validateSkillEnvironment())
+    success(await validateSkillEnvironment());
   },
-})
+});
 
 export const skillInstallCommand = defineCommand({
   meta: {
-    name: 'install',
+    name: "install",
     description:
       "Write the agent skill to <dir>/telegram-sync-cli/SKILL.md, replacing the file there, local edits included. <dir> is an agent's skills directory",
   },
   args: {
     dir: {
-      type: 'string',
-      description: 'Skills directory, such as ~/.claude/skills',
+      type: "string",
+      description: "Skills directory, such as ~/.claude/skills",
       required: true,
     },
   },
   async run({ args }) {
-    // A bare --dir or --dir= parses as an empty value
-    const dir = typeof args.dir === 'string' ? args.dir.trim() : ''
+    const dir = typeof args.dir === "string" ? args.dir.trim() : "";
     if (!dir) {
       error(
         ErrorCodes.INVALID_ARGS,
-        '--dir needs a directory',
+        "--dir needs a directory",
         undefined,
         "Pass the agent's skills directory, such as --dir ~/.claude/skills",
-      )
+      );
     }
     try {
-      success(await installSkill(dir))
+      success(await installSkill(dir));
     } catch (err) {
       error(
         ErrorCodes.GENERAL_ERROR,
-        'Failed to write the skill',
+        "Failed to write the skill",
         {
           reason: getErrorMessage(err),
           ...(err instanceof SkillInstallRefused ? { path: err.path } : {}),
         },
         err instanceof SkillInstallRefused
-          ? 'Remove it or pass another --dir: install never writes through a link inside the skills directory'
+          ? "Remove it or pass another --dir: install never writes through a link inside the skills directory"
           : undefined,
-      )
+      );
     }
   },
-})
+});
 
 export const skillCommand = defineCommand({
   meta: {
-    name: 'skill',
-    description: 'The agent skill: install it, check the setup it needs',
+    name: "skill",
+    description: "The agent skill: install it, check the setup it needs",
   },
   subCommands: {
     validate: skillValidateCommand,
     install: skillInstallCommand,
   },
-})
+});

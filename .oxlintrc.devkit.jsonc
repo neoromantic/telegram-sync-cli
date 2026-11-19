@@ -1,0 +1,65 @@
+// managed by devkit v1: edit in https://github.com/neoromantic/devkit/blob/main/templates/.oxlintrc.devkit.jsonc
+// The shared lint standard (docs/standards/lint-format.md). This repo's exceptions go in .oxlintrc.json.
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import"],
+  "jsPlugins": [
+    { "name": "landmines-testing", "specifier": "@interfere/landmines/testing" },
+    { "name": "landmines-style", "specifier": "@interfere/landmines/style" },
+    { "name": "landmines-structure", "specifier": "@interfere/landmines/structure" },
+    { "name": "landmines-types", "specifier": "@interfere/landmines/types" },
+  ],
+  "categories": {
+    "correctness": "error",
+  },
+  "rules": {
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "no-fallthrough": "error",
+    "array-callback-return": "error",
+    "no-self-compare": "error",
+    "no-case-declarations": "error",
+    "no-prototype-builtins": "error",
+    "no-constructor-return": "error",
+    "typescript/ban-ts-comment": "error",
+    "no-unused-vars": [
+      "error",
+      {
+        "ignoreRestSiblings": true,
+        "varsIgnorePattern": "^_",
+        "argsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_",
+        "destructuredArrayIgnorePattern": "^_",
+      },
+    ],
+    "landmines-testing/no-fixed-sleep": "error",
+    "landmines-testing/no-flake-masking": "error",
+    "landmines-testing/no-test-doubles": "error",
+    "landmines-testing/no-unsignaled-poll": "error",
+    "landmines-testing/strict-msw": "error",
+    "landmines-style/no-comments": "error",
+    "landmines-structure/colocated-tests": "error",
+    "landmines-structure/package-exports": "error",
+    "landmines-structure/test-file-names": "error",
+    "landmines-types/no-explicit-return-types": "error",
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "mock",
+        "property": "module",
+        "message": "mock.module replaces a module for the whole test process, and mock.restore() does not undo it. Use the real module, a local substitute or MSW (docs/standards/testing.md).",
+      },
+    ],
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "bun:test",
+            "importNames": ["setDefaultTimeout"],
+            "message": "Do not raise the default test timeout. Split slow sweeps with test.each, or run slow shared setup once in beforeAll.",
+          },
+        ],
+      },
+    ],
+  },
+}

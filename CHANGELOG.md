@@ -58,9 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tg skill install` and `tg skill validate` work with a corrupt `data.db`, which stopped every
   command with a SQLite stack trace before it started: `data.db` now opens when a command first
   reads an account. Install writes the skill, and validate names the file as an issue.
-
-### Fixed
-
 - The npm package declares `long`, which tg imports directly. Until now it only arrived
   through `@mtcute/core`, so an install that doesn't hoist transitive dependencies could fail
   to start.
