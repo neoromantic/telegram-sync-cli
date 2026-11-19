@@ -104,6 +104,8 @@ bun run docs:outputs             # regenerate output tables in docs/cli-commands
 - `bin/tg.js` is a 3-line ESM shim (`#!/usr/bin/env bun`) that runs `src/index.ts`. The npm
   package ships source, not `dist/tg`, and has no `postinstall`. Requires Bun >= 1.4.
 - The version lives only in `package.json` (read by `src/version.ts`).
+- `typecheck` runs tsc incrementally and `check:knip` runs Knip with `--cache`; both keep their
+  state in `node_modules/.cache`, so a repeat run (the pre-commit typecheck) takes under a second.
 - Knip (`knip.json`) checks files, dependencies and imports, not exports: exported names are
   public API. A file that only a test spawns by path is listed under `entry`. Import a package
   only if `package.json` declares it, even when another dependency already brings it in.
