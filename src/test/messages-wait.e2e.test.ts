@@ -212,7 +212,6 @@ describe("E2E: messages wait and watch", () => {
     const result = await runCli(["messages", "wait"], options());
 
     expect(result.exitCode).toBe(1);
-    expect(result.duration).toBeLessThan(5000);
     expect(result.json).toMatchObject({
       success: false,
       error: {

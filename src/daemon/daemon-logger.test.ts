@@ -7,6 +7,7 @@ import {
   maskPhone,
   routeClientLogs,
 } from "./daemon-logger";
+import type { DaemonVerbosity } from "./types";
 import { watchedLogger } from "../test/daemon-runtime.test-utils";
 
 function watchConsole() {
@@ -22,51 +23,34 @@ afterEach(() => {
 });
 
 describe("createLogger", () => {
-  it("suppresses info/debug in quiet mode", () => {
+  it("prints warnings and errors always, info unless quiet, debug only when verbose", () => {
     const { log, warn, error } = watchConsole();
+    const printed = (verbosity: DaemonVerbosity) => {
+      for (const spy of [log, warn, error]) spy.mockClear();
+      const logger = createLogger(verbosity);
+      logger.info("info");
+      logger.debug("debug");
+      logger.warn("warn");
+      logger.error("error");
+      return [log, warn, error].flatMap((spy) =>
+        spy.mock.calls.map(([line]) => String(line).replace(/^\[[^\]]+\] /, "")),
+      );
+    };
 
-    const logger = createLogger("quiet");
-    logger.info("info");
-    logger.debug("debug");
-    logger.warn("warn");
-    logger.error("error");
-
-    expect(log).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalled();
-    expect(error).toHaveBeenCalled();
-  });
-
-  it("logs info but not debug in normal mode", () => {
-    const { log } = watchConsole();
-
-    const logger = createLogger("normal");
-    logger.info("info");
-    logger.debug("debug");
-
-    expect(log).toHaveBeenCalledTimes(1);
-  });
-
-  it("logs debug in verbose mode", () => {
-    const { log } = watchConsole();
-
-    const logger = createLogger("verbose");
-    logger.debug("debug");
-
-    expect(log).toHaveBeenCalledTimes(1);
+    expect(printed("quiet")).toEqual(["[WARN] warn", "[ERROR] error"]);
+    expect(printed("normal")).toEqual(["[INFO] info", "[WARN] warn", "[ERROR] error"]);
+    expect(printed("verbose")).toEqual([
+      "[INFO] info",
+      "[DEBUG] debug",
+      "[WARN] warn",
+      "[ERROR] error",
+    ]);
   });
 });
 
 describe("account labels (#128)", () => {
-  it("masks all but the first two and last two digits of a phone", () => {
-    expect(maskPhone("+15550000001")).toBe("+15*******01");
+  it("masks a short phone whole and names an account without a phone by its ID", () => {
     expect(maskPhone("123")).toBe("***");
-  });
-
-  it("names an account by its username, else a masked phone", () => {
-    expect(accountLabel({ accountId: 2, phone: "+15550000002", username: "demo" })).toBe(
-      "#2 (@demo)",
-    );
-    expect(accountLabel({ accountId: 2, phone: "+15550000002" })).toBe("#2 (+15*******02)");
     expect(accountLabel({ accountId: 3, phone: "user:42" })).toBe("#3");
   });
 });

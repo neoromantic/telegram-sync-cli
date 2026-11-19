@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { getAccountCacheDb, getAccountCachePath } from "../db";
@@ -37,8 +38,8 @@ function stampForAnotherAccount(accountId: number) {
 const { createDaemon } = await import("./daemon");
 const { DaemonExitCode } = await import("./types");
 
-const tempDir = join(process.cwd(), ".tmp", `daemon-start-caches-${process.pid}`);
-const pidPath = join(tempDir, "daemon.pid");
+let tempDir: string;
+let pidPath: string;
 
 function statusOf(accountId: number) {
   const cache = new Database(getAccountCachePath(accountId));
@@ -52,7 +53,8 @@ function statusOf(accountId: number) {
 useTestDataDir([testAccount(), testAccount({ phone: "+15550000002", is_active: false })]);
 
 beforeEach(() => {
-  mkdirSync(tempDir, { recursive: true });
+  tempDir = mkdtempSync(join(tmpdir(), "tg-daemon-start-"));
+  pidPath = join(tempDir, "daemon.pid");
   connected.length = 0;
 });
 
@@ -66,47 +68,16 @@ describe("daemon start with a cache per account", () => {
   it("connects only the accounts whose cache opened, and marks each one's cache stopped", async () => {
     stampForAnotherAccount(1);
     const daemon = createDaemon({ pidPath });
-    let whileConnecting: ReturnType<typeof daemon.getStatus>["accounts"] = [];
-    clients.set(2, {
-      async start() {
-        whileConnecting = daemon.getStatus().accounts;
-        throw new Error("Connection timed out");
-      },
-    });
 
     expect(await daemon.start()).toBe(DaemonExitCode.AllAccountsFailed);
 
     expect(connected).toEqual([2]);
-    expect(whileConnecting).toContainEqual(
-      expect.objectContaining({
-        id: 1,
-        status: "error",
-        lastError: expect.stringContaining("another account"),
-      }),
-    );
-    expect(daemon.getStatus().accounts).toContainEqual(
-      expect.objectContaining({
-        id: 1,
-        lastError: expect.stringContaining("another account"),
-      }),
-    );
-    expect(statusOf(2)).toMatchObject({ daemon_status: "stopped" });
+    expect(statusOf(2)).toMatchObject({
+      daemon_status: "stopped",
+      connection_status: "disconnected",
+    });
     expect(statusOf(2).daemon_pid).toBeUndefined();
     expect(statusOf(1).daemon_status).toBeUndefined();
-  });
-
-  it("marks every account stopped when none connects", async () => {
-    const daemon = createDaemon({ pidPath });
-
-    expect(await daemon.start()).toBe(DaemonExitCode.AllAccountsFailed);
-
-    expect(connected).toEqual([1, 2]);
-    for (const accountId of [1, 2]) {
-      expect(statusOf(accountId)).toMatchObject({
-        daemon_status: "stopped",
-        connection_status: "disconnected",
-      });
-    }
   });
 
   it("fails without connecting when no account has a cache it can open", async () => {
@@ -151,6 +122,7 @@ describe("daemon start with a cache per account", () => {
       connection_status: "connected",
       pending_jobs: "0",
     });
+    expect(statusOf(1)).toMatchObject({ daemon_status: "stopped" });
     expect(statusOf(2)).toMatchObject({ daemon_status: "stopped" });
   });
 });

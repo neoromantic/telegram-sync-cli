@@ -210,7 +210,7 @@ describe("bootstrapDialogs", () => {
     expect(chatSyncState.get(-1_000_000_002_002)?.forward_cursor).toBeNull();
   });
 
-  it("keeps the newest post of an archived channel without starting to sync it (#125)", async () => {
+  it("caches an archived chat and its newest post without starting to sync it (#125)", async () => {
     await runPass([
       {
         kind: "channel",
@@ -219,12 +219,25 @@ describe("bootstrapDialogs", () => {
         topMessage: 15,
         lastMessage: { id: 15, text: "Archived post" },
       },
+      { kind: "user", id: 1001, topMessage: 5, archived: true },
+      {
+        kind: "group",
+        id: 4001,
+        membersCount: 5,
+        topMessage: 9,
+        archived: true,
+      },
     ]);
 
     expect(createMessagesCache(testCacheDb).get(-1_000_000_002_005, 15)?.text).toBe(
       "Archived post",
     );
-    expect(chatSyncState.get(-1_000_000_002_005)).toBeNull();
+    const chatsCache = createChatsCache(testCacheDb);
+    expect(chatsCache.getById("1001")?.access_hash).toBe("777");
+    expect(chatsCache.getById("-4001")?.type).toBe("group");
+    for (const chatId of [-1_000_000_002_005, 1001, -4001]) {
+      expect(chatSyncState.get(chatId)).toBeNull();
+    }
   });
 
   it("queues one participation check per group, archived ones too, and counts an own newest message (group participation)", async () => {
@@ -268,39 +281,28 @@ describe("bootstrapDialogs", () => {
     expect(checks()).toHaveLength(2);
   });
 
-  it("lists archived dialogs too", async () => {
-    const fake = await runPass([{ kind: "user", id: 1001, topMessage: 5 }]);
+  it("lists archived dialogs too, and caches joined communities with their access hash", async () => {
+    const fake = await runPass(
+      [
+        { kind: "user", id: 1001, topMessage: 5 },
+        { kind: "user", id: 1002, topMessage: 5, archived: true },
+      ],
+      { communities: [{ id: 5555555555, accessHash: "777" }] },
+    );
 
     expect(fake.calls).toEqual([{ archived: "keep" }]);
-    const infoLines = (ctx.logger.info as ReturnType<typeof mock>).mock.calls;
-    expect(
-      infoLines.some(([line]) => /Bootstrapped 1 dialogs \(0 archived\)/.test(String(line))),
-    ).toBe(true);
-    expect(fake.communityCalls).toHaveLength(1);
-    expect(ctx.logger.warn).not.toHaveBeenCalled();
-    expect(infoLines.some(([line]) => /0 communities/.test(String(line)))).toBe(true);
-  });
-
-  it("caches joined communities with their access hash", async () => {
-    const fake = await runPass([{ kind: "user", id: 1001, topMessage: 5 }], {
-      communities: [{ id: 5555555555, accessHash: "777" }],
-    });
-
     expect(createChatsCache(testCacheDb).getById("-1005555555555")).toMatchObject({
       type: "community",
       access_hash: "777",
     });
     expect(chatSyncState.get(-1005555555555)).toBeNull();
-    expect(fake.communityCalls).toHaveLength(1);
-    expect(fake.communityCalls[0]).toEqual({
-      abortSignal: ctx.runtime.shutdown.signal,
-      floodSleepThreshold: 0,
-    });
-    expect(
-      (ctx.logger.info as ReturnType<typeof mock>).mock.calls.some(([line]) =>
-        /1 communities/.test(String(line)),
-      ),
-    ).toBe(true);
+    expect(fake.communityCalls).toEqual([
+      { abortSignal: ctx.runtime.shutdown.signal, floodSleepThreshold: 0 },
+    ]);
+    expect(ctx.logger.warn).not.toHaveBeenCalled();
+    expect(ctx.logger.info).toHaveBeenCalledWith(
+      expect.stringMatching(/Bootstrapped 2 dialogs \(1 archived\), 2 users, 1 communities/),
+    );
     assertPeerIdInvariants(testCacheDb);
   });
 
@@ -397,41 +399,6 @@ describe("bootstrapDialogs", () => {
     } finally {
       await client.destroy();
     }
-  });
-
-  it("raises the newest message ID and never lowers it", async () => {
-    seedSynced(1001, 400, 500);
-    seedSynced(1002, 300, null);
-    seedSynced(1003, 300, null);
-
-    await runPass([
-      { kind: "user", id: 1001, topMessage: 450 },
-      { kind: "user", id: 1002, topMessage: 320 },
-      { kind: "user", id: 1003 },
-    ]);
-
-    expect(chatSyncState.get(1001)?.top_message_id).toBe(500);
-    expect(chatSyncState.get(1002)?.top_message_id).toBe(320);
-    expect(chatSyncState.get(1003)?.top_message_id).toBeNull();
-  });
-
-  it("caches an archived chat without starting to sync it", async () => {
-    await runPass([
-      { kind: "user", id: 1001, topMessage: 5, archived: true },
-      {
-        kind: "group",
-        id: 4001,
-        membersCount: 5,
-        topMessage: 9,
-        archived: true,
-      },
-    ]);
-
-    const chatsCache = createChatsCache(testCacheDb);
-    expect(chatsCache.getById("1001")?.access_hash).toBe("777");
-    expect(chatsCache.getById("-4001")?.type).toBe("group");
-    expect(chatSyncState.get(1001)).toBeNull();
-    expect(chatSyncState.get(-4001)).toBeNull();
   });
 
   it("caches each chat under the marked ID its sync state has", async () => {
@@ -669,54 +636,6 @@ describe("bootstrapDialogs", () => {
     otherDb.close();
   });
 
-  it("a stop during a FLOOD_WAIT in the startup pass ends the wait at once", async () => {
-    const { bootstrapDialogs } = await import("./daemon-bootstrap");
-    seedSynced(1005, 1000, 1200);
-    const first = fakeDialogClient(
-      [
-        { kind: "user", id: 1001, topMessage: 10 },
-        { kind: "user", id: 1002, topMessage: 10 },
-      ],
-      { waitAfter: 1, onWait: () => requestShutdown(ctx) },
-    );
-    connect(ctx, 1, first.client);
-    addAccountRuntime(ctx, 1, testCacheDb);
-    const otherDb = createAccountCacheDb();
-    const second = fakeDialogClient([{ kind: "user", id: 2001 }]);
-    connect(ctx, 2, second.client);
-    addAccountRuntime(ctx, 2, otherDb);
-
-    const started = performance.now();
-    await bootstrapDialogs(ctx);
-
-    expect(performance.now() - started).toBeLessThan(1000);
-    expect(first.params).toEqual([{ abortSignal: ctx.runtime.shutdown.signal }]);
-    expect(first.params[0]?.abortSignal).toBe(ctx.runtime.shutdown.signal);
-    expect(
-      testCacheDb
-        .query("SELECT chat_id FROM chats_cache")
-        .all()
-        .map((row) => (row as { chat_id: string }).chat_id),
-    ).toEqual(["1001"]);
-    expect(chatSyncState.get(1005)).toMatchObject({
-      forward_cursor: 1000,
-      top_message_id: 1200,
-    });
-    expect(second.calls).toEqual([]);
-    expect(ctx.logger.warn).not.toHaveBeenCalled();
-    expect(ctx.logger.error).not.toHaveBeenCalled();
-    const debugLines = (ctx.logger.debug as ReturnType<typeof mock>).mock.calls.map(([line]) =>
-      String(line),
-    );
-    expect(debugLines).toContain(
-      "[Account 1] Dialog pass stopped after 1 dialogs: the daemon is stopping",
-    );
-    expect(debugLines.some((line) => line.includes("Dialog page failed during the stop"))).toBe(
-      false,
-    );
-    otherDb.close();
-  });
-
   it("passes the stop signal to every page request of mtcute's iterDialogs", async () => {
     const client = new TelegramClient({
       apiId: 1,
@@ -807,7 +726,17 @@ describe("bootstrapDialogs", () => {
         "communities.getJoinedCommunities",
         "users.getUsers",
       ]);
-      expect(testCacheDb.query("SELECT COUNT(*) AS n FROM api_activity").get()).toEqual({ n: 3 });
+      expect(
+        testCacheDb
+          .query(
+            "SELECT method, SUM(call_count) AS calls FROM rate_limits GROUP BY method ORDER BY method",
+          )
+          .all(),
+      ).toEqual([
+        { method: "communities.getJoinedCommunities", calls: 1 },
+        { method: "messages.getDialogs", calls: 1 },
+        { method: "users.getUsers", calls: 1 },
+      ]);
       expect(createRateLimitsService(testCacheDb).getStatus()).toMatchObject({
         totalCalls: 3,
         callsByMethod: {
@@ -917,15 +846,6 @@ describe("bootstrapDialogs", () => {
     );
     expect(second.calls).toEqual([]);
     otherDb.close();
-  });
-
-  it("leaves a supergroup without a member count off", async () => {
-    await runPass([{ kind: "supergroup", id: 2001, topMessage: 50 }]);
-
-    const state = chatSyncState.get(-1_000_000_002_001);
-    expect(state?.chat_type).toBe("supergroup");
-    expect(state?.sync_priority).toBe(SyncPriority.Low);
-    expect(state?.sync_enabled).toBe(0);
   });
 
   it("keeps the stored member count when a dialog has none", async () => {

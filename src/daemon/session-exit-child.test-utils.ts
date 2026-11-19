@@ -38,7 +38,6 @@ if (mode === "signal") {
   });
   process.kill(process.pid, "SIGTERM");
   await signalled;
-  await Bun.sleep(50);
 
   const errors: string[] = [];
   await attempt(errors, "store", () =>

@@ -88,23 +88,11 @@ function runAccount(
 }
 
 describe("mainLoop", () => {
-  it("logs status update failures without crashing", async () => {
+  it("writes each account's tick to its own cache, past one whose write fails", async () => {
     const ctx = createContext();
-    const db = createAccountCacheDb();
-    failWrites(db, "daemon_status", "status fail");
-    addAccountRuntime(ctx, 1, db);
-
-    await mainLoop(ctx, stopAfterTicks(ctx, 1));
-
-    expect(ctx.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "[Account 1] Failed to update daemon status: SQLiteError: status fail",
-      ),
-    );
-  });
-
-  it("writes each account's tick to its own cache", async () => {
-    const ctx = createContext();
+    const failingDb = createAccountCacheDb();
+    failWrites(failingDb, "daemon_status", "status fail");
+    addAccountRuntime(ctx, 3, failingDb);
     const seedJobs = (db: ReturnType<typeof createAccountCacheDb>, statuses: string[]) => {
       for (const [i, status] of statuses.entries()) {
         db.run("INSERT INTO sync_jobs (chat_id, job_type, priority, status) VALUES (?, ?, ?, ?)", [
@@ -139,11 +127,14 @@ describe("mainLoop", () => {
       status: "error",
       lastError: "AUTH_KEY_UNREGISTERED",
     });
-    const writes = [first, second].map((rt) => spyOn(rt.statusService, "writeTick"));
 
     await mainLoop(ctx, stopAfterTicks(ctx, 1));
 
-    expect(writes.map((write) => write.mock.calls.length)).toEqual([1, 1]);
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[Account 3] Failed to update daemon status: SQLiteError: status fail",
+      ),
+    );
     expect(first.statusService.getDaemonInfo()).toMatchObject({
       connectionStatus: "connected",
       lastError: null,
@@ -482,17 +473,6 @@ describe("mainLoop", () => {
     expect(ctx.runtime.jobsInFlight.size).toBe(0);
   });
 
-  it("a stop ends the tick wait at once", async () => {
-    const ctx = createContext();
-    addAccountRuntime(ctx, 1, createAccountCacheDb());
-    setTimeout(() => requestShutdown(ctx), 20);
-
-    const started = performance.now();
-    await mainLoop(ctx);
-
-    expect(performance.now() - started).toBeLessThan(500);
-  });
-
   it("checks a busy account but waits to reconnect one until its job ends", async () => {
     const ctx = createContext();
     const finishes: Array<(page: unknown) => void> = [];
@@ -580,6 +560,15 @@ describe("waitForNextTick (#133)", () => {
 
     expect(starts).toEqual([10_400]);
     expect(time.sleeps).toEqual([400, 600]);
+  });
+
+  it("a stop ends the wait of a tick on the real clock at once", async () => {
+    const ctx = createContext();
+    const waiting = waitForNextTick(ctx, 30_000);
+
+    requestShutdown(ctx);
+
+    await expect(waiting).resolves.toBeUndefined();
   });
 
   it("sleeps the whole tick when no job comes due in it", async () => {

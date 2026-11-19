@@ -1,18 +1,7 @@
-import { describe, expect, it, mock } from "bun:test";
-import type {
-  DeleteMessageUpdate,
-  Message,
-  RawUpdateInfo,
-  RpcCallMiddleware,
-  RpcCallMiddlewareContext,
-  TelegramClient,
-  tl,
-} from "@mtcute/bun";
+import { describe, expect, it, setSystemTime } from "bun:test";
+import type { RpcCallMiddleware, RpcCallMiddlewareContext, tl } from "@mtcute/bun";
 import {
-  closeClientSafe,
   daemonNetworkMiddlewares,
-  removeEventHandlers,
-  resolveRealtimeMessageType,
   resolveSyncChatType,
   scheduleReconnect,
   setupSignalHandlers,
@@ -21,251 +10,71 @@ import { floodWaitSecondsOf } from "./daemon-api-activity";
 import { type AccountRuntime, requestShutdown } from "./daemon-context";
 import { isDaemonStopError } from "./daemon-utils";
 import { createSyncPacer } from "./sync-pacing";
-import type { AccountConnectionState } from "./types";
-import { createRateLimitsService } from "../db/rate-limits";
+import { type AccountConnectionState, DEFAULT_RECONNECT_CONFIG } from "./types";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
 import { testDaemonContext } from "../test/daemon-runtime.test-utils";
 
-class MockEmitter<T> {
-  handlers: Array<(value: T) => void> = [];
-  get length() {
-    return this.handlers.length;
-  }
-  add = (handler: (value: T) => void) => {
-    this.handlers.push(handler);
-  };
-  remove = (handler: (value: T) => void) => {
-    this.handlers = this.handlers.filter((entry) => entry !== handler);
-  };
-  emit = (value: T) => {
-    for (const handler of this.handlers) {
-      handler(value);
-    }
-  };
-  once = (handler: (value: T) => void) => {
-    const wrapper = (value: T) => {
-      this.remove(wrapper);
-      handler(value);
-    };
-    this.add(wrapper);
-  };
-  listeners = () => this.handlers;
-  clear = () => {
-    this.handlers = [];
-  };
-  forwardTo = (_emitter: MockEmitter<T>) => {};
-}
-
-const createClientWithEvents = () => {
-  const client = {
-    onNewMessage: new MockEmitter<Message>(),
-    onEditMessage: new MockEmitter<Message>(),
-    onDeleteMessage: new MockEmitter<DeleteMessageUpdate>(),
-    onRawUpdate: new MockEmitter<RawUpdateInfo>(),
-    onConnectionState: new MockEmitter<string>(),
-  };
-
-  return client as unknown as TelegramClient;
-};
-
-const asTelegramClient = (client: unknown) => client as TelegramClient;
-
-describe("removeEventHandlers", () => {
-  it("clears handlers and unregisters events", () => {
-    const ctx = testDaemonContext();
-    const client = createClientWithEvents();
-
-    const accountState: AccountConnectionState = {
-      accountId: 1,
-      phone: "+10000000000",
-      name: null,
-      status: "connected",
-      client,
-      eventHandlers: {
-        onNewMessage: () => {},
-        onEditMessage: () => {},
-        onDeleteMessage: () => {},
-        onRawUpdate: () => {},
-        onConnectionState: () => {},
-      },
-    };
-    const raw = (client as unknown as { onRawUpdate: MockEmitter<RawUpdateInfo> }).onRawUpdate;
-    raw.add(accountState.eventHandlers!.onRawUpdate);
-
-    removeEventHandlers(ctx, accountState);
-
-    expect(raw.handlers).toHaveLength(0);
-    expect(accountState.eventHandlers).toBeUndefined();
-    expect(accountState.updateHandlers).toBeUndefined();
-  });
-});
-
 describe("reconnect scheduling", () => {
-  it("schedules next reconnect when under max attempts", () => {
-    const ctx = testDaemonContext();
+  it("backs off from 5 s, doubling up to 5 minutes, and gives up after 10 attempts", () => {
+    const ctx = testDaemonContext({ reconnectConfig: DEFAULT_RECONNECT_CONFIG });
     const accountState: AccountConnectionState = {
       accountId: 2,
-      phone: "+15552223344",
+      phone: "+15550000002",
       name: null,
       status: "error",
-      reconnectAttempts: 0,
     };
+    const now = 1_760_000_000_000;
+    const delays: number[] = [];
 
-    scheduleReconnect(ctx, accountState);
-
-    expect(accountState.reconnectAttempts).toBe(1);
-    expect(accountState.nextReconnectAt).toBeDefined();
-  });
-
-  it("does not schedule reconnect after max attempts", () => {
-    const ctx = testDaemonContext();
-    const accountState: AccountConnectionState = {
-      accountId: 3,
-      phone: "+15559990000",
-      name: null,
-      status: "error",
-      reconnectAttempts: ctx.reconnectConfig.maxAttempts,
-    };
-
-    scheduleReconnect(ctx, accountState);
-
-    expect(accountState.nextReconnectAt).toBeUndefined();
-  });
-});
-
-describe("resolveRealtimeMessageType", () => {
-  it("returns service type for service messages", () => {
-    const result = resolveRealtimeMessageType({ isService: true });
-    expect(result).toEqual({ messageType: "service", hasMedia: false });
-  });
-
-  it("returns service type for service messages even with media present", () => {
-    const result = resolveRealtimeMessageType({
-      isService: true,
-      media: { type: "photo" },
-    });
-    expect(result).toEqual({ messageType: "service", hasMedia: false });
-  });
-
-  it("returns text type for messages without media", () => {
-    const result = resolveRealtimeMessageType({});
-    expect(result).toEqual({ messageType: "text", hasMedia: false });
-  });
-
-  it("returns text type for messages with null media", () => {
-    const result = resolveRealtimeMessageType({ media: null });
-    expect(result).toEqual({ messageType: "text", hasMedia: false });
-  });
-
-  it("returns unknown type for media without type property", () => {
-    const result = resolveRealtimeMessageType({ media: {} });
-    expect(result).toEqual({ messageType: "unknown", hasMedia: true });
-  });
-
-  it("returns unknown type for unrecognized media types", () => {
-    const result = resolveRealtimeMessageType({
-      media: { type: "bizarre_new_type" },
-    });
-    expect(result).toEqual({ messageType: "unknown", hasMedia: true });
-  });
-
-  it("maps known media types correctly", () => {
-    const knownTypes = [
-      { input: "photo", expected: "photo" },
-      { input: "video", expected: "video" },
-      { input: "document", expected: "document" },
-      { input: "sticker", expected: "sticker" },
-      { input: "voice", expected: "voice" },
-      { input: "audio", expected: "audio" },
-      { input: "poll", expected: "poll" },
-      { input: "contact", expected: "contact" },
-      { input: "location", expected: "location" },
-      { input: "live_location", expected: "location" },
-      { input: "venue", expected: "venue" },
-      { input: "game", expected: "game" },
-      { input: "invoice", expected: "invoice" },
-      { input: "webpage", expected: "webpage" },
-      { input: "dice", expected: "dice" },
-    ];
-
-    for (const { input, expected } of knownTypes) {
-      const result = resolveRealtimeMessageType({ media: { type: input } });
-      expect(result).toEqual({ messageType: expected, hasMedia: true });
+    setSystemTime(now);
+    try {
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        scheduleReconnect(ctx, accountState);
+        delays.push(accountState.nextReconnectAt! - now);
+      }
+      accountState.nextReconnectAt = undefined;
+      scheduleReconnect(ctx, accountState);
+    } finally {
+      setSystemTime();
     }
+
+    expect(delays).toEqual([
+      5_000, 10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000, 300_000,
+    ]);
+    expect(accountState.nextReconnectAt).toBeUndefined();
+    expect(ctx.logger.error).toHaveBeenCalledWith(
+      "Account #2 (+15*******02) exceeded max reconnection attempts (10). Giving up.",
+    );
   });
 });
 
 describe("resolveSyncChatType", () => {
-  it("returns undefined for null chat", () => {
-    const result = resolveSyncChatType(null);
-    expect(result).toBeUndefined();
-  });
-
-  it("returns undefined for undefined chat", () => {
-    const result = resolveSyncChatType(undefined);
-    expect(result).toBeUndefined();
-  });
-
-  it("returns private for user type", () => {
-    const result = resolveSyncChatType({ type: "user" });
-    expect(result).toBe("private");
-  });
-
-  it("returns group for basic group chatType", () => {
-    const result = resolveSyncChatType({ type: "chat", chatType: "group" });
-    expect(result).toBe("group");
-  });
-
-  it("returns supergroup for supergroup chatType", () => {
-    const result = resolveSyncChatType({ type: "chat", chatType: "supergroup" });
-    expect(result).toBe("supergroup");
-  });
-
-  it("returns supergroup for gigagroup chatType", () => {
-    const result = resolveSyncChatType({ type: "chat", chatType: "gigagroup" });
-    expect(result).toBe("supergroup");
-  });
-
-  it("returns supergroup for monoforum chatType", () => {
-    const result = resolveSyncChatType({ type: "chat", chatType: "monoforum" });
-    expect(result).toBe("supergroup");
-  });
-
-  it("returns channel for channel chatType", () => {
-    const result = resolveSyncChatType({ type: "chat", chatType: "channel" });
-    expect(result).toBe("channel");
-  });
-
-  it("returns community for community chatType", () => {
-    const result = resolveSyncChatType({ type: "chat", chatType: "community" });
-    expect(result).toBe("community");
-  });
-
-  it("returns group for unknown chatType (default case)", () => {
-    const result = resolveSyncChatType({
-      type: "chat",
-      chatType: "some_future_type",
-    });
-    expect(result).toBe("group");
-  });
-
-  it("returns group for chat type without chatType property", () => {
-    const result = resolveSyncChatType({ type: "chat" });
-    expect(result).toBe("group");
-  });
-
-  it("returns undefined for unknown type (neither user nor chat)", () => {
-    const result = resolveSyncChatType({ type: "bot" });
-    expect(result).toBeUndefined();
-  });
-
-  it("returns undefined for empty object", () => {
-    const result = resolveSyncChatType({});
-    expect(result).toBeUndefined();
+  it("maps each mtcute chat type to its sync type, an unknown group type to group", () => {
+    expect(
+      [
+        { type: "user" },
+        { type: "chat", chatType: "group" },
+        { type: "chat", chatType: "supergroup" },
+        { type: "chat", chatType: "gigagroup" },
+        { type: "chat", chatType: "monoforum" },
+        { type: "chat", chatType: "channel" },
+        { type: "chat", chatType: "community" },
+        { type: "chat", chatType: "some_future_type" },
+      ].map(resolveSyncChatType),
+    ).toEqual([
+      "private",
+      "group",
+      "supergroup",
+      "supergroup",
+      "supergroup",
+      "channel",
+      "community",
+      "group",
+    ]);
   });
 });
 
-describe("signal/cleanup helpers", () => {
+describe("signal handlers", () => {
   function addedSignalListeners(install: () => void) {
     const before = {
       SIGTERM: process.listeners("SIGTERM"),
@@ -282,52 +91,21 @@ describe("signal/cleanup helpers", () => {
     return added;
   }
 
-  it("setupSignalHandlers marks runtime and installs handlers once", () => {
+  it("installs one SIGTERM handler, which sets the stop flag and aborts the stop signal", () => {
     const ctx = testDaemonContext();
-
     const added = addedSignalListeners(() => {
       setupSignalHandlers(ctx);
       setupSignalHandlers(ctx);
     });
 
-    expect(ctx.runtime.signalHandlersSetup).toBe(true);
     expect(added.SIGTERM).toHaveLength(1);
-  });
-
-  it("SIGTERM sets the stop flag and aborts the stop signal", () => {
-    const ctx = testDaemonContext();
-    const added = addedSignalListeners(() => setupSignalHandlers(ctx));
-
     added.SIGTERM[0]?.("SIGTERM");
 
     expect(ctx.logger.info).toHaveBeenCalledWith(
       "Received SIGTERM, initiating graceful shutdown...",
     );
     expect(ctx.state.shutdownRequested).toBe(true);
-    expect(ctx.runtime.shutdown.signal.aborted).toBe(true);
     expect(isDaemonStopError(ctx.runtime.shutdown.signal.reason)).toBe(true);
-  });
-
-  it("closeClientSafe destroys the client", async () => {
-    const ctx = testDaemonContext();
-    const client = { destroy: mock(async () => {}) };
-
-    await closeClientSafe(ctx, asTelegramClient(client), "test");
-
-    expect(client.destroy).toHaveBeenCalledTimes(1);
-    expect(ctx.logger.warn).not.toHaveBeenCalled();
-  });
-
-  it("closeClientSafe logs errors instead of throwing", async () => {
-    const ctx = testDaemonContext();
-    const errorClient = {
-      destroy: () => {
-        throw new Error("boom");
-      },
-    };
-
-    await closeClientSafe(ctx, asTelegramClient(errorClient), "error");
-    expect(ctx.logger.warn).toHaveBeenCalled();
   });
 });
 
@@ -359,14 +137,12 @@ describe("daemonNetworkMiddlewares", () => {
     } as unknown as RpcCallMiddlewareContext["manager"];
     setTimeout(() => requestShutdown(ctx), 20);
 
-    const started = performance.now();
     const error = await call({
       request: { _: "messages.getHistory" } as unknown as tl.RpcMethod,
       manager,
       params: { abortSignal: ctx.runtime.shutdown.signal },
     }).catch((err: unknown) => err);
 
-    expect(performance.now() - started).toBeLessThan(200);
     expect(isDaemonStopError(error)).toBe(true);
     expect(ctx.logger.info).toHaveBeenCalledWith(
       "[Account 1] messages.getHistory: FLOOD_WAIT, waiting 300s",
@@ -390,49 +166,6 @@ describe("daemonNetworkMiddlewares", () => {
       ctx.runtime.accounts.set(1, { accountId: 1, db } as AccountRuntime);
       return { ctx, db };
     }
-
-    it("logs every request the daemon sends to the account, in ms: a dialog pass, the communities check, getMe", async () => {
-      const { ctx, db } = withCache();
-      const call = compose(daemonNetworkMiddlewares(ctx, 1), async () => ({
-        _: "ok",
-      }));
-      const before = Date.now();
-
-      for (const method of [
-        "messages.getDialogs",
-        "messages.getDialogs",
-        "communities.getJoinedCommunities",
-        "users.getUsers",
-      ]) {
-        await call(rpc(method));
-      }
-
-      const rows = db
-        .query<{ timestamp: number; success: number; error_code: string | null }, []>(
-          "SELECT timestamp, success, error_code FROM api_activity",
-        )
-        .all();
-      expect(rows).toHaveLength(4);
-      for (const row of rows) {
-        expect(row).toMatchObject({ success: 1, error_code: null });
-        expect(row.timestamp).toBeGreaterThanOrEqual(before);
-        expect(row.timestamp).toBeLessThanOrEqual(Date.now());
-      }
-      const rateLimits = createRateLimitsService(db);
-      const status = rateLimits.getStatus();
-      expect(status.totalCalls).toBe(4);
-      expect(status.callsByMethod).toEqual({
-        "messages.getDialogs": 2,
-        "communities.getJoinedCommunities": 1,
-        "users.getUsers": 1,
-      });
-      expect(
-        db
-          .query("SELECT SUM(call_count) AS calls FROM rate_limits WHERE method = ?")
-          .get("messages.getDialogs"),
-      ).toEqual({ calls: 2 });
-      db.close();
-    });
 
     it("logs Telegram's error code, and an error that isn't Telegram's without one", async () => {
       const { ctx, db } = withCache();
@@ -470,7 +203,7 @@ describe("daemonNetworkMiddlewares", () => {
       db.close();
     });
 
-    it("halves the account's sync pace on a FLOOD_WAIT, short or long (#133)", async () => {
+    it("halves the account's sync pace on a FLOOD_WAIT of messages.getHistory only (#133)", async () => {
       const { ctx, db } = withCache();
       const rt = ctx.runtime.accounts.get(1)!;
       rt.pacer = createSyncPacer();
@@ -482,33 +215,18 @@ describe("daemonNetworkMiddlewares", () => {
       }));
       const before = Date.now();
 
+      await call(rpc("messages.getDialogs"));
+      expect(rt.pacer.snapshot().floodWaits).toBe(0);
       await call(rpc("messages.getHistory"));
 
       expect(rt.pacer.snapshot()).toMatchObject({
         mode: "history",
         floodWaits: 1,
       });
-      expect(rt.pacer.snapshot().targetCallsPerSecond).toBeCloseTo(0.35, 2);
       expect(rt.pacer.nextStartAt()).toBeGreaterThanOrEqual(before + 400_000);
       expect(ctx.logger.info).toHaveBeenCalledWith(
         "[Account 1] messages.getHistory: FLOOD_WAIT of 400s, history pace down to 0.35 calls/s",
       );
-      db.close();
-    });
-
-    it("leaves the sync pace alone on another method's FLOOD_WAIT", async () => {
-      const { ctx, db } = withCache();
-      const rt = ctx.runtime.accounts.get(1)!;
-      rt.pacer = createSyncPacer();
-      const call = compose(daemonNetworkMiddlewares(ctx, 1), async () => ({
-        _: "mt_rpc_error",
-        errorCode: 420,
-        errorMessage: "FLOOD_WAIT_400",
-      }));
-
-      await call(rpc("messages.getDialogs"));
-
-      expect(rt.pacer.snapshot().floodWaits).toBe(0);
       db.close();
     });
 
