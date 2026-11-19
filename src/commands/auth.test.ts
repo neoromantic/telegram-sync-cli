@@ -146,6 +146,17 @@ describe("Authentication Commands", () => {
       expect(result.account?.id).toBe(existing.id);
     });
 
+    it("moves the phone onto the user's account from a QR login and creates no other", async () => {
+      const existing = accountsDb.create({ phone: "user:123", user_id: 123 });
+
+      const result = await loginWithPhone("+15550000001", deps);
+
+      expect(result).toMatchObject({ success: true, account: { id: existing.id } });
+      expect(accountsDb.getAll()).toMatchObject([
+        { id: existing.id, phone: "+15550000001", user_id: 123, is_active: 1 },
+      ]);
+    });
+
     it("stores the user's full name, username and the label", async () => {
       await loginWithPhone("+1234567890", deps, { label: "Work" });
 
