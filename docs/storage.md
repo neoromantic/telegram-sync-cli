@@ -396,23 +396,38 @@ common word.
 
 ### 9. Other word forms and typos
 
-**Decision** ([#92](https://github.com/neoromantic/telegram-sync-cli/issues/92)): E2, as the
-opt-in flag `tg messages search --forms`. Each plain query word becomes an `OR` of the index's
-own words with the same light stem (Savoy's Russian, Lucene's plural-only English, `ё` read as
-`е`), read from a persistent `fts5vocab` table; the index is unchanged. Why E2: of the
-candidates that find the same messages, it is the simplest (a query rewrite: no index change,
-no migration, and older versions and other SQLite clients read the same file), and it doubles
-Russian recall (0.368 to 0.704, +0.34 [0.30, 0.37]; pairs 0.111 to 0.323) and raises English
-recall (0.749 to 0.843). D1/E1 find more (0.839) but are right less often (0.887), B2 and C less
-still. Why opt-in: no candidate passed Q3, the precision limit fixed in advance; E2 loses 0.059
-of Russian precision (to 0.946), 0.053 in the first 50, against a limit of 0.05, so the default
-stays exact and the maintainer can make it the default from these numbers. Production adds two
-things the benchmark's candidate didn't have: at most 30 forms a word (the word itself, then the
-most frequent), and the vocabulary scan reads `е` and `ё` both at every position of the stem's
-prefix, where the candidate stopped the prefix at the first of them. Both scans cover every
-word with the stem, so below the cap they find the same words, only with fewer words read; the
-benchmark's E2 now runs through the shipped code (`findQueryForms`). Typo correction is a separate change. How `--forms` works:
-[search.md](search.md#other-word-forms---forms).
+**Decision** ([#92](https://github.com/neoromantic/telegram-sync-cli/issues/92)): E2, on by
+default in `tg messages search`, with `--exact` to turn it off. Each plain query word becomes an
+`OR` of the index's own words with the same light stem (Savoy's Russian, Lucene's plural-only
+English, `ё` read as `е`), read from a persistent `fts5vocab` table; the index is unchanged. Why
+E2: of the candidates that find the same messages, it is the simplest (a query rewrite: no index
+change, no migration, and older versions and other SQLite clients read the same file), and it
+doubles Russian recall (0.368 to 0.704, +0.34 [0.30, 0.37]; pairs 0.111 to 0.323) and raises
+English recall (0.749 to 0.843). D1/E1 find more (0.839) but are right less often (0.887), B2
+and C less still. Production adds two things the benchmark's candidate didn't have: at most 30
+forms a word (the word itself, then the most frequent), and the vocabulary scan reads `е` and
+`ё` both at every position of the stem's prefix, where the candidate stopped the prefix at the
+first of them. Both scans cover every word with the stem, so below the cap they find the same
+words, only with fewer words read; the benchmark's E2 now runs through the shipped code
+(`findQueryForms`). Typo correction is a separate change. How word forms work:
+[search.md](search.md#word-forms).
+
+**Why it is the default although it missed Q3.** No candidate passed Q3, the precision limit
+fixed in advance: E2 loses 0.059 of Russian precision (to 0.946), 0.053 in the first 50, against
+a limit of 0.05. So the first version was an opt-in flag. The owner then made it the default
+anyway. This is a product decision that overrides the rule set before the benchmark; the rule
+and the numbers stay as they are. The reasons:
+
+- A missed message is silent: the caller sees nothing and concludes that nothing exists. A wrong
+  form is visible: the result's text is shown, and the answer lists the forms searched for in
+  `forms`.
+- With exact search a Russian word finds about a third of the messages that contain some form
+  of it (recall 0.368), and a two-word Russian query about a ninth (recall 0.111).
+- An opt-in flag doesn't meet the goal of #92, finding other word forms without a manual prefix.
+- Exact search stays one flag away: `--exact`, or any query with FTS5 syntax, is matched as
+  written.
+
+The maintainer may prefer the opt-in flag; these numbers are the basis for either choice.
 
 The benchmark below was defined before any candidate ran; a change made afterwards is listed
 under it with the reason.

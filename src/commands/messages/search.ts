@@ -67,7 +67,7 @@ const searchArgs = {
   query: {
     type: "string",
     description:
-      'Words to find (all of them, any order), or an FTS5 query: error OR timeout, "exact phrase", sender:alice, chat:team, word*',
+      'Words to find (all of them, any order, in any of their forms), or an FTS5 query, matched as written: error OR timeout, "exact phrase", sender:alice, chat:team, word*',
     required: true,
   },
   phrase: {
@@ -75,10 +75,10 @@ const searchArgs = {
     description: "Match the whole query as one exact phrase",
     default: false,
   },
-  forms: {
+  exact: {
     type: "boolean",
     description:
-      "Also match other forms of each plain word that occur in the cache (квартира: квартиру, квартирой; meeting: meetings), ё read as е",
+      "Match each word only as typed, without its other forms (квартира would also find квартиру, meeting also meetings)",
     default: false,
   },
   limit: {
@@ -140,30 +140,13 @@ export const searchMessagesCommand = defineCommand({
   meta: {
     name: "search",
     description:
-      'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form; --forms finds other forms of plain words',
+      'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, word*. Plain words also match their other forms in the cache (квартира finds квартиру); --exact turns that off',
   },
   args: searchArgs,
   async run({ args }) {
     const query = (args.query ?? "").trim();
     if (!query) {
       error(ErrorCodes.INVALID_ARGS, "Search query is required");
-    }
-
-    if (args.forms && args.phrase) {
-      error(
-        ErrorCodes.INVALID_ARGS,
-        "--forms can't be combined with --phrase",
-        { query },
-        "Drop --forms to match the exact phrase, or drop --phrase to match the words in any order with their forms",
-      );
-    }
-    if (args.forms && hasFts5Syntax(query)) {
-      error(
-        ErrorCodes.INVALID_ARGS,
-        "--forms works on plain words only, and this query has FTS5 syntax",
-        { query },
-        "Drop --forms to run the query as written, or write the forms into it yourself (квартир*)",
-      );
     }
 
     const limit = Number.parseInt(args.limit ?? "50", 10);
@@ -199,7 +182,8 @@ export const searchMessagesCommand = defineCommand({
 
     try {
       const search = createMessagesSearch(cacheDb);
-      const forms = args.forms ? findQueryForms(cacheDb, query) : undefined;
+      const expand = !args.exact && !args.phrase && !hasFts5Syntax(query);
+      const forms = expand ? findQueryForms(cacheDb, query) : undefined;
 
       const options = {
         forms,
@@ -250,7 +234,7 @@ export const searchMessagesCommand = defineCommand({
             sender: args.sender ?? null,
             includeDeleted: args.includeDeleted ?? false,
             phrase: args.phrase ?? false,
-            forms: args.forms ?? false,
+            exact: args.exact ?? false,
             since: args.since ?? null,
             until: args.until ?? null,
           },

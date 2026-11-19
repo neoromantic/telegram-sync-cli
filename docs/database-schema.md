@@ -377,11 +377,11 @@ EXISTS` after the index; it outlives an index rebuild that drops and recreates `
 ### Table: message_search_vocab
 
 The words of `message_search`, one row per word: an FTS5 `fts5vocab` table of type `row`, which
-reads the index when queried and stores nothing. `tg messages search --forms` reads it to find
-the other forms of a query word ([search.md](search.md#other-word-forms---forms)). It is a
-persistent table rather than a temporary one, so the read-only, `query_only` connection of
-`tg sql` can read it too. Created after the index when a cache opens, so an older cache gets it
-the first time this version opens it, without a migration. It names the index by name, so it
+reads the index when queried and stores nothing. `tg messages search` reads it to find the other
+forms of each plain query word, unless `--exact` is given ([search.md](search.md#word-forms)).
+It is a persistent table rather than a temporary one, so the read-only, `query_only` connection
+of `tg sql` can read it too. Created after the index when a cache opens, so an older cache gets
+it the first time this version opens it, without a migration. It names the index by name, so it
 outlives a rebuild that drops and recreates `message_search`.
 
 ```sql

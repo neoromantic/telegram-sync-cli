@@ -11,16 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `tg send --markdown` and `--html` send rich messages such as headings and tables on
   supported accounts. The result includes `format`. File captions stay plain text.
-- `tg messages search --forms` also matches other forms of each plain word that occur in the
-  cache: `квартира` finds `квартиру` and `квартирой`, `meeting` finds `meetings`, and `еще`
-  finds `ещё`. It works on the index's own words with light Russian and English stemmers, so
-  the index and older versions are unchanged. The answer lists the forms searched for in
-  `forms`; a query with FTS5 syntax or `--phrase` is refused with `--forms`. Without the flag
-  search stays exact. The cache gets the table `message_search_vocab`, the index's words, which
-  `tg sql` can read. See [docs/search.md](docs/search.md#other-word-forms---forms).
 
 ### Changed
 
+- `tg messages search` also matches other forms of each plain word that occur in the cache, so
+  it returns more results: `квартира` finds `квартиру` and `квартирой`, `meeting` finds
+  `meetings`, and `еще` finds `ещё`. It works on the index's own words with light Russian and
+  English stemmers, so the index and older versions are unchanged. `--exact` gives the old
+  behaviour, each word only as typed; a query with FTS5 syntax or `--phrase` is matched as
+  written, as before. The answer adds `forms`, the forms searched for (`null` when the query
+  wasn't expanded), and `filters.exact`. The cache gets the table `message_search_vocab`, the
+  index's words, which `tg sql` can read. See [docs/search.md](docs/search.md#word-forms).
 - A group (basic group or supergroup) adds new messages to the cache only while you take part
   in it: you sent an ordinary message there in the last 90 days. Reading a group doesn't count.
   The rule holds in every `tg chats sync` mode and in `tg messages list`/`get`, `--fresh`

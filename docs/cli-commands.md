@@ -217,7 +217,7 @@ tg messages search --query '"hello world"'         # the exact phrase (or --phra
 tg messages search --query "error OR timeout" --chat @teamchat --sender @alice
 tg messages search --query "todo" --chat me        # Saved Messages; --sender me: your own
 tg messages search --query "квартир*" --includeDeleted   # every word that starts so
-tg messages search --query "квартира" --forms      # its other forms: квартиру, квартирой…
+tg messages search --query "квартира" --exact      # only as typed, not квартиру, квартирой…
 tg messages search --query "deploy" --since 7d --sort relevance --count --snippet
 tg messages wait --chat @username --after 1200     # the next reply after message 1200
 tg messages wait --timeout 300 --settle 3          # any chat; then 3 quiet seconds
@@ -348,17 +348,17 @@ text around the first match with matched words in `**`. When another page has ma
 has the same search with the following `--offset` ([Next commands](#next-commands)). The rules
 and examples are in [search.md](search.md#query-rules).
 
-`--forms` makes each plain word also match its other forms in the cache: Russian case forms
-(`квартира`, `квартиру`, `квартирой`), English plurals (`meeting`, `meetings`), with `ё` read as
-`е`. The answer's `forms` lists, for each query word as typed, the index words searched for
-(`words`) and whether more were left out (`cut`, past 30); it is `null` without `--forms`, and
-`filters.forms` says whether it was on. A query with FTS5 syntax or `--phrase` together with
-`--forms` is `INVALID_ARGS` (exit 3). `next` keeps `--forms`. How it works, its limits and its
-measured quality: [search.md](search.md#other-word-forms---forms). From a made-up cache, with
-each result trimmed to its ID and text:
+Each plain word also matches its other forms in the cache: Russian case forms (`квартира`,
+`квартиру`, `квартирой`), English plurals (`meeting`, `meetings`), with `ё` read as `е`.
+`--exact` turns this off, and a query with FTS5 syntax or `--phrase` is matched as written,
+without forms. The answer's `forms` lists, for each query word as typed, the index words
+searched for (`words`) and whether more were left out (`cut`, past 30); it is `null` when the
+query wasn't expanded, and `filters.exact` says whether `--exact` was given. `next` keeps
+`--exact`. How it works, its limits and its measured quality: [search.md](search.md#word-forms).
+From a made-up cache, with each result trimmed to its ID and text:
 
 ```bash
-tg messages search --query квартира --forms --limit 3 --snippet
+tg messages search --query квартира --limit 3 --snippet
 ```
 
 ```json
@@ -371,7 +371,7 @@ tg messages search --query квартира --forms --limit 3 --snippet
       "sender": null,
       "includeDeleted": false,
       "phrase": false,
-      "forms": true,
+      "exact": false,
       "since": null,
       "until": null
     },
@@ -396,14 +396,48 @@ tg messages search --query квартира --forms --limit 3 --snippet
   },
   "next": [
     {
-      "command": "tg messages search --query='квартира' --forms --limit=3 --offset=3 --snippet",
+      "command": "tg messages search --query='квартира' --limit=3 --offset=3 --snippet",
       "why": "The next page of results."
     }
   ]
 }
 ```
 
-The same query without `--forms` finds only message 2, the one with `квартира` itself.
+With `--exact` the same query finds only message 2, the one with `квартира` itself, and there
+is no next page:
+
+```bash
+tg messages search --query квартира --exact --limit 3 --snippet
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "query": "квартира",
+    "filters": {
+      "chat": null,
+      "sender": null,
+      "includeDeleted": false,
+      "phrase": false,
+      "exact": true,
+      "since": null,
+      "until": null
+    },
+    "sort": "date",
+    "forms": null,
+    "results": [
+      { "messageId": 2, "text": "Квартира ещё свободна?", "snippet": "**Квартира** ещё свободна?", … }
+    ],
+    "total": 1,
+    "count": null,
+    "limit": 3,
+    "offset": 0,
+    "source": "cache",
+    "stale": false
+  }
+}
+```
 
 #### Waiting for new messages
 
