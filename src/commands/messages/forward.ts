@@ -5,6 +5,7 @@ import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { flagValues } from "../../utils/args";
 import { error, success } from "../../utils/output";
+import { checkedChat } from "../access";
 import { AmbiguousPeerError, InvalidPeerError } from "../send/peer-resolver";
 import { ForwardRefusedError, forwardMessages, MAX_FORWARD_IDS } from "./forward-message";
 import {
@@ -70,7 +71,7 @@ export const forwardMessagesCommand = defineCommand({
       const deps = openHistory(account.id, "cli:messages.forward");
       const resolve = async (flag: "from" | "to", input: string) => {
         try {
-          return await resolveHistoryChat(deps.client, input, deps);
+          return checkedChat(args, flag) ?? (await resolveHistoryChat(deps.client, input, deps));
         } catch (err) {
           if (err instanceof InvalidPeerError) {
             error(
