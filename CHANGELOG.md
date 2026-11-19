@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tg send`, `tg messages read` and `tg api` write methods resolve an `@username` through
+  Telegram, not the cache, so a username that moved never sends to its previous owner. The
+  `allowedChats` check of a write resolves the list's `@username` entries the same way: an entry
+  allows the chat that holds the username now, not its previous owner by ID. Reads take the
+  latest fetched owner of a username (#217).
+
 ## [0.15.0] - 2026-11-19
 
 ### Added

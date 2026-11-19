@@ -19,7 +19,7 @@ import { createUsersCache, type UsersCache } from "../../db/users-cache";
 import type { MessageSearchItem } from "../../types";
 import { verbose } from "../../utils/output";
 import { toPeerIdFromInputPeer } from "../../utils/telegram-peer-ids";
-import { type DmLookup, resolvePeer } from "../send/peer-resolver";
+import { type DmLookup, type ResolvePeerOptions, resolvePeer } from "../send/peer-resolver";
 import { resolveSelfId } from "../send/sent-message-cache";
 import {
   type HistoryClient,
@@ -53,6 +53,7 @@ export async function resolveHistoryChat(
   client: HistoryClient,
   identifier: string,
   deps: ResolveHistoryChatDeps,
+  options?: ResolvePeerOptions,
 ) {
   const { inputPeer, name } = await resolvePeer(
     client,
@@ -60,6 +61,7 @@ export async function resolveHistoryChat(
     deps.usersCache,
     deps.chatsCache,
     deps.dms,
+    options,
   );
   const selfId =
     inputPeer._ === "inputPeerSelf"
