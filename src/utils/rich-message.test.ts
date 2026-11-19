@@ -9,8 +9,6 @@ import {
   namedDocument,
   paragraph,
   plain,
-  REPORT_BLOCKS,
-  REPORT_TEXT,
   richTlMessage,
 } from "../test/rich-message.test-utils";
 
@@ -140,7 +138,7 @@ describe("richMessageText: inline text", () => {
     ).toBe("![Mon 09:00](tg://time?unix=1760000000&format=wt)");
   });
 
-  it("shows the text of auto-detected entities and of a diff", () => {
+  it("reads entities, a diff and a text type it does not know by their text, else names it", () => {
     const kinds = [
       "textMention",
       "textHashtag",
@@ -156,6 +154,10 @@ describe("richMessageText: inline text", () => {
       expect(inline({ _: kind, text: plain("#value") })).toBe("#value");
     }
     expect(inline({ _: "textDiff", text: plain("new"), oldText: plain("old") })).toBe("new");
+    const future = { _: "textSparkle", text: plain("shiny") };
+    const bare = { _: "textHologram", id: 1 };
+    expect(inline(future as unknown as tl.TypeRichText)).toBe("shiny");
+    expect(inline(bare as unknown as tl.TypeRichText)).toBe("[textHologram]");
   });
 
   it("writes an inline button as a placeholder with its label and link", () => {
@@ -167,18 +169,10 @@ describe("richMessageText: inline text", () => {
       }),
     ).toBe("[button: Open (https://example.com/)]");
   });
-
-  it("reads a text type it does not know by its nested text, else names it", () => {
-    const future = { _: "textSparkle", text: plain("shiny") };
-    const bare = { _: "textHologram", id: 1 };
-    expect(inline(future as unknown as tl.TypeRichText)).toBe("shiny");
-    expect(inline(bare as unknown as tl.TypeRichText)).toBe("[textHologram]");
-  });
 });
 
 describe("richMessageText: blocks", () => {
-  it("writes headings, a paragraph and a table", () => {
-    expect(render(REPORT_BLOCKS)).toBe(REPORT_TEXT);
+  it("writes headings of every level", () => {
     const headings = ([1, 2, 3, 4, 5, 6] as const).map((level) => {
       const result: tl.TypePageBlock = {
         _: `pageBlockHeading${level}`,

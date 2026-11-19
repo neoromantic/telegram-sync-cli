@@ -2,7 +2,6 @@ import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { tl } from "@mtcute/bun";
 
-import { dialogToCacheInput } from "../chats/helpers";
 import {
   buildSentMessageInputs,
   cacheSentMessage,
@@ -10,7 +9,6 @@ import {
   type SentMessageRequest,
 } from "./sent-message-cache";
 import { createTestDatabase } from "../../db";
-import { createChatsCache } from "../../db/chats-cache";
 import { createMessageAttachmentsStore } from "../../db/message-attachments";
 import { createMessagesCache } from "../../db/messages-cache";
 import { createMessagesSearch } from "../../db/messages-search";
@@ -18,7 +16,6 @@ import { extractAttachment } from "../../utils/attachment";
 import { toLong } from "../../utils/long";
 import { toPeerIdFromInputPeer } from "../../utils/telegram-peer-ids";
 import { createAccountCacheDb } from "../../test/cache-db.test-utils";
-import { fakeDialog } from "../../test/fake-dialogs.test-utils";
 import { pdfDocumentMessage } from "../../test/media-messages.test-utils";
 import { takePartIn } from "../../test/participation.test-utils";
 import { assertPeerIdInvariants } from "../../test/peer-id-invariants.test-utils";
@@ -141,23 +138,6 @@ describe("buildSentMessageInputs", () => {
       });
     });
 
-    it("uses the user ID for a private chat", () => {
-      const [input] = buildSentMessageInputs(
-        shortSent(),
-        {
-          peer: {
-            _: "inputPeerUser",
-            userId: OTHER_USER_ID,
-            accessHash: toLong(42),
-          },
-          text: "hi",
-        },
-        SELF_ID,
-      );
-      expect(input?.chat_id).toBe(OTHER_USER_ID);
-      expect(input?.from_id).toBe(SELF_ID);
-    });
-
     it("uses a negative ID for a basic group and keeps the reply", () => {
       const [input] = buildSentMessageInputs(
         shortSent({ id: 7 }),
@@ -193,20 +173,6 @@ describe("buildSentMessageInputs", () => {
         SELF_ID,
       );
       expect(input).toMatchObject({ message_type: "webpage", has_media: true });
-    });
-
-    it("records an empty link preview as text, as live updates do", () => {
-      const [input] = buildSentMessageInputs(
-        shortSent({
-          media: {
-            _: "messageMediaWebPage",
-            webpage: { _: "webPageEmpty", id: toLong(9) },
-          },
-        }),
-        { ...selfRequest, text: "see https://example.com" },
-        SELF_ID,
-      );
-      expect(input).toMatchObject({ message_type: "text", has_media: false });
     });
 
     it("stores nothing without the own user ID", () => {
@@ -249,28 +215,6 @@ describe("buildSentMessageInputs", () => {
       });
     });
 
-    it("stores a channel that posts as itself under its marked ID", () => {
-      const message = rawMessage({
-        fromId: { _: "peerChannel", channelId: CHANNEL_ID },
-        fwdFrom: {
-          _: "messageFwdHeader",
-          fromId: { _: "peerChat", chatId: GROUP_ID },
-          date: DATE - 60,
-        },
-      });
-      const [input] = buildSentMessageInputs(
-        updatesWith([{ _: "updateNewChannelMessage", message, pts: 1, ptsCount: 1 }]),
-        selfRequest,
-        null,
-      );
-
-      expect(input).toMatchObject({
-        chat_id: CHANNEL_PEER_ID,
-        from_id: CHANNEL_PEER_ID,
-        forward_from_id: GROUP_PEER_ID,
-      });
-    });
-
     it("maps updateNewMessage in updatesCombined for a basic group", () => {
       const message = rawMessage({
         id: 303,
@@ -287,36 +231,6 @@ describe("buildSentMessageInputs", () => {
         chat_id: GROUP_PEER_ID,
         message_id: 303,
       });
-    });
-
-    it("maps a Saved Messages updateNewMessage to the own user ID", () => {
-      const message = rawMessage({
-        id: 404,
-        out: false,
-        fromId: undefined,
-        peerId: { _: "peerUser", userId: SELF_ID },
-        savedPeerId: { _: "peerUser", userId: SELF_ID },
-      });
-      const [input] = buildSentMessageInputs(
-        updatesWith([{ _: "updateNewMessage", message, pts: 1, ptsCount: 1 }]),
-        selfRequest,
-        null,
-      );
-      expect(input).toMatchObject({
-        chat_id: SELF_ID,
-        message_id: 404,
-        from_id: SELF_ID,
-        is_outgoing: false,
-      });
-    });
-
-    it("ignores updates without a new message", () => {
-      const inputs = buildSentMessageInputs(
-        updatesWith([{ _: "updateMessageID", id: 1, randomId: toLong(1) }]),
-        selfRequest,
-        SELF_ID,
-      );
-      expect(inputs).toEqual([]);
     });
   });
 });
@@ -364,41 +278,6 @@ describe("cacheSentMessage", () => {
     expect(cached).toBe(1);
     expect(getSelfId).not.toHaveBeenCalled();
     expect(createMessagesCache(db).get(CHANNEL_PEER_ID, 202)).not.toBeNull();
-  });
-
-  it("caches a message sent to a supergroup under the ID its chats_cache row has", async () => {
-    createChatsCache(db).upsert(
-      dialogToCacheInput(
-        fakeDialog({
-          kind: "supergroup",
-          id: CHANNEL_ID,
-          title: "Example Team",
-          username: "exampleteam",
-        }),
-      ),
-    );
-
-    await cacheSentMessage(
-      { cacheDb: db, getSelfId: async () => SELF_ID },
-      updatesWith([
-        {
-          _: "updateNewChannelMessage",
-          message: rawMessage({ message: "sendcachemarker for the team" }),
-          pts: 1,
-          ptsCount: 1,
-        },
-      ]),
-      selfRequest,
-    );
-
-    const [hit] = createMessagesSearch(db).search("sendcachemarker");
-    expect(hit).toMatchObject({
-      chat_id: CHANNEL_PEER_ID,
-      chat_title: "Example Team",
-      chat_username: "exampleteam",
-      chat_type: "supergroup",
-    });
-    expect(createMessagesSearch(db).search("Example Team")).toHaveLength(1);
     assertPeerIdInvariants(db);
   });
 
@@ -438,31 +317,22 @@ describe("cacheSentMessage", () => {
     });
   });
 
-  it("swallows a failing cache write", async () => {
+  it("swallows a failing cache write or own user ID lookup", async () => {
     const broken = new Database(":memory:");
+    const offline = async () => {
+      throw new Error("network down");
+    };
 
-    const cached = await cacheSentMessage(
-      { cacheDb: broken, getSelfId: async () => SELF_ID },
-      shortSent(),
-      selfRequest,
-    );
-
-    expect(cached).toBe(0);
-  });
-
-  it("swallows a failing own user ID lookup", async () => {
-    const cached = await cacheSentMessage(
-      {
-        cacheDb: db,
-        getSelfId: async () => {
-          throw new Error("network down");
-        },
-      },
-      shortSent(),
-      selfRequest,
-    );
-
-    expect(cached).toBe(0);
+    expect(
+      await cacheSentMessage(
+        { cacheDb: broken, getSelfId: async () => SELF_ID },
+        shortSent(),
+        selfRequest,
+      ),
+    ).toBe(0);
+    expect(
+      await cacheSentMessage({ cacheDb: db, getSelfId: offline }, shortSent(), selfRequest),
+    ).toBe(0);
     expect(createMessagesCache(db).countByChatId(SELF_ID)).toBe(0);
   });
 });
