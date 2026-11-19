@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A boolean flag with a value other than `true` or `false` (`--silent=no` and `--silent=0`,
+  which ran as `--silent`) is `INVALID_ARGS` instead of being read as set (#217).
 - `tg send`, `tg messages read` and `tg api` write methods resolve an `@username` through
   Telegram, not the cache, so a username that moved never sends to its previous owner. The
   `allowedChats` check of a write resolves the list's `@username` entries the same way: an entry
