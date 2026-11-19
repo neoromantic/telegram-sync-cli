@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tg skill install --dir ~/.claude/skills
   ```
 
+- **Breaking:** `tg skill validate` reports a missing account as an issue, so before
+  `tg auth login` it prints `valid: false`, still with exit 0. tg 0.14.0 and older checked only
+  the credentials and the data directory.
+- **Breaking:** `src/db/index.ts` no longer exports `db`, the open `data.db` connection. Code
+  that imports it from the package source calls `getDataDb()`, which opens `data.db` on first
+  use.
+
 ### Fixed
 
 - `tg skill install` and `tg skill validate` work with a corrupt `data.db`, which stopped every
