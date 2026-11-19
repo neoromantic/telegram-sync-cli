@@ -12,8 +12,10 @@ import {
   loginWithQr,
   logout,
 } from "./auth";
+import { readStringSession, writeStringSession } from "@mtcute/bun/utils.js";
 import { syncActiveAccountFromConfig } from "../config";
 import { type AccountsDbInterface, createTestDatabase } from "../db";
+import { createDefaultClientFactory, requireDefaultConfig } from "../services/telegram";
 import { renderQr } from "../utils/qr";
 
 process.env.BUN_ENV = "test";
@@ -30,7 +32,10 @@ describe("Authentication Commands", () => {
     onQrScanned?: () => void;
   };
 
-  type MockAuthClient = Pick<TelegramClient, "start" | "getMe" | "signInQr" | "call" | "destroy">;
+  type MockAuthClient = Pick<
+    TelegramClient,
+    "start" | "getMe" | "signInQr" | "call" | "destroy" | "exportSession" | "importSession"
+  >;
 
   type UserResult = Awaited<ReturnType<TelegramClient["getMe"]>>;
 
@@ -76,6 +81,8 @@ describe("Authentication Commands", () => {
       ),
       call: mock(() => Promise.resolve({})),
       destroy: mock(() => Promise.resolve()),
+      exportSession: mock(() => Promise.resolve("session")),
+      importSession: mock(() => Promise.resolve()),
       ...overrides,
     } satisfies MockAuthClient;
 
@@ -144,6 +151,17 @@ describe("Authentication Commands", () => {
 
       expect(result.success).toBe(true);
       expect(result.account?.id).toBe(existing.id);
+    });
+
+    it("moves the phone onto the user's account from a QR login and creates no other", async () => {
+      const existing = accountsDb.create({ phone: "user:123", user_id: 123 });
+
+      const result = await loginWithPhone("+15550000001", deps);
+
+      expect(result).toMatchObject({ success: true, account: { id: existing.id } });
+      expect(accountsDb.getAll()).toMatchObject([
+        { id: existing.id, phone: "+15550000001", user_id: 123, is_active: 1 },
+      ]);
     });
 
     it("stores the user's full name, username and the label", async () => {
@@ -414,6 +432,81 @@ describe("Authentication Commands", () => {
       expect(JSON.parse(readConfig())).toEqual({ activeAccount: 2 });
       expect(activeIds()).toEqual([2]);
     });
+  });
+
+  describe("a login of a user who already has an account", () => {
+    const logins = [
+      ["tg auth login", (d: AuthDependencies) => loginWithPhone(PHONE, d)],
+      ["tg auth login-qr", (d: AuthDependencies) => loginWithQr("Second", d)],
+    ] as const;
+    const user = createUser({ id: 4242 });
+    const dcs = {
+      main: { id: 2, ipAddress: "192.0.2.1", port: 443 },
+      media: { id: 2, ipAddress: "192.0.2.1", port: 443 },
+    };
+    const sessionWithKey = (byte: number) =>
+      writeStringSession({ version: 3, primaryDcs: dcs, authKey: new Uint8Array(256).fill(byte) });
+
+    let dataDir: string;
+    let sessions: ReturnType<typeof createDefaultClientFactory>;
+    let existingId: number;
+
+    const keyOf = async (accountId: number) => {
+      const client = sessions.create(accountId);
+      const session = readStringSession(await client.exportSession());
+      await client.destroy();
+      return session.authKey[0];
+    };
+
+    beforeEach(async () => {
+      dataDir = mkdtempSync(join(tmpdir(), "telegram-sync-cli-auth-merge-"));
+      sessions = createDefaultClientFactory(requireDefaultConfig(), dataDir);
+      existingId = accountsDb.create({ phone: "user:4242", user_id: 4242, label: "Main" }).id;
+      const revoked = sessions.create(existingId);
+      await revoked.importSession(sessionWithKey(1));
+      await revoked.destroy();
+
+      deps.createClient = (accountId) => {
+        const client = sessions.create(accountId);
+        const signIn = async () => {
+          await client.importSession(sessionWithKey(2));
+          return user;
+        };
+        return Object.assign(client, { start: signIn, signInQr: signIn });
+      };
+    });
+
+    afterEach(() => rmSync(dataDir, { recursive: true, force: true }));
+
+    for (const [name, login] of logins) {
+      it(`${name} gives that account the new session and keeps its id`, async () => {
+        const result = await login(deps);
+
+        expect(result).toMatchObject({ success: true, account: { id: existingId } });
+        expect(accountsDb.getAll()).toMatchObject([
+          { id: existingId, user_id: 4242, label: name === "tg auth login" ? "Main" : "Second" },
+        ]);
+        expect(await keyOf(existingId)).toBe(2);
+      });
+
+      it(`${name} keeps the new account when the session can't move`, async () => {
+        const createClient = deps.createClient;
+        deps.createClient = (accountId) =>
+          accountId === existingId
+            ? Object.assign(sessions.create(accountId), {
+                importSession: () => Promise.reject(new Error("disk I/O error")),
+              })
+            : createClient(accountId);
+
+        const result = await login(deps);
+
+        expect(result).toEqual({ success: false, error: "disk I/O error" });
+        const [existing, created] = accountsDb.getAll();
+        expect(existing).toMatchObject({ id: existingId, phone: "user:4242", label: "Main" });
+        expect(await keyOf(created?.id ?? 0)).toBe(2);
+        expect(await keyOf(existingId)).toBe(1);
+      });
+    }
   });
 
   describe("logout", () => {

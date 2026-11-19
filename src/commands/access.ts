@@ -1,7 +1,7 @@
 import { ConfigError, loadAccessSettings } from "../config";
 import { ErrorCodes } from "../types";
 import { openAccountCache } from "../utils/account-cache";
-import { positionalChat } from "../utils/args";
+import { positionalChat, undeclaredArg } from "../utils/args";
 import { error } from "../utils/output";
 import { openHistory, reportHistoryError } from "./messages/helpers";
 import { resolveHistoryChat } from "./messages/history";
@@ -111,7 +111,9 @@ export function runnableCommands(cmd: CommandNode, prefix: string[] = []) {
   });
 }
 
-/** Wrap every command's run so the checks of its COMMAND_ACCESS entry come first */
+const OWN_ARGS = new Set(["api", "sql"]);
+
+/** Wrap every command's run so the args check and its COMMAND_ACCESS checks come first */
 export function guardCommands(cmd: CommandNode) {
   for (const { path, node } of runnableCommands(cmd)) {
     const access = COMMAND_ACCESS[path];
@@ -121,7 +123,12 @@ export function guardCommands(cmd: CommandNode) {
     const run = node.run as Run;
     const defs = (node.args ?? {}) as Record<string, { type?: string }>;
     const positional = Object.keys(defs).filter((name) => defs[name]?.type === "positional");
+    const known = { ...(cmd.args as object), ...defs };
     node.run = async (context: RunContext) => {
+      const problem = OWN_ARGS.has(path) ? null : undeclaredArg(context.rawArgs ?? [], known);
+      if (problem) {
+        error(ErrorCodes.INVALID_ARGS, problem, undefined, `tg ${path} --help lists its options`);
+      }
       await checkAccess(path, access, context, positional);
       return run(context);
     };
@@ -179,12 +186,31 @@ export async function checkAccess(
       "Use tg chats, tg messages and tg media, which keep to allowedChats",
     );
   }
+  const chats = new Map<string, CheckedChat>();
   for (const name of access.chatArgs ?? []) {
     const input = positional.includes(name) ? positionalChat(args[name], rawArgs) : args[name];
     if (typeof input === "string" && input.trim() !== "") {
-      await checkChatAllowed(input, args.account as string | undefined, allowed);
+      const { account } = openAccountCache(args.account as string | undefined);
+      args.account = String(account.id);
+      chats.set(name, await checkChatAllowed(input, account.id, allowed));
     }
   }
+  checkedChats.set(args, chats);
+}
+
+type CheckedChat = Awaited<ReturnType<typeof resolveHistoryChat>>;
+
+const checkedChats = new WeakMap<Args, Map<string, CheckedChat>>();
+
+/**
+ * The chat that checkAccess resolved and let through for the arg, or
+ * undefined when it checked none (allowedChats is not set). A command acts
+ * on this chat, not on its own second resolution, which could land on
+ * another chat; checkAccess also pins `args.account` to the account it
+ * checked, so a switch of the active account in between changes nothing.
+ */
+export function checkedChat(args: Args, name: string) {
+  return checkedChats.get(args)?.get(name);
 }
 
 type HistoryDeps = ReturnType<typeof openHistory>;
@@ -204,29 +230,25 @@ async function resolveAllowed(entries: string[], deps: HistoryDeps) {
 const ALLOWED_SUGGESTION =
   "Only the chats in allowedChats (config.json or TELEGRAM_SYNC_CLI_ALLOWED_CHATS) can be used; tg status lists them";
 
-async function checkChatAllowed(
-  input: string,
-  accountSelector: string | undefined,
-  allowed: string[],
-) {
-  const { account } = openAccountCache(accountSelector);
-  const deps = openHistory(account.id, "cli:allowed-chats");
-  let id: number;
+async function checkChatAllowed(input: string, accountId: number, allowed: string[]) {
+  const deps = openHistory(accountId, "cli:allowed-chats");
+  let chat: CheckedChat;
   let ids: Set<number>;
   try {
-    id = (await resolveHistoryChat(deps.client, input, deps)).chatId;
+    chat = await resolveHistoryChat(deps.client, input, deps);
     ids = await resolveAllowed(allowed, deps);
   } catch (err) {
     reportHistoryError(err, `check ${input} against allowedChats`);
   }
-  if (!ids.has(id)) {
+  if (!ids.has(chat.chatId)) {
     error(
       ErrorCodes.CHAT_NOT_ALLOWED,
       `Chat ${input} is not in allowedChats`,
-      { chat: input, id },
+      { chat: input, id: chat.chatId },
       ALLOWED_SUGGESTION,
     );
   }
+  return chat;
 }
 
 /**

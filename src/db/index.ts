@@ -202,6 +202,8 @@ export interface AccountsDbInterface {
   updateSession(id: number, session_data: string): void;
   setActive(id: number): void;
   delete(id: number): boolean;
+  /** Delete one account and update another in the same transaction */
+  merge(fromId: number, intoId: number, data: Parameters<AccountsDbInterface["update"]>[1]): void;
   count(): number;
 }
 
@@ -308,6 +310,13 @@ export function createAccountsDb(db: Database) {
     delete(id: number) {
       const result = statements.deleteAccount.run({ $id: id });
       return result.changes > 0;
+    },
+
+    merge(fromId: number, intoId: number, data: Parameters<AccountsDbInterface["update"]>[1]) {
+      db.transaction(() => {
+        statements.deleteAccount.run({ $id: fromId });
+        this.update(intoId, data);
+      })();
     },
 
     count() {
