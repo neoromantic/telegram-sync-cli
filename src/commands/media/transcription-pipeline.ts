@@ -1,121 +1,105 @@
-/**
- * The steps every transcription provider gets, in this order: eligibility
- * (voice and video notes, content protection) before any reuse; a stored
- * transcript of the file as it is now; the provider's setup; its limits;
- * the file and its audio only when the provider reads audio; the silence
- * check wherever audio is decoded; the provider; each result saved once it
- * exists, after eligibility is checked again. Temporary audio is removed
- * on success, failure and interrupt.
- */
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   createMessageTranscriptsStore,
   type MessageTranscriptRow,
-} from '../../db/message-transcripts'
-import { ErrorCodes, type TranscriptSource } from '../../types'
-import type { AttachmentInfo } from '../../utils/attachment'
-import { info } from '../../utils/output'
-import { type HistoryChat, resolveHistoryChat } from '../messages/history'
-import { convertToWav, SILENCE_MAX_VOLUME_DB } from './audio'
+} from "../../db/message-transcripts";
+import { ErrorCodes, type TranscriptSource } from "../../types";
+import type { AttachmentInfo } from "../../utils/attachment";
+import { info } from "../../utils/output";
+import { type HistoryChat, resolveHistoryChat } from "../messages/history";
+import { convertToWav, SILENCE_MAX_VOLUME_DB } from "./audio";
 import {
   checkedAttachment,
   type DownloadDeps,
   downloadMedia,
   readCachedAttachment,
-} from './download-media'
-import { MediaError } from './errors'
+} from "./download-media";
+import { MediaError } from "./errors";
 import type {
   AudioFormat,
   ProviderResult,
   ProviderSetup,
   TranscriptionProvider,
   TranscriptionRequest,
-} from './transcription-provider'
+} from "./transcription-provider";
 
 export interface TranscribeResult {
-  chatId: number
-  messageId: number
-  text: string
-  language: string | null
-  source: TranscriptSource
+  chatId: number;
+  messageId: number;
+  text: string;
+  language: string | null;
+  source: TranscriptSource;
   /** The program or service that made it; null for silent audio */
-  runner: string | null
-  model: string | null
-  cached: boolean
+  runner: string | null;
+  model: string | null;
+  cached: boolean;
 }
 
-export type TranscribeOutcome = TranscribeResult | MediaError
+export type TranscribeOutcome = TranscribeResult | MediaError;
 
 export interface PipelineDeps {
   /** What `tg media download` reads with; its `signal` stops every step */
-  download: DownloadDeps & { signal: AbortSignal }
+  download: DownloadDeps & { signal: AbortSignal };
   /** The selected provider, or its setup problem */
-  setup: ProviderSetup
-  language: string | null
+  setup: ProviderSetup;
+  language: string | null;
   /** Ignore stored transcripts */
-  force: boolean
+  force: boolean;
   /** Where the temp directory for converted audio goes */
-  tmpRoot?: string
-  now?: () => number
+  tmpRoot?: string;
+  now?: () => number;
 }
 
-/** What a stored transcript holds besides the message and file it is for */
-type TranscriptFields = Omit<
-  MessageTranscriptRow,
-  'chat_id' | 'message_id' | 'unique_file_id'
->
+type TranscriptFields = Omit<MessageTranscriptRow, "chat_id" | "message_id" | "unique_file_id">;
 
-/** A message the provider still has to transcribe */
 interface Pending {
-  messageId: number
-  attachment: AttachmentInfo
+  messageId: number;
+  attachment: AttachmentInfo;
 }
 
-const SPEECH_KINDS = new Set(['voice', 'round'])
+const SPEECH_KINDS = new Set(["voice", "round"]);
 
 function notSpeech(chatId: number, messageId: number, kind: string | null) {
   return new MediaError(
     ErrorCodes.MEDIA_UNSUPPORTED,
     `Message ${messageId} in chat ${chatId} is not a voice note or video note`,
-    { chatId, messageId, kind, reason: 'not_speech' },
-  )
+    { chatId, messageId, kind, reason: "not_speech" },
+  );
 }
 
-/** chatId and messageId in a failure's details, so a batch line says which */
 function withMessage(
   err: MediaError,
   chatId: number,
   messageId: number,
   extra: { details?: Record<string, unknown>; retryable?: boolean } = {},
-): MediaError {
+) {
   return new MediaError(
     err.code,
     err.message,
     { chatId, messageId, ...err.details, ...extra.details },
     err.suggestion,
     extra.retryable ?? err.retryable,
-  )
+  );
 }
 
-/** A provider's failure as reported: an unknown outcome is never retryable */
 function failureError(
-  result: Extract<ProviderResult, { status: 'failed' }>,
+  result: Extract<ProviderResult, { status: "failed" }>,
   chatId: number,
   messageId: number,
-): MediaError {
+) {
   switch (result.failure) {
-    case 'outcome_unknown':
+    case "outcome_unknown":
       return withMessage(result.error, chatId, messageId, {
-        details: { outcome: 'unknown' },
+        details: { outcome: "unknown" },
         retryable: false,
-      })
-    case 'retry_later':
-      return withMessage(result.error, chatId, messageId, { retryable: true })
-    case 'rejected':
-      return withMessage(result.error, chatId, messageId)
+      });
+    case "retry_later":
+      return withMessage(result.error, chatId, messageId, { retryable: true });
+    case "rejected":
+      return withMessage(result.error, chatId, messageId);
   }
 }
 
@@ -129,20 +113,19 @@ function toResult(row: MessageTranscriptRow, cached: boolean) {
     runner: row.runner,
     model: row.model,
     cached,
-  } satisfies TranscribeResult
+  } satisfies TranscribeResult;
 }
 
-/** The format the pipeline prepares: the original file when the provider takes it */
-function preparedFormat(formats: readonly AudioFormat[]): AudioFormat {
-  return formats.includes('original') ? 'original' : 'wav16k'
+function preparedFormat(formats: readonly AudioFormat[]) {
+  return formats.includes("original") ? "original" : "wav16k";
 }
 
-function chunk<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = []
+function chunk<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size))
+    chunks.push(items.slice(i, i + size));
   }
-  return chunks
+  return chunks;
 }
 
 /**
@@ -154,195 +137,179 @@ export async function transcribeMessages(
   deps: PipelineDeps,
   chatArg: string,
   messageIds: readonly number[],
-): Promise<TranscribeOutcome[]> {
-  const { download, setup } = deps
-  const { signal, cacheDb, history } = download
-  const now = deps.now ?? Date.now
-  const store = createMessageTranscriptsStore(cacheDb)
-  const chat = await resolveHistoryChat(history.client, chatArg, history)
-  const { chatId } = chat
-  const outcomes = new Map<number, TranscribeOutcome>()
+) {
+  const { download, setup } = deps;
+  const { signal, cacheDb, history } = download;
+  const now = deps.now ?? Date.now;
+  const store = createMessageTranscriptsStore(cacheDb);
+  const chat = await resolveHistoryChat(history.client, chatArg, history);
+  const { chatId } = chat;
+  const outcomes = new Map<number, TranscribeOutcome>();
   const fail = (messageId: number, err: MediaError) =>
-    outcomes.set(messageId, withMessage(err, chatId, messageId))
+    outcomes.set(messageId, withMessage(err, chatId, messageId));
 
-  /** Saved only while the message is cached, eligible and holds the same file */
   const save = (
-    request: Pick<TranscriptionRequest, 'messageId' | 'uniqueFileId'>,
+    request: Pick<TranscriptionRequest, "messageId" | "uniqueFileId">,
     fields: TranscriptFields,
     cached = false,
-  ): TranscribeOutcome => {
-    const { messageId, uniqueFileId } = request
+  ) => {
+    const { messageId, uniqueFileId } = request;
     const row: MessageTranscriptRow = {
       chat_id: chatId,
       message_id: messageId,
       unique_file_id: uniqueFileId,
       ...fields,
-    }
-    let current: AttachmentInfo | null
+    };
+    let current: AttachmentInfo | null;
     try {
-      current = readCachedAttachment(download, chat, messageId)
+      current = readCachedAttachment(download, chat, messageId);
     } catch (err) {
-      if (!(err instanceof MediaError)) throw err
-      return withMessage(err, chatId, messageId)
+      if (!(err instanceof MediaError)) throw err;
+      return withMessage(err, chatId, messageId);
     }
-    // A message the cache keeps out (a group the account left) keeps no transcript either
-    if (!current) return toResult(row, cached)
+    if (!current) return toResult(row, cached);
     if (current.uniqueFileId !== uniqueFileId) {
       return new MediaError(
         ErrorCodes.GENERAL_ERROR,
         `The file of message ${messageId} in chat ${chatId} changed while it was transcribed`,
-        { chatId, messageId, reason: 'attachment_changed' },
-        'run the command again',
+        { chatId, messageId, reason: "attachment_changed" },
+        "run the command again",
         true,
-      )
+      );
     }
-    store.save(row)
-    return toResult(row, cached)
-  }
+    store.save(row);
+    return toResult(row, cached);
+  };
 
   const pending = await checkAndReuse(deps, chat, messageIds, {
     outcomes,
     fail,
     save,
-  })
+  });
   if (pending.length > 0) {
     if (!setup.ready) {
-      for (const item of pending) fail(item.messageId, setup.problem)
+      for (const item of pending) fail(item.messageId, setup.problem);
     } else {
-      await runProvider(setup, pending)
+      await runProvider(setup, pending);
     }
   }
-  return messageIds.map((id) => outcomes.get(id)!)
+  return messageIds.map((id) => outcomes.get(id)!);
 
-  async function runProvider(
-    ready: Extract<ProviderSetup, { ready: true }>,
-    items: Pending[],
-  ): Promise<void> {
-    const { provider, ffmpeg } = ready
-    const declaration = provider.declaration
-    const { maxDurationSeconds, input } = declaration
+  async function runProvider(ready: Extract<ProviderSetup, { ready: true }>, items: Pending[]) {
+    const { provider, ffmpeg } = ready;
+    const declaration = provider.declaration;
+    const { maxDurationSeconds, input } = declaration;
     const allowed = items.filter(({ messageId, attachment }) => {
-      const duration = attachment.duration ?? 0
+      const duration = attachment.duration ?? 0;
       if (maxDurationSeconds === null || duration <= maxDurationSeconds) {
-        return true
+        return true;
       }
       fail(
         messageId,
         new MediaError(
           ErrorCodes.MEDIA_UNSUPPORTED,
           `Message ${messageId} in chat ${chatId} is longer than ${declaration.engine} takes`,
-          { duration, maxDuration: maxDurationSeconds, reason: 'too_long' },
+          { duration, maxDuration: maxDurationSeconds, reason: "too_long" },
         ),
-      )
-      return false
-    })
-    if (allowed.length === 0) return
+      );
+      return false;
+    });
+    if (allowed.length === 0) return;
 
-    const toRun: TranscriptionRequest[] = []
-    if (input.kind === 'message') {
-      for (const item of allowed) toRun.push(requestFor(item, null))
-      await runBatches(provider, toRun)
-      return
+    const toRun: TranscriptionRequest[] = [];
+    if (input.kind === "message") {
+      for (const item of allowed) toRun.push(requestFor(item, null));
+      await runBatches(provider, toRun);
+      return;
     }
 
-    const format = preparedFormat(input.formats)
+    const format = preparedFormat(input.formats);
     const tmp =
-      format === 'wav16k'
-        ? await mkdtemp(join(deps.tmpRoot ?? tmpdir(), 'tg-transcribe-'))
-        : null
+      format === "wav16k" ? await mkdtemp(join(deps.tmpRoot ?? tmpdir(), "tg-transcribe-")) : null;
     try {
       for (const [index, item] of allowed.entries()) {
-        signal.throwIfAborted()
-        const { messageId } = item
+        signal.throwIfAborted();
+        const { messageId } = item;
         try {
           const file = await downloadMedia(download, {
             chat: chatArg,
             messageId,
             thumb: false,
             fresh: false,
-          })
-          if (format === 'original') {
+          });
+          if (format === "original") {
             toRun.push(
               requestFor(item, {
                 path: file.path,
                 format,
                 mimeType: file.mimeType,
               }),
-            )
-            continue
+            );
+            continue;
           }
           if (!ffmpeg || !tmp) {
-            throw new Error('A WAV provider is ready without ffmpeg')
+            throw new Error("A WAV provider is ready without ffmpeg");
           }
-          const wav = join(tmp, `${index}.wav`)
-          const peakDb = await convertToWav(ffmpeg, file.path, wav, signal)
+          const wav = join(tmp, `${index}.wav`);
+          const peakDb = await convertToWav(ffmpeg, file.path, wav, signal);
           if (peakDb < SILENCE_MAX_VOLUME_DB) {
             outcomes.set(
               messageId,
               save(requestFor(item, null), {
-                text: '',
+                text: "",
                 language: null,
                 source: declaration.id,
                 runner: null,
                 model: null,
                 transcribed_at: now(),
               }),
-            )
-            continue
+            );
+            continue;
           }
-          toRun.push(
-            requestFor(item, { path: wav, format, mimeType: 'audio/wav' }),
-          )
+          toRun.push(requestFor(item, { path: wav, format, mimeType: "audio/wav" }));
         } catch (err) {
-          if (!(err instanceof MediaError)) throw err
-          fail(messageId, err)
+          if (!(err instanceof MediaError)) throw err;
+          fail(messageId, err);
         }
       }
-      if (toRun.length > 0) await runBatches(provider, toRun)
+      if (toRun.length > 0) await runBatches(provider, toRun);
     } finally {
-      if (tmp) await rm(tmp, { recursive: true, force: true })
+      if (tmp) await rm(tmp, { recursive: true, force: true });
     }
   }
 
-  function requestFor(
-    item: Pending,
-    audio: TranscriptionRequest['audio'],
-  ): TranscriptionRequest {
-    const { attachment } = item
+  function requestFor(item: Pending, audio: TranscriptionRequest["audio"]) {
+    const { attachment } = item;
     return {
       chatId,
       messageId: item.messageId,
-      kind: attachment.kind === 'round' ? 'round' : 'voice',
+      kind: attachment.kind === "round" ? "round" : "voice",
       durationSeconds: attachment.duration,
       uniqueFileId: attachment.uniqueFileId,
       audio,
-    }
+    } satisfies TranscriptionRequest;
   }
 
-  async function runBatches(
-    provider: TranscriptionProvider,
-    requests: TranscriptionRequest[],
-  ): Promise<void> {
-    const { engine, model, batchSize, concurrency } = provider.declaration
-    // Progress for a person watching; agents read runner and model in the result
+  async function runBatches(provider: TranscriptionProvider, requests: TranscriptionRequest[]) {
+    const { engine, model, batchSize, concurrency } = provider.declaration;
     if (process.stderr.isTTY) {
-      const files = `${requests.length} file${requests.length === 1 ? '' : 's'}`
-      info(`Transcribing ${files} with ${engine}${model ? ` (${model})` : ''}`)
+      const files = `${requests.length} file${requests.length === 1 ? "" : "s"}`;
+      info(`Transcribing ${files} with ${engine}${model ? ` (${model})` : ""}`);
     }
-    const batches = chunk(requests, batchSize)
-    let next = 0
+    const batches = chunk(requests, batchSize);
+    let next = 0;
     const worker = async () => {
       for (let batch = batches[next++]; batch; batch = batches[next++]) {
-        signal.throwIfAborted()
+        signal.throwIfAborted();
         const results = await provider.transcribe(batch, {
           language: deps.language,
           signal,
-        })
+        });
         for (const [i, request] of batch.entries()) {
-          const result = results[i]!
+          const result = results[i]!;
           outcomes.set(
             request.messageId,
-            result.status === 'done'
+            result.status === "done"
               ? save(request, {
                   text: result.text,
                   language: result.language,
@@ -352,69 +319,58 @@ export async function transcribeMessages(
                   transcribed_at: now(),
                 })
               : failureError(result, chatId, request.messageId),
-          )
+          );
         }
       }
-    }
-    await Promise.all(
-      Array.from({ length: Math.min(concurrency, batches.length) }, worker),
-    )
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, batches.length) }, worker));
   }
 }
 
-/**
- * Eligibility, then reuse: each message's attachment as it is now, checked
- * as `tg media download` checks it, before any stored transcript is read.
- * Returns the messages a provider still has to transcribe.
- */
 async function checkAndReuse(
   deps: PipelineDeps,
   chat: HistoryChat,
   messageIds: readonly number[],
   report: {
-    outcomes: Map<number, TranscribeOutcome>
-    fail: (messageId: number, err: MediaError) => void
-    /** Store a reused transcript for this message too */
+    outcomes: Map<number, TranscribeOutcome>;
+    fail: (messageId: number, err: MediaError) => void;
     save: (
-      request: Pick<TranscriptionRequest, 'messageId' | 'uniqueFileId'>,
+      request: Pick<TranscriptionRequest, "messageId" | "uniqueFileId">,
       fields: TranscriptFields,
       cached: boolean,
-    ) => TranscribeOutcome
+    ) => TranscribeOutcome;
   },
-): Promise<Pending[]> {
-  const { outcomes, fail, save } = report
-  const { download, force } = deps
-  const store = createMessageTranscriptsStore(download.cacheDb)
-  const pending: Pending[] = []
+) {
+  const { outcomes, fail, save } = report;
+  const { download, force } = deps;
+  const store = createMessageTranscriptsStore(download.cacheDb);
+  const pending: Pending[] = [];
   for (const messageId of messageIds) {
-    download.signal.throwIfAborted()
-    let attachment: AttachmentInfo
+    download.signal.throwIfAborted();
+    let attachment: AttachmentInfo;
     try {
-      attachment = await checkedAttachment(download, chat, messageId)
+      attachment = await checkedAttachment(download, chat, messageId);
     } catch (err) {
-      if (!(err instanceof MediaError)) throw err
-      fail(messageId, err)
-      continue
+      if (!(err instanceof MediaError)) throw err;
+      fail(messageId, err);
+      continue;
     }
     if (!SPEECH_KINDS.has(attachment.kind)) {
-      fail(messageId, notSpeech(chat.chatId, messageId, attachment.kind))
-      continue
+      fail(messageId, notSpeech(chat.chatId, messageId, attachment.kind));
+      continue;
     }
-    const stored = force ? null : store.get(chat.chatId, messageId)
+    const stored = force ? null : store.get(chat.chatId, messageId);
     if (stored?.unique_file_id === attachment.uniqueFileId) {
-      outcomes.set(messageId, toResult(stored, true))
-      continue
+      outcomes.set(messageId, toResult(stored, true));
+      continue;
     }
-    const sameFile = force ? null : store.getByFile(attachment.uniqueFileId)
+    const sameFile = force ? null : store.getByFile(attachment.uniqueFileId);
     if (sameFile) {
-      const { chat_id, message_id, unique_file_id, ...fields } = sameFile
-      outcomes.set(
-        messageId,
-        save({ messageId, uniqueFileId: unique_file_id }, fields, true),
-      )
-      continue
+      const { chat_id, message_id, unique_file_id, ...fields } = sameFile;
+      outcomes.set(messageId, save({ messageId, uniqueFileId: unique_file_id }, fields, true));
+      continue;
     }
-    pending.push({ messageId, attachment })
+    pending.push({ messageId, attachment });
   }
-  return pending
+  return pending;
 }

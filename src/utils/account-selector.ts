@@ -1,59 +1,55 @@
-import {
-  type AccountsDbInterface,
-  accountsDb as defaultAccountsDb,
-} from '../db'
-import { type Account, ErrorCodes } from '../types'
-import { error } from './output'
+import { type AccountsDbInterface, accountsDb as defaultAccountsDb } from "../db";
+import { ErrorCodes } from "../types";
+import { error } from "./output";
 
-export const ACCOUNT_SELECTOR_DESCRIPTION =
-  'Account selector (ID, @username, or label)'
+export const ACCOUNT_SELECTOR_DESCRIPTION = "Account selector (ID, @username, or label)";
 
 /** The suggestion of an ACCOUNT_NOT_FOUND error for --account */
 export const ACCOUNT_NOT_FOUND_SUGGESTION =
-  'Run tg accounts list to see the accounts, then pass an ID, @username or label to --account'
+  "Run tg accounts list to see the accounts, then pass an ID, @username or label to --account";
 
 export function resolveAccountSelector(
   selector: string | undefined,
   accountsDb: AccountsDbInterface = defaultAccountsDb,
-): number | undefined {
-  if (selector === undefined) return undefined
+) {
+  if (selector === undefined) return undefined;
 
-  const trimmed = selector.trim()
+  const trimmed = selector.trim();
   if (!trimmed) {
-    error(ErrorCodes.INVALID_ARGS, 'Account selector cannot be empty')
+    error(ErrorCodes.INVALID_ARGS, "Account selector cannot be empty");
   }
 
   if (/^\d+$/.test(trimmed)) {
-    const id = Number.parseInt(trimmed, 10)
-    const account = accountsDb.getById(id)
+    const id = Number.parseInt(trimmed, 10);
+    const account = accountsDb.getById(id);
     if (!account) {
       error(
         ErrorCodes.ACCOUNT_NOT_FOUND,
         `Account with ID ${id} not found`,
         undefined,
         ACCOUNT_NOT_FOUND_SUGGESTION,
-      )
+      );
     }
-    return id
+    return id;
   }
 
-  if (trimmed.startsWith('@')) {
-    const normalized = trimmed.slice(1)
-    const account = accountsDb.getByUsername(normalized)
+  if (trimmed.startsWith("@")) {
+    const normalized = trimmed.slice(1);
+    const account = accountsDb.getByUsername(normalized);
     if (!account) {
       error(
         ErrorCodes.ACCOUNT_NOT_FOUND,
         `Account with username @${normalized} not found`,
         undefined,
         ACCOUNT_NOT_FOUND_SUGGESTION,
-      )
+      );
     }
-    return account.id
+    return account.id;
   }
 
-  const labelMatches = accountsDb.getAllByLabel(trimmed)
+  const labelMatches = accountsDb.getAllByLabel(trimmed);
   if (labelMatches.length === 1) {
-    return labelMatches[0]!.id
+    return labelMatches[0]!.id;
   }
   if (labelMatches.length > 1) {
     error(
@@ -68,7 +64,7 @@ export function resolveAccountSelector(
           label: account.label,
         })),
       },
-    )
+    );
   }
 
   error(
@@ -76,7 +72,7 @@ export function resolveAccountSelector(
     `Account not found for selector "${trimmed}"`,
     undefined,
     ACCOUNT_NOT_FOUND_SUGGESTION,
-  )
+  );
 }
 
 /**
@@ -87,32 +83,32 @@ export function resolveAccountSelector(
 export function resolveAccount(
   selector: string | undefined,
   accountsDb: AccountsDbInterface = defaultAccountsDb,
-): Account {
-  const selectedId = resolveAccountSelector(selector, accountsDb)
+) {
+  const selectedId = resolveAccountSelector(selector, accountsDb);
   if (selectedId !== undefined) {
-    const selected = accountsDb.getById(selectedId)
-    if (selected) return selected
+    const selected = accountsDb.getById(selectedId);
+    if (selected) return selected;
     error(
       ErrorCodes.ACCOUNT_NOT_FOUND,
       `Account with ID ${selectedId} not found`,
       undefined,
       ACCOUNT_NOT_FOUND_SUGGESTION,
-    )
+    );
   }
 
-  const active = accountsDb.getActive()
-  if (active) return active
+  const active = accountsDb.getActive();
+  if (active) return active;
 
-  const accounts = accountsDb.getAll()
-  if (accounts.length === 1) return accounts[0]!
+  const accounts = accountsDb.getAll();
+  if (accounts.length === 1) return accounts[0]!;
 
   if (accounts.length === 0) {
     error(
       ErrorCodes.AUTH_REQUIRED,
       'No account found. Please log in first with "tg auth login"',
       undefined,
-      'Log in with tg auth login',
-    )
+      "Log in with tg auth login",
+    );
   }
 
   error(
@@ -126,6 +122,6 @@ export function resolveAccount(
         label: account.label,
       })),
     },
-    'Pass --account <id|@username|label> or run tg accounts switch --id <id>',
-  )
+    "Pass --account <id|@username|label> or run tg accounts switch --id <id>",
+  );
 }

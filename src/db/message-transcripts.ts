@@ -1,33 +1,27 @@
-/**
- * message_transcripts: the text `tg media transcribe` got from a voice note
- * or video note. Written only by the CLI.
- */
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 
-import type { TranscriptSource } from '../types'
+import type { TranscriptSource } from "../types";
 
 export interface MessageTranscriptRow {
-  chat_id: number
-  message_id: number
-  unique_file_id: string
-  text: string
-  language: string | null
-  source: TranscriptSource
-  runner: string | null
-  model: string | null
-  transcribed_at: number
+  chat_id: number;
+  message_id: number;
+  unique_file_id: string;
+  text: string;
+  language: string | null;
+  source: TranscriptSource;
+  runner: string | null;
+  model: string | null;
+  transcribed_at: number;
 }
 
 export interface MessageTranscriptsStore {
-  get(chatId: number, messageId: number): MessageTranscriptRow | null
+  get(chatId: number, messageId: number): MessageTranscriptRow | null;
   /** A transcript of the same file, in any chat */
-  getByFile(uniqueFileId: string): MessageTranscriptRow | null
-  save(row: MessageTranscriptRow): void
+  getByFile(uniqueFileId: string): MessageTranscriptRow | null;
+  save(row: MessageTranscriptRow): void;
 }
 
-export function createMessageTranscriptsStore(
-  db: Database,
-): MessageTranscriptsStore {
+export function createMessageTranscriptsStore(db: Database) {
   const stmts = {
     get: db.query<MessageTranscriptRow, [number, number]>(`
       SELECT * FROM message_transcripts WHERE chat_id = ? AND message_id = ?
@@ -45,14 +39,14 @@ export function createMessageTranscriptsStore(
         $runner, $model, $transcribed_at
       )
     `),
-  }
+  };
 
   return {
     get(chatId, messageId) {
-      return stmts.get.get(chatId, messageId) ?? null
+      return stmts.get.get(chatId, messageId) ?? null;
     },
     getByFile(uniqueFileId) {
-      return stmts.getByFile.get(uniqueFileId) ?? null
+      return stmts.getByFile.get(uniqueFileId) ?? null;
     },
     save(row) {
       stmts.save.run({
@@ -65,7 +59,7 @@ export function createMessageTranscriptsStore(
         $runner: row.runner,
         $model: row.model,
         $transcribed_at: row.transcribed_at,
-      })
+      });
     },
-  }
+  } satisfies MessageTranscriptsStore;
 }

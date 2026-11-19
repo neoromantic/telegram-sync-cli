@@ -68,10 +68,10 @@ All timestamps in cache/sync tables are **milliseconds since epoch** unless note
 Every column that holds a chat holds its **marked peer ID**, the format mtcute uses and every
 `tg` command prints:
 
-| Chat | Marked ID | Example |
-|------|-----------|---------|
-| Private chat | the user ID | `5550001` |
-| Basic group N | `-N` | `-4242` |
+| Chat                               | Marked ID                      | Example          |
+| ---------------------------------- | ------------------------------ | ---------------- |
+| Private chat                       | the user ID                    | `5550001`        |
+| Basic group N                      | `-N`                           | `-4242`          |
 | Supergroup, channel or community N | `-1000000000000 - N` (`-100…`) | `-1001234567890` |
 
 That covers `chats_cache.chat_id`, `messages_cache.chat_id`, `chat_sync_state.chat_id`,
@@ -619,16 +619,16 @@ CREATE TABLE daemon_status (
 
 The daemon writes each account's own rows, every second in one transaction per account:
 
-| Key | Value |
-|-----|-------|
-| `daemon_pid`, `daemon_started_at`, `daemon_status` | The daemon that runs the account: its PID, start time, `running` or `stopped` |
-| `daemon_version`, `daemon_version_pid` | The version of the daemon that started, and the PID that wrote it |
-| `connection_status`, `last_error` | The account's connection (`connecting` from the start until the daemon's first write, then `connected`, `reconnecting`, `error`, `disconnected`) and its last error |
-| `messages_synced` | Messages the daemon cached for this account since it started |
-| `pending_jobs`, `running_jobs` | The account's queue; a start deletes the previous run's counts |
-| `last_catch_up_at`, `last_catch_up_reason`, `last_offline_ms`, `last_catch_up_chats` | The last dialog pass after a reconnect or a wake: when it ended, why (`reconnect`, `wake`, `new_client`), how long the account was offline and how many chats it left to catch up; a start deletes them |
-| `pacing_mode`, `pacing_target_calls_per_second`, `pacing_flood_waits` | The account's sync pace: `history` while first or history pages are due, else `calm`; the calls per second it runs at; FLOOD_WAITs on `messages.getHistory` since the daemon started ([rate-limiting.md](rate-limiting.md#pacing)); a start deletes them |
-| `last_update` | When the daemon last wrote these rows |
+| Key                                                                                  | Value                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daemon_pid`, `daemon_started_at`, `daemon_status`                                   | The daemon that runs the account: its PID, start time, `running` or `stopped`                                                                                                                                                                            |
+| `daemon_version`, `daemon_version_pid`                                               | The version of the daemon that started, and the PID that wrote it                                                                                                                                                                                        |
+| `connection_status`, `last_error`                                                    | The account's connection (`connecting` from the start until the daemon's first write, then `connected`, `reconnecting`, `error`, `disconnected`) and its last error                                                                                      |
+| `messages_synced`                                                                    | Messages the daemon cached for this account since it started                                                                                                                                                                                             |
+| `pending_jobs`, `running_jobs`                                                       | The account's queue; a start deletes the previous run's counts                                                                                                                                                                                           |
+| `last_catch_up_at`, `last_catch_up_reason`, `last_offline_ms`, `last_catch_up_chats` | The last dialog pass after a reconnect or a wake: when it ended, why (`reconnect`, `wake`, `new_client`), how long the account was offline and how many chats it left to catch up; a start deletes them                                                  |
+| `pacing_mode`, `pacing_target_calls_per_second`, `pacing_flood_waits`                | The account's sync pace: `history` while first or history pages are due, else `calm`; the calls per second it runs at; FLOOD_WAITs on `messages.getHistory` since the daemon started ([rate-limiting.md](rate-limiting.md#pacing)); a start deletes them |
+| `last_update`                                                                        | When the daemon last wrote these rows                                                                                                                                                                                                                    |
 
 `tg status` and `tg daemon status` count only rows whose `daemon_pid` is the PID in
 `daemon.pid` of a live daemon; without one, `tg status` still reports the newest
@@ -823,14 +823,14 @@ migration is half done: every reader takes rows in the old and the new form.
 
 The migrations so far (see [raw_json](#raw_json)):
 
-| Name | Table | Rewrites |
-|------|-------|----------|
-| `messages_raw_json_v2` | `messages_cache` | `raw_json` into the current form; the `message_attachments` row of each media message; `message_type` of each message whose `raw_json` is a TL message, as a history page writes it now |
-| `users_raw_json_v2` | `users_cache` | `raw_json` into the current form |
-| `chats_raw_json_v2` | `chats_cache` | `raw_json` into the current form |
+| Name                              | Table            | Rewrites                                                                                                                                                                                          |
+| --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `messages_raw_json_v2`            | `messages_cache` | `raw_json` into the current form; the `message_attachments` row of each media message; `message_type` of each message whose `raw_json` is a TL message, as a history page writes it now           |
+| `users_raw_json_v2`               | `users_cache`    | `raw_json` into the current form                                                                                                                                                                  |
+| `chats_raw_json_v2`               | `chats_cache`    | `raw_json` into the current form                                                                                                                                                                  |
 | `messages_refetch_empty_raw_json` | `messages_cache` | nothing: it queues a `refetch_messages` sync job for each chat with a message whose `raw_json` is `{}`, which the daemon fetches again by ID (see [sync-strategy.md](sync-strategy.md#job-types)) |
-| `message_search_names` | `messages_cache` | the message's `message_search` row, with the sender and chat names cached now; for caches written before `search_reindex_queue` (#93, [search.md](search.md#names-after-a-rename)) |
-| `messages_rich_text` | `messages_cache` | `text` of each rich message cached by 0.13.1 and older without it: its blocks in rich Markdown, which the update trigger indexes. It reads `raw_json` only for `text` rows with no text |
+| `message_search_names`            | `messages_cache` | the message's `message_search` row, with the sender and chat names cached now; for caches written before `search_reindex_queue` (#93, [search.md](search.md#names-after-a-rename))                |
+| `messages_rich_text`              | `messages_cache` | `text` of each rich message cached by 0.13.1 and older without it: its blocks in rich Markdown, which the update trigger indexes. It reads `raw_json` only for `text` rows with no text           |
 
 `messages_raw_json_v2` parses each message's `raw_json` once for all three. It writes neither
 `text`, `from_id` nor `media_path`, so the search index is untouched, and it leaves
@@ -912,11 +912,11 @@ Measured with `bun run bench:storage` on made-up messages (a few big chats and m
 [storage.md](storage.md). Bytes per message, indexes counted with their table as `tg status
 --sizes` reports them:
 
-| Messages | File | `messages_cache` | of it `raw_json` | `message_search` | `message_attachments` |
-|----------|------|------------------|------------------|------------------|-----------------------|
-| 100,000 | 157 MB, 1,564 B | 1,420 B | 849 B | 116 B | 21 B |
-| 1M | 1.56 GB, 1,553 B | 1,424 B | 849 B | 102 B | 22 B |
-| 10M | 15.55 GB, 1,555 B | 1,427 B | 849 B | 101 B | 22 B |
+| Messages | File              | `messages_cache` | of it `raw_json` | `message_search` | `message_attachments` |
+| -------- | ----------------- | ---------------- | ---------------- | ---------------- | --------------------- |
+| 100,000  | 157 MB, 1,564 B   | 1,420 B          | 849 B            | 116 B            | 21 B                  |
+| 1M       | 1.56 GB, 1,553 B  | 1,424 B          | 849 B            | 102 B            | 22 B                  |
+| 10M      | 15.55 GB, 1,555 B | 1,427 B          | 849 B            | 101 B            | 22 B                  |
 
 So 1 GB holds about 640,000 such messages; more photos, links and long texts cost more. A cache
 written by 0.5.0 and older takes about 2.2 KB per message until the background migrations

@@ -1,24 +1,24 @@
-import type { tl } from '@mtcute/bun'
+import type { tl } from "@mtcute/bun";
 import {
   isOwnOrdinaryMessage,
   nowSeconds,
   PARTICIPATION_WINDOW_SECONDS,
-} from '../db/group-participation'
+} from "../db/group-participation";
 import {
   CHAT_INDEPENDENT_JOB_TYPES,
   type SyncJobRow,
   SyncJobStatus,
   SyncJobType,
   SyncPriority,
-} from '../db/sync-schema'
-import { toLong } from '../utils/long'
-import { toPeerIdFromRawPeer } from '../utils/telegram-peer-ids'
+} from "../db/sync-schema";
+import { toLong } from "../utils/long";
+import { toPeerIdFromRawPeer } from "../utils/telegram-peer-ids";
 import {
   canMakeApiCall,
   getWaitTime,
   requestPeer,
   resolveJobError,
-} from './sync-worker-real-context'
+} from "./sync-worker-real-context";
 import {
   cachePageUsers,
   createMessageInputs,
@@ -28,41 +28,23 @@ import {
   historyTotal,
   parseRawMessage,
   rawMessageId,
-} from './sync-worker-real-helpers'
-import type {
-  RealJobResult,
-  RealSyncWorkerContext,
-} from './sync-worker-real-types'
-import { processJobWithHandlers } from './sync-worker-utils'
+} from "./sync-worker-real-helpers";
+import type { RealJobResult, RealSyncWorkerContext } from "./sync-worker-real-types";
+import { processJobWithHandlers } from "./sync-worker-utils";
 
-/**
- * The group stopped taking new messages during the fetch or the write
- * (src/db/group-participation.ts): the job ends without moving a cursor and
- * without a retry, so the page is read again once the group takes messages.
- */
-const PAUSED: RealJobResult = { success: true, messagesFetched: 0 }
+const PAUSED: RealJobResult = { success: true, messagesFetched: 0 };
 
-/**
- * Fetch one history page for a job, and cache what it says besides its
- * messages: the senders, before the job writes the messages, so the search
- * index has their names, and the chat's message count on the server.
- */
 async function fetchJobPage(
   ctx: RealSyncWorkerContext,
   chatId: number,
   inputPeer: tl.TypeInputPeer,
   request: Parameters<typeof fetchMessagesRaw>[2],
-): Promise<unknown[]> {
-  const page = await fetchMessagesRaw(
-    ctx.client,
-    inputPeer,
-    request,
-    ctx.signal,
-  )
-  cachePageUsers(ctx.usersCache, page.users)
-  const total = historyTotal(page, request)
-  if (total !== null) ctx.chatSyncState.setTotalMessages(chatId, total)
-  return page.messages
+) {
+  const page = await fetchMessagesRaw(ctx.client, inputPeer, request, ctx.signal);
+  cachePageUsers(ctx.usersCache, page.users);
+  const total = historyTotal(page, request);
+  if (total !== null) ctx.chatSyncState.setTotalMessages(chatId, total);
+  return page.messages;
 }
 
 /**
@@ -80,19 +62,15 @@ async function fetchJobPage(
  * A chat without a cursor gets its newest page; older history is the
  * backward job's.
  */
-export async function processForwardCatchupReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
-  const chatId = job.chat_id
-  const peer = requestPeer(ctx, chatId)
-  if ('result' in peer) return peer.result
+export async function processForwardCatchupReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
+  const chatId = job.chat_id;
+  const peer = requestPeer(ctx, chatId);
+  if ("result" in peer) return peer.result;
 
-  const state = ctx.chatSyncState.get(chatId)
-  // 0 is a real cursor: the first page of an empty chat leaves it there.
-  const cursor = state?.forward_cursor ?? null
-  const floor = cursor ?? 0
-  const topBefore = state?.top_message_id ?? null
+  const state = ctx.chatSyncState.get(chatId);
+  const cursor = state?.forward_cursor ?? null;
+  const floor = cursor ?? 0;
+  const topBefore = state?.top_message_id ?? null;
 
   try {
     const messages = await fetchJobPage(
@@ -100,38 +78,33 @@ export async function processForwardCatchupReal(
       chatId,
       peer.inputPeer,
       forwardPageRequest(cursor, ctx.config.batchSize),
-    )
+    );
 
-    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
-    // Guard against a server that returns messages at or below the cursor.
-    const above = messages.filter((message) => rawMessageId(message) > floor)
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
+    const above = messages.filter((message) => rawMessageId(message) > floor);
 
     if (above.length === 0) {
       if (cursor === null) {
-        ctx.chatSyncState.updateLastSync(chatId, 'forward')
+        ctx.chatSyncState.updateLastSync(chatId, "forward");
       } else {
-        // Nothing above the cursor: the chat is caught up.
         ctx.chatSyncState.recordCatchupPage(chatId, {
           forward_cursor: cursor,
           new_messages: 0,
           caught_up: true,
           top_before: topBefore,
-        })
+        });
       }
-      return { success: true, messagesFetched: 0, hasMore: false }
+      const value: RealJobResult = { success: true, messagesFetched: 0, hasMore: false };
+      return value;
     }
 
-    // Empty messages hold no data, but the cursor still moves past them.
-    const top = Math.max(...above.map(rawMessageId))
-    const inputs = createMessageInputs(above, chatId)
+    const top = Math.max(...above.map(rawMessageId));
+    const inputs = createMessageInputs(above, chatId);
 
-    // Live updates already counted the messages they cached.
-    const write = ctx.messagesCache.upsertBatch(inputs)
-    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
-    const newCount = write.inserted
+    const write = ctx.messagesCache.upsertBatch(inputs);
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
+    const newCount = write.inserted;
 
-    // The cursor moves past the messages of a group's pauses, but a page
-    // with any of them skipped records no range: the cache lacks them
     if (write.skipped === 0) {
       ctx.historyRanges.recordPage(
         chatId,
@@ -139,126 +112,109 @@ export async function processForwardCatchupReal(
         cursor !== null
           ? { after: cursor }
           : { reachedStart: messages.length < ctx.config.batchSize },
-      )
+      );
     }
 
-    const hasMore = cursor !== null && above.length >= ctx.config.batchSize
+    const hasMore = cursor !== null && above.length >= ctx.config.batchSize;
     ctx.chatSyncState.recordCatchupPage(chatId, {
       forward_cursor: top,
       new_messages: newCount,
       caught_up: !hasMore,
       top_before: topBefore,
-    })
+    });
 
     ctx.jobsService.updateProgress(job.id, {
       messages_fetched: newCount,
       cursor_end: top,
-    })
+    });
 
-    return {
+    const value: RealJobResult = {
       success: true,
       messagesFetched: newCount,
       hasMore,
       newCursor: top,
-    }
+    };
+    return value;
   } catch (err) {
-    return resolveJobError(ctx, err)
+    return resolveJobError(ctx, err);
   }
 }
 
-export async function processBackwardHistoryReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
-  const chatId = job.chat_id
-  const peer = requestPeer(ctx, chatId)
-  if ('result' in peer) return peer.result
+export async function processBackwardHistoryReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
+  const chatId = job.chat_id;
+  const peer = requestPeer(ctx, chatId);
+  if ("result" in peer) return peer.result;
 
-  const state = ctx.chatSyncState.get(chatId)
+  const state = ctx.chatSyncState.get(chatId);
   if (state?.history_complete) {
-    return { success: true, messagesFetched: 0, historyComplete: true }
+    const value: RealJobResult = { success: true, messagesFetched: 0, historyComplete: true };
+    return value;
   }
 
-  // Older versions left a forward cursor without a backward one (0.1.4's
-  // catch-up, and every live message before it), or one above it (a first
-  // page of only empty messages). The oldest cached message then says
-  // nothing about what is cached below the forward cursor, so history pages
-  // down from just above it.
-  const forwardCursor = state?.forward_cursor ?? null
-  let backwardCursor = state?.backward_cursor ?? null
-  if (
-    forwardCursor !== null &&
-    (backwardCursor === null || backwardCursor > forwardCursor + 1)
-  ) {
-    backwardCursor = forwardCursor + 1
+  const forwardCursor = state?.forward_cursor ?? null;
+  let backwardCursor = state?.backward_cursor ?? null;
+  if (forwardCursor !== null && (backwardCursor === null || backwardCursor > forwardCursor + 1)) {
+    backwardCursor = forwardCursor + 1;
   }
-  // Without either cursor, backfill starts at the newest page. The oldest
-  // cached message marks no progress: tg send and tg messages list and get
-  // cache messages anywhere in a chat, and starting below such a page would
-  // skip the gap above it, or reach the start early and mark history
-  // complete.
-  backwardCursor ??= 0
+  backwardCursor ??= 0;
 
   try {
     const messages = await fetchJobPage(ctx, chatId, peer.inputPeer, {
       offsetId: backwardCursor,
       limit: ctx.config.batchSize,
-    })
+    });
 
-    // The newest messages below the cursor, or the newest page without one
     const bounds = {
       before: backwardCursor || undefined,
       reachedStart: messages.length < ctx.config.batchSize,
-    }
+    };
 
-    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
     if (messages.length === 0) {
-      ctx.historyRanges.recordPage(chatId, [], bounds)
-      ctx.chatSyncState.markHistoryComplete(chatId)
-      ctx.chatSyncState.updateLastSync(chatId, 'backward')
-      return { success: true, messagesFetched: 0, historyComplete: true }
+      ctx.historyRanges.recordPage(chatId, [], bounds);
+      ctx.chatSyncState.markHistoryComplete(chatId);
+      ctx.chatSyncState.updateLastSync(chatId, "backward");
+      const value: RealJobResult = { success: true, messagesFetched: 0, historyComplete: true };
+      return value;
     }
 
-    // Empty messages hold no data, but the cursor still moves past them.
-    const ids = messages.map(rawMessageId).filter((id) => id > 0)
-    const minId = ids.length > 0 ? Math.min(...ids) : backwardCursor
-    const inputs = createMessageInputs(messages, chatId)
+    const ids = messages.map(rawMessageId).filter((id) => id > 0);
+    const minId = ids.length > 0 ? Math.min(...ids) : backwardCursor;
+    const inputs = createMessageInputs(messages, chatId);
 
-    // The first page, live updates and pages the CLI cached may hold some
-    const write = ctx.messagesCache.upsertBatch(inputs)
-    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
-    const newCount = write.inserted
+    const write = ctx.messagesCache.upsertBatch(inputs);
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
+    const newCount = write.inserted;
 
     if (write.skipped === 0) {
-      ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), bounds)
+      ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), bounds);
     }
 
-    ctx.chatSyncState.updateBackwardCursor(chatId, minId)
-    ctx.chatSyncState.incrementSyncedMessages(chatId, newCount)
-    ctx.chatSyncState.updateLastSync(chatId, 'backward')
+    ctx.chatSyncState.updateBackwardCursor(chatId, minId);
+    ctx.chatSyncState.incrementSyncedMessages(chatId, newCount);
+    ctx.chatSyncState.updateLastSync(chatId, "backward");
 
     ctx.jobsService.updateProgress(job.id, {
       messages_fetched: newCount,
       cursor_end: minId,
-    })
+    });
 
-    // A page without message IDs can't move the cursor, so fetching the
-    // next one would fetch the same page again.
     const historyComplete =
-      ids.length === 0 || minId <= 1 || messages.length < ctx.config.batchSize
+      ids.length === 0 || minId <= 1 || messages.length < ctx.config.batchSize;
     if (historyComplete) {
-      ctx.chatSyncState.markHistoryComplete(chatId)
+      ctx.chatSyncState.markHistoryComplete(chatId);
     }
 
-    return {
+    const value: RealJobResult = {
       success: true,
       messagesFetched: newCount,
       hasMore: !historyComplete,
       newCursor: minId,
       historyComplete,
-    }
+    };
+    return value;
   } catch (err) {
-    return resolveJobError(ctx, err)
+    return resolveJobError(ctx, err);
   }
 }
 
@@ -268,69 +224,65 @@ export async function processBackwardHistoryReal(
  * history pages down from the oldest. An empty chat gets cursors at 0, so
  * its first message is caught up from the start.
  */
-export async function processInitialLoadReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
-  const chatId = job.chat_id
+export async function processInitialLoadReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
+  const chatId = job.chat_id;
 
   if (!canMakeApiCall(ctx)) {
-    return {
+    const value: RealJobResult = {
       success: false,
       messagesFetched: 0,
       rateLimited: true,
       waitSeconds: getWaitTime(ctx),
-    }
+    };
+    return value;
   }
 
-  // A chat with a forward cursor already had its first page; moving the
-  // cursor to the newest message now could skip messages below it.
-  const state = ctx.chatSyncState.get(chatId)
+  const state = ctx.chatSyncState.get(chatId);
   if (state && state.forward_cursor !== null) {
-    return { success: true, messagesFetched: 0 }
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
   }
 
-  const peer = requestPeer(ctx, chatId)
-  if ('result' in peer) return peer.result
+  const peer = requestPeer(ctx, chatId);
+  if ("result" in peer) return peer.result;
 
   try {
     const messages = await fetchJobPage(ctx, chatId, peer.inputPeer, {
       limit: ctx.config.batchSize,
-    })
+    });
 
-    // Empty messages hold no data, but they still count for the cursors.
-    const ids = messages.map(rawMessageId).filter((id) => id > 0)
+    const ids = messages.map(rawMessageId).filter((id) => id > 0);
 
-    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
     if (ids.length === 0) {
       ctx.chatSyncState.recordFirstPage(chatId, {
         forward_cursor: 0,
         backward_cursor: 0,
         history_complete: true,
         new_messages: 0,
-      })
-      return {
+      });
+      const value: RealJobResult = {
         success: true,
         messagesFetched: 0,
         newCursor: 0,
         historyComplete: true,
-      }
+      };
+      return value;
     }
 
-    const maxId = Math.max(...ids)
-    const minId = Math.min(...ids)
-    const inputs = createMessageInputs(messages, chatId)
+    const maxId = Math.max(...ids);
+    const minId = Math.min(...ids);
+    const inputs = createMessageInputs(messages, chatId);
 
-    // Live updates already counted the messages they cached.
-    const write = ctx.messagesCache.upsertBatch(inputs)
-    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED
-    const newCount = write.inserted
+    const write = ctx.messagesCache.upsertBatch(inputs);
+    if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;
+    const newCount = write.inserted;
 
-    const historyComplete = minId <= 1 || messages.length < ctx.config.batchSize
+    const historyComplete = minId <= 1 || messages.length < ctx.config.batchSize;
     if (write.skipped === 0) {
       ctx.historyRanges.recordPage(chatId, messages.map(rawMessageId), {
         reachedStart: historyComplete,
-      })
+      });
     }
 
     ctx.chatSyncState.recordFirstPage(chatId, {
@@ -338,27 +290,28 @@ export async function processInitialLoadReal(
       backward_cursor: minId,
       history_complete: historyComplete,
       new_messages: newCount,
-    })
+    });
 
     ctx.jobsService.updateProgress(job.id, {
       messages_fetched: newCount,
       cursor_start: maxId,
       cursor_end: minId,
-    })
+    });
 
-    return {
+    const value: RealJobResult = {
       success: true,
       messagesFetched: newCount,
       newCursor: maxId,
       historyComplete,
-    }
+    };
+    return value;
   } catch (err) {
-    return resolveJobError(ctx, err)
+    return resolveJobError(ctx, err);
   }
 }
 
 /** Most message IDs one `getMessages` request asks for */
-export const REFETCH_BATCH_SIZE = 100
+export const REFETCH_BATCH_SIZE = 100;
 
 /**
  * Fetch again the chat's messages that an older version cached live with
@@ -369,70 +322,59 @@ export const REFETCH_BATCH_SIZE = 100
  * while it ran), it queues the next job above it, so the rows that stay '{}'
  * are asked for once.
  */
-export async function processRefetchMessagesReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
-  const chatId = job.chat_id
-  const after = job.cursor_start ?? 0
-  const ids = ctx.messagesCache.listEmptyRawJsonIds(
-    chatId,
-    after,
-    REFETCH_BATCH_SIZE,
-  )
-  if (ids.length === 0) return { success: true, messagesFetched: 0 }
+export async function processRefetchMessagesReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
+  const chatId = job.chat_id;
+  const after = job.cursor_start ?? 0;
+  const ids = ctx.messagesCache.listEmptyRawJsonIds(chatId, after, REFETCH_BATCH_SIZE);
+  if (ids.length === 0) {
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
+  }
 
-  const peer = requestPeer(ctx, chatId)
-  if ('result' in peer) return peer.result
+  const peer = requestPeer(ctx, chatId);
+  if ("result" in peer) return peer.result;
 
   try {
-    const page = await fetchMessagesByIdRaw(
-      ctx.client,
-      peer.inputPeer,
-      ids,
-      ctx.signal,
-    )
-    cachePageUsers(ctx.usersCache, page.users)
+    const page = await fetchMessagesByIdRaw(ctx.client, peer.inputPeer, ids, ctx.signal);
+    cachePageUsers(ctx.usersCache, page.users);
 
-    const wanted = new Set(ids)
+    const wanted = new Set(ids);
     const inputs = page.messages
       .filter(
         (message) =>
           wanted.has(rawMessageId(message)) &&
           toPeerIdFromRawPeer(
-            (message as { peerId?: Parameters<typeof toPeerIdFromRawPeer>[0] })
-              .peerId,
+            (message as { peerId?: Parameters<typeof toPeerIdFromRawPeer>[0] }).peerId,
           ) === chatId,
       )
       .map((message) => parseRawMessage(message, chatId))
-      .filter((input) => input !== null)
-    // Only rows cached already: a refetch repairs them and adds none
-    const { written } = ctx.messagesCache.upsertBatch(inputs)
+      .filter((input) => input !== null);
+    const { written } = ctx.messagesCache.upsertBatch(inputs);
 
-    const last = Math.max(...ids)
+    const last = Math.max(...ids);
     ctx.jobsService.updateProgress(job.id, {
       cursor_start: last,
       messages_fetched: written,
-    })
-    const more = ctx.messagesCache.listEmptyRawJsonIds(chatId, last, 1)
+    });
+    const more = ctx.messagesCache.listEmptyRawJsonIds(chatId, last, 1);
     const queued = ctx.jobsService
       .getJobsForChat(chatId)
       .some(
         (other) =>
-          other.job_type === SyncJobType.RefetchMessages &&
-          other.status === SyncJobStatus.Pending,
-      )
+          other.job_type === SyncJobType.RefetchMessages && other.status === SyncJobStatus.Pending,
+      );
     if (more.length > 0 && !queued) {
       ctx.jobsService.create({
         chat_id: chatId,
         job_type: SyncJobType.RefetchMessages,
         priority: SyncPriority.Background,
         cursor_start: last,
-      })
+      });
     }
-    return { success: true, messagesFetched: written }
+    const value: RealJobResult = { success: true, messagesFetched: written };
+    return value;
   } catch (err) {
-    return resolveJobError(ctx, err)
+    return resolveJobError(ctx, err);
   }
 }
 
@@ -444,18 +386,18 @@ export async function processRefetchMessagesReal(
  * (left, private). A chat with more senders waiting gets its next job at the
  * scheduler's next refresh.
  */
-export async function processFetchSendersReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
-  const batch = ctx.senderLookups.nextBatch(job.chat_id, REFETCH_BATCH_SIZE)
-  if (batch.length === 0) return { success: true, messagesFetched: 0 }
+export async function processFetchSendersReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
+  const batch = ctx.senderLookups.nextBatch(job.chat_id, REFETCH_BATCH_SIZE);
+  if (batch.length === 0) {
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
+  }
 
-  const senderIds = batch.map((lookup) => lookup.sender_id)
-  const peer = requestPeer(ctx, job.chat_id)
-  if ('result' in peer) {
-    if (peer.result.permanent) ctx.senderLookups.finish(senderIds, Date.now())
-    return peer.result
+  const senderIds = batch.map((lookup) => lookup.sender_id);
+  const peer = requestPeer(ctx, job.chat_id);
+  if ("result" in peer) {
+    if (peer.result.permanent) ctx.senderLookups.finish(senderIds, Date.now());
+    return peer.result;
   }
 
   try {
@@ -464,19 +406,19 @@ export async function processFetchSendersReal(
       peer.inputPeer,
       batch.map((lookup) => lookup.message_id),
       ctx.signal,
-    )
-    cachePageUsers(ctx.usersCache, page.users)
-    ctx.senderLookups.finish(senderIds, Date.now())
-    return { success: true, messagesFetched: 0 }
+    );
+    cachePageUsers(ctx.usersCache, page.users);
+    ctx.senderLookups.finish(senderIds, Date.now());
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
   } catch (err) {
-    const result = resolveJobError(ctx, err)
-    if (result.permanent) ctx.senderLookups.finish(senderIds, Date.now())
-    return result
+    const result = resolveJobError(ctx, err);
+    if (result.permanent) ctx.senderLookups.finish(senderIds, Date.now());
+    return result;
   }
 }
 
-/** Search results a participation check asks for */
-const PARTICIPATION_SEARCH_LIMIT = 10
+const PARTICIPATION_SEARCH_LIMIT = 10;
 
 /**
  * Search the group for the account's own messages of the last 90 days and
@@ -488,64 +430,56 @@ const PARTICIPATION_SEARCH_LIMIT = 10
 export async function processCheckGroupParticipationReal(
   ctx: RealSyncWorkerContext,
   job: SyncJobRow,
-): Promise<RealJobResult> {
-  const chatId = job.chat_id
-  const peer = requestPeer(ctx, chatId)
-  if ('result' in peer) return peer.result
+) {
+  const chatId = job.chat_id;
+  const peer = requestPeer(ctx, chatId);
+  if ("result" in peer) return peer.result;
 
   try {
-    ctx.signal?.throwIfAborted()
-    const since = nowSeconds() - PARTICIPATION_WINDOW_SECONDS
+    ctx.signal?.throwIfAborted();
+    const since = nowSeconds() - PARTICIPATION_WINDOW_SECONDS;
     const request: tl.messages.RawSearchRequest = {
-      _: 'messages.search',
+      _: "messages.search",
       peer: peer.inputPeer,
-      q: '',
-      fromId: { _: 'inputPeerSelf' },
-      filter: { _: 'inputMessagesFilterEmpty' },
+      q: "",
+      fromId: { _: "inputPeerSelf" },
+      filter: { _: "inputMessagesFilterEmpty" },
       minDate: since,
       maxDate: 0,
       offsetId: 0,
       addOffset: 0,
-      // A few, in case the newest is a service message
       limit: PARTICIPATION_SEARCH_LIMIT,
       maxId: 0,
       minId: 0,
       hash: toLong(0),
-    }
+    };
     const result = ctx.signal
       ? await ctx.client.call(request, { abortSignal: ctx.signal })
-      : await ctx.client.call(request)
-    const found = ('messages' in result ? result.messages : [])
+      : await ctx.client.call(request);
+    const found = ("messages" in result ? result.messages : [])
       .map((message) => parseRawMessage(message, chatId))
-      .filter(
-        (input) =>
-          input !== null && isOwnOrdinaryMessage(input) && input.date >= since,
-      )
-      .map((input) => input!.date)
-    const newest = found.length > 0 ? Math.max(...found) : null
-    ctx.messagesCache.participation.recordCheck(chatId, newest)
-    return { success: true, messagesFetched: 0 }
+      .filter((input) => input !== null && isOwnOrdinaryMessage(input) && input.date >= since)
+      .map((input) => input!.date);
+    const newest = found.length > 0 ? Math.max(...found) : null;
+    ctx.messagesCache.participation.recordCheck(chatId, newest);
+    const value: RealJobResult = { success: true, messagesFetched: 0 };
+    return value;
   } catch (err) {
-    return resolveJobError(ctx, err)
+    return resolveJobError(ctx, err);
   }
 }
 
-async function processFullSyncReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
-  const result = await processInitialLoadReal(ctx, job)
+async function processFullSyncReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
+  const result = await processInitialLoadReal(ctx, job);
   if (result.success && !result.historyComplete) {
-    return { ...result, hasMore: true }
+    const value: RealJobResult = { ...result, hasMore: true };
+    return value;
   }
-  return result
+  return result;
 }
 
 const JOB_HANDLERS: Partial<
-  Record<
-    SyncJobType,
-    (ctx: RealSyncWorkerContext, job: SyncJobRow) => Promise<RealJobResult>
-  >
+  Record<SyncJobType, (ctx: RealSyncWorkerContext, job: SyncJobRow) => Promise<RealJobResult>>
 > = {
   [SyncJobType.ForwardCatchup]: processForwardCatchupReal,
   [SyncJobType.BackwardHistory]: processBackwardHistoryReal,
@@ -554,23 +488,18 @@ const JOB_HANDLERS: Partial<
   [SyncJobType.RefetchMessages]: processRefetchMessagesReal,
   [SyncJobType.FetchSenders]: processFetchSendersReal,
   [SyncJobType.CheckGroupParticipation]: processCheckGroupParticipationReal,
-}
+};
 
-export async function processJobReal(
-  ctx: RealSyncWorkerContext,
-  job: SyncJobRow,
-): Promise<RealJobResult> {
-  // A group the account stopped taking part in after the job was queued:
-  // the job ends without a request
+export async function processJobReal(ctx: RealSyncWorkerContext, job: SyncJobRow) {
   const handlers =
     !CHAT_INDEPENDENT_JOB_TYPES.includes(job.job_type) &&
     !ctx.messagesCache.participation.captures(job.chat_id)
       ? { [job.job_type]: async () => PAUSED }
-      : JOB_HANDLERS
+      : JOB_HANDLERS;
   return processJobWithHandlers(ctx, job, handlers, (jobType) => ({
     success: false,
     messagesFetched: 0,
     error: `Unknown job type: ${jobType}`,
     permanent: true,
-  }))
+  }));
 }

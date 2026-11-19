@@ -195,11 +195,11 @@ tg doesn't ship or download a speech-to-text program or model. It runs one you i
 needs [ffmpeg](https://ffmpeg.org): Telegram's voice notes are OGG/Opus and video notes MP4,
 so tg converts each to 16 kHz mono WAV first.
 
-| Program | Install | Model |
-|---------|---------|-------|
-| whisper.cpp (`whisper-cli`), macOS, Linux, Windows | `brew install whisper-cpp ffmpeg` | a model file you download and name in `transcribe.model` |
-| mlx-whisper (`mlx_whisper`), faster on Apple Silicon | `uv tool install mlx-whisper` | downloads `mlx-community/whisper-large-v3-turbo` on first use |
-| whisper-ctranslate2, openai-whisper (`whisper`) | `uv tool install whisper-ctranslate2` | downloads `large-v3-turbo` on first use |
+| Program                                              | Install                               | Model                                                         |
+| ---------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| whisper.cpp (`whisper-cli`), macOS, Linux, Windows   | `brew install whisper-cpp ffmpeg`     | a model file you download and name in `transcribe.model`      |
+| mlx-whisper (`mlx_whisper`), faster on Apple Silicon | `uv tool install mlx-whisper`         | downloads `mlx-community/whisper-large-v3-turbo` on first use |
+| whisper-ctranslate2, openai-whisper (`whisper`)      | `uv tool install whisper-ctranslate2` | downloads `large-v3-turbo` on first use                       |
 
 whisper.cpp is the one native program packaged for all three systems, so it is the first
 choice. Its models are on Hugging Face at
@@ -221,13 +221,13 @@ and `--model`, `--language`). `transcribe.model` sets the model for any of them.
 
 Each setup problem is an error whose `suggestion` holds the commands to run:
 
-| Problem | Error | `suggestion` |
-|---------|-------|--------------|
-| no program on `PATH` | `TRANSCRIBER_NOT_FOUND` (exit 1), `details: { searched, runner: null, ffmpeg }` | the install command for this OS; for whisper.cpp also the model download and `tg config set transcribe.model` (on Apple Silicon, mlx-whisper as the faster option) |
-| no ffmpeg | `TRANSCRIBER_NOT_FOUND`, `details.ffmpeg: null` | `brew install ffmpeg` (Windows: install it and put it on `PATH`) |
-| whisper.cpp, `transcribe.model` not set | `INVALID_ARGS` (exit 3), `details: { runner, model: null }` | the `curl` download into `~/.cache/whisper-cli/` and the `tg config set` for that path |
-| whisper.cpp, model file missing or unreadable | `INVALID_ARGS`, `details: { runner, model }` | the `curl` download to that path |
-| the program ran and wrote no transcript | `GENERAL_ERROR` for that message, `details: { runner, exitCode, stderr }` (the last 20 lines) | none |
+| Problem                                       | Error                                                                                         | `suggestion`                                                                                                                                                       |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| no program on `PATH`                          | `TRANSCRIBER_NOT_FOUND` (exit 1), `details: { searched, runner: null, ffmpeg }`               | the install command for this OS; for whisper.cpp also the model download and `tg config set transcribe.model` (on Apple Silicon, mlx-whisper as the faster option) |
+| no ffmpeg                                     | `TRANSCRIBER_NOT_FOUND`, `details.ffmpeg: null`                                               | `brew install ffmpeg` (Windows: install it and put it on `PATH`)                                                                                                   |
+| whisper.cpp, `transcribe.model` not set       | `INVALID_ARGS` (exit 3), `details: { runner, model: null }`                                   | the `curl` download into `~/.cache/whisper-cli/` and the `tg config set` for that path                                                                             |
+| whisper.cpp, model file missing or unreadable | `INVALID_ARGS`, `details: { runner, model }`                                                  | the `curl` download to that path                                                                                                                                   |
+| the program ran and wrote no transcript       | `GENERAL_ERROR` for that message, `details: { runner, exitCode, stderr }` (the last 20 lines) | none                                                                                                                                                               |
 
 A setup problem fails each message that still needs the program, with `chatId` and `messageId`
 in `details`; messages answered from stored transcripts in the same run are printed as usual.
@@ -311,12 +311,12 @@ Telegram's [content protection](https://core.telegram.org/api/content-protection
 media from protected chats and messages. `tg media download` refuses with `CONTENT_PROTECTED`
 (exit 1), `details: { chatId, messageId, reason }`:
 
-| `reason` | When |
-|----------|------|
-| `message` | the message itself forbids saving |
-| `chat` | the group or channel restricts saving content |
-| `private_chat` | a private chat where you or the other person turned on protection |
-| `self_destructing` | the media has a self-destruct timer |
+| `reason`           | When                                                              |
+| ------------------ | ----------------------------------------------------------------- |
+| `message`          | the message itself forbids saving                                 |
+| `chat`             | the group or channel restricts saving content                     |
+| `private_chat`     | a private chat where you or the other person turned on protection |
+| `self_destructing` | the media has a self-destruct timer                               |
 
 A refused run downloads nothing. A file already cached stays in the cache, but the command
 won't serve it either. A protection found online is kept: the message's in its cached row, the
@@ -366,9 +366,15 @@ tg media clean --all                # everything
   no connection, unless `--chat` names a chat the cache doesn't know.
 
 ```json
-{ "accountId": 1, "removedFiles": 3, "removedPartialFiles": 1, "freedBytes": 18350080,
-  "keptFiles": 12, "sharedFiles": 1,
-  "filters": { "all": false, "olderThan": "2026-09-28T09:30:00.000Z", "chat": null } }
+{
+  "accountId": 1,
+  "removedFiles": 3,
+  "removedPartialFiles": 1,
+  "freedBytes": 18350080,
+  "keptFiles": 12,
+  "sharedFiles": 1,
+  "filters": { "all": false, "olderThan": "2026-09-28T09:30:00.000Z", "chat": null }
+}
 ```
 
 ## Send a file

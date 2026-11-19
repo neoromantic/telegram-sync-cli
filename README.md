@@ -96,28 +96,28 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 [telegram-mcp](https://github.com/chigwell/telegram-mcp) is an MCP server that makes one live call
 per tool. Compared on 2026-10-21 from its README and tool list:
 
-| Feature | tg | telegram-mcp |
-|---|---|---|
-| Interface | CLI, JSON output, fixed exit codes | MCP server (stdio, HTTP, SSE) |
-| Agent integration | any agent with a shell | MCP clients, Claude Desktop bundle |
-| Local cache, offline queries | ✅ SQLite, cache-first, `--fresh` | ❌ live calls only |
-| Message search | ✅ full-text (FTS5) over cached messages | ✅ Telegram server search |
-| SQL over your data | ✅ read-only `tg sql` | ❌ |
-| Background sync | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; catch-up and history for large groups and channels on request (`tg chats sync`) | partial: waits for events, stores nothing |
-| Any MTProto method | ✅ `tg api <method>` | ❌ fixed tool set |
-| Read chat history | ✅ `tg messages list` (paging) and `tg messages get` (context), cache-first, `--fresh` | ✅ |
-| Unread messages, mark as read | ✅ `tg chats list --unread`, `tg messages unread`, `tg messages read` | ✅ |
-| Send text | ✅ replies, silent, rich messages from Markdown or HTML (`--markdown`, `--html`) | ✅ replies, Markdown/HTML |
-| Edit, delete, forward, pin | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)) | ✅ |
-| Send and download media | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`), local transcription of voice and video notes (`tg media transcribe`); sending albums and voice messages later | ✅ files, albums, voice, transcription |
-| Wait for new messages | ✅ `tg messages wait` (JSON, timeout, settle) and `tg messages watch` (NDJSON), from the daemon's cache | ✅ |
-| Groups, channels, admin rights | partial: via `tg api` | ✅ |
-| Contacts | list, search, get; the rest via `tg api` | ✅ add, import, block, export |
-| Reactions, polls, drafts, scheduled, folders | partial: via `tg api` | ✅ |
-| Multi-account | ✅ `--account`; one cache per account, the daemon syncs each account with its own client | ✅ |
-| Guardrails for agents | ✅ read-only mode, chat allowlist (`readOnly`, `allowedChats`) | ✅ read-only mode, chat allowlist |
-| Install | Homebrew binary, or bun/npm with Bun | git clone + uv, pip from git, Docker |
-| Runtime, license | TypeScript on Bun ([mtcute](https://mtcute.dev)), MIT | Python ([Telethon](https://docs.telethon.dev)), Apache-2.0 |
+| Feature                                      | tg                                                                                                                                                                                                            | telegram-mcp                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Interface                                    | CLI, JSON output, fixed exit codes                                                                                                                                                                            | MCP server (stdio, HTTP, SSE)                              |
+| Agent integration                            | any agent with a shell                                                                                                                                                                                        | MCP clients, Claude Desktop bundle                         |
+| Local cache, offline queries                 | ✅ SQLite, cache-first, `--fresh`                                                                                                                                                                             | ❌ live calls only                                         |
+| Message search                               | ✅ full-text (FTS5) over cached messages                                                                                                                                                                      | ✅ Telegram server search                                  |
+| SQL over your data                           | ✅ read-only `tg sql`                                                                                                                                                                                         | ❌                                                         |
+| Background sync                              | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; catch-up and history for large groups and channels on request (`tg chats sync`)                                     | partial: waits for events, stores nothing                  |
+| Any MTProto method                           | ✅ `tg api <method>`                                                                                                                                                                                          | ❌ fixed tool set                                          |
+| Read chat history                            | ✅ `tg messages list` (paging) and `tg messages get` (context), cache-first, `--fresh`                                                                                                                        | ✅                                                         |
+| Unread messages, mark as read                | ✅ `tg chats list --unread`, `tg messages unread`, `tg messages read`                                                                                                                                         | ✅                                                         |
+| Send text                                    | ✅ replies, silent, rich messages from Markdown or HTML (`--markdown`, `--html`)                                                                                                                              | ✅ replies, Markdown/HTML                                  |
+| Edit, delete, forward, pin                   | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23))                                                                                                                     | ✅                                                         |
+| Send and download media                      | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`), local transcription of voice and video notes (`tg media transcribe`); sending albums and voice messages later | ✅ files, albums, voice, transcription                     |
+| Wait for new messages                        | ✅ `tg messages wait` (JSON, timeout, settle) and `tg messages watch` (NDJSON), from the daemon's cache                                                                                                       | ✅                                                         |
+| Groups, channels, admin rights               | partial: via `tg api`                                                                                                                                                                                         | ✅                                                         |
+| Contacts                                     | list, search, get; the rest via `tg api`                                                                                                                                                                      | ✅ add, import, block, export                              |
+| Reactions, polls, drafts, scheduled, folders | partial: via `tg api`                                                                                                                                                                                         | ✅                                                         |
+| Multi-account                                | ✅ `--account`; one cache per account, the daemon syncs each account with its own client                                                                                                                      | ✅                                                         |
+| Guardrails for agents                        | ✅ read-only mode, chat allowlist (`readOnly`, `allowedChats`)                                                                                                                                                | ✅ read-only mode, chat allowlist                          |
+| Install                                      | Homebrew binary, or bun/npm with Bun                                                                                                                                                                          | git clone + uv, pip from git, Docker                       |
+| Runtime, license                             | TypeScript on Bun ([mtcute](https://mtcute.dev)), MIT                                                                                                                                                         | Python ([Telethon](https://docs.telethon.dev)), Apache-2.0 |
 
 ## Usage
 
@@ -150,18 +150,18 @@ Global options: `--format json|pretty|quiet`, `--verbose`, `--quiet`. Many comma
 account); cache-aware commands accept `--fresh`. See `tg <command> --help`. Upgrading from 0.3
 with several accounts: see [per-account caches](docs/configuration.md#upgrading-to-per-account-caches).
 
-| Variable | Description |
-|----------|-------------|
-| `TELEGRAM_API_ID` | Your Telegram API ID |
-| `TELEGRAM_API_HASH` | Your Telegram API hash |
-| `TELEGRAM_PROXY` | Optional proxy URL for CLI and daemon connections |
-| `TELEGRAM_SYNC_CLI_DATA_DIR` | Override the data directory (default `~/.telegram-sync-cli`) |
-| `TELEGRAM_SYNC_CLI_TELEMETRY` | `0` turns [usage stats](#usage-stats) off |
-| `TELEGRAM_SYNC_CLI_READ_ONLY` | `1` refuses commands that change Telegram ([read-only mode](docs/configuration.md#read-only-mode-and-allowed-chats)) |
-| `TELEGRAM_SYNC_CLI_ALLOWED_CHATS` | Comma-separated chats this process may use, such as `@teamchat,me` |
-| `DO_NOT_TRACK` | `1` turns usage stats off |
-| `MTCUTE_LOG_LEVEL` | mtcute log level |
-| `VERBOSE` | Verbose logging (`1`) |
+| Variable                          | Description                                                                                                          |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `TELEGRAM_API_ID`                 | Your Telegram API ID                                                                                                 |
+| `TELEGRAM_API_HASH`               | Your Telegram API hash                                                                                               |
+| `TELEGRAM_PROXY`                  | Optional proxy URL for CLI and daemon connections                                                                    |
+| `TELEGRAM_SYNC_CLI_DATA_DIR`      | Override the data directory (default `~/.telegram-sync-cli`)                                                         |
+| `TELEGRAM_SYNC_CLI_TELEMETRY`     | `0` turns [usage stats](#usage-stats) off                                                                            |
+| `TELEGRAM_SYNC_CLI_READ_ONLY`     | `1` refuses commands that change Telegram ([read-only mode](docs/configuration.md#read-only-mode-and-allowed-chats)) |
+| `TELEGRAM_SYNC_CLI_ALLOWED_CHATS` | Comma-separated chats this process may use, such as `@teamchat,me`                                                   |
+| `DO_NOT_TRACK`                    | `1` turns usage stats off                                                                                            |
+| `MTCUTE_LOG_LEVEL`                | mtcute log level                                                                                                     |
+| `VERBOSE`                         | Verbose logging (`1`)                                                                                                |
 
 For a proxy, set `TELEGRAM_PROXY=socks5://127.0.0.1:1080`. Supports `socks4://`,
 `socks5://`, `http://`, `https://` and MTProxy links, with credentials in the URL.

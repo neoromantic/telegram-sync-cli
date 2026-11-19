@@ -47,6 +47,25 @@ jobs:
       - name: Check the CHANGELOG.md section
         run: bun scripts/changelog-section.ts "${TAG}" >/dev/null
       - run: bun install --frozen-lockfile
+      # The landmines rules run as oxlint JS plugins and need Node 22.18 or later.
+      - name: Resolve Node for oxlint
+        id: node
+        run: |
+          setup=false
+          if [ -f .oxlintrc.devkit.jsonc ]; then
+            version="$(node -p process.versions.node 2>/dev/null || echo 0.0.0)"
+            IFS=. read -r major minor _ <<< "$version"
+            if [ "$major" -lt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -lt 18 ]; }; then
+              setup=true
+            fi
+            echo "Node $version on the runner; setup: $setup"
+          fi
+          echo "setup=$setup" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.node.outputs.setup == 'true'
+        with:
+          node-version: 24
+          package-manager-cache: false
       - run: bun run check
       - run: bun run test
       - run: bun run test:e2e

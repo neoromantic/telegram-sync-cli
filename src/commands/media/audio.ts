@@ -1,16 +1,12 @@
-/**
- * Audio preparation for transcription: ffmpeg converts a voice or video
- * note to 16 kHz mono WAV and measures its peak in the same pass.
- */
-import { ErrorCodes } from '../../types'
-import { MediaError } from './errors'
+import { ErrorCodes } from "../../types";
+import { MediaError } from "./errors";
 
 /** Below this peak the audio is digital silence, which Whisper fills with invented phrases */
-export const SILENCE_MAX_VOLUME_DB = -60
+export const SILENCE_MAX_VOLUME_DB = -60;
 
 /** The last lines of a program's stderr, for an error's details */
-export function tail(text: string, lines = 20): string {
-  return text.trimEnd().split('\n').slice(-lines).join('\n').slice(-2000)
+export function tail(text: string, lines = 20) {
+  return text.trimEnd().split("\n").slice(-lines).join("\n").slice(-2000);
 }
 
 /**
@@ -23,39 +19,36 @@ export async function convertToWav(
   input: string,
   wav: string,
   signal: AbortSignal,
-): Promise<number> {
+) {
   const proc = Bun.spawn(
     [
       ffmpeg,
-      '-nostdin',
-      '-hide_banner',
-      '-nostats',
-      '-y',
-      '-i',
+      "-nostdin",
+      "-hide_banner",
+      "-nostats",
+      "-y",
+      "-i",
       input,
-      '-vn',
-      '-ac',
-      '1',
-      '-ar',
-      '16000',
-      '-af',
-      'volumedetect',
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-af",
+      "volumedetect",
       wav,
     ],
-    { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe', signal },
-  )
-  const [stderr, exitCode] = await Promise.all([
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  signal.throwIfAborted()
-  const peak = stderr.match(/max_volume:\s*(-?[\d.]+|-inf)\s*dB/)
+    { stdin: "ignore", stdout: "ignore", stderr: "pipe", signal },
+  );
+  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  signal.throwIfAborted();
+  const peak = stderr.match(/max_volume:\s*(-?[\d.]+|-inf)\s*dB/);
   if (exitCode !== 0 || !peak) {
-    throw new MediaError(
-      ErrorCodes.GENERAL_ERROR,
-      'ffmpeg could not convert the audio',
-      { program: ffmpeg, exitCode, stderr: tail(stderr) },
-    )
+    throw new MediaError(ErrorCodes.GENERAL_ERROR, "ffmpeg could not convert the audio", {
+      program: ffmpeg,
+      exitCode,
+      stderr: tail(stderr),
+    });
   }
-  return peak[1] === '-inf' ? -Infinity : Number(peak[1])
+  return peak[1] === "-inf" ? -Infinity : Number(peak[1]);
 }

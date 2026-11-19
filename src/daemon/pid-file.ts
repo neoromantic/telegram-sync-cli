@@ -1,8 +1,4 @@
-/**
- * PID file management for daemon
- * Prevents multiple daemon instances and enables lifecycle management
- */
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 /**
  * Error thrown when PID file operations fail
@@ -10,11 +6,11 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 export class PidFileError extends Error {
   constructor(
     message: string,
-    public readonly code: 'ALREADY_RUNNING' | 'NOT_RUNNING' | 'IO_ERROR',
+    public readonly code: "ALREADY_RUNNING" | "NOT_RUNNING" | "IO_ERROR",
     public readonly pid?: number,
   ) {
-    super(message)
-    this.name = 'PidFileError'
+    super(message);
+    this.name = "PidFileError";
   }
 }
 
@@ -23,124 +19,121 @@ export class PidFileError extends Error {
  */
 export interface PidFile {
   /** Acquire PID file (fails if daemon already running) */
-  acquire(): void
+  acquire(): void;
   /** Release PID file */
-  release(): void
+  release(): void;
   /** Read PID from file (null if not running) */
-  read(): number | null
+  read(): number | null;
   /** Check if daemon is running */
-  isRunning(): boolean
+  isRunning(): boolean;
   /** Send signal to daemon process */
-  sendSignal(signal: number | NodeJS.Signals): boolean
+  sendSignal(signal: number | NodeJS.Signals): boolean;
   /** Get PID file path */
-  getPath(): string
+  getPath(): string;
 }
 
-/**
- * Check if a process exists
- */
-function processExists(pid: number): boolean {
+function processExists(pid: number) {
   try {
-    // Signal 0 doesn't actually send a signal, just checks if process exists
-    process.kill(pid, 0)
-    return true
+    process.kill(pid, 0);
+    return true;
   } catch {
-    return false
+    return false;
   }
 }
 
-function readPidFromFile(path: string): number | null {
+function readPidFromFile(path: string) {
   if (!existsSync(path)) {
-    return null
+    return null;
   }
 
   try {
-    const content = readFileSync(path, 'utf-8').trim()
-    const pid = parseInt(content, 10)
+    const content = readFileSync(path, "utf-8").trim();
+    const pid = parseInt(content, 10);
     if (Number.isNaN(pid)) {
-      return null
+      return null;
     }
-    return pid
+    return pid;
   } catch {
-    return null
+    return null;
   }
 }
 
-function removePidFile(path: string): void {
+function removePidFile(path: string) {
   if (existsSync(path)) {
-    rmSync(path, { force: true })
+    rmSync(path, { force: true });
   }
 }
 
-function writePidFile(path: string, pid: number): void {
+function writePidFile(path: string, pid: number) {
   try {
-    writeFileSync(path, pid.toString(), { mode: 0o600 })
+    writeFileSync(path, pid.toString(), { mode: 0o600 });
   } catch (err) {
-    throw new PidFileError(`Failed to write PID file: ${err}`, 'IO_ERROR')
+    throw new PidFileError(`Failed to write PID file: ${err}`, "IO_ERROR");
   }
 }
 
 class PidFileManager implements PidFile {
   constructor(private readonly path: string) {}
 
-  acquire(): void {
-    const existingPid = readPidFromFile(this.path)
+  acquire() {
+    const existingPid = readPidFromFile(this.path);
     if (existingPid && processExists(existingPid)) {
       throw new PidFileError(
         `Daemon already running with PID ${existingPid}`,
-        'ALREADY_RUNNING',
+        "ALREADY_RUNNING",
         existingPid,
-      )
+      );
     }
 
     if (existingPid || existsSync(this.path)) {
-      removePidFile(this.path)
+      removePidFile(this.path);
     }
 
-    writePidFile(this.path, process.pid)
+    writePidFile(this.path, process.pid);
   }
 
-  release(): void {
-    removePidFile(this.path)
+  release() {
+    removePidFile(this.path);
   }
 
-  read(): number | null {
-    const pid = readPidFromFile(this.path)
+  read() {
+    const pid = readPidFromFile(this.path);
     if (!pid) {
-      return null
+      return null;
     }
     if (!processExists(pid)) {
-      return null
+      return null;
     }
-    return pid
+    return pid;
   }
 
-  isRunning(): boolean {
-    return this.read() !== null
+  isRunning() {
+    return this.read() !== null;
   }
 
-  sendSignal(signal: number | NodeJS.Signals): boolean {
-    const pid = this.read()
+  sendSignal(signal: number | NodeJS.Signals) {
+    const pid = this.read();
     if (pid === null) {
-      return false
+      return false;
     }
 
     try {
-      process.kill(pid, signal)
-      return true
+      process.kill(pid, signal);
+      return true;
     } catch {
-      return false
+      return false;
     }
   }
 
-  getPath(): string {
-    return this.path
+  getPath() {
+    return this.path;
   }
 }
 
 /**
  * Create a PID file manager
  */
-export function createPidFile(path: string): PidFile {
-  return new PidFileManager(path)
+export function createPidFile(path: string) {
+  const result: PidFile = new PidFileManager(path);
+  return result;
 }

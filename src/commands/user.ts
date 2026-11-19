@@ -1,2 +1,2 @@
-export { userCommand } from './user/lookup'
-export { meCommand } from './user/me'
+export { userCommand } from "./user/lookup";
+export { meCommand } from "./user/me";
