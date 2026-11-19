@@ -47,6 +47,18 @@ describe("wrapClientCallWithRateLimits", () => {
     throw new Error("expected the call to fail");
   }
 
+  it("returns a call Telegram carried out when api_activity can't be written", async () => {
+    const call = mock(async () => ({ _: "updates" }));
+    const client = wrapClientCallWithRateLimits({ call } as unknown as TelegramClient, {
+      rateLimits,
+    });
+    db.run("DROP TABLE api_activity");
+
+    const request = { _: "messages.sendMessage" } as Parameters<TelegramClient["call"]>[0];
+    expect(await client.call(request)).toEqual({ _: "updates" });
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
   it("reports the first FLOOD_WAIT as a rate limit for the method", async () => {
     const flood = tl.RpcError.fromTl({
       _: "rpc_error",

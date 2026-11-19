@@ -128,6 +128,17 @@ describe("E2E: read-only mode and allowedChats", () => {
     return { exitCode: result.exitCode, json: result.json as ErrorJson };
   }
 
+  it("refuses an undeclared flag and a value it would drop, before connecting", async () => {
+    for (const extra of [
+      ["--acount", "2"],
+      ["--silent", "false"],
+    ]) {
+      const { exitCode, json } = await refusal(["send", "--to", "me", "-m", "hi", ...extra], {});
+      expect(json.error.code).toBe("INVALID_ARGS");
+      expect(exitCode).toBe(3);
+    }
+  });
+
   describe("read-only", () => {
     const READ_ONLY = { TELEGRAM_SYNC_CLI_READ_ONLY: "1" };
     const writes = PATHS.filter((path) => COMMAND_ACCESS[path]?.write === true);
