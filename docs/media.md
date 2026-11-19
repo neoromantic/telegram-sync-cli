@@ -175,13 +175,13 @@ tg sql "SELECT message_id FROM message_attachments WHERE chat_id = 5550001 AND k
 - A template ending in a slash or expanding to an existing directory uses the directory naming
   rule. Paired braces in output paths denote placeholders.
 
-| Placeholder | Value |
-|-------------|-------|
-| `{chat}` | the chat ID, as `chatId` prints it |
-| `{id}` | the message ID |
-| `{date}` | the message's day in UTC, `2026-10-09` |
-| `{name}` | the cached file name (`fileName`) |
-| `{kind}` | `photo`, `voice`, `document`… (`kind`) |
+| Placeholder | Value                                  |
+| ----------- | -------------------------------------- |
+| `{chat}`    | the chat ID, as `chatId` prints it     |
+| `{id}`      | the message ID                         |
+| `{date}`    | the message's day in UTC, `2026-10-09` |
+| `{name}`    | the cached file name (`fileName`)      |
+| `{kind}`    | `photo`, `voice`, `document`… (`kind`) |
 
 Each path part that holds a placeholder is made a safe file name once filled, as cached names
 are, so a value never adds a folder. An unknown placeholder is `INVALID_ARGS`.
@@ -199,12 +199,12 @@ Telegram's [content protection](https://core.telegram.org/api/content-protection
 media from protected chats and messages. `tg media download` refuses with `CONTENT_PROTECTED`
 (exit 1), `details: { chatId, messageId, reason }`:
 
-| `reason` | When |
-|----------|------|
-| `message` | the message itself forbids saving |
-| `chat` | the group or channel restricts saving content |
-| `private_chat` | a private chat where you or the other person turned on protection |
-| `self_destructing` | the media has a self-destruct timer |
+| `reason`           | When                                                              |
+| ------------------ | ----------------------------------------------------------------- |
+| `message`          | the message itself forbids saving                                 |
+| `chat`             | the group or channel restricts saving content                     |
+| `private_chat`     | a private chat where you or the other person turned on protection |
+| `self_destructing` | the media has a self-destruct timer                               |
 
 A refused run downloads nothing. A file already cached stays in the cache, but the command
 won't serve it either. A protection found online is kept: the message's in its cached row, the
@@ -254,9 +254,15 @@ tg media clean --all                # everything
   no connection, unless `--chat` names a chat the cache doesn't know.
 
 ```json
-{ "accountId": 1, "removedFiles": 3, "removedPartialFiles": 1, "freedBytes": 18350080,
-  "keptFiles": 12, "sharedFiles": 1,
-  "filters": { "all": false, "olderThan": "2026-09-28T09:30:00.000Z", "chat": null } }
+{
+  "accountId": 1,
+  "removedFiles": 3,
+  "removedPartialFiles": 1,
+  "freedBytes": 18350080,
+  "keptFiles": 12,
+  "sharedFiles": 1,
+  "filters": { "all": false, "olderThan": "2026-09-28T09:30:00.000Z", "chat": null }
+}
 ```
 
 ## Send a file

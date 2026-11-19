@@ -1,19 +1,15 @@
-/**
- * Account management commands
- */
-import { defineCommand } from 'citty'
+import { defineCommand } from "citty";
 
-import { accountsDb } from '../db'
-import { ErrorCodes } from '../types'
-import { settleCacheLayoutBeforeAccountChange } from '../utils/account-cache'
-import { keepActiveAccountInConfig } from '../utils/active-account'
-import { error, success } from '../utils/output'
+import { accountsDb } from "../db";
+import { ErrorCodes } from "../types";
+import { settleCacheLayoutBeforeAccountChange } from "../utils/account-cache";
+import { keepActiveAccountInConfig } from "../utils/active-account";
+import { error, success } from "../utils/output";
 
-/** What to do about an ACCOUNT_NOT_FOUND error for --id, if any account exists */
-function listAccountIds(): string | undefined {
+function listAccountIds() {
   return accountsDb.getAll().length > 0
-    ? 'Run tg accounts list to see the account IDs, then pass one to --id'
-    : undefined
+    ? "Run tg accounts list to see the account IDs, then pass one to --id"
+    : undefined;
 }
 
 /**
@@ -21,18 +17,18 @@ function listAccountIds(): string | undefined {
  */
 export const listAccountsCommand = defineCommand({
   meta: {
-    name: 'list',
-    description: 'List all configured accounts',
+    name: "list",
+    description: "List all configured accounts",
   },
   async run() {
-    const accounts = accountsDb.getAll()
+    const accounts = accountsDb.getAll();
 
     if (accounts.length === 0) {
       success({
         accounts: [],
         message: 'No accounts configured. Use "tg auth login" to add one.',
-      })
-      return
+      });
+      return;
     }
 
     success({
@@ -46,28 +42,28 @@ export const listAccountsCommand = defineCommand({
         createdAt: a.created_at,
       })),
       total: accounts.length,
-    })
+    });
   },
-})
+});
 
 /**
  * Switch active account
  */
 export const switchAccountCommand = defineCommand({
   meta: {
-    name: 'switch',
-    description: 'Switch the active account',
+    name: "switch",
+    description: "Switch the active account",
   },
   args: {
     id: {
-      type: 'string',
-      description: 'Account ID to switch to',
+      type: "string",
+      description: "Account ID to switch to",
       required: true,
     },
   },
   async run({ args }) {
-    const accountId = parseInt(args.id, 10)
-    const account = accountsDb.getById(accountId)
+    const accountId = parseInt(args.id, 10);
+    const account = accountsDb.getById(accountId);
 
     if (!account) {
       error(
@@ -75,11 +71,11 @@ export const switchAccountCommand = defineCommand({
         `Account with ID ${accountId} not found`,
         undefined,
         listAccountIds(),
-      )
+      );
     }
 
-    await keepActiveAccountInConfig(accountId)
-    accountsDb.setActive(accountId)
+    await keepActiveAccountInConfig(accountId);
+    accountsDb.setActive(accountId);
 
     success({
       message: `Switched to account ${accountId}`,
@@ -90,28 +86,28 @@ export const switchAccountCommand = defineCommand({
         username: account.username,
         label: account.label,
       },
-    })
+    });
   },
-})
+});
 
 /**
  * Remove an account
  */
 export const removeAccountCommand = defineCommand({
   meta: {
-    name: 'remove',
-    description: 'Remove an account',
+    name: "remove",
+    description: "Remove an account",
   },
   args: {
     id: {
-      type: 'string',
-      description: 'Account ID to remove',
+      type: "string",
+      description: "Account ID to remove",
       required: true,
     },
   },
   async run({ args }) {
-    const accountId = parseInt(args.id, 10)
-    const account = accountsDb.getById(accountId)
+    const accountId = parseInt(args.id, 10);
+    const account = accountsDb.getById(accountId);
 
     if (!account) {
       error(
@@ -119,11 +115,11 @@ export const removeAccountCommand = defineCommand({
         `Account with ID ${accountId} not found`,
         undefined,
         listAccountIds(),
-      )
+      );
     }
 
-    settleCacheLayoutBeforeAccountChange()
-    accountsDb.delete(accountId)
+    settleCacheLayoutBeforeAccountChange();
+    accountsDb.delete(accountId);
 
     success({
       message: `Removed account ${accountId}`,
@@ -133,37 +129,30 @@ export const removeAccountCommand = defineCommand({
         username: account.username,
         label: account.label,
       },
-    })
+    });
   },
-})
+});
 
 /**
  * Show account info
  */
 export const infoAccountCommand = defineCommand({
   meta: {
-    name: 'info',
-    description: 'Show detailed account information',
+    name: "info",
+    description: "Show detailed account information",
   },
   args: {
     id: {
-      type: 'string',
-      description: 'Account ID (uses active account if not specified)',
+      type: "string",
+      description: "Account ID (uses active account if not specified)",
     },
   },
   async run({ args }) {
-    const accountId = args.id ? parseInt(args.id, 10) : undefined
-    const account = accountId
-      ? accountsDb.getById(accountId)
-      : accountsDb.getActive()
+    const accountId = args.id ? parseInt(args.id, 10) : undefined;
+    const account = accountId ? accountsDb.getById(accountId) : accountsDb.getActive();
 
     if (!account) {
-      error(
-        ErrorCodes.ACCOUNT_NOT_FOUND,
-        'No account found',
-        undefined,
-        listAccountIds(),
-      )
+      error(ErrorCodes.ACCOUNT_NOT_FOUND, "No account found", undefined, listAccountIds());
     }
 
     success({
@@ -177,17 +166,17 @@ export const infoAccountCommand = defineCommand({
         createdAt: account.created_at,
         updatedAt: account.updated_at,
       },
-    })
+    });
   },
-})
+});
 
 /**
  * Accounts subcommand group
  */
 export const accountsCommand = defineCommand({
   meta: {
-    name: 'accounts',
-    description: 'Account management commands',
+    name: "accounts",
+    description: "Account management commands",
   },
   subCommands: {
     list: listAccountsCommand,
@@ -195,4 +184,4 @@ export const accountsCommand = defineCommand({
     remove: removeAccountCommand,
     info: infoAccountCommand,
   },
-})
+});

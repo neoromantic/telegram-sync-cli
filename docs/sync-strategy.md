@@ -23,6 +23,7 @@ Timeline: [oldest] ---- [backward_cursor] ---- [forward_cursor] ---- [newest]
 ```
 
 Stored in `chat_sync_state`:
+
 - `forward_cursor` — every message up to this ID is cached; forward catch-up continues from here
 - `top_message_id` — the newest message ID Telegram reported; `NULL` means unknown and counts
   as behind
@@ -33,12 +34,12 @@ Stored in `chat_sync_state`:
 
 ### Priority Tiers
 
-| Priority | Category | Sync Behavior |
-|----------|----------|---------------|
-| **P1** | DMs + small groups (<20 members) | Full history sync |
-| **P2** | Medium groups (20–100 members) | Newest 100 messages, then history after the P1 chats |
-| **P2** | Bots and deleted accounts | Newest 100 messages and catch-up, no older history |
-| **P3** | Groups of unknown size, large groups (>100) & channels | On request only (`tg chats sync`) |
+| Priority | Category                                               | Sync Behavior                                        |
+| -------- | ------------------------------------------------------ | ---------------------------------------------------- |
+| **P1**   | DMs + small groups (<20 members)                       | Full history sync                                    |
+| **P2**   | Medium groups (20–100 members)                         | Newest 100 messages, then history after the P1 chats |
+| **P2**   | Bots and deleted accounts                              | Newest 100 messages and catch-up, no older history   |
+| **P3**   | Groups of unknown size, large groups (>100) & channels | On request only (`tg chats sync`)                    |
 
 Live updates don't go through the queue: they are cached as they arrive. A chat's tier
 (`sync_priority`) is also the priority of its jobs inside each lane (see
@@ -202,6 +203,7 @@ Implemented in `SyncJobType`:
   `tg chats sync` and the startup cleanup keep it.
 
 Job status values:
+
 - `pending`, `running`, `completed`, `failed`
 
 A pending job runs once it is due: `next_run_at` is 0 for a new job and later for a job waiting
@@ -401,12 +403,12 @@ are due an adaptive pace that starts at 0.7 calls per second, speeds up after cl
 and halves on a FLOOD_WAIT ([rate-limiting.md](rate-limiting.md#pacing)). Catch-up keeps its
 lane turns at any pace. An account's jobs are split into three lanes:
 
-| Lane | Job types |
-|------|-----------|
-| catch-up | `forward_catchup`, `check_group_participation` |
-| first page | `initial_load`, `refetch_messages` |
-| history | `backward_history`, `full_sync` |
-| senders | `fetch_senders` |
+| Lane       | Job types                                      |
+| ---------- | ---------------------------------------------- |
+| catch-up   | `forward_catchup`, `check_group_participation` |
+| first page | `initial_load`, `refetch_messages`             |
+| history    | `backward_history`, `full_sync`                |
+| senders    | `fetch_senders`                                |
 
 The lanes take turns in a fixed cycle of four slots: catch-up, first page, catch-up, history.
 When every lane has work, catch-up gets half the jobs and first pages and history a quarter
@@ -432,6 +434,7 @@ Sync jobs use a default batch size of **100 messages** (configurable in worker c
 ## Rate Limiting
 
 Rate limits are tracked per API method:
+
 - `rate_limits` table stores call count + flood wait
 - Every request of the daemon, page requests included, is logged to `api_activity` (method,
   outcome, Telegram's error code, duration), so `tg status` counts the calls of the last 60

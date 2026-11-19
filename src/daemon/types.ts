@@ -1,17 +1,14 @@
-/**
- * Daemon types and interfaces
- */
 import type {
   ConnectionState,
   DeleteMessageUpdate,
   Message,
   RawUpdateInfo,
   TelegramClient,
-} from '@mtcute/bun'
-import type { CacheRetentionConfig } from '../db/types'
-import type { ConnectionWatch } from './daemon-catch-up'
-import type { UpdateHandlers } from './handlers'
-import type { SyncPacingConfig } from './sync-pacing'
+} from "@mtcute/bun";
+import type { CacheRetentionConfig } from "../db/types";
+import type { ConnectionWatch } from "./daemon-catch-up";
+import type { UpdateHandlers } from "./handlers";
+import type { SyncPacingConfig } from "./sync-pacing";
 
 /**
  * Event handler references for cleanup
@@ -19,15 +16,15 @@ import type { SyncPacingConfig } from './sync-pacing'
  */
 export interface AccountEventHandlers {
   /** Handler for new messages */
-  onNewMessage: (msg: Message) => void
+  onNewMessage: (msg: Message) => void;
   /** Handler for edited messages */
-  onEditMessage: (msg: Message) => void
+  onEditMessage: (msg: Message) => void;
   /** Handler for deleted messages */
-  onDeleteMessage: (update: DeleteMessageUpdate) => void
+  onDeleteMessage: (update: DeleteMessageUpdate) => void;
   /** Handler for raw updates: contact changes (#8) */
-  onRawUpdate: (info: RawUpdateInfo) => void
+  onRawUpdate: (info: RawUpdateInfo) => void;
   /** Handler for the client's connection state: catch-up after it is back (#124) */
-  onConnectionState: (state: ConnectionState) => void
+  onConnectionState: (state: ConnectionState) => void;
 }
 
 /**
@@ -49,87 +46,87 @@ export enum DaemonExitCode {
 /**
  * Daemon verbosity level
  */
-export type DaemonVerbosity = 'quiet' | 'normal' | 'verbose'
+export type DaemonVerbosity = "quiet" | "normal" | "verbose";
 
 /**
  * Reconnection configuration
  */
 export interface ReconnectConfig {
   /** Initial delay in milliseconds before first reconnection attempt */
-  initialDelayMs: number
+  initialDelayMs: number;
   /** Maximum delay in milliseconds between reconnection attempts */
-  maxDelayMs: number
+  maxDelayMs: number;
   /** Maximum number of reconnection attempts before giving up */
-  maxAttempts: number
+  maxAttempts: number;
   /** Multiplier for exponential backoff (e.g., 2 means double the delay each time) */
-  backoffMultiplier: number
+  backoffMultiplier: number;
 }
 
 /**
  * Default reconnection configuration
  */
 export const DEFAULT_RECONNECT_CONFIG: ReconnectConfig = {
-  initialDelayMs: 5000, // 5 seconds
-  maxDelayMs: 300000, // 5 minutes
+  initialDelayMs: 5000,
+  maxDelayMs: 300000,
   maxAttempts: 10,
   backoffMultiplier: 2,
-}
+};
 
 /**
  * Daemon configuration
  */
 export interface DaemonConfig {
   /** Verbosity level */
-  verbosity: DaemonVerbosity
+  verbosity: DaemonVerbosity;
   /** Data directory path */
-  dataDir: string
+  dataDir: string;
   /** PID file path */
-  pidPath: string
+  pidPath: string;
   /** Reconnection configuration */
-  reconnectConfig?: ReconnectConfig
+  reconnectConfig?: ReconnectConfig;
   /** Shutdown timeout in milliseconds - force exit if cleanup takes longer */
-  shutdownTimeoutMs?: number
+  shutdownTimeoutMs?: number;
   /** How long the caches keep their bookkeeping rows; defaults if absent */
-  retention?: CacheRetentionConfig
+  retention?: CacheRetentionConfig;
   /** How fast each account's sync jobs start; defaults if absent */
-  pacing?: SyncPacingConfig
+  pacing?: SyncPacingConfig;
 }
 
 /**
  * Default shutdown timeout in milliseconds (30 seconds)
  */
-export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30000
+export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30000;
 
 /**
  * Account connection state
  */
 export interface AccountConnectionState {
   /** Account ID */
-  accountId: number
+  accountId: number;
   /** Account phone number */
-  phone: string
+  phone: string;
   /** Account display name */
-  name: string | null
+  name: string | null;
   /** Telegram username, once connected; the log names the account by it */
-  username?: string | null
+  username?: string | null;
   /** Connection status */
-  status: 'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting'
+  status: "connecting" | "connected" | "disconnected" | "error" | "reconnecting";
   /** Last error message */
-  lastError?: string
+  lastError?: string;
   /** Last activity timestamp */
-  lastActivity?: number
+  lastActivity?: number;
   /** Telegram client instance */
-  client?: TelegramClient
+  client?: TelegramClient;
   /** Number of reconnection attempts since last successful connection */
-  reconnectAttempts?: number
+  reconnectAttempts?: number;
   /** Timestamp when next reconnection attempt should occur */
-  nextReconnectAt?: number
+  nextReconnectAt?: number;
   /** Update handlers for this account */
-  updateHandlers?: UpdateHandlers
+  updateHandlers?: UpdateHandlers;
   /** Event handler references for cleanup */
-  eventHandlers?: AccountEventHandlers
+  eventHandlers?: AccountEventHandlers;
   /** The client's connection, for catch-up after a reconnect or a wake (#124) */
-  watch?: ConnectionWatch
+  watch?: ConnectionWatch;
 }
 
 /**
@@ -137,23 +134,23 @@ export interface AccountConnectionState {
  */
 export interface DaemonState {
   /** Whether daemon is running */
-  running: boolean
+  running: boolean;
   /** Start timestamp */
-  startedAt?: number
+  startedAt?: number;
   /** Connected accounts */
-  accounts: Map<number, AccountConnectionState>
+  accounts: Map<number, AccountConnectionState>;
   /** Shutdown signal received */
-  shutdownRequested: boolean
+  shutdownRequested: boolean;
 }
 
 /**
  * Logger interface for daemon components
  */
 export interface DaemonLogger {
-  info(message: string): void
-  debug(message: string): void
-  warn(message: string): void
-  error(message: string): void
+  info(message: string): void;
+  debug(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
 }
 
 /**
@@ -161,25 +158,25 @@ export interface DaemonLogger {
  */
 export interface DaemonStatus {
   /** Whether daemon is running */
-  running: boolean
+  running: boolean;
   /** Process ID */
-  pid: number | null
+  pid: number | null;
   /** Uptime in milliseconds */
-  uptimeMs: number | null
+  uptimeMs: number | null;
   /** Connected accounts count */
-  connectedAccounts: number
+  connectedAccounts: number;
   /** Total accounts count */
-  totalAccounts: number
+  totalAccounts: number;
   /** Account details */
   accounts: Array<{
-    id: number
-    phone: string
-    name: string | null
-    status: string
-    lastError?: string
-  }>
+    id: number;
+    phone: string;
+    name: string | null;
+    status: string;
+    lastError?: string;
+  }>;
   /** Messages synced count */
-  messagesSynced: number
+  messagesSynced: number;
   /** Last update timestamp */
-  lastUpdate: number | null
+  lastUpdate: number | null;
 }

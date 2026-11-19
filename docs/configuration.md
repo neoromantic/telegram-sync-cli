@@ -10,18 +10,18 @@ source of truth for Telegram API credentials.
 
 ## Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `TELEGRAM_API_ID` | Telegram API ID |
-| `TELEGRAM_API_HASH` | Telegram API hash |
-| `TELEGRAM_PROXY` | Optional proxy URL for CLI and daemon connections |
-| `TELEGRAM_SYNC_CLI_DATA_DIR` | Override data directory |
-| `TELEGRAM_SYNC_CLI_TELEMETRY` | Usage stats: `0` off, `1` on, `debug` prints them; see [Usage stats](#usage-stats) |
-| `TELEGRAM_SYNC_CLI_READ_ONLY` | Anything but empty, `0`, `false` or `off` turns [read-only mode](#read-only-mode-and-allowed-chats) on |
+| Variable                          | Purpose                                                                                                   |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `TELEGRAM_API_ID`                 | Telegram API ID                                                                                           |
+| `TELEGRAM_API_HASH`               | Telegram API hash                                                                                         |
+| `TELEGRAM_PROXY`                  | Optional proxy URL for CLI and daemon connections                                                         |
+| `TELEGRAM_SYNC_CLI_DATA_DIR`      | Override data directory                                                                                   |
+| `TELEGRAM_SYNC_CLI_TELEMETRY`     | Usage stats: `0` off, `1` on, `debug` prints them; see [Usage stats](#usage-stats)                        |
+| `TELEGRAM_SYNC_CLI_READ_ONLY`     | Anything but empty, `0`, `false` or `off` turns [read-only mode](#read-only-mode-and-allowed-chats) on    |
 | `TELEGRAM_SYNC_CLI_ALLOWED_CHATS` | Comma-separated chats that replace `allowedChats`; see [allowed chats](#read-only-mode-and-allowed-chats) |
-| `DO_NOT_TRACK` | Any value but `0` or `false` turns usage stats off |
-| `MTCUTE_LOG_LEVEL` | mtcute log level |
-| `VERBOSE` | Verbose logging (`1`) |
+| `DO_NOT_TRACK`                    | Any value but `0` or `false` turns usage stats off                                                        |
+| `MTCUTE_LOG_LEVEL`                | mtcute log level                                                                                          |
+| `VERBOSE`                         | Verbose logging (`1`)                                                                                     |
 
 ### Proxy
 

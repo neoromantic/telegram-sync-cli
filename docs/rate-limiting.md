@@ -11,6 +11,7 @@ account: a recorded one blocks its calls, and in the daemon one that mtcute slee
 inside a sync job holds only that account's job loop (see [Notes](#notes)).
 
 Key behaviors:
+
 - Track per-method call counts in 60-second windows (calendar minutes)
 - Record FLOOD_WAITs and block calls until the wait expires
 - Log each API call to `api_activity` (success/error, error code, duration) for status output
@@ -27,9 +28,11 @@ Key behaviors:
 ## Database Tables (each account's cache.db)
 
 ### rate_limits
+
 Tracks call counts and flood waits per method.
 
 Columns (see `docs/database-schema.md` for full definitions):
+
 - `method`
 - `window_start`
 - `call_count`
@@ -37,6 +40,7 @@ Columns (see `docs/database-schema.md` for full definitions):
 - `flood_wait_until`
 
 ### api_activity
+
 Audits API calls (success/errors): every call of a CLI command, and every request of the
 daemon: sync pages, contacts checks, dialog passes, the joined-communities check, `getMe` at
 start, reconnect and health checks (`users.getUsers`), and mtcute's own requests such as
@@ -45,6 +49,7 @@ so a FLOOD_WAIT and the retry after it are two rows; a write that fails never fa
 request.
 
 Columns:
+
 - `timestamp` — when the call started, in ms
 - `method`
 - `success`

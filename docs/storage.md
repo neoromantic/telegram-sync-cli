@@ -10,31 +10,31 @@ The tables themselves are in [database-schema.md](database-schema.md), search in
 
 ## At a glance
 
-|  | 100,000 | 1M | 10M |
-|---|---:|---:|---:|
-| Cache file | 159 MB | 1.58 GB | 15.73 GB |
-| Bytes per message | 1,582 | 1,570 | 1,572 |
-| `raw_json` share of the file | 54% | 54% | 54% |
-| History pages of 100, messages/s | 8,905 | 7,879 | 7,363 |
-| Search index merges after those pages | 1.5 s | 20 s | 3.9 min |
-| Live messages, one per write, messages/s | 6,250 | 6,849 | 6,579 |
-| The same pages again, messages/s (rows rewritten) | 24,048 (0) | 23,637 (0) | 22,160 (0) |
-| `messages search`, rare word | 0.07 ms | 0.25 ms | 2.8 ms |
-| `messages search`, common word | 0.71 ms | 2.2 ms | 6.8 ms |
-| `messages search`, a word in 7% of messages | 8.0 ms | 4.2 ms | 9.1 ms |
-| `messages search --offset 200`, common word | 2.2 ms | 5.1 ms | 13 ms |
-| `messages search --sort relevance`, common word | 56 ms | 695 ms | 6.3 s |
-| `messages list`, a page of 20 | 0.18 ms | 0.20 ms | 0.23 ms |
-| `messages get --context 5` | 0.22 ms | 0.21 ms | 0.24 ms |
-| CLI run: `tg status` | 96 ms | 97 ms | 129 ms |
-| CLI run: `tg status --sizes` | 128 ms | 404 ms | 3.3 s |
-| CLI run: `tg messages search`, rare word | 93 ms | 93 ms | 98 ms |
-| CLI run: `tg messages search`, common word | 95 ms | 95 ms | 98 ms |
-| `tg db migrate` on rows written by 0.5.0, rows/s | 58,828 | 53,393 | not run |
-| Re-index of names, once per cache (#93), messages/s | 46,915 | 35,438 | 28,500 |
-| Search index rebuild | 0.75 s | 7.8 s | 1.4 min |
-| `tg db vacuum`, daemon stopped | 0.7 s | 4.8 s | 1.1 min |
-| `tg db vacuum`, extra disk at its peak | 322 MB | 3.11 GB | 30.94 GB |
+|                                                     |    100,000 |         1M |        10M |
+| --------------------------------------------------- | ---------: | ---------: | ---------: |
+| Cache file                                          |     159 MB |    1.58 GB |   15.73 GB |
+| Bytes per message                                   |      1,582 |      1,570 |      1,572 |
+| `raw_json` share of the file                        |        54% |        54% |        54% |
+| History pages of 100, messages/s                    |      8,905 |      7,879 |      7,363 |
+| Search index merges after those pages               |      1.5 s |       20 s |    3.9 min |
+| Live messages, one per write, messages/s            |      6,250 |      6,849 |      6,579 |
+| The same pages again, messages/s (rows rewritten)   | 24,048 (0) | 23,637 (0) | 22,160 (0) |
+| `messages search`, rare word                        |    0.07 ms |    0.25 ms |     2.8 ms |
+| `messages search`, common word                      |    0.71 ms |     2.2 ms |     6.8 ms |
+| `messages search`, a word in 7% of messages         |     8.0 ms |     4.2 ms |     9.1 ms |
+| `messages search --offset 200`, common word         |     2.2 ms |     5.1 ms |      13 ms |
+| `messages search --sort relevance`, common word     |      56 ms |     695 ms |      6.3 s |
+| `messages list`, a page of 20                       |    0.18 ms |    0.20 ms |    0.23 ms |
+| `messages get --context 5`                          |    0.22 ms |    0.21 ms |    0.24 ms |
+| CLI run: `tg status`                                |      96 ms |      97 ms |     129 ms |
+| CLI run: `tg status --sizes`                        |     128 ms |     404 ms |      3.3 s |
+| CLI run: `tg messages search`, rare word            |      93 ms |      93 ms |      98 ms |
+| CLI run: `tg messages search`, common word          |      95 ms |      95 ms |      98 ms |
+| `tg db migrate` on rows written by 0.5.0, rows/s    |     58,828 |     53,393 |    not run |
+| Re-index of names, once per cache (#93), messages/s |     46,915 |     35,438 |     28,500 |
+| Search index rebuild                                |     0.75 s |      7.8 s |    1.4 min |
+| `tg db vacuum`, daemon stopped                      |      0.7 s |      4.8 s |    1.1 min |
+| `tg db vacuum`, extra disk at its peak              |     322 MB |    3.11 GB |   30.94 GB |
 
 "Common word" is in 30% of the messages, "rare word" in about 1 in 10,000 (8, 103 and 1,211
 messages at the three sizes); `--offset 200` is its fifth page of 50. In-process times are the median of the runs, calling what the
@@ -56,39 +56,39 @@ and `tg status --sizes`, which reads every page. `tg status` counts the messages
 
 1M messages:
 
-| Table | Size | Bytes per message | Share of the file |
-|---|---:|---:|---:|
-| `messages_cache` | 1.45 GB | 1,438 | 91.7% |
-| `message_search` | 105 MB | 105 | 6.7% |
-| `message_attachments` | 21.7 MB | 22 | 1.4% |
-| `users_cache` | 2.6 MB | 3 | 0.2% |
-| `raw_json` (in `messages_cache`) | 853 MB | 849 | 54.1% |
+| Table                            |    Size | Bytes per message | Share of the file |
+| -------------------------------- | ------: | ----------------: | ----------------: |
+| `messages_cache`                 | 1.45 GB |             1,438 |             91.7% |
+| `message_search`                 |  105 MB |               105 |              6.7% |
+| `message_attachments`            | 21.7 MB |                22 |              1.4% |
+| `users_cache`                    |  2.6 MB |                 3 |              0.2% |
+| `raw_json` (in `messages_cache`) |  853 MB |               849 |             54.1% |
 
 `raw_json`, the Telegram object as mtcute gives it, is a bit over half of the file. The rest of
 `messages_cache` is the message's own columns and its indexes. The search index is contentless
 ([search.md](search.md#a-contentless-index)): it holds tokens, not a second copy of the text.
 The bytes per message are the same at every size:
 
-| Bytes per message | 100,000 | 1M | 10M |
-|---|---:|---:|---:|
-| Cache file | 1,582 | 1,570 | 1,572 |
-| `messages_cache` | 1,434 | 1,438 | 1,441 |
-| `raw_json` | 849 | 849 | 849 |
-| `message_search` | 109 | 105 | 104 |
-| `message_attachments` | 21 | 22 | 22 |
+| Bytes per message     | 100,000 |    1M |   10M |
+| --------------------- | ------: | ----: | ----: |
+| Cache file            |   1,582 | 1,570 | 1,572 |
+| `messages_cache`      |   1,434 | 1,438 | 1,441 |
+| `raw_json`            |     849 |   849 |   849 |
+| `message_search`      |     109 |   105 |   104 |
+| `message_attachments` |      21 |    22 |    22 |
 
 `raw_json` by message type, 1M messages:
 
-| Type | Messages | Share | Average `raw_json` |
-|---|---:|---:|---:|
-| `text` | 826,601 | 82.2% | 685 B |
-| `photo` | 100,403 | 10.0% | 1,891 B |
-| `webpage` | 20,254 | 2.0% | 1,518 B |
-| `document` | 20,246 | 2.0% | 918 B |
-| `video` | 15,247 | 1.5% | 1,843 B |
-| `voice` | 12,237 | 1.2% | 899 B |
-| `sticker` | 8,296 | 0.8% | 1,022 B |
-| `service` | 1,716 | 0.2% | 324 B |
+| Type       | Messages | Share | Average `raw_json` |
+| ---------- | -------: | ----: | -----------------: |
+| `text`     |  826,601 | 82.2% |              685 B |
+| `photo`    |  100,403 | 10.0% |            1,891 B |
+| `webpage`  |   20,254 |  2.0% |            1,518 B |
+| `document` |   20,246 |  2.0% |              918 B |
+| `video`    |   15,247 |  1.5% |            1,843 B |
+| `voice`    |   12,237 |  1.2% |              899 B |
+| `sticker`  |    8,296 |  0.8% |            1,022 B |
+| `service`  |    1,716 |  0.2% |              324 B |
 
 A photo's `raw_json` is about 1.9 KB, most of it the stripped thumbnail (400–900 bytes, as
 base64) and the list of sizes.
@@ -114,16 +114,16 @@ with a trained zstd dictionary only if it saves a lot and `tg sql` keeps working
 **Numbers.** The same made-up messages, written as tg 0.5.0 and older wrote them, then brought
 to the current form:
 
-|  | 100,000 | 1M |
-|---|---:|---:|
-| Cache file written by 0.5.0 | 223 MB | 2.22 GB |
-| Bytes per message | 2,225 | 2,218 |
-| `raw_json` per message | 1,489 B | 1,491 B |
-| `tg db migrate` | 1.7 s (100,301 rows) | 18.8 s (1,003,001 rows) |
-| `raw_json` per message after it | 849 B | 849 B |
-| Then `tg db vacuum` | 0.6 s, 154 MB | 5.4 s, 1.52 GB |
-| Bytes per message after both | 1,538 | 1,524 |
-| Written by this version, for comparison | 1,564 | 1,553 |
+|                                         |              100,000 |                      1M |
+| --------------------------------------- | -------------------: | ----------------------: |
+| Cache file written by 0.5.0             |               223 MB |                 2.22 GB |
+| Bytes per message                       |                2,225 |                   2,218 |
+| `raw_json` per message                  |              1,489 B |                 1,491 B |
+| `tg db migrate`                         | 1.7 s (100,301 rows) | 18.8 s (1,003,001 rows) |
+| `raw_json` per message after it         |                849 B |                   849 B |
+| Then `tg db vacuum`                     |        0.6 s, 154 MB |          5.4 s, 1.52 GB |
+| Bytes per message after both            |                1,538 |                   1,524 |
+| Written by this version, for comparison |                1,564 |                   1,553 |
 
 The old form wrote each byte of a byte field as its own JSON key, so the same cache was 43%
 bigger. Base64 does almost all of the change; Long values as decimal strings and dropping
@@ -132,12 +132,12 @@ write took 1,586 bytes per message, now 1,553.
 
 Compression, on an even sample of about 20,000 rows of the 1M cache (nothing written back):
 
-| `raw_json` | Bytes per message | Saving |
-|---|---:|---:|
-| As stored | 845 |  |
-| gzip, each row | 507 | 40% |
-| zstd, each row | 517 | 39% |
-| zstd, the whole sample as one stream | 170 | 80% |
+| `raw_json`                           | Bytes per message | Saving |
+| ------------------------------------ | ----------------: | -----: |
+| As stored                            |               845 |        |
+| gzip, each row                       |               507 |    40% |
+| zstd, each row                       |               517 |    39% |
+| zstd, the whole sample as one stream |               170 |    80% |
 
 - Compressing each row on its own saves about 40%, and `tg sql` could no longer read the row
   with `json_extract`.
@@ -275,20 +275,20 @@ relevance` and `--count` still read every match: making them fast would change t
 
 **Numbers.** The same runs, seed 1, of the code before #118 and after it:
 
-|  | 1M before | 1M after | 10M before | 10M after |
-|---|---:|---:|---:|---:|
-| `messages search`, common word | 315 ms | 10 ms | 3.0 s | 21 ms |
-| `messages search --offset 200`, common word | 288 ms | 296 ms | 3.0 s | 64 ms |
-| `messages search --chat`, common word, biggest chat | 211 ms | 9.2 ms | 2.1 s | 21 ms |
-| CLI run: `tg messages search`, common word | 374 ms | 104 ms | 3.1 s | 114 ms |
-| `messages search`, rare word | 0.24 ms | 0.29 ms | 3.0 ms | 2.8 ms |
-| `messages search --phrase`, two common words | 24 ms | 24 ms | 251 ms | 235 ms |
-| `messages search`, prefix `stem*` | 44 ms | 44 ms | 477 ms | 434 ms |
-| `messages search --count`, common word (the page and the count) | 574 ms | 215 ms | 5.9 s | 1.9 s |
-| `messages search --sort relevance`, common word | 627 ms | 592 ms | 6.6 s | 6.2 s |
-| History pages of 100, messages/s | 8,797 | 6,922 | 8,420 | 6,639 |
-| Live messages, one per write, messages/s | 6,315 | 5,762 | 5,632 | 5,378 |
-| Cache file | 1.56 GB | 1.58 GB | 15.57 GB | 15.72 GB |
+|                                                                 | 1M before | 1M after | 10M before | 10M after |
+| --------------------------------------------------------------- | --------: | -------: | ---------: | --------: |
+| `messages search`, common word                                  |    315 ms |    10 ms |      3.0 s |     21 ms |
+| `messages search --offset 200`, common word                     |    288 ms |   296 ms |      3.0 s |     64 ms |
+| `messages search --chat`, common word, biggest chat             |    211 ms |   9.2 ms |      2.1 s |     21 ms |
+| CLI run: `tg messages search`, common word                      |    374 ms |   104 ms |      3.1 s |    114 ms |
+| `messages search`, rare word                                    |   0.24 ms |  0.29 ms |     3.0 ms |    2.8 ms |
+| `messages search --phrase`, two common words                    |     24 ms |    24 ms |     251 ms |    235 ms |
+| `messages search`, prefix `stem*`                               |     44 ms |    44 ms |     477 ms |    434 ms |
+| `messages search --count`, common word (the page and the count) |    574 ms |   215 ms |      5.9 s |     1.9 s |
+| `messages search --sort relevance`, common word                 |    627 ms |   592 ms |      6.6 s |     6.2 s |
+| History pages of 100, messages/s                                |     8,797 |    6,922 |      8,420 |     6,639 |
+| Live messages, one per write, messages/s                        |     6,315 |    5,762 |      5,632 |     5,378 |
+| Cache file                                                      |   1.56 GB |  1.58 GB |   15.57 GB |  15.72 GB |
 
 - **The page.** tg counts the matches in the index up to T = √(900 × page × messages): 212,000
   for a page of 50 at 1M, 671,000 at 10M. With T or more it goes through at most page ×
@@ -323,15 +323,15 @@ messages in chunks, asks the index once per run of rowids at most 32 apart, and 
 walk has taken 0.25 µs per counted match, a quarter of the least the sort takes
 ([search.md](search.md#query-pattern)). 0.11.1 against now:
 
-|  | 1M 0.11.1 | 1M now | 10M 0.11.0 | 10M now |
-|---|---:|---:|---:|---:|
-| `messages search`, common word | 11 ms | 2.2 ms | 21 ms | 6.8 ms |
-| `messages search --offset 200`, common word | 308 ms | 5.1 ms | 64 ms | 13 ms |
-| `messages search --chat`, common word, biggest chat | 9.1 ms | 1.1 ms | 21 ms | 3.0 ms |
-| CLI run: `tg messages search`, common word | 103 ms | 95 ms | 114 ms | 98 ms |
-| `messages search`, rare word | 0.30 ms | 0.25 ms | 2.8 ms | 2.8 ms |
-| History pages of 100, messages/s | 7,062 | 7,879 | 6,639 | 7,363 |
-| Live messages, one per write, messages/s | 4,676 | 6,849 | 5,378 | 6,579 |
+|                                                     | 1M 0.11.1 |  1M now | 10M 0.11.0 | 10M now |
+| --------------------------------------------------- | --------: | ------: | ---------: | ------: |
+| `messages search`, common word                      |     11 ms |  2.2 ms |      21 ms |  6.8 ms |
+| `messages search --offset 200`, common word         |    308 ms |  5.1 ms |      64 ms |   13 ms |
+| `messages search --chat`, common word, biggest chat |    9.1 ms |  1.1 ms |      21 ms |  3.0 ms |
+| CLI run: `tg messages search`, common word          |    103 ms |   95 ms |     114 ms |   98 ms |
+| `messages search`, rare word                        |   0.30 ms | 0.25 ms |     2.8 ms |  2.8 ms |
+| History pages of 100, messages/s                    |     7,062 |   7,879 |      6,639 |   7,363 |
+| Live messages, one per write, messages/s            |     4,676 |   6,849 |      5,378 |   6,579 |
 
 The 10M column of 0.11.0 is the run above; 0.11.1 searches the same way. A word in 7% of the
 messages walks now and sorted before: on one 1M cache file it took 85 ms in 0.11.1 and takes
@@ -357,20 +357,20 @@ entries of every message is cleaned once.
 **Numbers.** "One question" is asking the index whether one of the 2,000 newest messages has the
 common word.
 
-|  | 100,000 | 1M | 10M |
-|---|---:|---:|---:|
-| Index after the writes, merged after each | 11.0 MB, 4 segments, 9.8 µs a question | 105 MB, 7, 19 µs | 1.04 GB, 9, 24 µs |
-| Merges after the history pages, in all | 1.5 s | 20 s | 3.9 min |
-| Longest merge batch after them | 69 ms | 146 ms | 227 ms |
-| Re-index of names: longest batch | 18 ms | 32 ms | 315 ms |
-| Re-index of names: longest merge batch between its batches | 73 ms | 90 ms | 693 ms |
-| Index after it | 11.1 MB, 1, 8.0 µs | 104 MB, 2, 9.6 µs | 1.06 GB, 5, 29 µs |
-| Re-index as 0.11.1 did it: longest batch | 87 ms | 282 ms | 661 ms |
-| Index after it | 21.9 MB, 7, 363 µs | 202 MB, 14, 3.8 ms | 2.00 GB, 13, 51 ms |
-| `messages search`, common word, on that index | 31 ms | 331 ms | 3.4 s |
-| Cleaning it up | 0.24 s, 4 batches | 2.6 s, 33 batches | 61 s, 774 batches |
-| Longest batch of the clean-up | 81 ms | 110 ms | 597 ms |
-| Index after it | 11.0 MB, 1, 7.8 µs | 104 MB, 1, 8.8 µs | 1.06 GB, 2, 14 µs |
+|                                                            |                                100,000 |                 1M |                10M |
+| ---------------------------------------------------------- | -------------------------------------: | -----------------: | -----------------: |
+| Index after the writes, merged after each                  | 11.0 MB, 4 segments, 9.8 µs a question |   105 MB, 7, 19 µs |  1.04 GB, 9, 24 µs |
+| Merges after the history pages, in all                     |                                  1.5 s |               20 s |            3.9 min |
+| Longest merge batch after them                             |                                  69 ms |             146 ms |             227 ms |
+| Re-index of names: longest batch                           |                                  18 ms |              32 ms |             315 ms |
+| Re-index of names: longest merge batch between its batches |                                  73 ms |              90 ms |             693 ms |
+| Index after it                                             |                     11.1 MB, 1, 8.0 µs |  104 MB, 2, 9.6 µs |  1.06 GB, 5, 29 µs |
+| Re-index as 0.11.1 did it: longest batch                   |                                  87 ms |             282 ms |             661 ms |
+| Index after it                                             |                     21.9 MB, 7, 363 µs | 202 MB, 14, 3.8 ms | 2.00 GB, 13, 51 ms |
+| `messages search`, common word, on that index              |                                  31 ms |             331 ms |              3.4 s |
+| Cleaning it up                                             |                      0.24 s, 4 batches |  2.6 s, 33 batches |  61 s, 774 batches |
+| Longest batch of the clean-up                              |                                  81 ms |             110 ms |             597 ms |
+| Index after it                                             |                     11.0 MB, 1, 7.8 µs |  104 MB, 1, 8.8 µs |  1.06 GB, 2, 14 µs |
 
 - **The state #149 found.** 0.11.1 merged inside writes, a level once it had four segments, and
   kept deleted entries until then. Its re-index of every message in batches of 250, as the
@@ -398,35 +398,35 @@ common word.
 
 Median of the in-process runs, with p95 in parentheses:
 
-|  | 100,000 | 1M | 10M |
-|---|---:|---:|---:|
-| `messages search`, rare word | 0.07 ms (0.09 ms) | 0.25 ms (0.31 ms) | 2.8 ms (3.1 ms) |
-| `messages search`, common word | 0.71 ms (1.2 ms) | 2.2 ms (2.3 ms) | 6.8 ms (6.9 ms) |
-| `messages search`, a word in 7% of messages | 8.0 ms (8.4 ms) | 4.2 ms (4.4 ms) | 9.1 ms (9.1 ms) |
-| `messages search`, a word in 7%, `--sender` with no recent messages | 6.0 ms (6.2 ms) | 71 ms (72 ms) | 679 ms (689 ms) |
-| `messages search --offset 200`, common word | 2.2 ms (2.3 ms) | 5.1 ms (5.2 ms) | 13 ms (14 ms) |
-| `messages search`, two words | 0.22 ms (0.24 ms) | 0.96 ms (1.1 ms) | 16 ms (18 ms) |
-| `messages search --phrase`, two common words | 1.6 ms (1.7 ms) | 23 ms (23 ms) | 238 ms (244 ms) |
-| `messages search`, prefix `stem*` | 3.6 ms (3.7 ms) | 43 ms (45 ms) | 437 ms (440 ms) |
-| `messages search --chat`, common word, biggest chat | 0.49 ms (0.51 ms) | 1.1 ms (1.3 ms) | 3.0 ms (3.2 ms) |
-| `messages search --sort relevance`, common word | 56 ms (60 ms) | 695 ms (727 ms) | 6.3 s (7.2 s) |
-| `messages search --sort relevance`, two words | 0.36 ms (0.39 ms) | 2.5 ms (2.6 ms) | 31 ms (34 ms) |
-| `messages search --count`, common word | 20 ms (22 ms) | 202 ms (211 ms) | 1.9 s (1.9 s) |
-| `messages search --count`, rare word | 0.08 ms (0.10 ms) | 0.31 ms (0.42 ms) | 4.6 ms (4.7 ms) |
-| `messages search --snippet`, two words | 0.53 ms (0.60 ms) | 1.4 ms (1.5 ms) | 15 ms (16 ms) |
-| `messages list`, newest page of 20 | 0.18 ms (0.23 ms) | 0.20 ms (0.26 ms) | 0.23 ms (0.29 ms) |
-| `messages list --before`, a page in the middle | 0.19 ms (0.21 ms) | 0.19 ms (0.21 ms) | 0.20 ms (0.33 ms) |
-| `messages get --context 5` | 0.22 ms (0.32 ms) | 0.21 ms (0.34 ms) | 0.24 ms (0.24 ms) |
-| `tg sql`, aggregate over `message_search_text` | 0.09 ms (0.11 ms) | 0.79 ms (0.82 ms) | 15 ms (15 ms) |
-| `tg sql`, aggregate that scans `messages_cache` | 188 ms (193 ms) | 2.2 s (2.3 s) | 24.7 s (25.8 s) |
-| `tg status` | 0.75 ms (0.92 ms) | 3.1 ms (3.4 ms) | 34 ms (36 ms) |
-| `tg status --sizes` | 33 ms (33 ms) | 318 ms (322 ms) | 3.2 s (3.2 s) |
-| CLI run: `tg --help` | 92 ms (104 ms) | 89 ms (91 ms) | 88 ms (88 ms) |
-| CLI run: `tg status` | 96 ms (97 ms) | 97 ms (98 ms) | 129 ms (129 ms) |
-| CLI run: `tg status --sizes` | 128 ms (129 ms) | 404 ms (409 ms) | 3.3 s (3.4 s) |
-| CLI run: `tg messages search`, rare word | 93 ms (103 ms) | 93 ms (94 ms) | 98 ms (98 ms) |
-| CLI run: `tg messages search`, common word | 95 ms (96 ms) | 95 ms (95 ms) | 98 ms (99 ms) |
-| CLI run: `tg sql`, aggregate over `message_search_text` | 94 ms (95 ms) | 94 ms (103 ms) | 110 ms (112 ms) |
+|                                                                     |           100,000 |                1M |               10M |
+| ------------------------------------------------------------------- | ----------------: | ----------------: | ----------------: |
+| `messages search`, rare word                                        | 0.07 ms (0.09 ms) | 0.25 ms (0.31 ms) |   2.8 ms (3.1 ms) |
+| `messages search`, common word                                      |  0.71 ms (1.2 ms) |   2.2 ms (2.3 ms) |   6.8 ms (6.9 ms) |
+| `messages search`, a word in 7% of messages                         |   8.0 ms (8.4 ms) |   4.2 ms (4.4 ms) |   9.1 ms (9.1 ms) |
+| `messages search`, a word in 7%, `--sender` with no recent messages |   6.0 ms (6.2 ms) |     71 ms (72 ms) |   679 ms (689 ms) |
+| `messages search --offset 200`, common word                         |   2.2 ms (2.3 ms) |   5.1 ms (5.2 ms) |     13 ms (14 ms) |
+| `messages search`, two words                                        | 0.22 ms (0.24 ms) |  0.96 ms (1.1 ms) |     16 ms (18 ms) |
+| `messages search --phrase`, two common words                        |   1.6 ms (1.7 ms) |     23 ms (23 ms) |   238 ms (244 ms) |
+| `messages search`, prefix `stem*`                                   |   3.6 ms (3.7 ms) |     43 ms (45 ms) |   437 ms (440 ms) |
+| `messages search --chat`, common word, biggest chat                 | 0.49 ms (0.51 ms) |   1.1 ms (1.3 ms) |   3.0 ms (3.2 ms) |
+| `messages search --sort relevance`, common word                     |     56 ms (60 ms) |   695 ms (727 ms) |     6.3 s (7.2 s) |
+| `messages search --sort relevance`, two words                       | 0.36 ms (0.39 ms) |   2.5 ms (2.6 ms) |     31 ms (34 ms) |
+| `messages search --count`, common word                              |     20 ms (22 ms) |   202 ms (211 ms) |     1.9 s (1.9 s) |
+| `messages search --count`, rare word                                | 0.08 ms (0.10 ms) | 0.31 ms (0.42 ms) |   4.6 ms (4.7 ms) |
+| `messages search --snippet`, two words                              | 0.53 ms (0.60 ms) |   1.4 ms (1.5 ms) |     15 ms (16 ms) |
+| `messages list`, newest page of 20                                  | 0.18 ms (0.23 ms) | 0.20 ms (0.26 ms) | 0.23 ms (0.29 ms) |
+| `messages list --before`, a page in the middle                      | 0.19 ms (0.21 ms) | 0.19 ms (0.21 ms) | 0.20 ms (0.33 ms) |
+| `messages get --context 5`                                          | 0.22 ms (0.32 ms) | 0.21 ms (0.34 ms) | 0.24 ms (0.24 ms) |
+| `tg sql`, aggregate over `message_search_text`                      | 0.09 ms (0.11 ms) | 0.79 ms (0.82 ms) |     15 ms (15 ms) |
+| `tg sql`, aggregate that scans `messages_cache`                     |   188 ms (193 ms) |     2.2 s (2.3 s) |   24.7 s (25.8 s) |
+| `tg status`                                                         | 0.75 ms (0.92 ms) |   3.1 ms (3.4 ms) |     34 ms (36 ms) |
+| `tg status --sizes`                                                 |     33 ms (33 ms) |   318 ms (322 ms) |     3.2 s (3.2 s) |
+| CLI run: `tg --help`                                                |    92 ms (104 ms) |     89 ms (91 ms) |     88 ms (88 ms) |
+| CLI run: `tg status`                                                |     96 ms (97 ms) |     97 ms (98 ms) |   129 ms (129 ms) |
+| CLI run: `tg status --sizes`                                        |   128 ms (129 ms) |   404 ms (409 ms) |     3.3 s (3.4 s) |
+| CLI run: `tg messages search`, rare word                            |    93 ms (103 ms) |     93 ms (94 ms) |     98 ms (98 ms) |
+| CLI run: `tg messages search`, common word                          |     95 ms (96 ms) |     95 ms (95 ms) |     98 ms (99 ms) |
+| CLI run: `tg sql`, aggregate over `message_search_text`             |     94 ms (95 ms) |    94 ms (103 ms) |   110 ms (112 ms) |
 
 ## Method
 
@@ -483,15 +483,15 @@ bun run bench:storage --messages 1000000 --out 1m.json  # also write the JSON to
 bun run bench:storage --messages 1000000 --old-form     # time tg db migrate on old rows
 ```
 
-| Option | Default | |
-|---|---|---|
-| `--messages N` | 100000 | Messages in the generated history; live messages come on top |
-| `--seed S` | 1 | Fixes every generated value |
-| `--runs R` | 20 | Timed runs per in-process query, after one first run |
-| `--cli-runs R` | 5 | Timed runs per CLI command |
-| `--old-form` | off | Write the history as 0.5.0 and older did, then time `tg db migrate` |
-| `--out file` | none | Also write the JSON result to `file` |
-| `--keep` | off | Leave the temp folder with the cache |
+| Option         | Default |                                                                     |
+| -------------- | ------- | ------------------------------------------------------------------- |
+| `--messages N` | 100000  | Messages in the generated history; live messages come on top        |
+| `--seed S`     | 1       | Fixes every generated value                                         |
+| `--runs R`     | 20      | Timed runs per in-process query, after one first run                |
+| `--cli-runs R` | 5       | Timed runs per CLI command                                          |
+| `--old-form`   | off     | Write the history as 0.5.0 and older did, then time `tg db migrate` |
+| `--out file`   | none    | Also write the JSON result to `file`                                |
+| `--keep`       | off     | Leave the temp folder with the cache                                |
 
 It prints progress to stderr, then the JSON result and a Markdown summary to stdout. It needs
 no Telegram credentials, works in a new folder under `$TMPDIR` (set as
