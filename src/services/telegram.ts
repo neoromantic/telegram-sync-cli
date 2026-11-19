@@ -1,183 +1,153 @@
-/**
- * Global setTimeout patch to prevent crashes from invalid/negative timeouts
- * This must be applied before importing mtcute or any other library that uses timers
- */
-const timeoutPatchKey = Symbol.for('tgcli.timeoutPatch')
+const timeoutPatchKey = Symbol.for("tgcli.timeoutPatch");
 if (!(globalThis as Record<symbol, boolean>)[timeoutPatchKey]) {
-  const originalSetTimeout = globalThis.setTimeout
+  const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = ((
     handler: (...args: unknown[]) => void,
     delay?: number,
     ...args: unknown[]
-  ): ReturnType<typeof originalSetTimeout> => {
-    const safeDelay = Math.max(0, Number.isFinite(delay) ? delay! : 0)
-    return originalSetTimeout(handler, safeDelay, ...args)
-  }) as typeof setTimeout
-  ;(globalThis as Record<symbol, boolean>)[timeoutPatchKey] = true
+  ) => {
+    const safeDelay = Math.max(0, Number.isFinite(delay) ? delay! : 0);
+    return originalSetTimeout(handler, safeDelay, ...args);
+  }) as typeof setTimeout;
+  (globalThis as Record<symbol, boolean>)[timeoutPatchKey] = true;
 }
 
-/**
- * Telegram clients: config, the client factory and one cached client per
- * account, each with its own session file
- */
-
-import { join } from 'node:path'
+import { join } from "node:path";
 import {
   type FloodWaiterOptions,
   networkMiddlewares,
   proxyTransportFromUrl,
   TelegramClient,
-} from '@mtcute/bun'
+} from "@mtcute/bun";
 
-import { ConfigError } from '../config'
-import { getDataDir } from '../db'
-import { wrapClientCallWithRecordReplay } from '../utils/telegram-record-replay'
+import { ConfigError } from "../config";
+import { getDataDir } from "../db";
+import { wrapClientCallWithRecordReplay } from "../utils/telegram-record-replay";
 
-// Store active clients by account ID
-const clients = new Map<number, TelegramClient>()
+const clients = new Map<number, TelegramClient>();
 
 /**
  * Configuration for telegram service
  */
 export interface TelegramConfig {
-  apiId: number
-  apiHash: string
-  logLevel: number
-  transport?: ReturnType<typeof proxyTransportFromUrl>
+  apiId: number;
+  apiHash: string;
+  logLevel: number;
+  transport?: ReturnType<typeof proxyTransportFromUrl>;
   /** FloodWaiter middleware options */
-  floodWaiter?: FloodWaiterOptions
+  floodWaiter?: FloodWaiterOptions;
 }
 
-/**
- * Default FloodWaiter options
- * - maxRetries: 5 attempts before giving up
- * - maxWait: 60 seconds max wait time (higher than default 10s for CLI use)
- * - store: true to remember wait times across requests
- */
 const DEFAULT_FLOOD_WAITER_OPTIONS: FloodWaiterOptions = {
   maxRetries: 5,
-  maxWait: 60000, // 60 seconds - CLI users can wait longer
+  maxWait: 60000,
   store: true,
   onBeforeWait: (ctx, seconds) => {
-    // Log flood wait unless it's a common method that often triggers it
-    const method = ctx.request._
+    const method = ctx.request._;
     const quietMethods = [
-      'messages.getDialogs',
-      'messages.getHistory',
-      'contacts.getContacts',
-      // File transfers sleep through short waits part by part
-      'upload.getFile',
-      'upload.saveFilePart',
-      'upload.saveBigFilePart',
-    ]
+      "messages.getDialogs",
+      "messages.getHistory",
+      "contacts.getContacts",
+      "upload.getFile",
+      "upload.saveFilePart",
+      "upload.saveBigFilePart",
+    ];
     if (!quietMethods.includes(method)) {
-      console.error(`[flood-wait] ${method}: waiting ${seconds}s before retry`)
+      console.error(`[flood-wait] ${method}: waiting ${seconds}s before retry`);
     }
   },
-}
+};
 
 /**
  * Get default configuration from environment
  */
-export function getDefaultConfig(): TelegramConfig {
-  // Read lazily so commands that never talk to Telegram (help, version,
-  // cache queries, config) work without credentials.
+export function getDefaultConfig() {
   const config: TelegramConfig = {
-    apiId: parseInt(process.env.TELEGRAM_API_ID ?? '0', 10),
-    apiHash: process.env.TELEGRAM_API_HASH ?? '',
-    // Verbose/debug mode - set via VERBOSE=1 or MTCUTE_LOG_LEVEL env var
+    apiId: parseInt(process.env.TELEGRAM_API_ID ?? "0", 10),
+    apiHash: process.env.TELEGRAM_API_HASH ?? "",
     logLevel: parseInt(
-      process.env.MTCUTE_LOG_LEVEL ?? (process.env.VERBOSE === '1' ? '5' : '2'),
+      process.env.MTCUTE_LOG_LEVEL ?? (process.env.VERBOSE === "1" ? "5" : "2"),
       10,
     ),
-  }
+  };
   if (process.env.TELEGRAM_PROXY !== undefined) {
     try {
-      config.transport = proxyTransportFromUrl(process.env.TELEGRAM_PROXY)
+      config.transport = proxyTransportFromUrl(process.env.TELEGRAM_PROXY);
     } catch {
-      throw new ConfigError('Invalid TELEGRAM_PROXY URL', [
-        { path: 'TELEGRAM_PROXY', message: 'Expected a supported proxy URL' },
-      ])
+      throw new ConfigError("Invalid TELEGRAM_PROXY URL", [
+        { path: "TELEGRAM_PROXY", message: "Expected a supported proxy URL" },
+      ]);
     }
   }
-  return config
+  return config;
 }
 
 /**
  * Validate API credentials
  */
-export function validateConfig(config: TelegramConfig): {
-  valid: boolean
-  error?: string
-} {
+export function validateConfig(config: TelegramConfig) {
   if (!config.apiId || config.apiId <= 0) {
     return {
       valid: false,
-      error: 'TELEGRAM_API_ID environment variable is required',
-    }
+      error: "TELEGRAM_API_ID environment variable is required",
+    };
   }
   if (!config.apiHash) {
     return {
       valid: false,
-      error: 'TELEGRAM_API_HASH environment variable is required',
-    }
+      error: "TELEGRAM_API_HASH environment variable is required",
+    };
   }
-  return { valid: true }
+  return { valid: true };
 }
 
-export const CREDENTIALS_HELP_URL = 'https://my.telegram.org/apps'
+export const CREDENTIALS_HELP_URL = "https://my.telegram.org/apps";
 
 /**
  * Thrown when a command needs Telegram but API credentials are not set
  */
 export class MissingCredentialsError extends ConfigError {
   constructor(message: string) {
-    super(`${message}. Get credentials at ${CREDENTIALS_HELP_URL}`, [
-      { path: 'env', message },
-    ])
-    this.name = 'MissingCredentialsError'
+    super(`${message}. Get credentials at ${CREDENTIALS_HELP_URL}`, [{ path: "env", message }]);
+    this.name = "MissingCredentialsError";
   }
 }
 
 /**
  * Get config from environment, throwing if credentials are missing
  */
-export function requireDefaultConfig(): TelegramConfig {
-  const config = getDefaultConfig()
-  const validation = validateConfig(config)
+export function requireDefaultConfig() {
+  const config = getDefaultConfig();
+  const validation = validateConfig(config);
   if (!validation.valid) {
-    throw new MissingCredentialsError(validation.error ?? 'Invalid config')
+    throw new MissingCredentialsError(validation.error ?? "Invalid config");
   }
-  return config
+  return config;
 }
 
 /**
  * Get session storage path for an account
  */
-export function getSessionPath(accountId: number, dataDir?: string): string {
-  return join(dataDir ?? getDataDir(), `session_${accountId}.db`)
+export function getSessionPath(accountId: number, dataDir?: string) {
+  return join(dataDir ?? getDataDir(), `session_${accountId}.db`);
 }
 
 /**
  * Client factory interface for dependency injection
  */
 export interface ClientFactory {
-  create(accountId: number): TelegramClient
+  create(accountId: number): TelegramClient;
 }
 
 /**
  * Default client factory using mtcute
  */
-export function createDefaultClientFactory(
-  config: TelegramConfig,
-  dataDir?: string,
-): ClientFactory {
-  // Build middleware stack
-  const floodWaiterOpts = config.floodWaiter ?? DEFAULT_FLOOD_WAITER_OPTIONS
-  const middlewares = [networkMiddlewares.floodWaiter(floodWaiterOpts)]
+export function createDefaultClientFactory(config: TelegramConfig, dataDir?: string) {
+  const floodWaiterOpts = config.floodWaiter ?? DEFAULT_FLOOD_WAITER_OPTIONS;
+  const middlewares = [networkMiddlewares.floodWaiter(floodWaiterOpts)];
 
   return {
-    create(accountId: number): TelegramClient {
+    create(accountId: number) {
       const client = new TelegramClient({
         apiId: config.apiId,
         apiHash: config.apiHash,
@@ -187,46 +157,44 @@ export function createDefaultClientFactory(
         network: {
           middlewares,
         },
-      })
-      wrapClientCallWithRecordReplay(client, { accountId, dataDir })
-      return client
+      });
+      wrapClientCallWithRecordReplay(client, { accountId, dataDir });
+      return client;
     },
-  }
+  };
 }
 
 /**
  * Check if a client is connected and authorized
  */
-export async function isAuthorized(client: TelegramClient): Promise<boolean> {
+export async function isAuthorized(client: TelegramClient) {
   try {
-    await client.getMe()
-    return true
+    await client.getMe();
+    return true;
   } catch {
-    return false
+    return false;
   }
 }
 
-// Default client factory, created on first use so credentials are only
-// required by commands that actually connect to Telegram
-let defaultFactory: ClientFactory | null = null
+let defaultFactory: ClientFactory | null = null;
 
-function getDefaultFactory(): ClientFactory {
-  defaultFactory ??= createDefaultClientFactory(requireDefaultConfig())
-  return defaultFactory
+function getDefaultFactory() {
+  defaultFactory ??= createDefaultClientFactory(requireDefaultConfig());
+  return defaultFactory;
 }
 
 /**
  * Create a new Telegram client for an account (uses global clients map)
  */
-export function createClient(accountId: number): TelegramClient {
-  const client = getDefaultFactory().create(accountId)
-  clients.set(accountId, client)
-  return client
+export function createClient(accountId: number) {
+  const client = getDefaultFactory().create(accountId);
+  clients.set(accountId, client);
+  return client;
 }
 
 /**
  * Get or create the client for an account the command already resolved
  */
-export function getClientForAccount(accountId: number): TelegramClient {
-  return clients.get(accountId) ?? createClient(accountId)
+export function getClientForAccount(accountId: number) {
+  return clients.get(accountId) ?? createClient(accountId);
 }

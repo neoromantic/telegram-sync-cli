@@ -1,17 +1,15 @@
-import type { tl } from '@mtcute/bun'
-import Long from 'long'
+import type { tl } from "@mtcute/bun";
+import Long from "long";
 
-export function toLong(
-  value: tl.Long | bigint | number | string | null | undefined,
-): tl.Long {
+export function toLong(value: tl.Long | bigint | number | string | null | undefined) {
   if (Long.isLong(value)) {
-    return value
+    return value;
   }
-  if (typeof value === 'bigint') {
-    return Long.fromString(value.toString())
+  if (typeof value === "bigint") {
+    return Long.fromString(value.toString());
   }
   if (value === null || value === undefined) {
-    return Long.fromInt(0)
+    return Long.fromInt(0);
   }
-  return Long.fromValue(value)
+  return Long.fromValue(value);
 }

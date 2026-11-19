@@ -1,29 +1,17 @@
-/**
- * Senders missing from the cache (#143). A cached message whose sender has
- * no users_cache row shows only the sender's ID, and `sender:name` misses
- * it: history synced before 0.9.0 (#126) left such messages, and a live
- * message whose sender came as a "min" user still does. Once a day the
- * daemon lists every such sender here with one recent message of theirs; a
- * fetch_senders job asks Telegram for up to 100 of those messages of one
- * chat by ID, and the reply carries their senders with access hashes. The
- * new users_cache rows re-index the senders' messages (search-reindex.ts).
- * A sender Telegram doesn't return (a message deleted since, a chat left)
- * is asked again after 30 days, with their newest message then.
- */
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 
-import { CHANNEL_PEER_ID_OFFSET } from '../utils/telegram-peer-ids'
+import { CHANNEL_PEER_ID_OFFSET } from "../utils/telegram-peer-ids";
 
 /** How long a sender Telegram didn't return waits before the next try */
-export const SENDER_RETRY_MS = 30 * 24 * 60 * 60 * 1000
+export const SENDER_RETRY_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** A sender to look up and the message of theirs to ask for */
 export interface SenderLookup {
-  sender_id: number
-  message_id: number
+  sender_id: number;
+  message_id: number;
 }
 
-export function createSenderLookupsSchema(db: Database): void {
+export function createSenderLookupsSchema(db: Database) {
   db.run(`
     CREATE TABLE IF NOT EXISTS sender_lookups (
       sender_id   INTEGER PRIMARY KEY,
@@ -31,24 +19,17 @@ export function createSenderLookupsSchema(db: Database): void {
       message_id  INTEGER NOT NULL,
       asked_at    INTEGER
     )
-  `)
+  `);
   db.run(`
     CREATE INDEX IF NOT EXISTS idx_sender_lookups_waiting
     ON sender_lookups(chat_id) WHERE asked_at IS NULL
-  `)
+  `);
 }
 
-/** Whether users_cache has the user `id` names */
-function cachedUserSql(id: string): string {
-  return `EXISTS (SELECT 1 FROM users_cache WHERE user_id = CAST(${id} AS TEXT))`
+function cachedUserSql(id: string) {
+  return `EXISTS (SELECT 1 FROM users_cache WHERE user_id = CAST(${id} AS TEXT))`;
 }
 
-/**
- * Every user that sent a cached message, one index seek each: a walk from
- * one sender to the next on idx_messages_cache_from instead of a scan of
- * every message (about 6 ms for 40,000 senders of 1.16M messages, where a
- * DISTINCT over the messages takes 200 ms)
- */
 const MISSING_SENDERS_CTE = `
   senders(id) AS (
     SELECT MIN(from_id) FROM messages_cache WHERE from_id > 0
@@ -58,13 +39,13 @@ const MISSING_SENDERS_CTE = `
   ),
   missing(id) AS (
     SELECT id FROM senders
-    WHERE id IS NOT NULL AND NOT ${cachedUserSql('id')}
+    WHERE id IS NOT NULL AND NOT ${cachedUserSql("id")}
       -- With every message deleted, none is left to ask for or to show
       AND EXISTS (
         SELECT 1 FROM messages_cache WHERE from_id = senders.id AND is_deleted = 0
       )
   )
-`
+`;
 
 export interface SenderLookups {
   /**
@@ -75,34 +56,31 @@ export interface SenderLookups {
    * gets a new message after SENDER_RETRY_MS. Rows of senders cached since
    * go. Returns how many senders now wait.
    */
-  scan(now: number): number
+  scan(now: number): number;
   /** Chats with senders waiting to be asked for */
-  chatsDue(): number[]
+  chatsDue(): number[];
   /** Up to `limit` senders of the chat that wait and are still missing */
-  nextBatch(chatId: number, limit: number): SenderLookup[]
+  nextBatch(chatId: number, limit: number): SenderLookup[];
   /**
    * After Telegram was asked: senders cached since go, the others wait
    * SENDER_RETRY_MS
    */
-  finish(senderIds: number[], now: number): void
+  finish(senderIds: number[], now: number): void;
   /** Users with cached messages and no users_cache row */
-  countMissing(): number
+  countMissing(): number;
   /** Of those, the ones Telegram was asked for and didn't return */
-  countNotFound(): number
+  countNotFound(): number;
 }
 
-export function createSenderLookups(db: Database): SenderLookups {
+export function createSenderLookups(db: Database) {
   const reachable = `(
     r.chat_id > -${CHANNEL_PEER_ID_OFFSET} OR EXISTS (
       SELECT 1 FROM chats_cache c
       WHERE c.chat_id = CAST(r.chat_id AS TEXT) AND c.access_hash IS NOT NULL
     )
-  )`
+  )`;
   const stmts = {
-    dropCached: db.prepare(
-      `DELETE FROM sender_lookups WHERE ${cachedUserSql('sender_id')}`,
-    ),
-    // A SELECT before ON CONFLICT needs its WHERE (SQLite's upsert parsing)
+    dropCached: db.prepare(`DELETE FROM sender_lookups WHERE ${cachedUserSql("sender_id")}`),
     list: db.prepare(`
       WITH RECURSIVE ${MISSING_SENDERS_CTE}
       INSERT INTO sender_lookups (sender_id, chat_id, message_id)
@@ -121,25 +99,22 @@ export function createSenderLookups(db: Database): SenderLookups {
         asked_at = NULL
       WHERE sender_lookups.asked_at <= $retry_before
     `),
-    countWaiting: db.query(
-      'SELECT COUNT(*) AS count FROM sender_lookups WHERE asked_at IS NULL',
-    ),
-    // A sender cached since the scan, by history or a live message, makes no job
+    countWaiting: db.query("SELECT COUNT(*) AS count FROM sender_lookups WHERE asked_at IS NULL"),
     chatsDue: db.query(`
       SELECT DISTINCT chat_id FROM sender_lookups
-      WHERE asked_at IS NULL AND NOT ${cachedUserSql('sender_id')}
+      WHERE asked_at IS NULL AND NOT ${cachedUserSql("sender_id")}
     `),
     nextBatch: db.query(`
       SELECT sender_id, message_id FROM sender_lookups
       WHERE chat_id = $chat_id AND asked_at IS NULL
-        AND NOT ${cachedUserSql('sender_id')}
+        AND NOT ${cachedUserSql("sender_id")}
       ORDER BY sender_id
       LIMIT $limit
     `),
     dropFinished: db.prepare(`
       DELETE FROM sender_lookups
       WHERE sender_id IN (SELECT value FROM json_each($ids))
-        AND ${cachedUserSql('sender_id')}
+        AND ${cachedUserSql("sender_id")}
     `),
     markAsked: db.prepare(`
       UPDATE sender_lookups SET asked_at = $now
@@ -150,44 +125,42 @@ export function createSenderLookups(db: Database): SenderLookups {
     ),
     countNotFound: db.query(`
       SELECT COUNT(*) AS count FROM sender_lookups
-      WHERE asked_at IS NOT NULL AND NOT ${cachedUserSql('sender_id')}
+      WHERE asked_at IS NOT NULL AND NOT ${cachedUserSql("sender_id")}
     `),
-  }
+  };
 
-  const count = (query: typeof stmts.countWaiting) =>
-    (query.get() as { count: number }).count
+  const count = (query: typeof stmts.countWaiting) => (query.get() as { count: number }).count;
 
-  return {
+  const result: SenderLookups = {
     scan(now) {
       db.transaction(() => {
-        stmts.dropCached.run()
-        stmts.list.run({ $retry_before: now - SENDER_RETRY_MS })
-      })()
-      return count(stmts.countWaiting)
+        stmts.dropCached.run();
+        stmts.list.run({ $retry_before: now - SENDER_RETRY_MS });
+      })();
+      return count(stmts.countWaiting);
     },
 
     chatsDue() {
-      return (stmts.chatsDue.all() as { chat_id: number }[]).map(
-        (row) => row.chat_id,
-      )
+      return (stmts.chatsDue.all() as { chat_id: number }[]).map((row) => row.chat_id);
     },
 
     nextBatch(chatId, limit) {
       return stmts.nextBatch.all({
         $chat_id: chatId,
         $limit: limit,
-      }) as SenderLookup[]
+      }) as SenderLookup[];
     },
 
     finish(senderIds, now) {
-      const ids = JSON.stringify(senderIds)
+      const ids = JSON.stringify(senderIds);
       db.transaction(() => {
-        stmts.dropFinished.run({ $ids: ids })
-        stmts.markAsked.run({ $ids: ids, $now: now })
-      })()
+        stmts.dropFinished.run({ $ids: ids });
+        stmts.markAsked.run({ $ids: ids, $now: now });
+      })();
     },
 
     countMissing: () => count(stmts.countMissing),
     countNotFound: () => count(stmts.countNotFound),
-  }
+  };
+  return result;
 }

@@ -1,253 +1,213 @@
-/**
- * Schema annotation types and registry
- * Provides metadata about database tables and columns for:
- * - CLI help output
- * - Documentation generation
- * - AI/LLM context
- */
-
 /** Metadata for a database column */
 export interface ColumnAnnotation {
   /** Human-readable description */
-  description: string
+  description: string;
   /** Whether this column is nullable */
-  nullable?: boolean
+  nullable?: boolean;
   /** Default value if any */
-  defaultValue?: string | number | boolean | null
+  defaultValue?: string | number | boolean | null;
   /** Valid enum values if column is an enum */
-  enumValues?: readonly string[]
+  enumValues?: readonly string[];
   /** Semantic type hint (e.g., 'timestamp', 'json', 'phone', 'username') */
-  semanticType?: SemanticType
+  semanticType?: SemanticType;
 }
 
 /** Metadata for a database table */
 export interface TableAnnotation {
   /** Human-readable description */
-  description: string
+  description: string;
   /** Primary key column(s) */
-  primaryKey: string | string[]
+  primaryKey: string | string[];
   /** Column annotations keyed by column name */
-  columns: Record<string, ColumnAnnotation>
+  columns: Record<string, ColumnAnnotation>;
   /** Index descriptions */
-  indexes?: Record<string, string>
+  indexes?: Record<string, string>;
   /** Staleness TTL description (for cache tables) */
-  ttl?: string
+  ttl?: string;
   /** Staleness TTL in milliseconds */
-  ttlMs?: number
+  ttlMs?: number;
 }
 
 /** Semantic type hints for special handling */
 export type SemanticType =
-  | 'timestamp' // Unix timestamp (milliseconds)
-  | 'timestamp_sec' // Unix timestamp (seconds)
-  | 'json' // JSON-encoded string
-  | 'phone' // Phone number with country code
-  | 'username' // Telegram @username (without @)
-  | 'bigint_string' // BigInt stored as string
-  | 'boolean_int' // Boolean stored as INTEGER (0/1)
-  | 'enum' // Enum value (use enumValues)
+  | "timestamp"
+  | "timestamp_sec"
+  | "json"
+  | "phone"
+  | "username"
+  | "bigint_string"
+  | "boolean_int"
+  | "enum";
 
 /** Complete schema registry */
 export interface SchemaRegistry {
   /** Schema version for tracking changes */
-  version: number
+  version: number;
   /** Table annotations keyed by table name */
-  tables: Record<string, TableAnnotation>
+  tables: Record<string, TableAnnotation>;
 }
-
-// =============================================================================
-// Attachments (#22): the file of a cached message, one row per message
-// =============================================================================
 
 const MESSAGE_ATTACHMENTS_ANNOTATION: TableAnnotation = {
   description:
-    'The file of a cached message (photo, video, voice…), one row per message, written with the message. Messages cached before this table existed get their row from the background migration messages_raw_json_v2 (see cache_migrations); tg messages list/get/search read the attachment from raw_json for every message. Join messages_cache USING (chat_id, message_id).',
-  primaryKey: ['chat_id', 'message_id'],
+    "The file of a cached message (photo, video, voice…), one row per message, written with the message. Messages cached before this table existed get their row from the background migration messages_raw_json_v2 (see cache_migrations); tg messages list/get/search read the attachment from raw_json for every message. Join messages_cache USING (chat_id, message_id).",
+  primaryKey: ["chat_id", "message_id"],
   columns: {
     chat_id: {
-      description: 'Marked peer ID of the chat, as in messages_cache',
+      description: "Marked peer ID of the chat, as in messages_cache",
       nullable: false,
     },
     message_id: {
-      description: 'Message ID within the chat',
+      description: "Message ID within the chat",
       nullable: false,
     },
     kind: {
-      description: 'What the file is',
+      description: "What the file is",
       nullable: false,
-      semanticType: 'enum',
-      enumValues: [
-        'photo',
-        'video',
-        'round',
-        'animation',
-        'voice',
-        'audio',
-        'sticker',
-        'document',
-      ],
+      semanticType: "enum",
+      enumValues: ["photo", "video", "round", "animation", "voice", "audio", "sticker", "document"],
     },
     source: {
-      description:
-        'message: the message media; webpage: the photo or file of its link preview',
+      description: "message: the message media; webpage: the photo or file of its link preview",
       nullable: false,
-      semanticType: 'enum',
-      enumValues: ['message', 'webpage'],
-      defaultValue: 'message',
+      semanticType: "enum",
+      enumValues: ["message", "webpage"],
+      defaultValue: "message",
     },
     file_name: {
-      description:
-        'File name the sender gave (documents); null for photos and unnamed files',
+      description: "File name the sender gave (documents); null for photos and unnamed files",
       nullable: true,
     },
     mime_type: {
-      description: 'MIME type (image/jpeg for photos)',
+      description: "MIME type (image/jpeg for photos)",
       nullable: true,
     },
-    file_size: { description: 'Size in bytes', nullable: true },
+    file_size: { description: "Size in bytes", nullable: true },
     duration: {
-      description: 'Length in seconds (video, round, animation, voice, audio)',
+      description: "Length in seconds (video, round, animation, voice, audio)",
       nullable: true,
     },
     width: {
-      description: 'Width in pixels (photo: largest size)',
+      description: "Width in pixels (photo: largest size)",
       nullable: true,
     },
-    height: { description: 'Height in pixels', nullable: true },
+    height: { description: "Height in pixels", nullable: true },
     unique_file_id: {
       description:
-        'Telegram unique file ID (same for the same file in any chat); the folder name in the media cache',
+        "Telegram unique file ID (same for the same file in any chat); the folder name in the media cache",
       nullable: false,
     },
     grouped_id: {
-      description: 'Album ID: messages sent as one album share it',
+      description: "Album ID: messages sent as one album share it",
       nullable: true,
-      semanticType: 'bigint_string',
+      semanticType: "bigint_string",
     },
   },
   indexes: {
-    idx_message_attachments_unique_file_id:
-      'Find the messages that hold a cached file',
+    idx_message_attachments_unique_file_id: "Find the messages that hold a cached file",
   },
-}
-
-// =============================================================================
-// Content protection (#22): the last online check of a chat's protection
-// =============================================================================
+};
 
 const CHAT_CONTENT_PROTECTION_ANNOTATION: TableAnnotation = {
   description:
     "What the last online check of tg media download found about a chat's content protection. A protected chat's cached files are refused offline too, until an online check (--fresh) finds the protection off. Written only by tg media download.",
-  primaryKey: 'chat_id',
+  primaryKey: "chat_id",
   columns: {
     chat_id: {
-      description: 'Marked peer ID of the chat, as in messages_cache',
+      description: "Marked peer ID of the chat, as in messages_cache",
       nullable: false,
     },
     protected: {
-      description: 'Whether that check found content protection',
+      description: "Whether that check found content protection",
       nullable: false,
-      semanticType: 'boolean_int',
+      semanticType: "boolean_int",
     },
     reason: {
       description:
-        'chat: the group or channel protects its content; private_chat: a private chat with protection on; null when not protected',
+        "chat: the group or channel protects its content; private_chat: a private chat with protection on; null when not protected",
       nullable: true,
-      semanticType: 'enum',
-      enumValues: ['chat', 'private_chat'],
+      semanticType: "enum",
+      enumValues: ["chat", "private_chat"],
     },
     fetched_at: {
-      description: 'When that check ran',
+      description: "When that check ran",
       nullable: false,
-      semanticType: 'timestamp',
+      semanticType: "timestamp",
     },
   },
-}
-
-// =============================================================================
-// Background migrations (#89): rewrites of every row, done in batches
-// =============================================================================
+};
 
 const CACHE_MIGRATIONS_ANNOTATION: TableAnnotation = {
   description:
-    'The progress of each background migration: a rewrite of every row of a table that the daemon or tg db migrate does in short batches, resuming from cursor. tg status shows the unfinished ones.',
-  primaryKey: 'name',
+    "The progress of each background migration: a rewrite of every row of a table that the daemon or tg db migrate does in short batches, resuming from cursor. tg status shows the unfinished ones.",
+  primaryKey: "name",
   columns: {
     name: {
       description:
-        'The migration: messages_raw_json_v2, users_raw_json_v2, chats_raw_json_v2, messages_refetch_empty_raw_json, message_search_names',
+        "The migration: messages_raw_json_v2, users_raw_json_v2, chats_raw_json_v2, messages_refetch_empty_raw_json, message_search_names",
       nullable: false,
     },
     state: {
-      description:
-        'pending before it starts, running once it has, done when every row is',
+      description: "pending before it starts, running once it has, done when every row is",
       nullable: false,
-      semanticType: 'enum',
-      enumValues: ['pending', 'running', 'done'],
+      semanticType: "enum",
+      enumValues: ["pending", "running", "done"],
     },
     cursor: {
-      description: 'rowid of the last row done',
+      description: "rowid of the last row done",
       nullable: false,
     },
     end_rowid: {
       description:
-        'The largest rowid of the table when the migration started; later rows are written in the new form',
+        "The largest rowid of the table when the migration started; later rows are written in the new form",
       nullable: true,
     },
-    done: { description: 'Rows done so far', nullable: false },
+    done: { description: "Rows done so far", nullable: false },
     total: {
-      description: 'Rows up to end_rowid when it started; null until then',
+      description: "Rows up to end_rowid when it started; null until then",
       nullable: true,
     },
     started_at: {
-      description: 'When it started',
+      description: "When it started",
       nullable: true,
-      semanticType: 'timestamp',
+      semanticType: "timestamp",
     },
     updated_at: {
-      description: 'When the last batch ran',
+      description: "When the last batch ran",
       nullable: true,
-      semanticType: 'timestamp',
+      semanticType: "timestamp",
     },
     finished_at: {
-      description: 'When it finished',
+      description: "When it finished",
       nullable: true,
-      semanticType: 'timestamp',
+      semanticType: "timestamp",
     },
     last_error: {
       description:
-        'The error of the last failed batch, which rolled back; cleared by the next batch that commits',
+        "The error of the last failed batch, which rolled back; cleared by the next batch that commits",
       nullable: true,
     },
   },
-}
-
-// =============================================================================
-// Schema Registry
-// =============================================================================
+};
 
 export const SCHEMA_REGISTRY: SchemaRegistry = {
   version: 5,
   tables: {
-    // -------------------------------------------------------------------------
-    // Users Cache Table
-    // -------------------------------------------------------------------------
     users_cache: {
       description:
-        'Cached Telegram user profiles. Includes contacts, chat participants, and any user encountered.',
-      primaryKey: 'user_id',
-      ttl: '1 week',
+        "Cached Telegram user profiles. Includes contacts, chat participants, and any user encountered.",
+      primaryKey: "user_id",
+      ttl: "1 week",
       ttlMs: 7 * 24 * 60 * 60 * 1000,
       columns: {
         user_id: {
           description:
-            'Telegram user ID (unique identifier); the same as the chat_id of the private chat with the user',
-          semanticType: 'bigint_string',
+            "Telegram user ID (unique identifier); the same as the chat_id of the private chat with the user",
+          semanticType: "bigint_string",
           nullable: false,
         },
         username: {
-          description: 'Telegram @username without the @ symbol',
-          semanticType: 'username',
+          description: "Telegram @username without the @ symbol",
+          semanticType: "username",
           nullable: true,
         },
         first_name: {
@@ -259,118 +219,106 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         display_name: {
-          description: 'Combined first + last name for display purposes',
+          description: "Combined first + last name for display purposes",
           nullable: true,
         },
         phone: {
-          description: 'Phone number (only visible for contacts)',
-          semanticType: 'phone',
+          description: "Phone number (only visible for contacts)",
+          semanticType: "phone",
           nullable: true,
         },
         access_hash: {
-          description:
-            'Telegram access hash required for API calls to this user',
-          semanticType: 'bigint_string',
+          description: "Telegram access hash required for API calls to this user",
+          semanticType: "bigint_string",
           nullable: true,
         },
         is_contact: {
-          description: 'Whether user is in your contacts list',
-          semanticType: 'boolean_int',
+          description: "Whether user is in your contacts list",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         is_bot: {
-          description: 'Whether this user is a bot account',
-          semanticType: 'boolean_int',
+          description: "Whether this user is a bot account",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         is_premium: {
-          description: 'Whether user has Telegram Premium subscription',
-          semanticType: 'boolean_int',
+          description: "Whether user has Telegram Premium subscription",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         fetched_at: {
-          description:
-            'Unix timestamp (ms) when this data was fetched from Telegram API',
-          semanticType: 'timestamp',
+          description: "Unix timestamp (ms) when this data was fetched from Telegram API",
+          semanticType: "timestamp",
           nullable: false,
         },
         raw_json: {
           description:
-            'Complete Telegram User object as JSON for future-proofing. Byte arrays are base64 strings and 64-bit values (accessHash…) decimal strings; rows of older versions keep objects until the background migration users_raw_json_v2 reaches them',
-          semanticType: 'json',
+            "Complete Telegram User object as JSON for future-proofing. Byte arrays are base64 strings and 64-bit values (accessHash…) decimal strings; rows of older versions keep objects until the background migration users_raw_json_v2 reaches them",
+          semanticType: "json",
           nullable: false,
         },
         created_at: {
-          description: 'When this cache entry was first created',
-          semanticType: 'timestamp',
+          description: "When this cache entry was first created",
+          semanticType: "timestamp",
         },
         updated_at: {
-          description: 'When this cache entry was last updated',
-          semanticType: 'timestamp',
+          description: "When this cache entry was last updated",
+          semanticType: "timestamp",
         },
       },
       indexes: {
-        idx_users_cache_username: 'Fast lookup by @username',
-        idx_users_cache_phone: 'Fast lookup by phone number',
-        idx_users_cache_fetched_at: 'Find stale entries for refresh',
+        idx_users_cache_username: "Fast lookup by @username",
+        idx_users_cache_phone: "Fast lookup by phone number",
+        idx_users_cache_fetched_at: "Find stale entries for refresh",
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Chats Cache Table
-    // -------------------------------------------------------------------------
     chats_cache: {
       description:
-        'Cached Telegram chats including private chats, groups, supergroups, and channels.',
-      primaryKey: 'chat_id',
-      ttl: '1 week',
+        "Cached Telegram chats including private chats, groups, supergroups, and channels.",
+      primaryKey: "chat_id",
+      ttl: "1 week",
       ttlMs: 7 * 24 * 60 * 60 * 1000,
       columns: {
         chat_id: {
           description:
-            'Marked peer ID, as messages_cache.chat_id holds it: the user ID for a private chat, -N for basic group N, -100… for a supergroup, channel or community',
-          semanticType: 'bigint_string',
+            "Marked peer ID, as messages_cache.chat_id holds it: the user ID for a private chat, -N for basic group N, -100… for a supergroup, channel or community",
+          semanticType: "bigint_string",
           nullable: false,
         },
         type: {
-          description: 'Type of chat',
-          enumValues: [
-            'private',
-            'group',
-            'supergroup',
-            'channel',
-            'community',
-          ],
-          semanticType: 'enum',
+          description: "Type of chat",
+          enumValues: ["private", "group", "supergroup", "channel", "community"],
+          semanticType: "enum",
           nullable: false,
         },
         title: {
-          description:
-            'Chat title (groups/channels) or user display name (private chats)',
+          description: "Chat title (groups/channels) or user display name (private chats)",
           nullable: true,
         },
         username: {
-          description: 'Public @username for the chat if it has one',
-          semanticType: 'username',
+          description: "Public @username for the chat if it has one",
+          semanticType: "username",
           nullable: true,
         },
         member_count: {
-          description: 'Number of members (groups/channels only)',
+          description: "Number of members (groups/channels only)",
           nullable: true,
         },
         access_hash: {
-          description: 'Telegram access hash required for API calls',
-          semanticType: 'bigint_string',
+          description: "Telegram access hash required for API calls",
+          semanticType: "bigint_string",
           nullable: true,
         },
         is_creator: {
-          description: 'Whether current user created this chat',
-          semanticType: 'boolean_int',
+          description: "Whether current user created this chat",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         is_admin: {
-          description: 'Whether current user is an admin',
-          semanticType: 'boolean_int',
+          description: "Whether current user is an admin",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         last_message_id: {
@@ -379,182 +327,179 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         last_message_at: {
-          description: 'Timestamp of the most recent message',
-          semanticType: 'timestamp',
+          description: "Timestamp of the most recent message",
+          semanticType: "timestamp",
           nullable: true,
         },
         unread_count: {
           description:
-            'Unread incoming messages, as Telegram counts them: set by every dialog list (daemon start and reconnect, tg chats list --fresh), raised by each new incoming message the daemon gets, set by a read on any device and by tg messages read. NULL until a dialog list has the chat',
+            "Unread incoming messages, as Telegram counts them: set by every dialog list (daemon start and reconnect, tg chats list --fresh), raised by each new incoming message the daemon gets, set by a read on any device and by tg messages read. NULL until a dialog list has the chat",
           nullable: true,
         },
         read_inbox_max_id: {
           description:
-            'Read boundary: every incoming message up to this ID is read, the unread ones are above it. Set with unread_count; NULL until a dialog list has the chat',
+            "Read boundary: every incoming message up to this ID is read, the unread ones are above it. Set with unread_count; NULL until a dialog list has the chat",
           nullable: true,
         },
         fetched_at: {
-          description: 'When this chat data was last fetched from Telegram API',
-          semanticType: 'timestamp',
+          description: "When this chat data was last fetched from Telegram API",
+          semanticType: "timestamp",
           nullable: false,
         },
         raw_json: {
           description:
-            'Complete Telegram Chat object as JSON. Byte arrays are base64 strings and 64-bit values (accessHash…) decimal strings; rows of older versions keep objects until the background migration chats_raw_json_v2 reaches them',
-          semanticType: 'json',
+            "Complete Telegram Chat object as JSON. Byte arrays are base64 strings and 64-bit values (accessHash…) decimal strings; rows of older versions keep objects until the background migration chats_raw_json_v2 reaches them",
+          semanticType: "json",
           nullable: false,
         },
         created_at: {
-          description: 'When this cache entry was first created',
-          semanticType: 'timestamp',
+          description: "When this cache entry was first created",
+          semanticType: "timestamp",
         },
         updated_at: {
-          description: 'When this cache entry was last updated',
-          semanticType: 'timestamp',
+          description: "When this cache entry was last updated",
+          semanticType: "timestamp",
         },
       },
       indexes: {
-        idx_chats_cache_username: 'Fast lookup by @username',
-        idx_chats_cache_type: 'Filter chats by type',
-        idx_chats_cache_fetched_at: 'Find stale entries',
-        idx_chats_cache_last_message_at: 'Order by recent activity',
+        idx_chats_cache_username: "Fast lookup by @username",
+        idx_chats_cache_type: "Filter chats by type",
+        idx_chats_cache_fetched_at: "Find stale entries",
+        idx_chats_cache_last_message_at: "Order by recent activity",
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Messages Cache Table
-    // -------------------------------------------------------------------------
     messages_cache: {
       description:
-        'Cached messages from synchronized chats. Messages are eternal (never considered stale).',
-      primaryKey: ['chat_id', 'message_id'],
+        "Cached messages from synchronized chats. Messages are eternal (never considered stale).",
+      primaryKey: ["chat_id", "message_id"],
       columns: {
         chat_id: {
           description:
-            'Marked peer ID of the chat: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel. Joins chats_cache on chats_cache.chat_id = CAST(chat_id AS TEXT)',
+            "Marked peer ID of the chat: the user ID for a private chat, -N for basic group N, -100… for a supergroup or channel. Joins chats_cache on chats_cache.chat_id = CAST(chat_id AS TEXT)",
           nullable: false,
         },
         message_id: {
-          description: 'Message ID within the chat (unique per chat)',
+          description: "Message ID within the chat (unique per chat)",
           nullable: false,
         },
         from_id: {
           description:
-            'Marked peer ID of the sender: a user ID, or -N / -100… for a group or channel that posts as itself. A message Telegram sends without a sender (an incoming private message, a channel post, Saved Messages) has its chat as the sender, as mtcute gives live messages. Null when raw_json names no peer.',
+            "Marked peer ID of the sender: a user ID, or -N / -100… for a group or channel that posts as itself. A message Telegram sends without a sender (an incoming private message, a channel post, Saved Messages) has its chat as the sender, as mtcute gives live messages. Null when raw_json names no peer.",
           nullable: true,
         },
         reply_to_id: {
-          description: 'ID of message being replied to',
+          description: "ID of message being replied to",
           nullable: true,
         },
         forward_from_id: {
           description:
-            'Marked peer ID of the original sender of a forwarded message: a user ID, or -N / -100… for a group or channel',
+            "Marked peer ID of the original sender of a forwarded message: a user ID, or -N / -100… for a group or channel",
           nullable: true,
         },
         text: {
           description:
-            'Message text content (null for media-only messages). A rich message (raw_json.richMessage: page blocks such as headings, tables and lists) has no text of its own; this holds its blocks rendered in rich Markdown, so search finds it',
+            "Message text content (null for media-only messages). A rich message (raw_json.richMessage: page blocks such as headings, tables and lists) has no text of its own; this holds its blocks rendered in rich Markdown, so search finds it",
           nullable: true,
         },
         message_type: {
           description:
-            'Type of message content, as live updates and history sync both write it. Rows history sync wrote in earlier versions say document for every file (voice, video, sticker…) until the background migration messages_raw_json_v2 reaches them. service: a call, pin or group change; raw_json.action says which, and tg messages list/get/search print it as action',
+            "Type of message content, as live updates and history sync both write it. Rows history sync wrote in earlier versions say document for every file (voice, video, sticker…) until the background migration messages_raw_json_v2 reaches them. service: a call, pin or group change; raw_json.action says which, and tg messages list/get/search print it as action",
           enumValues: [
-            'text',
-            'photo',
-            'video',
-            'document',
-            'sticker',
-            'voice',
-            'audio',
-            'poll',
-            'contact',
-            'location',
-            'venue',
-            'game',
-            'invoice',
-            'webpage',
-            'dice',
-            'service',
-            'unknown',
-            'media',
+            "text",
+            "photo",
+            "video",
+            "document",
+            "sticker",
+            "voice",
+            "audio",
+            "poll",
+            "contact",
+            "location",
+            "venue",
+            "game",
+            "invoice",
+            "webpage",
+            "dice",
+            "service",
+            "unknown",
+            "media",
           ],
-          semanticType: 'enum',
-          defaultValue: 'text',
+          semanticType: "enum",
+          defaultValue: "text",
         },
         has_media: {
           description:
-            'Whether the message has media Telegram clients show (a photo, file, poll, location, link preview…); 0 for text, service messages and media the client cannot show',
-          semanticType: 'boolean_int',
+            "Whether the message has media Telegram clients show (a photo, file, poll, location, link preview…); 0 for text, service messages and media the client cannot show",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         media_path: {
-          description: 'Local file path if media was downloaded',
+          description: "Local file path if media was downloaded",
           nullable: true,
         },
         is_outgoing: {
-          description: 'Whether message was sent by current user',
-          semanticType: 'boolean_int',
+          description: "Whether message was sent by current user",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         is_edited: {
-          description: 'Whether message has been edited',
-          semanticType: 'boolean_int',
+          description: "Whether message has been edited",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         is_pinned: {
-          description: 'Whether message is pinned in the chat',
-          semanticType: 'boolean_int',
+          description: "Whether message is pinned in the chat",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         is_deleted: {
-          description: 'Whether message was deleted (soft delete)',
-          semanticType: 'boolean_int',
+          description: "Whether message was deleted (soft delete)",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         edit_date: {
-          description: 'When the message was last edited, in Unix seconds',
-          semanticType: 'timestamp_sec',
+          description: "When the message was last edited, in Unix seconds",
+          semanticType: "timestamp_sec",
           nullable: true,
         },
         date: {
           description:
             "When the message was originally sent, in Unix seconds (Telegram's own unit): date >= unixepoch('now', '-7 days')",
-          semanticType: 'timestamp_sec',
+          semanticType: "timestamp_sec",
           nullable: false,
         },
         fetched_at: {
           description:
-            'When this message was last fetched with a change. Fetching it again unchanged writes nothing, so this keeps the earlier time',
-          semanticType: 'timestamp',
+            "When this message was last fetched with a change. Fetching it again unchanged writes nothing, so this keeps the earlier time",
+          semanticType: "timestamp",
           nullable: false,
         },
         raw_json: {
           description:
-            'Complete Telegram Message object as JSON, without fileReference. Byte arrays such as the stripped thumbnail are base64 strings and 64-bit values (id, groupedId…) decimal strings; rows of older versions keep objects and fileReference until the background migration messages_raw_json_v2 reaches them',
-          semanticType: 'json',
+            "Complete Telegram Message object as JSON, without fileReference. Byte arrays such as the stripped thumbnail are base64 strings and 64-bit values (id, groupedId…) decimal strings; rows of older versions keep objects and fileReference until the background migration messages_raw_json_v2 reaches them",
+          semanticType: "json",
           nullable: false,
         },
         created_at: {
-          description: 'When this cache entry was created',
-          semanticType: 'timestamp',
+          description: "When this cache entry was created",
+          semanticType: "timestamp",
         },
         updated_at: {
-          description: 'When this cache entry last changed',
-          semanticType: 'timestamp',
+          description: "When this cache entry last changed",
+          semanticType: "timestamp",
         },
       },
       indexes: {
-        idx_messages_cache_date: 'Order messages chronologically within a chat',
-        idx_messages_cache_from: 'Find messages by sender',
-        idx_messages_cache_reply: 'Find reply chains',
-        idx_messages_cache_type: 'Filter by media type',
-        idx_messages_cache_pinned: 'Find pinned messages',
+        idx_messages_cache_date: "Order messages chronologically within a chat",
+        idx_messages_cache_from: "Find messages by sender",
+        idx_messages_cache_reply: "Find reply chains",
+        idx_messages_cache_type: "Filter by media type",
+        idx_messages_cache_pinned: "Find pinned messages",
         idx_messages_cache_message_id:
-          'Find the chat of a message ID that a delete without chat context names',
+          "Find the chat of a message ID that a delete without chat context names",
         idx_messages_cache_newest:
-          'Every chat newest first: the newest page of a common search query',
+          "Every chat newest first: the newest page of a common search query",
       },
     },
 
@@ -562,58 +507,51 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
     chat_content_protection: CHAT_CONTENT_PROTECTION_ANNOTATION,
     cache_migrations: CACHE_MIGRATIONS_ANNOTATION,
 
-    // -------------------------------------------------------------------------
-    // History Ranges Table
-    // -------------------------------------------------------------------------
     history_ranges: {
       description:
-        'Message ID ranges of a chat that messages_cache holds without a gap. Every cached getHistory page (daemon or CLI) adds the range it covers; touching ranges merge. tg messages list and get read from the cache only inside a range.',
-      primaryKey: ['chat_id', 'low'],
+        "Message ID ranges of a chat that messages_cache holds without a gap. Every cached getHistory page (daemon or CLI) adds the range it covers; touching ranges merge. tg messages list and get read from the cache only inside a range.",
+      primaryKey: ["chat_id", "low"],
       columns: {
         chat_id: {
-          description:
-            'Marked peer ID of the chat the range belongs to, as in messages_cache',
+          description: "Marked peer ID of the chat the range belongs to, as in messages_cache",
           nullable: false,
         },
         low: {
-          description: 'Lowest message ID of the range (inclusive)',
+          description: "Lowest message ID of the range (inclusive)",
           nullable: false,
         },
         high: {
-          description: 'Highest message ID of the range (inclusive)',
+          description: "Highest message ID of the range (inclusive)",
           nullable: false,
         },
         updated_at: {
-          description: 'When the range was last recorded or merged',
-          semanticType: 'timestamp',
+          description: "When the range was last recorded or merged",
+          semanticType: "timestamp",
         },
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Message Search Index (FTS5)
-    // -------------------------------------------------------------------------
     message_search: {
       description:
-        'Full-text search index for messages_cache (FTS5 virtual table). On SQLite 3.43+ it is contentless: its columns read as NULL. Query the view message_search_text for matches with their text. Writes never merge its segments (FTS5 option automerge 0): the daemon and tg db migrate merge them in short batches.',
-      primaryKey: 'rowid',
+        "Full-text search index for messages_cache (FTS5 virtual table). On SQLite 3.43+ it is contentless: its columns read as NULL. Query the view message_search_text for matches with their text. Writes never merge its segments (FTS5 option automerge 0): the daemon and tg db migrate merge them in short batches.",
+      primaryKey: "rowid",
       columns: {
         text: {
-          description: 'Indexed message text content',
+          description: "Indexed message text content",
           nullable: true,
         },
         sender: {
           description:
-            'Indexed sender tokens (username, name, id; title, username, id for a channel or group posting as itself); a rename reaches older messages through search_reindex_queue',
+            "Indexed sender tokens (username, name, id; title, username, id for a channel or group posting as itself); a rename reaches older messages through search_reindex_queue",
           nullable: true,
         },
         chat: {
           description:
-            'Indexed chat tokens (title, username, id); a rename reaches older messages through search_reindex_queue',
+            "Indexed chat tokens (title, username, id); a rename reaches older messages through search_reindex_queue",
           nullable: true,
         },
         files: {
-          description: 'Indexed media path/filename tokens',
+          description: "Indexed media path/filename tokens",
           nullable: true,
         },
       },
@@ -622,115 +560,109 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
 
     search_reindex_queue: {
       description:
-        'Senders and chats whose cached messages wait for a re-index of message_search with their current names (#93). Triggers on users_cache and chats_cache add a row when a peer with cached messages is inserted or renamed; the daemon and tg db migrate drain it in batches and delete each row when done.',
-      primaryKey: ['kind', 'peer_id'],
+        "Senders and chats whose cached messages wait for a re-index of message_search with their current names (#93). Triggers on users_cache and chats_cache add a row when a peer with cached messages is inserted or renamed; the daemon and tg db migrate drain it in batches and delete each row when done.",
+      primaryKey: ["kind", "peer_id"],
       columns: {
         kind: {
           description:
-            'sender: the messages with this from_id (a user in users_cache, or a channel or group that posts as itself in chats_cache); chat: the messages of this chat (chats_cache)',
+            "sender: the messages with this from_id (a user in users_cache, or a channel or group that posts as itself in chats_cache); chat: the messages of this chat (chats_cache)",
           nullable: false,
-          semanticType: 'enum',
-          enumValues: ['sender', 'chat'],
+          semanticType: "enum",
+          enumValues: ["sender", "chat"],
         },
         peer_id: {
-          description: 'from_id, or the marked chat_id, of the messages',
+          description: "from_id, or the marked chat_id, of the messages",
           nullable: false,
         },
         cursor: {
-          description:
-            'The last message done: its rowid for a sender, its message_id for a chat',
+          description: "The last message done: its rowid for a sender, its message_id for a chat",
           nullable: false,
         },
         end_rowid: {
           description:
-            'The largest rowid of messages_cache when queued; later messages were indexed with the new names',
+            "The largest rowid of messages_cache when queued; later messages were indexed with the new names",
           nullable: false,
         },
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Message Search View
-    // -------------------------------------------------------------------------
     message_search_text: {
       description:
         "View: message_search joined with messages_cache, the chat and the sender, so a full-text match comes with its text. SELECT message_id, chat_title, text FROM message_search_text WHERE message_search_text MATCH 'deploy' ORDER BY rank. It stores nothing; snippet() and highlight() don't work on it (tg messages search --snippet does).",
-      primaryKey: 'rowid',
+      primaryKey: "rowid",
       columns: {
         message_search_text: {
-          description:
-            "The index itself: filter with message_search_text MATCH '<FTS5 query>'",
+          description: "The index itself: filter with message_search_text MATCH '<FTS5 query>'",
           nullable: true,
         },
         rank: {
-          description:
-            'bm25 rank of the match, lower is better: ORDER BY rank puts the best first',
+          description: "bm25 rank of the match, lower is better: ORDER BY rank puts the best first",
           nullable: true,
         },
-        rowid: { description: 'messages_cache rowid' },
-        chat_id: { description: 'Marked peer ID of the chat' },
-        message_id: { description: 'Message ID within the chat' },
+        rowid: { description: "messages_cache rowid" },
+        chat_id: { description: "Marked peer ID of the chat" },
+        message_id: { description: "Message ID within the chat" },
         from_id: {
-          description: 'Marked peer ID of the sender (see messages_cache)',
+          description: "Marked peer ID of the sender (see messages_cache)",
           nullable: true,
         },
-        text: { description: 'Message text', nullable: true },
-        message_type: { description: 'Type of message content' },
+        text: { description: "Message text", nullable: true },
+        message_type: { description: "Type of message content" },
         has_media: {
-          description: 'Whether message contains media',
-          semanticType: 'boolean_int',
+          description: "Whether message contains media",
+          semanticType: "boolean_int",
         },
-        media_path: { description: 'Local media path', nullable: true },
+        media_path: { description: "Local media path", nullable: true },
         is_outgoing: {
-          description: 'Whether message was sent by current user',
-          semanticType: 'boolean_int',
+          description: "Whether message was sent by current user",
+          semanticType: "boolean_int",
         },
         is_edited: {
-          description: 'Whether message has been edited',
-          semanticType: 'boolean_int',
+          description: "Whether message has been edited",
+          semanticType: "boolean_int",
         },
         is_pinned: {
-          description: 'Whether message is pinned',
-          semanticType: 'boolean_int',
+          description: "Whether message is pinned",
+          semanticType: "boolean_int",
         },
         is_deleted: {
-          description: 'Whether message was deleted (soft delete)',
-          semanticType: 'boolean_int',
+          description: "Whether message was deleted (soft delete)",
+          semanticType: "boolean_int",
         },
         reply_to_id: {
-          description: 'ID of message being replied to',
+          description: "ID of message being replied to",
           nullable: true,
         },
         forward_from_id: {
-          description: 'Marked peer ID of the original sender of a forward',
+          description: "Marked peer ID of the original sender of a forward",
           nullable: true,
         },
         edit_date: {
-          description: 'When the message was last edited, in Unix seconds',
-          semanticType: 'timestamp_sec',
+          description: "When the message was last edited, in Unix seconds",
+          semanticType: "timestamp_sec",
           nullable: true,
         },
         date: {
-          description: 'When the message was sent, in Unix seconds',
-          semanticType: 'timestamp_sec',
+          description: "When the message was sent, in Unix seconds",
+          semanticType: "timestamp_sec",
         },
         fetched_at: {
-          description: 'When this message was fetched from API',
-          semanticType: 'timestamp',
+          description: "When this message was fetched from API",
+          semanticType: "timestamp",
         },
         chat_title: {
-          description: 'Title of the chat (chats_cache)',
+          description: "Title of the chat (chats_cache)",
           nullable: true,
         },
         chat_username: {
-          description: 'Public @username of the chat, without @',
-          semanticType: 'username',
+          description: "Public @username of the chat, without @",
+          semanticType: "username",
           nullable: true,
         },
-        chat_type: { description: 'Type of chat', nullable: true },
+        chat_type: { description: "Type of chat", nullable: true },
         sender_username: {
           description: "Sender's @username, without @ (users_cache)",
-          semanticType: 'username',
+          semanticType: "username",
           nullable: true,
         },
         sender_first_name: {
@@ -744,38 +676,32 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Search Metadata
-    // -------------------------------------------------------------------------
     search_meta: {
-      description: 'Metadata for search index versioning and rebuilds.',
-      primaryKey: 'key',
+      description: "Metadata for search index versioning and rebuilds.",
+      primaryKey: "key",
       columns: {
         key: {
-          description: 'Metadata key (e.g., search_index_version)',
+          description: "Metadata key (e.g., search_index_version)",
           nullable: false,
         },
         value: {
-          description: 'Metadata value as string',
+          description: "Metadata value as string",
           nullable: true,
         },
         updated_at: {
-          description: 'Last update time',
-          semanticType: 'timestamp',
+          description: "Last update time",
+          semanticType: "timestamp",
         },
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Sync State Table
-    // -------------------------------------------------------------------------
     sync_state: {
       description:
-        'Global sync state for entity types (contacts, dialogs). Per-chat state is in chat_sync_state.',
-      primaryKey: 'entity_type',
+        "Global sync state for entity types (contacts, dialogs). Per-chat state is in chat_sync_state.",
+      primaryKey: "entity_type",
       columns: {
         entity_type: {
-          description: 'Type of entity being synced (contacts, dialogs)',
+          description: "Type of entity being synced (contacts, dialogs)",
           nullable: false,
         },
         forward_cursor: {
@@ -784,84 +710,72 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         backward_cursor: {
-          description: 'Cursor for fetching older data',
+          description: "Cursor for fetching older data",
           nullable: true,
         },
         is_complete: {
-          description: 'Whether historical sync has reached the beginning',
-          semanticType: 'boolean_int',
+          description: "Whether historical sync has reached the beginning",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         last_sync_at: {
-          description: 'When this entity was last synced',
-          semanticType: 'timestamp',
+          description: "When this entity was last synced",
+          semanticType: "timestamp",
           nullable: true,
         },
         created_at: {
-          description: 'When tracking started',
-          semanticType: 'timestamp',
+          description: "When tracking started",
+          semanticType: "timestamp",
         },
         updated_at: {
-          description: 'When state was last updated',
-          semanticType: 'timestamp',
+          description: "When state was last updated",
+          semanticType: "timestamp",
         },
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Chat Sync State Table
-    // -------------------------------------------------------------------------
     chat_sync_state: {
       description:
-        'Tracks message synchronization progress per chat with dual cursors for bidirectional sync.',
-      primaryKey: 'chat_id',
+        "Tracks message synchronization progress per chat with dual cursors for bidirectional sync.",
+      primaryKey: "chat_id",
       columns: {
         chat_id: {
-          description:
-            'Marked peer ID of the chat being synchronized, as in messages_cache',
+          description: "Marked peer ID of the chat being synchronized, as in messages_cache",
           nullable: false,
         },
         chat_type: {
-          description: 'Type of chat (for sync policy decisions)',
-          enumValues: [
-            'private',
-            'group',
-            'supergroup',
-            'channel',
-            'community',
-          ],
-          semanticType: 'enum',
+          description: "Type of chat (for sync policy decisions)",
+          enumValues: ["private", "group", "supergroup", "channel", "community"],
+          semanticType: "enum",
           nullable: false,
         },
         member_count: {
-          description:
-            'Member count at time of sync setup (for priority calculation)',
+          description: "Member count at time of sync setup (for priority calculation)",
           nullable: true,
         },
         forward_cursor: {
           description:
-            'Every message up to this ID is cached; forward catch-up pages up from here. Only sync jobs move it, never live updates. 0: the chat was empty at its first page',
+            "Every message up to this ID is cached; forward catch-up pages up from here. Only sync jobs move it, never live updates. 0: the chat was empty at its first page",
           nullable: true,
         },
         backward_cursor: {
-          description: 'Oldest message ID seen (for history backfill)',
+          description: "Oldest message ID seen (for history backfill)",
           nullable: true,
         },
         sync_priority: {
           description:
             "Sync tier: 1=high (DMs, groups under 20 members), 2=medium (20-100 members; bots and deleted accounts), 3=low (not synced unless turned on). Also the priority of the chat's jobs inside each lane",
-          enumValues: ['1', '2', '3'],
+          enumValues: ["1", "2", "3"],
           defaultValue: 3,
         },
         sync_enabled: {
-          description: 'Whether automatic sync is enabled for this chat',
-          semanticType: 'boolean_int',
+          description: "Whether automatic sync is enabled for this chat",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         history_complete: {
-          description:
-            'Whether full history has been synced (reached beginning)',
-          semanticType: 'boolean_int',
+          description: "Whether full history has been synced (reached beginning)",
+          semanticType: "boolean_int",
           defaultValue: 0,
         },
         total_messages: {
@@ -870,77 +784,76 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         synced_messages: {
-          description: 'Number of messages synced so far',
+          description: "Number of messages synced so far",
           defaultValue: 0,
         },
         last_forward_sync: {
-          description: 'When forward sync (new messages) last ran',
-          semanticType: 'timestamp',
+          description: "When forward sync (new messages) last ran",
+          semanticType: "timestamp",
           nullable: true,
         },
         last_backward_sync: {
-          description: 'When backward sync (history) last ran',
-          semanticType: 'timestamp',
+          description: "When backward sync (history) last ran",
+          semanticType: "timestamp",
           nullable: true,
         },
         created_at: {
-          description: 'When sync was first enabled for this chat',
-          semanticType: 'timestamp',
+          description: "When sync was first enabled for this chat",
+          semanticType: "timestamp",
         },
         updated_at: {
-          description: 'When sync state was last modified',
-          semanticType: 'timestamp',
+          description: "When sync state was last modified",
+          semanticType: "timestamp",
         },
         top_message_id: {
           description:
-            'Newest message ID Telegram reported (dialog list or a sync page). NULL: unknown. Catch-up is due while it is NULL or above forward_cursor',
+            "Newest message ID Telegram reported (dialog list or a sync page). NULL: unknown. Catch-up is due while it is NULL or above forward_cursor",
           nullable: true,
         },
         sync_mode: {
           description:
             "Set with tg chats sync: 'auto' follows the sync policy, 'on' and 'off' win over it in every dialog pass",
-          enumValues: ['auto', 'on', 'off'],
-          semanticType: 'enum',
-          defaultValue: 'auto',
+          enumValues: ["auto", "on", "off"],
+          semanticType: "enum",
+          defaultValue: "auto",
         },
         sync_policy: {
           description:
             "Why the sync policy turns the chat on or off, set by each dialog pass and the first live message. 'bot' and 'deleted_account' get the newest page and catch-up but no older history unless sync_mode is 'on'. NULL: not classified yet",
           enumValues: [
-            'dm',
-            'bot',
-            'deleted_account',
-            'small_group',
-            'medium_group',
-            'large_group',
-            'unknown_size',
-            'channel',
-            'community',
+            "dm",
+            "bot",
+            "deleted_account",
+            "small_group",
+            "medium_group",
+            "large_group",
+            "unknown_size",
+            "channel",
+            "community",
           ],
-          semanticType: 'enum',
+          semanticType: "enum",
           nullable: true,
         },
       },
       indexes: {
-        idx_chat_sync_state_enabled:
-          'Find chats with sync enabled, ordered by priority',
-        idx_chat_sync_state_priority: 'Order chats by sync priority',
-        idx_chat_sync_state_incomplete: 'Find chats with incomplete history',
+        idx_chat_sync_state_enabled: "Find chats with sync enabled, ordered by priority",
+        idx_chat_sync_state_priority: "Order chats by sync priority",
+        idx_chat_sync_state_incomplete: "Find chats with incomplete history",
       },
     },
 
     refetch_chats: {
       description:
-        'Chats the background migration messages_refetch_empty_raw_json queued a refetch_messages job for (#130): each chat once, whatever became of its job, so messages Telegram no longer has are asked for once',
-      primaryKey: 'chat_id',
+        "Chats the background migration messages_refetch_empty_raw_json queued a refetch_messages job for (#130): each chat once, whatever became of its job, so messages Telegram no longer has are asked for once",
+      primaryKey: "chat_id",
       columns: {
         chat_id: {
-          description: 'Marked peer ID of the chat, as in messages_cache',
+          description: "Marked peer ID of the chat, as in messages_cache",
           nullable: false,
         },
         queued_at: {
-          description: 'When the pass queued the job, in ms since the epoch',
-          semanticType: 'timestamp',
+          description: "When the pass queued the job, in ms since the epoch",
+          semanticType: "timestamp",
           nullable: false,
         },
       },
@@ -948,23 +861,23 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
 
     group_participation: {
       description:
-        'The newest own message known in each group (basic group or supergroup). A group adds messages to messages_cache only while it is under 90 days old; reading a group does not count. Filled from own messages as they are written and from check_group_participation searches after each dialog pass.',
-      primaryKey: 'chat_id',
+        "The newest own message known in each group (basic group or supergroup). A group adds messages to messages_cache only while it is under 90 days old; reading a group does not count. Filled from own messages as they are written and from check_group_participation searches after each dialog pass.",
+      primaryKey: "chat_id",
       columns: {
         chat_id: {
-          description: 'Marked peer ID of the group, as in messages_cache',
+          description: "Marked peer ID of the group, as in messages_cache",
           nullable: false,
         },
         last_own_date: {
           description:
-            'Date of the newest own ordinary message known (not a service message, not one sent as a channel or anonymous admin), in Unix seconds. Never lowered',
-          semanticType: 'timestamp_sec',
+            "Date of the newest own ordinary message known (not a service message, not one sent as a channel or anonymous admin), in Unix seconds. Never lowered",
+          semanticType: "timestamp_sec",
           nullable: true,
         },
         initialized_at: {
           description:
             "When the first participation check answered, or a fresh own message was seen, in Unix seconds. NULL: the group's state is unknown and it takes no new messages",
-          semanticType: 'timestamp_sec',
+          semanticType: "timestamp_sec",
           nullable: true,
         },
       },
@@ -972,22 +885,22 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
 
     group_capture_gaps: {
       description:
-        'Periods a group was known to be paused: from the day its newest own message turned 90 days old (or the first check that found none) to the next own message. Messages dated inside one are never added to messages_cache, so catch-up and history after a return skip them.',
-      primaryKey: ['chat_id', 'start_date'],
+        "Periods a group was known to be paused: from the day its newest own message turned 90 days old (or the first check that found none) to the next own message. Messages dated inside one are never added to messages_cache, so catch-up and history after a return skip them.",
+      primaryKey: ["chat_id", "start_date"],
       columns: {
         chat_id: {
-          description: 'Marked peer ID of the group, as in messages_cache',
+          description: "Marked peer ID of the group, as in messages_cache",
           nullable: false,
         },
         start_date: {
-          description: 'Start of the pause (inclusive), in Unix seconds',
-          semanticType: 'timestamp_sec',
+          description: "Start of the pause (inclusive), in Unix seconds",
+          semanticType: "timestamp_sec",
           nullable: false,
         },
         end_date: {
           description:
-            'End of the pause (exclusive): the date of the own message that ended it, in Unix seconds',
-          semanticType: 'timestamp_sec',
+            "End of the pause (exclusive): the date of the own message that ended it, in Unix seconds",
+          semanticType: "timestamp_sec",
           nullable: false,
         },
       },
@@ -995,64 +908,58 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
 
     sender_lookups: {
       description:
-        'Users with cached messages and no users_cache row (#143), each with one recent message of theirs: a fetch_senders job asks Telegram for up to 100 of those messages of one chat, and the reply caches their senders. Listed by the daemon on start and once a day; a row goes once its sender is cached.',
-      primaryKey: 'sender_id',
+        "Users with cached messages and no users_cache row (#143), each with one recent message of theirs: a fetch_senders job asks Telegram for up to 100 of those messages of one chat, and the reply caches their senders. Listed by the daemon on start and once a day; a row goes once its sender is cached.",
+      primaryKey: "sender_id",
       columns: {
         sender_id: {
-          description: 'User ID of the sender, as in messages_cache.from_id',
+          description: "User ID of the sender, as in messages_cache.from_id",
           nullable: false,
         },
         chat_id: {
-          description:
-            'Marked peer ID of the chat of the message to ask for, as in messages_cache',
+          description: "Marked peer ID of the chat of the message to ask for, as in messages_cache",
           nullable: false,
         },
         message_id: {
-          description:
-            "The sender's newest cached message that Telegram can be asked for",
+          description: "The sender's newest cached message that Telegram can be asked for",
           nullable: false,
         },
         asked_at: {
           description:
-            'When Telegram was asked and did not return the sender (the message was deleted, the chat left or private), in ms since the epoch; asked again 30 days later. NULL while it waits for its job',
-          semanticType: 'timestamp',
+            "When Telegram was asked and did not return the sender (the message was deleted, the chat left or private), in ms since the epoch; asked again 30 days later. NULL while it waits for its job",
+          semanticType: "timestamp",
           nullable: true,
         },
       },
       indexes: {
-        idx_sender_lookups_waiting: 'Find the chats with senders waiting',
+        idx_sender_lookups_waiting: "Find the chats with senders waiting",
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Sync Jobs Table
-    // -------------------------------------------------------------------------
     sync_jobs: {
       description:
-        'Job queue for background message synchronization. Jobs run in three lanes that take turns (catch-up, first pages, history), by priority inside a lane; sender fetches run only when those lanes are empty.',
-      primaryKey: 'id',
+        "Job queue for background message synchronization. Jobs run in three lanes that take turns (catch-up, first pages, history), by priority inside a lane; sender fetches run only when those lanes are empty.",
+      primaryKey: "id",
       columns: {
         id: {
-          description: 'Auto-incremented job ID',
+          description: "Auto-incremented job ID",
           nullable: false,
         },
         chat_id: {
-          description:
-            'Marked peer ID of the chat to sync, as in messages_cache',
+          description: "Marked peer ID of the chat to sync, as in messages_cache",
           nullable: false,
         },
         job_type: {
-          description: 'Type of sync operation',
+          description: "Type of sync operation",
           enumValues: [
-            'forward_catchup',
-            'initial_load',
-            'backward_history',
-            'full_sync',
-            'refetch_messages',
-            'fetch_senders',
-            'check_group_participation',
+            "forward_catchup",
+            "initial_load",
+            "backward_history",
+            "full_sync",
+            "refetch_messages",
+            "fetch_senders",
+            "check_group_participation",
           ],
-          semanticType: 'enum',
+          semanticType: "enum",
           nullable: false,
         },
         priority: {
@@ -1063,127 +970,117 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
         status: {
           description:
             "Current job status. 'pending' includes jobs waiting for a retry; a 'failed' job blocks new jobs of its type for its chat until it is deleted",
-          enumValues: ['pending', 'running', 'completed', 'failed'],
-          semanticType: 'enum',
-          defaultValue: 'pending',
+          enumValues: ["pending", "running", "completed", "failed"],
+          semanticType: "enum",
+          defaultValue: "pending",
         },
         cursor_start: {
-          description: 'Starting message ID for this job',
+          description: "Starting message ID for this job",
           nullable: true,
         },
         cursor_end: {
-          description: 'Ending message ID for this job',
+          description: "Ending message ID for this job",
           nullable: true,
         },
         messages_fetched: {
-          description: 'Number of messages fetched by this job',
+          description: "Number of messages fetched by this job",
           defaultValue: 0,
         },
         error_message: {
-          description:
-            'The last error, kept while the job waits for its retry and once it failed',
+          description: "The last error, kept while the job waits for its retry and once it failed",
           nullable: true,
         },
         created_at: {
-          description: 'When job was queued',
-          semanticType: 'timestamp',
+          description: "When job was queued",
+          semanticType: "timestamp",
         },
         started_at: {
-          description: 'When job started executing',
-          semanticType: 'timestamp',
+          description: "When job started executing",
+          semanticType: "timestamp",
           nullable: true,
         },
         completed_at: {
-          description: 'When job finished (success or failure)',
-          semanticType: 'timestamp',
+          description: "When job finished (success or failure)",
+          semanticType: "timestamp",
           nullable: true,
         },
         attempts: {
           description:
-            'Failed tries so far; a FLOOD_WAIT does not count. The fifth failure, or a permanent error, marks the job failed',
+            "Failed tries so far; a FLOOD_WAIT does not count. The fifth failure, or a permanent error, marks the job failed",
           defaultValue: 0,
         },
         next_run_at: {
           description:
-            'When a pending job may run (ms since the epoch); 0 means now. Set after a failure or a FLOOD_WAIT',
-          semanticType: 'timestamp',
+            "When a pending job may run (ms since the epoch); 0 means now. Set after a failure or a FLOOD_WAIT",
+          semanticType: "timestamp",
           defaultValue: 0,
         },
       },
       indexes: {
-        idx_sync_jobs_priority: 'Get highest priority pending jobs',
-        idx_sync_jobs_lane:
-          'Next pending job of a lane (job types), by priority, age and id',
-        idx_sync_jobs_status: 'Filter jobs by status',
-        idx_sync_jobs_chat: 'Find jobs for a specific chat',
+        idx_sync_jobs_priority: "Get highest priority pending jobs",
+        idx_sync_jobs_lane: "Next pending job of a lane (job types), by priority, age and id",
+        idx_sync_jobs_status: "Filter jobs by status",
+        idx_sync_jobs_chat: "Find jobs for a specific chat",
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Rate Limits Table
-    // -------------------------------------------------------------------------
     rate_limits: {
-      description:
-        'Tracks Telegram API rate limiting to prevent FLOOD_WAIT errors.',
-      primaryKey: ['method', 'window_start'],
+      description: "Tracks Telegram API rate limiting to prevent FLOOD_WAIT errors.",
+      primaryKey: ["method", "window_start"],
       columns: {
         method: {
-          description: 'Telegram API method name',
+          description: "Telegram API method name",
           nullable: false,
         },
         window_start: {
-          description: 'Start of rate limit window',
-          semanticType: 'timestamp',
+          description: "Start of rate limit window",
+          semanticType: "timestamp",
           nullable: false,
         },
         call_count: {
-          description: 'Number of API calls in this window',
+          description: "Number of API calls in this window",
           defaultValue: 1,
         },
         last_call_at: {
-          description: 'When the last call was made',
-          semanticType: 'timestamp',
+          description: "When the last call was made",
+          semanticType: "timestamp",
           nullable: true,
         },
         flood_wait_until: {
-          description:
-            'If rate limited, when we can retry (from FLOOD_WAIT error)',
-          semanticType: 'timestamp',
+          description: "If rate limited, when we can retry (from FLOOD_WAIT error)",
+          semanticType: "timestamp",
           nullable: true,
         },
       },
       indexes: {
-        idx_rate_limits_method: 'Lookup rate limit by method',
+        idx_rate_limits_method: "Lookup rate limit by method",
       },
     },
 
-    // -------------------------------------------------------------------------
-    // API Activity Table
-    // -------------------------------------------------------------------------
     api_activity: {
       description:
-        'Audit log of Telegram API calls: every CLI call and every request of the daemon. tg status counts the last 60 seconds from it.',
-      primaryKey: 'id',
-      ttl: '7 days',
+        "Audit log of Telegram API calls: every CLI call and every request of the daemon. tg status counts the last 60 seconds from it.",
+      primaryKey: "id",
+      ttl: "7 days",
       ttlMs: 7 * 24 * 60 * 60 * 1000,
       columns: {
         id: {
-          description: 'Auto-incremented log entry ID',
+          description: "Auto-incremented log entry ID",
           nullable: false,
         },
         timestamp: {
           description:
-            'When the API call started, in ms (0.8.0 and older wrote seconds; the next prune turns them into ms)',
-          semanticType: 'timestamp',
+            "When the API call started, in ms (0.8.0 and older wrote seconds; the next prune turns them into ms)",
+          semanticType: "timestamp",
           nullable: false,
         },
         method: {
-          description: 'Telegram API method that was called',
+          description: "Telegram API method that was called",
           nullable: false,
         },
         success: {
-          description: 'Whether the call succeeded',
-          semanticType: 'boolean_int',
+          description: "Whether the call succeeded",
+          semanticType: "boolean_int",
           nullable: false,
         },
         error_code: {
@@ -1192,107 +1089,91 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
           nullable: true,
         },
         response_ms: {
-          description: 'API response time in milliseconds',
+          description: "API response time in milliseconds",
           nullable: true,
         },
         context: {
           description:
-            'Who called (cli:send, cli:api, ..., daemon), or the error message of a failed call',
+            "Who called (cli:send, cli:api, ..., daemon), or the error message of a failed call",
           nullable: true,
         },
       },
       indexes: {
-        idx_api_activity_timestamp: 'Query by time range',
-        idx_api_activity_method: 'Filter by API method',
+        idx_api_activity_timestamp: "Query by time range",
+        idx_api_activity_method: "Filter by API method",
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Daemon Status Table
-    // -------------------------------------------------------------------------
     daemon_status: {
       description:
         "Key-value store for the daemon's state for this account (running, connection, progress).",
-      primaryKey: 'key',
+      primaryKey: "key",
       columns: {
         key: {
           description:
-            'Status key: daemon_pid, daemon_started_at, daemon_status, daemon_version, daemon_version_pid, last_update, connection_status, last_error, messages_synced, pending_jobs, running_jobs, last_catch_up_at, last_catch_up_reason (reconnect, wake, new_client), last_offline_ms, last_catch_up_chats, pacing_mode (history, calm), pacing_target_calls_per_second, pacing_flood_waits',
+            "Status key: daemon_pid, daemon_started_at, daemon_status, daemon_version, daemon_version_pid, last_update, connection_status, last_error, messages_synced, pending_jobs, running_jobs, last_catch_up_at, last_catch_up_reason (reconnect, wake, new_client), last_offline_ms, last_catch_up_chats, pacing_mode (history, calm), pacing_target_calls_per_second, pacing_flood_waits",
           nullable: false,
         },
         value: {
-          description: 'Status value (JSON-encoded for complex values)',
-          semanticType: 'json',
+          description: "Status value (JSON-encoded for complex values)",
+          semanticType: "json",
           nullable: true,
         },
         updated_at: {
-          description: 'When this status was last updated',
-          semanticType: 'timestamp',
+          description: "When this status was last updated",
+          semanticType: "timestamp",
         },
       },
     },
 
-    // -------------------------------------------------------------------------
-    // Cache Metadata Table
-    // -------------------------------------------------------------------------
     cache_meta: {
       description:
-        'Which account this cache file belongs to. Each account has its own file, accounts/<id>/cache.db; a file stamped for another account is not opened.',
-      primaryKey: 'key',
+        "Which account this cache file belongs to. Each account has its own file, accounts/<id>/cache.db; a file stamped for another account is not opened.",
+      primaryKey: "key",
       columns: {
         key: {
-          description:
-            'account_id (the ID in tg accounts list) or user_id (the Telegram user ID)',
+          description: "account_id (the ID in tg accounts list) or user_id (the Telegram user ID)",
           nullable: false,
-          enumValues: ['account_id', 'user_id'],
+          enumValues: ["account_id", "user_id"],
         },
         value: {
-          description: 'The ID, as text',
+          description: "The ID, as text",
           nullable: false,
         },
         updated_at: {
-          description: 'When the key was written',
-          semanticType: 'timestamp',
+          description: "When the key was written",
+          semanticType: "timestamp",
         },
       },
     },
   },
-}
-
-// =============================================================================
-// Utility Functions
-// =============================================================================
+};
 
 /**
  * Get annotation for a specific table
  */
-export function getTableAnnotation(
-  tableName: string,
-): TableAnnotation | undefined {
-  return SCHEMA_REGISTRY.tables[tableName]
+export function getTableAnnotation(tableName: string) {
+  return SCHEMA_REGISTRY.tables[tableName];
 }
 
 /**
  * Get annotation for a specific column
  */
-export function getColumnAnnotation(
-  tableName: string,
-  columnName: string,
-): ColumnAnnotation | undefined {
-  return SCHEMA_REGISTRY.tables[tableName]?.columns[columnName]
+export function getColumnAnnotation(tableName: string, columnName: string) {
+  return SCHEMA_REGISTRY.tables[tableName]?.columns[columnName];
 }
 
 /**
  * Get all table names
  */
-export function getTableNames(): string[] {
-  return Object.keys(SCHEMA_REGISTRY.tables)
+export function getTableNames() {
+  return Object.keys(SCHEMA_REGISTRY.tables);
 }
 
 /**
  * Get column names for a table
  */
-export function getColumnNames(tableName: string): string[] {
-  const table = SCHEMA_REGISTRY.tables[tableName]
-  return table ? Object.keys(table.columns) : []
+export function getColumnNames(tableName: string) {
+  const table = SCHEMA_REGISTRY.tables[tableName];
+  return table ? Object.keys(table.columns) : [];
 }

@@ -1,17 +1,13 @@
-/**
- * Errors of `tg media download`, thrown by its core (download-media.ts) and
- * reported by the command with the stable error schema
- */
-import type { ErrorCode } from '../../types'
-import { error, isRetryableCode } from '../../utils/output'
-import { reportHistoryError } from '../messages/helpers'
+import type { ErrorCode } from "../../types";
+import { error, isRetryableCode } from "../../utils/output";
+import { reportHistoryError } from "../messages/helpers";
 
 /** A failure with its documented error code */
 export class MediaError extends Error {
-  readonly code: ErrorCode
-  readonly details: Record<string, unknown>
-  readonly suggestion?: string
-  readonly retryable: boolean
+  readonly code: ErrorCode;
+  readonly details: Record<string, unknown>;
+  readonly suggestion?: string;
+  readonly retryable: boolean;
 
   constructor(
     code: ErrorCode,
@@ -20,12 +16,12 @@ export class MediaError extends Error {
     suggestion?: string,
     retryable = isRetryableCode(code),
   ) {
-    super(message)
-    this.name = 'MediaError'
-    this.code = code
-    this.details = details
-    this.suggestion = suggestion
-    this.retryable = retryable
+    super(message);
+    this.name = "MediaError";
+    this.code = code;
+    this.details = details;
+    this.suggestion = suggestion;
+    this.retryable = retryable;
   }
 }
 
@@ -35,15 +31,15 @@ export class MediaError extends Error {
  */
 export class DownloadInterruptedError extends Error {
   /** Bytes in the partial download; null when the transfer hadn't started */
-  readonly downloaded: number | null
+  readonly downloaded: number | null;
   /** The file's size, when Telegram gives it */
-  readonly total: number | null
+  readonly total: number | null;
 
   constructor(downloaded: number | null, total: number | null) {
-    super('Download interrupted')
-    this.name = 'DownloadInterruptedError'
-    this.downloaded = downloaded
-    this.total = total
+    super("Download interrupted");
+    this.name = "DownloadInterruptedError";
+    this.downloaded = downloaded;
+    this.total = total;
   }
 }
 
@@ -54,7 +50,7 @@ export class DownloadInterruptedError extends Error {
  */
 export function reportMediaError(err: unknown): never {
   if (err instanceof MediaError) {
-    error(err.code, err.message, err.details, err.suggestion, err.retryable)
+    error(err.code, err.message, err.details, err.suggestion, err.retryable);
   }
-  reportHistoryError(err, 'download media')
+  reportHistoryError(err, "download media");
 }
