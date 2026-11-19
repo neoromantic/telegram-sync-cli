@@ -10,7 +10,7 @@ import { type ChatsCache, createChatsCache } from "../../db/chats-cache";
 import { createMessagesCache, type MessagesCache } from "../../db/messages-cache";
 import { SyncPriority } from "../../db/sync-schema";
 import type { ChatType } from "../../db/types";
-import { createUsersCache, type UsersCache } from "../../db/users-cache";
+import { createUsersCache, type UserCacheInput, type UsersCache } from "../../db/users-cache";
 import { toLong } from "../../utils/long";
 import { RateLimitError } from "../../utils/telegram-rate-limits";
 import { chatRow, createAccountCacheDb } from "../../test/cache-db.test-utils";
@@ -90,6 +90,10 @@ describe("resolvePeer with numeric IDs", () => {
     chatsCache.upsert(chatRow(chatId, type, { title, access_hash: accessHash }));
   }
 
+  function cacheUser(user: Omit<UserCacheInput, "fetched_at" | "raw_json">) {
+    usersCache.upsert({ ...user, fetched_at: 1_760_000_000_000, raw_json: "{}" });
+  }
+
   function resolve(identifier: string, client: Pick<TelegramClient, "call">) {
     return resolvePeer(client, identifier, usersCache, chatsCache, createDmLookup(db));
   }
@@ -159,30 +163,108 @@ describe("resolvePeer with numeric IDs", () => {
   });
 
   describe("@username", () => {
-    it("resolves a cached supergroup to its bare channel ID", async () => {
+    it.each(["channel", "supergroup"] as const)(
+      "resolves a cached %s to its bare channel ID",
+      async (kind) => {
+        chatsCache.upsert(
+          dialogToCacheInput(
+            fakeDialog({ kind, id: 1234567890, title: "Team Chat", username: "teamchat" }),
+          ),
+        );
+        const { call, client } = throwingClient();
+
+        const peer = await resolve("@teamchat", client);
+
+        expect(peer).toEqual({
+          inputPeer: {
+            _: "inputPeerChannel",
+            channelId: 1234567890,
+            accessHash: toLong(777),
+          },
+          name: "Team Chat",
+        });
+        expect(call).not.toHaveBeenCalled();
+      },
+    );
+
+    it("resolves a cached user before a cached channel with the same username", async () => {
+      cacheUser({
+        user_id: "10",
+        username: "alice",
+        first_name: "Alice",
+        last_name: "Able",
+        access_hash: "1111",
+      });
       chatsCache.upsert(
-        dialogToCacheInput(
-          fakeDialog({
-            kind: "supergroup",
-            id: 1234567890,
-            title: "Team Chat",
-            username: "teamchat",
-          }),
-        ),
+        chatRow("-1009100000001", "channel", { username: "alice", access_hash: "2222" }),
       );
       const { call, client } = throwingClient();
 
-      const peer = await resolve("@teamchat", client);
+      const peer = await resolve("@alice", client);
 
       expect(peer).toEqual({
-        inputPeer: {
-          _: "inputPeerChannel",
-          channelId: 1234567890,
-          accessHash: toLong(777),
-        },
-        name: "Team Chat",
+        inputPeer: { _: "inputPeerUser", userId: 10, accessHash: toLong("1111") },
+        name: "Alice Able",
       });
       expect(call).not.toHaveBeenCalled();
+    });
+
+    it("passes over a cached user without an access hash to the cached channel", async () => {
+      cacheUser({ user_id: "10", username: "alice", first_name: "Alice" });
+      chatsCache.upsert(
+        chatRow("-1009100000001", "channel", { username: "alice", access_hash: "2222" }),
+      );
+      const { call, client } = throwingClient();
+
+      const peer = await resolve("@alice", client);
+
+      expect(peer.inputPeer).toEqual({
+        _: "inputPeerChannel",
+        channelId: 9100000001,
+        accessHash: toLong("2222"),
+      });
+      expect(call).not.toHaveBeenCalled();
+    });
+
+    it("asks Telegram for the username of a cached basic group", async () => {
+      chatsCache.upsert(chatRow("-666", "group", { username: "bookclub" }));
+      const call = mock(async (_request: unknown) => ({
+        _: "contacts.resolvedPeer",
+        peer: { _: "peerChat", chatId: 666 },
+        users: [],
+        chats: [
+          {
+            _: "chat",
+            id: 666,
+            title: "Book Club",
+            participantsCount: 10,
+            photo: { _: "chatPhotoEmpty" },
+            date: 1_760_000_000,
+            version: 1,
+          },
+        ],
+      }));
+
+      const peer = await resolve("@bookclub", { call } as unknown as Pick<TelegramClient, "call">);
+
+      expect(call).toHaveBeenCalledTimes(1);
+      expect(peer.inputPeer).toEqual({ _: "inputPeerChat", chatId: 666 });
+    });
+
+    it("takes a user Telegram returns without an access hash with hash 0", async () => {
+      const call = mock(async () => resolvedPeer([{ _: "user", id: 10, firstName: "Alice" }]));
+
+      const peer = await resolve("@alice", { call } as unknown as Pick<TelegramClient, "call">);
+
+      expect(peer.inputPeer).toEqual({ _: "inputPeerUser", userId: 10, accessHash: toLong(0) });
+    });
+
+    it("fails for a username Telegram does not know", async () => {
+      const call = mock(async () => resolvedPeer([]));
+
+      await expect(
+        resolve("@nobody", { call } as unknown as Pick<TelegramClient, "call">),
+      ).rejects.toThrow("Could not resolve @nobody");
     });
 
     it("keeps a cached channel's dialog metadata when it resolves a new username", async () => {
@@ -215,8 +297,16 @@ describe("resolvePeer with numeric IDs", () => {
         }),
       } as unknown as TelegramClient;
 
-      await resolve("@made_up_new_alias", client);
+      const peer = await resolve("@made_up_new_alias", client);
 
+      expect(peer).toEqual({
+        inputPeer: {
+          _: "inputPeerChannel",
+          channelId: 9_100_000_006,
+          accessHash: toLong(777),
+        },
+        name: "Made-up News",
+      });
       expect(chatsCache.getById("-1009100000006")).toMatchObject({
         type: "channel",
         username: "made_up_new_alias",
@@ -485,6 +575,35 @@ describe("resolvePeer with numeric IDs", () => {
       },
     );
 
+    it("resolves a cached phone number in any format without an API call", async () => {
+      cacheUser({
+        user_id: "10",
+        first_name: "Alice",
+        last_name: "Able",
+        phone: "15550000000",
+        access_hash: "1111",
+      });
+      const { call, client } = throwingClient();
+
+      const peer = await resolve("+1 (555) 000-0000", client);
+
+      expect(peer).toEqual({
+        inputPeer: { _: "inputPeerUser", userId: 10, accessHash: toLong("1111") },
+        name: "Alice Able",
+      });
+      expect(call).not.toHaveBeenCalled();
+    });
+
+    it("asks Telegram for a phone whose cached user has no access hash", async () => {
+      cacheUser({ user_id: "10", first_name: "Alice", phone: "15550000000" });
+      const { call, client } = throwingClient(phoneNotOccupied);
+
+      await expect(resolve("+15550000000", client)).rejects.toThrow(
+        "Could not resolve phone number +15550000000",
+      );
+      expect(call).toHaveBeenCalledTimes(1);
+    });
+
     it.each(["+", "+alice", "+1 555 abc"])(
       "rejects %p, which has no phone number after +",
       async (identifier) => {
@@ -496,11 +615,11 @@ describe("resolvePeer with numeric IDs", () => {
     );
 
     it.each([
-      ["@alice", "contacts.resolveUsername"],
-      ["+15550000000", "contacts.resolvePhone"],
+      ["@alice", { _: "contacts.resolveUsername", username: "alice" }],
+      ["+15550000000", { _: "contacts.resolvePhone", phone: "15550000000" }],
     ])(
-      "caches the user Telegram resolves for %p, so its ID hits the cache next",
-      async (identifier, method) => {
+      "resolves %p through Telegram and caches the user, so its ID hits the cache next",
+      async (identifier, lookup) => {
         const alice: tl.RawUser = {
           _: "user",
           id: 10,
@@ -510,15 +629,14 @@ describe("resolvePeer with numeric IDs", () => {
           phone: "15550000000",
           accessHash: toLong("1111"),
         };
-        const call = mock(async (request: { _: string }) => {
-          expect(request._).toBe(method);
-          return resolvedPeer([alice]);
-        });
+        const call = mock(async (_request: unknown) => resolvedPeer([alice]));
         const client = { call } as unknown as Pick<TelegramClient, "call">;
 
-        await resolve(identifier, client);
+        const resolved = await resolve(identifier, client);
         const byId = await resolve("10", throwingClient().client);
 
+        expect(call.mock.calls).toEqual([[lookup]]);
+        expect(resolved).toEqual(byId);
         expect(byId).toEqual({
           inputPeer: {
             _: "inputPeerUser",

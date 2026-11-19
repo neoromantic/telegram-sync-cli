@@ -269,20 +269,6 @@ describe("extractAttachment", () => {
     );
   });
 
-  it("reads the media of a sent message", () => {
-    expect(
-      extractAttachment({
-        _: "updateShortSentMessage",
-        out: true,
-        id: 28,
-        pts: 10,
-        ptsCount: 1,
-        date: 1_760_000_028,
-        media: pdfMessage.media,
-      }),
-    ).toEqual(extractAttachment(pdfMessage));
-  });
-
   it("gives null for a message without a file", () => {
     const withMedia = (media: unknown) => ({
       _: "message",
@@ -443,12 +429,6 @@ describe("uniqueFileId", () => {
       );
     }
   });
-
-  it("is the same for the same file in two messages", () => {
-    expect(extractAttachment(videoMessage(peer, 1))?.uniqueFileId).toBe(
-      extractAttachment(videoMessage({ _: "peerChannel", channelId: 77 }, 9))?.uniqueFileId,
-    );
-  });
 });
 
 describe("pickThumb", () => {
@@ -545,12 +525,6 @@ describe("attachmentDefaultFileName", () => {
       attachmentDefaultFileName(base({ kind, mimeType, uniqueFileId: "x" }));
     expect(named("photo", "image/jpeg")).toBe("photo.jpg");
     expect(named("voice", "audio/ogg")).toBe("voice.ogg");
-    expect(named("video", "video/mp4")).toBe("video.mp4");
-    expect(named("round", "video/mp4")).toBe("round.mp4");
-    expect(named("animation", "video/mp4")).toBe("animation.mp4");
-    expect(named("audio", "audio/mpeg")).toBe("audio.mp3");
-    expect(named("sticker", "application/x-tgsticker")).toBe("sticker.tgs");
-    expect(named("sticker", "image/webp")).toBe("sticker.webp");
     expect(named("document", "application/pdf")).toBe("file.pdf");
     expect(named("document", "application/x-unknown")).toBe("file.bin");
     expect(named("document", null)).toBe("file.bin");

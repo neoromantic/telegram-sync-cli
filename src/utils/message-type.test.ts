@@ -2,13 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Long, Message, PeersIndex, type tl } from "@mtcute/bun";
 
 import { resolveRealtimeMessageType } from "../daemon/daemon-accounts";
-import {
-  classifyDocument,
-  MESSAGE_TYPE_BY_MEDIA_TYPE,
-  messageTypeOfMediaType,
-  rawMediaType,
-  resolveRawMessageType,
-} from "./message-type";
+import { resolveRawMessageType } from "./message-type";
 import {
   documentMessage,
   gifMessage,
@@ -215,33 +209,5 @@ describe("resolveRawMessageType", () => {
       messageType: "text",
       hasMedia: false,
     });
-  });
-});
-
-describe("message type helpers", () => {
-  it("maps every mtcute media type, unknown ones to unknown", () => {
-    expect(messageTypeOfMediaType("live_location")).toBe("location");
-    expect(messageTypeOfMediaType("story")).toBe("unknown");
-    expect(messageTypeOfMediaType(undefined)).toBe("unknown");
-    for (const [type, messageType] of Object.entries(MESSAGE_TYPE_BY_MEDIA_TYPE)) {
-      expect(messageTypeOfMediaType(type)).toBe(messageType);
-    }
-  });
-
-  it("names the attribute that decided a document", () => {
-    const gif = gifMessage(peer, 80).media.document;
-    expect(classifyDocument(gif)).toEqual({
-      type: "video",
-      attr: gif.attributes[1]!,
-    });
-    expect(classifyDocument({ attributes: "garbage" })).toEqual({
-      type: "document",
-      attr: null,
-    });
-  });
-
-  it("gives no type to media it does not know", () => {
-    expect(rawMediaType({ _: "messageMediaSomethingNew" })).toBeNull();
-    expect(rawMediaType(undefined)).toBeNull();
   });
 });

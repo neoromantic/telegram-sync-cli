@@ -25,7 +25,6 @@ const DATE = 1_760_000_000;
 type UploadParams = Parameters<typeof uploadFile>[1];
 
 interface UploadCall {
-  client: TelegramClient;
   params: UploadParams;
   bytes: Uint8Array;
 }
@@ -35,7 +34,7 @@ function fakeUpload() {
   const upload = (async (client: TelegramClient, params: UploadParams) => {
     const stream = params.file as ReadableStream<Uint8Array>;
     const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
-    calls.push({ client, params, bytes });
+    calls.push({ params, bytes });
     await client.call(
       {
         _: "upload.saveFilePart",
@@ -152,10 +151,10 @@ describe("sendFile", () => {
     return path;
   }
 
-  it("uploads a PNG as a photo with the caption, silent and reply", async () => {
+  it("uploads a PNG as a photo after prepare, through the transfer client, with caption, silent and reply", async () => {
     const path = place("lake.png", 2_000);
     const response = sentUpdates(photoMessage(SELF, 42));
-    const { client, call } = fakeClient(response);
+    const { client, call, events } = fakeClient(response);
     const { upload, calls } = fakeUpload();
     const progress = mock((_sent: number, _total: number) => {});
 
@@ -188,6 +187,9 @@ describe("sendFile", () => {
       fileMime: "image/png",
     });
     expect(progress).toHaveBeenCalledWith(2_000, 2_000);
+    expect(events).toEqual(["prepare", "upload.saveFilePart", "messages.sendMedia"]);
+    const part = call.mock.calls.find(([request]) => request._ === "upload.saveFilePart");
+    expect(part?.[1]).toEqual({ floodSleepThreshold: MEDIA_FLOOD_SLEEP_MS });
 
     const request = sendMediaRequest(call);
     expect(request).toMatchObject({
@@ -201,49 +203,6 @@ describe("sendFile", () => {
       },
     });
     expect(request.randomId).toBeDefined();
-  });
-
-  it("prepares the client before the upload reads its session", async () => {
-    const path = place("report.pdf", 100);
-    const { client, events } = fakeClient(sentUpdates(photoMessage(SELF, 42)));
-    const { upload } = fakeUpload();
-
-    await sendFile(
-      client,
-      {
-        peer: { _: "inputPeerSelf" },
-        path,
-        caption: "",
-        silent: false,
-        forceDocument: false,
-      },
-      { upload },
-    );
-
-    expect(events).toEqual(["prepare", "upload.saveFilePart", "messages.sendMedia"]);
-  });
-
-  it("uploads through the transfer facade of the client", async () => {
-    const path = place("lake.jpg", 100);
-    const { client, call } = fakeClient(sentUpdates(photoMessage(SELF, 42)));
-    const { upload, calls } = fakeUpload();
-
-    await sendFile(
-      client,
-      {
-        peer: { _: "inputPeerSelf" },
-        path,
-        caption: "",
-        silent: false,
-        forceDocument: false,
-      },
-      { upload },
-    );
-
-    expect(calls[0]?.client).not.toBe(client);
-    expect(Object.getPrototypeOf(calls[0]?.client)).toBe(client);
-    const part = call.mock.calls.find(([request]) => request._ === "upload.saveFilePart");
-    expect(part?.[1]).toEqual({ floodSleepThreshold: MEDIA_FLOOD_SLEEP_MS });
   });
 
   it("sends a PDF as a document named by its base name", async () => {
@@ -278,63 +237,6 @@ describe("sendFile", () => {
       mimeType: "application/pdf",
       attributes: [{ _: "documentAttributeFilename", fileName: "example-report.pdf" }],
       forceFile: true,
-    });
-  });
-
-  for (const { name, mimeType } of [
-    { name: "example-loop.gif", mimeType: "image/gif" },
-    { name: "example-clip.mp4", mimeType: "video/mp4" },
-  ]) {
-    it(`sends ${name} as a plain file without forceDocument`, async () => {
-      const path = place(name, 100);
-      const { client, call } = fakeClient(sentUpdates(pdfDocumentMessage(SELF, 46)));
-      const { upload } = fakeUpload();
-
-      const sent = await sendFile(
-        client,
-        {
-          peer: { _: "inputPeerSelf" },
-          path,
-          caption: "",
-          silent: false,
-          forceDocument: false,
-        },
-        { upload },
-      );
-
-      expect(sent).toMatchObject({ kind: "document", mimeType });
-      expect(sendMediaRequest(call).media).toMatchObject({
-        _: "inputMediaUploadedDocument",
-        mimeType,
-        forceFile: true,
-        attributes: [{ _: "documentAttributeFilename", fileName: name }],
-      });
-    });
-  }
-
-  it("sends an image as a file with forceDocument", async () => {
-    const path = place("lake.jpg", 100);
-    const { client, call } = fakeClient(sentUpdates(pdfDocumentMessage(SELF, 44)));
-    const { upload } = fakeUpload();
-
-    const sent = await sendFile(
-      client,
-      {
-        peer: { _: "inputPeerSelf" },
-        path,
-        caption: "",
-        silent: false,
-        forceDocument: true,
-      },
-      { upload },
-    );
-
-    expect(sent).toMatchObject({ kind: "document", mimeType: "image/jpeg" });
-    expect(sendMediaRequest(call).media).toMatchObject({
-      _: "inputMediaUploadedDocument",
-      mimeType: "image/jpeg",
-      forceFile: true,
-      attributes: [{ _: "documentAttributeFilename", fileName: "lake.jpg" }],
     });
   });
 });

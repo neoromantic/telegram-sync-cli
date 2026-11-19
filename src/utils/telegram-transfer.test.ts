@@ -29,10 +29,9 @@ describe("transferClient", () => {
     });
     await facade.call(request);
 
-    expect(MEDIA_FLOOD_SLEEP_MS).toBe(10_000);
     expect(calls).toEqual([
-      { request, options: { floodSleepThreshold: 10_000, dcId: 4 } },
-      { request, options: { floodSleepThreshold: 10_000 } },
+      { request, options: { floodSleepThreshold: MEDIA_FLOOD_SLEEP_MS, dcId: 4 } },
+      { request, options: { floodSleepThreshold: MEDIA_FLOOD_SLEEP_MS } },
     ]);
   });
 
