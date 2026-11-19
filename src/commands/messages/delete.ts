@@ -20,6 +20,30 @@ import {
 } from "./helpers";
 import { resolveHistoryChat } from "./history";
 
+const VALUE_FLAGS = new Set(["--chat", "--id", "--account", "--format", "-f"]);
+
+function refuseStrayArgs(rawArgs: string[]) {
+  const end = rawArgs.indexOf("--");
+  const flags = end === -1 ? rawArgs : rawArgs.slice(0, end);
+  const stray = end === -1 ? [] : rawArgs.slice(end + 1);
+  for (let i = 0; i < flags.length; i++) {
+    const arg = flags[i]!;
+    if (VALUE_FLAGS.has(arg)) {
+      i++;
+    } else if (!arg.startsWith("-") || /^--revoke=(?!(true|false)$)/.test(arg)) {
+      stray.push(arg);
+    }
+  }
+  if (stray.length > 0) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      `Unexpected arguments: ${stray.join(" ")}. Nothing was deleted.`,
+      { arguments: stray },
+      "--revoke takes no value: add --revoke to delete for everyone, or leave it out",
+    );
+  }
+}
+
 function readMessageIds(rawArgs: string[]) {
   const ids = [
     ...new Set(
@@ -28,6 +52,9 @@ function readMessageIds(rawArgs: string[]) {
       ),
     ),
   ];
+  if (ids.length === 0) {
+    error(ErrorCodes.INVALID_ARGS, "No --id given. Nothing was deleted.");
+  }
   if (ids.length > MAX_DELETE_IDS) {
     error(
       ErrorCodes.INVALID_ARGS,
@@ -67,6 +94,7 @@ export const deleteMessagesCommand = defineCommand({
     },
   },
   async run({ args, rawArgs }) {
+    refuseStrayArgs(rawArgs);
     const messageIds = readMessageIds(rawArgs);
     const { account } = openAccountCache(args.account);
 

@@ -189,14 +189,52 @@ describe("E2E: messages delete", () => {
     });
   });
 
-  it("deletes for everyone with --revoke", async () => {
-    const result = await remove("@alice", [12], ["--revoke"]);
+  it.each([["--revoke"], ["--revoke=true"]])("deletes for everyone with %s", async (flag) => {
+    const result = await remove("@alice", [12], [flag]);
 
     expect(result.exitCode).toBe(0);
     expect(deleteCalls(result.stderr)).toEqual([
       { method: "messages.deleteMessages", id: [12], revoke: true },
     ]);
     expect((result.json as { data: DeleteMessagesResult }).data.forEveryone).toBe(true);
+  });
+
+  it.each([[["--revoke=false"]], [["--no-revoke"]], [["--format", "pretty"]], [["-f", "pretty"]]])(
+    "deletes for this account only with %j",
+    async (flags: string[]) => {
+      const result = await remove("@alice", [12], flags);
+
+      expect(result.exitCode).toBe(0);
+      expect(deleteCalls(result.stderr)).toEqual([
+        { method: "messages.deleteMessages", id: [12], revoke: false },
+      ]);
+    },
+  );
+
+  it.each([
+    [["--revoke", "false"], ["false"]],
+    [["--revoke=no"], ["--revoke=no"]],
+    [["--revoke=0"], ["--revoke=0"]],
+    [["everyone"], ["everyone"]],
+    [["--", "--revoke"], ["--revoke"]],
+  ])("refuses %j before it calls Telegram", async (extra, stray) => {
+    const result = await remove("@alice", [12], extra);
+
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).not.toContain(FAKE_CLIENT_CALL);
+    expect(errorJson(result.stderr).error).toMatchObject({
+      code: "INVALID_ARGS",
+      details: { arguments: stray },
+    });
+    expect(await listed("@alice")).toEqual([13, 12, FAKE_UNDELETABLE_MESSAGE]);
+  });
+
+  it("refuses an empty ID list before it calls Telegram", async () => {
+    const result = await runCli(["messages", "delete", "--chat", "@alice", "--no-id"], fake());
+
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).not.toContain(FAKE_CLIENT_CALL);
+    expect(errorJson(result.stderr).error.code).toBe("INVALID_ARGS");
   });
 
   it("deletes several IDs at once, each only once, and hides them from the cache", async () => {

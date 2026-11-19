@@ -438,8 +438,11 @@ the chat's dialog (`messages.getPeerDialogs`) and writes its new unread state to
 mutation, so it needs credentials and a connection; the daemon never marks anything read.
 
 `tg messages delete --chat <peer> --id <id>` deletes messages of a chat. A delete cannot be
-undone. Repeat `--id` for several messages, up to 100 per call (more is `INVALID_ARGS`; a
-repeated ID counts once). In a private chat, a basic group or Saved Messages it calls
+undone. Repeat `--id` for several messages, up to 100 per call (more, or an empty list such as
+`--no-id`, is `INVALID_ARGS`; a repeated ID counts once). `--revoke` takes no value:
+`--revoke false`, `--revoke=no` or any other word the command does not expect is `INVALID_ARGS`
+(exit 3) before anything is sent, with the words in `details.arguments`; `--revoke=false` and
+`--no-revoke` leave it off. In a private chat, a basic group or Saved Messages it calls
 `messages.deleteMessages`, which deletes only for this account unless `--revoke` deletes for
 everyone. In a supergroup or channel it calls `channels.deleteMessages`, which always deletes for
 everyone, with or without `--revoke`.
