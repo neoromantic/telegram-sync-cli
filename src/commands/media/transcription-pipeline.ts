@@ -305,6 +305,7 @@ export async function transcribeMessages(
           language: deps.language,
           signal,
         });
+        signal.throwIfAborted();
         for (const [i, request] of batch.entries()) {
           const result = results[i]!;
           outcomes.set(

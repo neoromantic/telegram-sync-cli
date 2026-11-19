@@ -476,7 +476,7 @@ order, and exit 1 when any failed. A stored transcript is printed again without 
 program (`cached: true`) unless `--force`. `tg messages` items show it as `transcript`. No
 program or ffmpeg found is `TRANSCRIBER_NOT_FOUND` (exit 1); this and every other setup error
 carries the commands to fix it in `suggestion`; in a batch it fails only the messages that need
-the program. Ctrl-C or SIGTERM removes the converted audio and exits 130. Setup, providers and
+the program. Ctrl-C, SIGTERM or SIGHUP removes the converted audio and exits 130. Setup, providers and
 where the audio goes: [media.md](media.md#transcribe).
 
 `tg media clean` removes partial downloads untouched for a day; `--older-than <30d|date>`,

@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reused and again before one is saved; a stored transcript counts only for the file the message
   holds now. Each file comes through `tg media download`'s path, is converted with ffmpeg to
   16 kHz mono WAV, and one run of the program handles all of them. Silent audio is stored as
-  empty without running it. Ctrl-C or SIGTERM stops ffmpeg or the program, removes the
-  converted audio and exits 130.
+  empty without running it. Ctrl-C, SIGTERM or SIGHUP stops ffmpeg or the program, removes
+  the converted audio and exits 130.
   Transcripts go into the new `message_transcripts` table, and every `tg messages` item has
   `transcript` (`{ text, language, source, model }` or `null`). Config keys
   `transcribe.command`, `transcribe.model` and `transcribe.language`; a missing program or

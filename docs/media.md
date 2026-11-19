@@ -182,8 +182,10 @@ failing doesn't stop the others; the run exits 1 when any failed and says how ma
   protected is `CONTENT_PROTECTED`; neither is stored.
 - A transcript is stored only for a message in the cache. A message of a group the cache keeps
   out ([sync rules](sync-strategy.md)) is printed and not stored.
-- Ctrl-C or SIGTERM stops the download, ffmpeg or the program, removes the converted audio and
-  exits 130. Transcripts finished before it stay stored.
+- Ctrl-C, SIGTERM or SIGHUP stops the download, ffmpeg or the program, removes the converted
+  audio and exits 130, also when the program had just finished: the results of that call are
+  not stored or printed. A second Ctrl-C exits at once, still removing the converted audio.
+  Transcripts finished before it stay stored.
 - Every `tg messages` item has `transcript`: `{ text, language, source, model }` for a voice or
   video note that has one, else `null`. For `tg sql` the table is
   [`message_transcripts`](database-schema.md#table-message_transcripts). Transcripts are not

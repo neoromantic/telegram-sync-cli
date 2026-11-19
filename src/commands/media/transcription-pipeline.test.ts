@@ -367,6 +367,20 @@ describe("transcribeMessages: eligibility checked again before saving", () => {
     expect(stored(1)).toBeNull();
   });
 
+  it("rejects and stores nothing when interrupted while the provider answers", async () => {
+    voiceNote(1);
+    const controller = new AbortController();
+    const fake = messageProvider(() => {
+      controller.abort();
+      return done("Finished as the signal came.");
+    });
+
+    const run = transcribeMessages(deps(fake.provider, { signal: controller.signal }), "me", [1]);
+
+    await expect(run).rejects.toThrow();
+    expect(stored(1)).toBeNull();
+  });
+
   it("stores nothing when the message became protected during transcription", async () => {
     voiceNote(1);
     const fake = messageProvider(() => {

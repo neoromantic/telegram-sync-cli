@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { defineCommand } from "citty";
 
 import { loadConfig, type TranscribeConfigFile } from "../../config";
@@ -71,6 +74,8 @@ export const transcribeMediaCommand = defineCommand({
     ];
     const { account } = openAccountCache(args.account);
 
+    const tmpRoot = mkdtempSync(join(tmpdir(), "tg-transcribe-"));
+    process.on("exit", () => rmSync(tmpRoot, { recursive: true, force: true }));
     const controller = new AbortController();
     const stop = () => {
       if (controller.signal.aborted) process.exit(INTERRUPTED_EXIT_CODE);
@@ -78,6 +83,7 @@ export const transcribeMediaCommand = defineCommand({
     };
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
+    process.on("SIGHUP", stop);
 
     let outcomes: TranscribeOutcome[];
     try {
@@ -102,10 +108,12 @@ export const transcribeMediaCommand = defineCommand({
           setup: PROVIDERS.local(transcribe),
           language: args.language?.trim() || transcribe.language || null,
           force: args.force ?? false,
+          tmpRoot,
         },
         args.chat,
         messageIds,
       );
+      controller.signal.throwIfAborted();
     } catch (err) {
       if (controller.signal.aborted) {
         info("Transcription interrupted; transcripts made so far are stored");

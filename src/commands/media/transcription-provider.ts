@@ -62,7 +62,7 @@ export type ProviderResult =
 export interface TranscriptionOptions {
   /** The speech's language code; null lets the provider detect it */
   language: string | null;
-  /** Aborted on SIGINT/SIGTERM: stop work and reject */
+  /** Aborted on SIGINT/SIGTERM/SIGHUP: stop work and reject */
   signal: AbortSignal;
 }
 

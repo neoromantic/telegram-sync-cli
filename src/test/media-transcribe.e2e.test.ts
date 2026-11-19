@@ -597,23 +597,41 @@ describe("E2E: media transcribe", () => {
       expect(runnerCalls()).toHaveLength(2);
     });
 
-    for (const stage of ["ffmpeg", "whisper"] as const) {
-      it(`removes the temporary audio and stops ${stage} on SIGTERM, exit 130`, async () => {
+    const interrupts = [
+      { stage: "ffmpeg", signals: ["SIGTERM"] },
+      { stage: "whisper", signals: ["SIGTERM"] },
+      { stage: "whisper", signals: ["SIGHUP"] },
+      { stage: "whisper", signals: ["SIGINT", "SIGINT"] },
+    ] as const;
+    for (const { stage, signals } of interrupts) {
+      it(`removes the temporary audio and stops ${stage} on ${signals.join(" then ")}, exit 130`, async () => {
         const pidFile = join(env.dataDir, "child.pid");
-        const hang = `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 30\n`;
+        const sleepPidFile = join(env.dataDir, "sleep.pid");
+        const stoppedFile = join(env.dataDir, "child.stopped");
+        const stubborn = signals.length > 1;
+        const hang = stubborn
+          ? `#!/bin/sh\ntrap 'echo stopped > "${stoppedFile}"' TERM\nsleep 30 &\necho $! > "${sleepPidFile}"\necho $$ > "${pidFile}"\nwait $!\nwait $!\n`
+          : `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 30\n`;
         install("ffmpeg", stage === "ffmpeg" ? hang : FAKE_FFMPEG);
         install("whisper", stage === "whisper" ? hang : FAKE_OPENAI_RUNNER);
         symlinkSync(Bun.which("sleep")!, join(toolsDir, "sleep"));
         note(1, "Hello.");
         const tmp = join(env.dataDir, "tmp");
         mkdirSync(tmp);
-        const childStarted = () => existsSync(pidFile) && readFileSync(pidFile, "utf-8") !== "";
-        const watcher = watch(env.dataDir);
-        const started = new Promise<void>((resolve) => {
-          watcher.on("change", () => {
-            if (childStarted()) resolve();
+        const written = (file: string) => existsSync(file) && readFileSync(file, "utf-8") !== "";
+        const whenWritten = (file: string) => {
+          const watcher = watch(env.dataDir);
+          return new Promise<void>((resolve) => {
+            const check = () => {
+              if (!written(file)) return;
+              watcher.close();
+              resolve();
+            };
+            watcher.on("change", check);
+            check();
           });
-        });
+        };
+        const started = whenWritten(pidFile);
 
         const proc = spawnCli(["media", "transcribe", "--chat", "me", "--id", "1"], {
           env: {
@@ -626,17 +644,29 @@ describe("E2E: media transcribe", () => {
           },
         });
         await started;
-        watcher.close();
         const childPid = Number(readFileSync(pidFile, "utf-8").trim());
         expect(readdirSync(tmp)).not.toEqual([]);
 
-        proc.kill("SIGTERM");
-        const exitCode = await proc.exited;
+        try {
+          const stopped = whenWritten(stoppedFile);
+          proc.kill(signals[0]);
+          if (stubborn) {
+            await stopped;
+            proc.kill(signals[1]!);
+          }
+          const exitCode = await proc.exited;
 
-        expect(exitCode).toBe(130);
-        expect(readdirSync(tmp)).toEqual([]);
-        expect(() => process.kill(childPid, 0)).toThrow();
-        expect(env.openCacheDb(1).query("SELECT 1 FROM message_transcripts").get()).toBeNull();
+          expect(exitCode).toBe(130);
+          expect(readdirSync(tmp)).toEqual([]);
+          if (!stubborn) expect(() => process.kill(childPid, 0)).toThrow();
+          expect(env.openCacheDb(1).query("SELECT 1 FROM message_transcripts").get()).toBeNull();
+        } finally {
+          if (stubborn) {
+            for (const pid of [childPid, Number(readFileSync(sleepPidFile, "utf-8"))]) {
+              process.kill(pid, "SIGKILL");
+            }
+          }
+        }
       });
     }
 
