@@ -208,7 +208,7 @@ async function startDaemon(ctx: DaemonContext) {
 
   if (exitCode === DaemonExitCode.Success) {
     try {
-      requireDefaultConfig();
+      await requireDefaultConfig();
     } catch (err) {
       ctx.logger.error(`Configuration error: ${formatError(err)}`);
       reportErrorType(err);

@@ -137,9 +137,10 @@ Once that lands, the Telegram client fakes above need an explicit override in `.
 - `output.test.ts` — the JSON success output, which errors are retryable, exit codes, `info`
   and `verbose`
 - `telegram.test.ts` — Telegram service layer
+- `cli.test.ts` — loading the command tree loads no mtcute module, so a cache read starts fast
 - `sync-jobs.test.ts` — sync job lifecycle, retries and counts
 - `sync-scheduler.test.ts` — what the scheduler queues and the lane turns
-- `sync-retry.test.ts` — which errors are permanent
+- `sync-worker-utils.test.ts` — which errors are permanent
 - `refetch-empty-raw-json.test.ts` — messages cached with `raw_json = '{}'` are queued by a
   background pass and fetched again by ID, a chat at a time (#130)
 - `update-handlers.test.ts` — daemon update handlers

@@ -37,7 +37,7 @@ export const meCommand = defineCommand({
 
       const fetchAndUpdateCache = async () => {
         const { getClientForAccount } = await import("../../services/telegram");
-        const client = getClientForAccount(accountId);
+        const client = await getClientForAccount(accountId);
 
         const me = await client.getMe();
 

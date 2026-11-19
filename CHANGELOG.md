@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `tg` starts about five times faster for every command that answers from the cache, and for
+  `--help` and `--version`: it loads the Telegram client library only when a command calls
+  Telegram (0.1 s of CPU instead of 0.5 s on a source install).
 - A group (basic group or supergroup) adds new messages to the cache only while you take part
   in it: you sent an ordinary message there in the last 90 days. Reading a group doesn't count.
   The rule holds in every `tg chats sync` mode and in `tg messages list`/`get`, `--fresh`
