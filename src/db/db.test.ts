@@ -65,4 +65,23 @@ describe("accountsDb", () => {
     expect(accountsDb.getById(first.id)).toBeNull();
     expect(accountsDb.getById(second.id)).not.toBeNull();
   });
+
+  it("merges an account into another all at once or not at all", () => {
+    const from = accountsDb.create({ phone: "+15550000001" });
+    const into = accountsDb.create({ phone: "user:4242", user_id: 4242 });
+    accountsDb.create({ phone: "+15550000003" });
+
+    expect(() => accountsDb.merge(from.id, into.id, { phone: "+15550000003" })).toThrow();
+    expect(accountsDb.getAll().map((account) => account.phone)).toEqual([
+      "+15550000001",
+      "user:4242",
+      "+15550000003",
+    ]);
+
+    accountsDb.merge(from.id, into.id, { phone: "+15550000001" });
+    expect(accountsDb.getAll()).toMatchObject([
+      { id: into.id, phone: "+15550000001", user_id: 4242 },
+      { phone: "+15550000003" },
+    ]);
+  });
 });
