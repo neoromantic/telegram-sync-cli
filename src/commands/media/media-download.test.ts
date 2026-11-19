@@ -852,19 +852,32 @@ describe("downloadMedia: protection found online, then offline", () => {
     });
   }
 
-  it("refuses the next offline run after --fresh finds a message protected", async () => {
-    cacheMessage(SELF_ID, pdf);
-    place(pathsOf(pdf).file, fakeBytes(PDF_SIZE));
-    const telegram = fakeTelegram({
-      message: () => ({ ...pdf, noforwards: true }),
-    });
+  it.each([false, true])(
+    "refuses the next offline run after --fresh finds a message protected (thumb %s)",
+    async (thumb) => {
+      const report = documentMessage(SELF, 5, {
+        mimeType: "application/pdf",
+        size: PDF_SIZE,
+        thumbs: [],
+        attributes: [{ _: "documentAttributeFilename", fileName: "example-report.pdf" }],
+      });
+      cacheMessage(SELF_ID, report);
+      place(pathsOf(report).file, fakeBytes(PDF_SIZE));
+      const telegram = fakeTelegram({
+        message: () => ({ ...report, noforwards: true }),
+      });
 
-    await mediaError(
-      downloadMedia(deps({ getClient: () => telegram.client }), request("me", 5, { fresh: true })),
-    );
-    const offline = await mediaError(downloadMedia(deps(), request("me", 5)));
-    expect(offline.details).toMatchObject({ reason: "message" });
-  });
+      const online = await mediaError(
+        downloadMedia(
+          deps({ getClient: () => telegram.client }),
+          request("me", 5, { fresh: true, thumb }),
+        ),
+      );
+      expect(online.code).toBe(thumb ? ErrorCodes.NO_MEDIA : ErrorCodes.CONTENT_PROTECTED);
+      const offline = await mediaError(downloadMedia(deps(), request("me", 5)));
+      expect(offline.details).toMatchObject({ reason: "message" });
+    },
+  );
 });
 
 describe("downloadMedia: partial downloads", () => {

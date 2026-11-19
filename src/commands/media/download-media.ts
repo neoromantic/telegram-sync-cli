@@ -494,11 +494,11 @@ export async function downloadOnline(
       throw noMedia(chatId, messageId, resolveRawMessageType(message).messageType);
     }
     const thumb = request.thumb ? pickThumb(message) : null;
-    if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
 
     const verdict = await checkOnlineProtection(client, chat, message, chats, deps.signal);
     if (verdict.chat) protection.record(chatId, verdict.chat, now());
     cacheFetchedMessage(deps.cacheDb, chatId, message, users);
+    if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
     if (verdict.message.protected) {
       throw contentProtected(chatId, messageId, verdict.message.reason);
     }
