@@ -214,6 +214,24 @@ describe("filtered list coverage", () => {
     expect(page).toMatchObject({ complete: false, missing: ["history"] });
     expect(gap).toEqual({ low: 2, high: 5, before: null, fillable: false });
   });
+
+  it("marks a gap it can not fill from a time the account didn't take part", async () => {
+    cache(db, [{ id: 1 }, { id: 5 }, { id: 9 }]);
+    cover(db, 1, 1);
+    cover(db, 5, 5);
+    cover(db, 9, 9);
+    db.run("INSERT INTO group_capture_gaps (chat_id, start_date, end_date) VALUES (?, ?, ?)", [
+      CHAT_ID,
+      DATE + 6,
+      DATE + 7,
+    ]);
+
+    const read = (before: number) =>
+      readFilteredPage(db, CHAT_ID, { limit: 20, before }, false, VOICE).gap;
+
+    expect(read(9)).toEqual({ low: 6, high: 8, before: 9, fillable: false });
+    expect(read(5)).toEqual({ low: 2, high: 4, before: 5, fillable: true });
+  });
 });
 
 describe("filtered list snapshot", () => {

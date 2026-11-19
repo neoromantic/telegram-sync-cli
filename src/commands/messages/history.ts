@@ -299,7 +299,7 @@ export interface HistoryGap {
   high: number;
   /** The `--before` of the page that fills it; null for the newest page */
   before: number | null;
-  /** False in a group whose new messages the cache keeps out */
+  /** False when the cache keeps out the group's messages of the gap's time */
   fillable: boolean;
 }
 
@@ -413,6 +413,21 @@ function vouchedSpan(
   return low <= high ? { low, high } : null;
 }
 
+function sentDuringCaptureGap(cacheDb: Database, chatId: number, low: number, high: number) {
+  const row = cacheDb
+    .query(`
+      SELECT 1 FROM group_capture_gaps
+      WHERE chat_id = $id
+        AND end_date > COALESCE((SELECT date FROM messages_cache
+          WHERE chat_id = $id AND message_id < $low ORDER BY message_id DESC LIMIT 1), 0)
+        AND start_date <= COALESCE((SELECT date FROM messages_cache
+          WHERE chat_id = $id AND message_id > $high ORDER BY message_id LIMIT 1), start_date)
+      LIMIT 1
+    `)
+    .get({ $id: chatId, $low: low, $high: high });
+  return row !== null;
+}
+
 function newestGap(
   cacheDb: Database,
   chatId: number,
@@ -424,12 +439,14 @@ function newestGap(
   if (holding && holding.low <= span.low) return null;
 
   const high = holding ? holding.low - 1 : span.high;
-  const below = ranges.below(chatId, high);
+  const low = Math.max(span.low, (ranges.below(chatId, high)?.high ?? 0) + 1);
   return {
-    low: Math.max(span.low, (below?.high ?? 0) + 1),
+    low,
     high,
     before: top !== null && high < top ? high + 1 : null,
-    fillable: createGroupParticipation(cacheDb).captures(chatId),
+    fillable:
+      createGroupParticipation(cacheDb).captures(chatId) &&
+      !sentDuringCaptureGap(cacheDb, chatId, low, high),
   } satisfies HistoryGap;
 }
 

@@ -246,7 +246,7 @@ function filteredSuggestion({ page, gap, untyped }: FilteredPage) {
     parts.push(
       gap.fillable
         ? `the cache lacks messages ${gap.low}-${gap.high}: next fetches them, then reads this page again (tg chats sync turns on history sync for a long gap)`
-        : `the cache lacks messages ${gap.low}-${gap.high}, and it keeps out new messages of a group you don't take part in, so an unfiltered tg messages list reads them from Telegram`,
+        : `the cache lacks messages ${gap.low}-${gap.high}, and it keeps out a group's messages from a time you didn't take part in it, so an unfiltered tg messages list reads them from Telegram`,
     );
   }
   if (untyped) {

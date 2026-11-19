@@ -317,9 +317,10 @@ What a filtered page promises:
    the page is complete; each round fills up to 100 more messages. Every command keeps
    `--account`. `next` of a complete page is the next page, as without filters, so `next` never
    steps over a gap. `nextBefore` and `nextAfter` still page through the cached matches when you
-   choose to read past a gap. A group you don't take part in keeps its new messages out of the
-   cache ([group participation](sync-strategy.md#group-participation)), so its gaps can't be
-   filled: `next` is then the next page and `suggestion` says to read the chat unfiltered.
+   choose to read past a gap. A group keeps its messages from a time you didn't take part in it
+   out of the cache ([group participation](sync-strategy.md#group-participation)), so a gap of
+   that time, or any gap while you don't take part, can't be filled: `next` is then the next page
+   and `suggestion` says to read the chat unfiltered.
 6. **Time bounds are pinned.** `next` carries `--since` and `--until` resolved to UTC seconds
    (`--since=2026-11-11T14:59:53Z`), so a relative bound such as `60s` keeps the window of the
    first page. Bounds with milliseconds round up to the next second, as message dates are whole
