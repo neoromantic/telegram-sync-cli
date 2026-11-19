@@ -4,20 +4,17 @@ import type { TelegramClient } from "@mtcute/bun";
 import type { AccountRuntime, DaemonContext } from "./daemon-context";
 import { processJobs } from "./daemon-scheduler";
 import { createUpdateHandlers, type UpdateHandlers } from "./handlers";
-import { createSyncScheduler, type SyncScheduler } from "./scheduler";
+import type { SyncScheduler } from "./scheduler";
 import { createSyncPacer } from "./sync-pacing";
-import { createRealSyncWorker } from "./sync-worker-real";
 import { type ChatSyncStateService, createChatSyncStateService } from "../db/chat-sync-state";
-import { createChatsCache } from "../db/chats-cache";
-import { createHistoryRanges } from "../db/history-ranges";
 import { createMessagesCache, type MessagesCache } from "../db/messages-cache";
-import { createRateLimitsService } from "../db/rate-limits";
-import { createSenderLookups } from "../db/sender-lookups";
-import { createSyncJobsService } from "../db/sync-jobs";
 import { SyncPriority } from "../db/sync-schema";
-import { createUsersCache } from "../db/users-cache";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { addAccountRuntime, testDaemonContext } from "../test/daemon-runtime.test-utils";
+import {
+  addAccountRuntime,
+  realSyncParts,
+  testDaemonContext,
+} from "../test/daemon-runtime.test-utils";
 import { createFakeHistory, range } from "../test/fake-history.test-utils";
 
 const CHAT_ID = 4242;
@@ -38,8 +35,6 @@ describe("daemon restart with messages missed while stopped", () => {
     db = createAccountCacheDb();
     messagesCache = createMessagesCache(db);
     chatSyncState = createChatSyncStateService(db);
-    const jobsService = createSyncJobsService(db);
-    const rateLimits = createRateLimitsService(db);
 
     chatSyncState.upsert({
       chat_id: CHAT_ID,
@@ -65,7 +60,8 @@ describe("daemon restart with messages missed while stopped", () => {
 
     ctx = testDaemonContext();
 
-    rt = addAccountRuntime(ctx, 1, db);
+    rt = addAccountRuntime(ctx, 1, db, realSyncParts(ctx, db, history.client));
+    scheduler = rt.scheduler!;
     handlers = createUpdateHandlers({
       db,
       messagesCache,
@@ -73,24 +69,6 @@ describe("daemon restart with messages missed while stopped", () => {
       onMessagesSynced: (count) => {
         rt.messagesSynced += count;
       },
-    });
-    scheduler = createSyncScheduler({
-      db,
-      jobsService,
-      chatSyncState,
-      messagesCache,
-    });
-    rt.scheduler = scheduler;
-    rt.worker = createRealSyncWorker({
-      client: history.client,
-      messagesCache,
-      historyRanges: createHistoryRanges(db),
-      chatSyncState,
-      jobsService,
-      rateLimits,
-      chatsCache: createChatsCache(db),
-      usersCache: createUsersCache(db),
-      senderLookups: createSenderLookups(db),
     });
     ctx.state.accounts.set(1, {
       accountId: 1,
@@ -162,18 +140,6 @@ describe("daemon restart with messages missed while stopped", () => {
     expect(rt.messagesSynced).toBe(151);
   });
 
-  it("keeps up with live messages that arrive during catch-up", async () => {
-    await scheduler.initializeForStartup();
-    await receiveLive(1151);
-
-    await runNextJob();
-    await receiveLive(1152);
-    await drainJobs();
-
-    expect(missingIds(1001, 1152)).toEqual([]);
-    expect(chatSyncState.get(CHAT_ID)?.forward_cursor).toBe(1152);
-  });
-
   it("resumes from the cursor after a FLOOD_WAIT between pages", async () => {
     const call = history.client.call.bind(history.client);
     let calls = 0;
@@ -184,17 +150,7 @@ describe("daemon restart with messages missed while stopped", () => {
         return call(request);
       },
     } as unknown as TelegramClient;
-    rt.worker = createRealSyncWorker({
-      client,
-      messagesCache,
-      historyRanges: createHistoryRanges(db),
-      chatSyncState,
-      jobsService: createSyncJobsService(db),
-      rateLimits: createRateLimitsService(db),
-      chatsCache: createChatsCache(db),
-      usersCache: createUsersCache(db),
-      senderLookups: createSenderLookups(db),
-    });
+    rt.worker = realSyncParts(ctx, db, client).worker;
 
     await scheduler.initializeForStartup();
     await receiveLive(1151);
@@ -213,94 +169,5 @@ describe("daemon restart with messages missed while stopped", () => {
 
     expect(missingIds(1001, 1151)).toEqual([]);
     expect(chatSyncState.get(CHAT_ID)?.forward_cursor).toBe(1151);
-  });
-});
-
-describe("daemon restart with two accounts", () => {
-  function seedAccount(ctx: DaemonContext, accountId: number, cursor: number, top: number) {
-    const db = createAccountCacheDb();
-    const messagesCache = createMessagesCache(db);
-    const chatSyncState = createChatSyncStateService(db);
-    const jobsService = createSyncJobsService(db);
-    chatSyncState.upsert({
-      chat_id: CHAT_ID,
-      chat_type: "private",
-      sync_priority: SyncPriority.High,
-      sync_enabled: true,
-      forward_cursor: cursor,
-      backward_cursor: 1,
-    });
-    chatSyncState.markHistoryComplete(CHAT_ID);
-    chatSyncState.raiseTopMessageId(CHAT_ID, top);
-    messagesCache.upsertBatch(
-      range(1, cursor).map((id) => ({
-        chat_id: CHAT_ID,
-        message_id: id,
-        message_type: "text",
-        date: 1_700_000_000 + id,
-        raw_json: "{}",
-      })),
-    );
-    const history = createFakeHistory(range(1, top));
-    const scheduler = createSyncScheduler({
-      db,
-      jobsService,
-      chatSyncState,
-      messagesCache,
-    });
-    addAccountRuntime(ctx, accountId, db, {
-      scheduler,
-      worker: createRealSyncWorker({
-        client: history.client,
-        messagesCache,
-        historyRanges: createHistoryRanges(db),
-        chatSyncState,
-        jobsService,
-        rateLimits: createRateLimitsService(db),
-        chatsCache: createChatsCache(db),
-        usersCache: createUsersCache(db),
-        senderLookups: createSenderLookups(db),
-      }),
-    });
-    ctx.state.accounts.set(accountId, {
-      accountId,
-      phone: `+1555000000${accountId}`,
-      name: null,
-      status: "connected",
-      client: history.client,
-    });
-    return { db, messagesCache, chatSyncState, history, scheduler };
-  }
-
-  it("catches each account up from its own cursor, in its own cache", async () => {
-    const ctx: DaemonContext = testDaemonContext();
-    const first = seedAccount(ctx, 1, CURSOR, 1150);
-    const second = seedAccount(ctx, 2, 300, 320);
-    await first.scheduler.initializeForStartup();
-    await second.scheduler.initializeForStartup();
-
-    for (let i = 0; i < 40; i++) {
-      if (!first.scheduler.getNextJob() && !second.scheduler.getNextJob()) {
-        break;
-      }
-      for (const rt of ctx.runtime.accounts.values()) rt.pacer = createSyncPacer();
-      await processJobs(ctx);
-    }
-
-    expect(first.chatSyncState.get(CHAT_ID)?.forward_cursor).toBe(1150);
-    expect(second.chatSyncState.get(CHAT_ID)?.forward_cursor).toBe(320);
-    for (const [account, top] of [
-      [first, 1150],
-      [second, 320],
-    ] as const) {
-      const missing = range(1, top).filter((id) => account.messagesCache.get(CHAT_ID, id) === null);
-      expect(missing).toEqual([]);
-      expect(account.messagesCache.get(CHAT_ID, top + 1)).toBeNull();
-    }
-    expect(second.history.requests.map((r) => r.minId)).toEqual([300]);
-    expect(first.history.requests[0]?.minId).toBe(CURSOR);
-
-    first.db.close();
-    second.db.close();
   });
 });

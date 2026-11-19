@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime, spyOn } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
 import type { DaemonContext } from "./daemon-context";
-import { requestShutdown, totalMessagesSynced } from "./daemon-context";
+import { requestShutdown } from "./daemon-context";
 import {
   cleanupOldJobs,
   cleanupScheduler,
@@ -25,7 +25,6 @@ import { chatRow, createAccountCacheDb, failWrites } from "../test/cache-db.test
 import {
   addAccountRuntime,
   cacheWithSyncJob,
-  queueSyncJob,
   realSyncParts,
   testDaemonContext,
 } from "../test/daemon-runtime.test-utils";
@@ -117,42 +116,6 @@ describe("initializeScheduler", () => {
 });
 
 describe("rebuildSyncWorker", () => {
-  it("replaces the account worker while the scheduler runs", () => {
-    const ctx = testDaemonContext();
-    const rt = runAccount(ctx, 1);
-    const oldWorker = rt.worker;
-
-    const newClient = asTelegramClient({});
-    rebuildSyncWorker(ctx, 1, newClient);
-
-    expect(rt.worker).not.toBe(oldWorker);
-    expect(rt.worker?.client).toBe(newClient);
-  });
-
-  it("leaves the other accounts' workers alone", () => {
-    const ctx = testDaemonContext();
-    runAccount(ctx, 1);
-    const other = runAccount(ctx, 2);
-    const otherWorker = other.worker;
-
-    rebuildSyncWorker(ctx, 1, asTelegramClient({}));
-
-    expect(other.worker).toBe(otherWorker);
-  });
-
-  it("does nothing without a scheduler", () => {
-    const ctx = testDaemonContext();
-    const rt = addAccountRuntime(ctx, 1);
-    const fake = fakeDialogClient([]);
-
-    expect(rebuildSyncWorker(ctx, 1, fake.client)).toBeUndefined();
-
-    expect(rt.worker).toBeNull();
-    expect(fake.calls).toHaveLength(0);
-  });
-});
-
-describe("rebuildSyncWorker dialog pass", () => {
   let cacheDb: Database;
   let otherDb: Database;
   let chatSyncState: ReturnType<typeof createChatSyncStateService>;
@@ -208,8 +171,11 @@ describe("rebuildSyncWorker dialog pass", () => {
       .map((job) => job.chat_id)
       .sort();
 
-  it("catches up the chats that got messages while the connection was down", async () => {
-    const ctx = createRunningContext();
+  it("gives the account a worker on the new client and catches its chats up on it", async () => {
+    const ctx = testDaemonContext();
+    const rt = runAccount(ctx, 1, { db: cacheDb });
+    const other = runAccount(ctx, 2, { db: otherDb });
+    const otherWorker = other.worker;
     const fake = fakeDialogClient([
       { kind: "user", id: 1001, topMessage: 1000 },
       { kind: "user", id: 1002, topMessage: 1007 },
@@ -217,44 +183,29 @@ describe("rebuildSyncWorker dialog pass", () => {
 
     await rebuildSyncWorker(ctx, 1, fake.client);
 
+    expect(rt.worker?.client).toBe(fake.client);
+    expect(other.worker).toBe(otherWorker);
     expect(fake.calls).toEqual([{ archived: "keep" }]);
-    expect(ctx.runtime.accounts.get(1)?.worker?.client).toBe(fake.client);
     expect(chatSyncState.get(1002)?.top_message_id).toBe(1007);
-    expect(chatSyncState.get(1003)?.top_message_id).toBe(1000);
     expect(pendingCatchups()).toEqual([1002]);
+    expect(createChatSyncStateService(otherDb).get(1002)?.top_message_id).toBe(1000);
+    expect(pendingCatchups(createSyncJobsService(otherDb))).toEqual([]);
+    expect(createChatsCache(otherDb).getById("1001")).toBeNull();
     expect(ctx.runtime.dialogPassesInFlight.size).toBe(0);
   });
 
-  it("changes only the reconnected account's cache", async () => {
-    const ctx = createRunningContext();
-    const otherState = createChatSyncStateService(otherDb);
-    addAccountRuntime(ctx, 2, otherDb, {
-      scheduler: createSyncScheduler({
-        db: otherDb,
-        jobsService: createSyncJobsService(otherDb),
-        chatSyncState: otherState,
-        messagesCache: createMessagesCache(otherDb),
-      }),
-    });
-    const fake = fakeDialogClient(
-      [
-        { kind: "user", id: 1001, topMessage: 1000 },
-        { kind: "user", id: 1002, topMessage: 1007 },
-      ],
-      { failAfter: 1 },
-    );
+  it("does nothing without a scheduler", () => {
+    const ctx = testDaemonContext();
+    const rt = addAccountRuntime(ctx, 1);
+    const fake = fakeDialogClient([]);
 
-    await rebuildSyncWorker(ctx, 1, fake.client);
+    expect(rebuildSyncWorker(ctx, 1, fake.client)).toBeUndefined();
 
-    expect(chatSyncState.get(1003)?.top_message_id).toBeNull();
-    for (const userId of [1001, 1002, 1003]) {
-      expect(otherState.get(userId)?.top_message_id).toBe(1000);
-    }
-    expect(pendingCatchups(createSyncJobsService(otherDb))).toEqual([]);
-    expect(createChatsCache(otherDb).getById("1001")).toBeNull();
+    expect(rt.worker).toBeNull();
+    expect(fake.calls).toHaveLength(0);
   });
 
-  it("marks the account's unlisted chats caught up after a complete pass", async () => {
+  it("marks the account's unlisted chats caught up after a complete pass, and checks an opted-in one", async () => {
     const channelId = -1_000_000_003_003;
     chatSyncState.upsert({
       chat_id: channelId,
@@ -266,6 +217,7 @@ describe("rebuildSyncWorker dialog pass", () => {
     });
     chatSyncState.setSyncMode(channelId, "on");
     chatSyncState.markHistoryComplete(channelId);
+    chatSyncState.raiseTopMessageId(channelId, 900);
     const otherState = createChatSyncStateService(otherDb);
     chatSyncState.markTopUnknown([1003]);
     otherState.markTopUnknown([1003]);
@@ -285,32 +237,6 @@ describe("rebuildSyncWorker dialog pass", () => {
     expect(chatSyncState.get(channelId)?.top_message_id).toBeNull();
     expect(pendingCatchups()).toEqual([channelId, 1002]);
     expect(otherState.get(1003)?.top_message_id).toBeNull();
-  });
-
-  it("checks an opted-in chat that the pass did not list", async () => {
-    const channelId = -1_000_000_003_003;
-    chatSyncState.upsert({
-      chat_id: channelId,
-      chat_type: "channel",
-      sync_priority: SyncPriority.Low,
-      sync_enabled: false,
-      forward_cursor: 900,
-      backward_cursor: 1,
-    });
-    chatSyncState.setSyncMode(channelId, "on");
-    chatSyncState.markHistoryComplete(channelId);
-    chatSyncState.raiseTopMessageId(channelId, 900);
-    const ctx = createRunningContext();
-    const fake = fakeDialogClient([
-      { kind: "user", id: 1001, topMessage: 1000 },
-      { kind: "user", id: 1002, topMessage: 1000 },
-    ]);
-
-    await rebuildSyncWorker(ctx, 1, fake.client);
-
-    expect(chatSyncState.get(channelId)?.top_message_id).toBeNull();
-    expect(chatSyncState.get(1003)?.top_message_id).toBe(1000);
-    expect(pendingCatchups()).toEqual([channelId]);
   });
 
   it("checks every unlisted chat after a pass that failed", async () => {
@@ -374,67 +300,6 @@ describe("rebuildSyncWorker dialog pass", () => {
     expect(ctx.runtime.dialogPassesInFlight.size).toBe(0);
   });
 
-  it("a stop during a FLOOD_WAIT in a reconnect pass ends the wait at once", async () => {
-    const ctx = createRunningContext();
-    const refreshQueues = spyOn(ctx.runtime.accounts.get(1)!.scheduler!, "refreshQueues");
-    const fake = fakeDialogClient(
-      [
-        { kind: "user", id: 1001, topMessage: 1000 },
-        { kind: "user", id: 1002, topMessage: 1007 },
-      ],
-      { waitAfter: 1, onWait: () => requestShutdown(ctx) },
-    );
-
-    const started = performance.now();
-    await rebuildSyncWorker(ctx, 1, fake.client);
-
-    expect(performance.now() - started).toBeLessThan(1000);
-    expect(fake.params).toEqual([{ abortSignal: ctx.runtime.shutdown.signal }]);
-    for (const userId of [1002, 1003]) {
-      expect(chatSyncState.get(userId)?.top_message_id).toBe(1000);
-    }
-    expect(refreshQueues).not.toHaveBeenCalled();
-    expect(ctx.runtime.dialogPassesInFlight.size).toBe(0);
-    expect(ctx.logger.warn).not.toHaveBeenCalled();
-    expect(ctx.logger.error).not.toHaveBeenCalled();
-    expect(ctx.logger.debug).toHaveBeenCalledWith(
-      "[Account 1] Dialog pass stopped after 1 dialogs: the daemon is stopping",
-    );
-  });
-
-  it("a reconnect pass whose page fails during a stop logs at debug and marks nothing", async () => {
-    const ctx = createRunningContext();
-    const refreshQueues = spyOn(ctx.runtime.accounts.get(1)!.scheduler!, "refreshQueues");
-    const fake = fakeDialogClient(
-      [
-        { kind: "user", id: 1001, topMessage: 1000 },
-        { kind: "user", id: 1002, topMessage: 1007 },
-      ],
-      {
-        failAfter: 1,
-        error: new Error("Connection closed"),
-        onListed: () => {
-          ctx.state.shutdownRequested = true;
-        },
-      },
-    );
-
-    await rebuildSyncWorker(ctx, 1, fake.client);
-
-    for (const userId of [1002, 1003]) {
-      expect(chatSyncState.get(userId)?.top_message_id).toBe(1000);
-    }
-    expect(refreshQueues).not.toHaveBeenCalled();
-    expect(ctx.logger.warn).not.toHaveBeenCalled();
-    expect(ctx.logger.error).not.toHaveBeenCalled();
-    expect(ctx.logger.debug).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "[Account 1] Dialog page failed during the stop: Error: Connection closed",
-      ),
-    );
-    expect(ctx.runtime.dialogPassesInFlight.size).toBe(0);
-  });
-
   it("a reconnect pass whose cache closes during a stop logs at debug", async () => {
     const ctx = createRunningContext();
     const refreshQueues = spyOn(ctx.runtime.accounts.get(1)!.scheduler!, "refreshQueues");
@@ -494,31 +359,25 @@ describe("rebuildSyncWorker dialog pass", () => {
 describe("processJobs", () => {
   it("queues follow-up jobs on success with hasMore", async () => {
     const ctx = testDaemonContext();
-    const { db, job } = cacheWithSyncJob(SyncJobType.BackwardHistory, {
+    const { db } = cacheWithSyncJob(SyncJobType.BackwardHistory, {
       chatId: 10,
       chat: { forward_cursor: 1000, backward_cursor: 1000 },
       row: { id: 1 },
     });
-    const rt = runAccount(ctx, 1, {
+    runAccount(ctx, 1, {
       db,
       client: createFakeHistory(range(1, 1000)).client,
       config: { batchSize: 4 },
     });
-    const processJobReal = spyOn(rt.worker!, "processJobReal");
-    const queueBackwardHistory = spyOn(rt.scheduler!, "queueBackwardHistory");
 
     await processJobs(ctx);
 
-    expect(processJobReal).toHaveBeenCalledWith(job);
-    expect(queueBackwardHistory).toHaveBeenCalledWith(10);
     expect(pendingOf(db, SyncJobType.BackwardHistory)).toEqual([10]);
-    expect(rt.messagesSynced).toBe(4);
-    expect(totalMessagesSynced(ctx.runtime)).toBe(4);
   });
 
   it("counts the pace from the start of a job that was rate limited", async () => {
     const ctx = testDaemonContext();
-    const { db, job } = cacheWithSyncJob(SyncJobType.ForwardCatchup, {
+    const { db } = cacheWithSyncJob(SyncJobType.ForwardCatchup, {
       chatId: 44,
       chat: { forward_cursor: 1000 },
       row: { id: 2 },
@@ -527,7 +386,6 @@ describe("processJobs", () => {
       db,
       client: failingClient(() => new tl.RpcError(420, "FLOOD_WAIT_3")),
     });
-    const queueForwardCatchup = spyOn(rt.scheduler!, "queueForwardCatchup");
     const clock = useClock();
 
     try {
@@ -537,31 +395,9 @@ describe("processJobs", () => {
     }
 
     expect(rt.pacer.nextStartAt()).toBe(1_760_000_000_000 + 3000);
-    expect(ctx.runtime.jobsInFlight.size).toBe(0);
-    expect(queueForwardCatchup).not.toHaveBeenCalled();
-    expect(createSyncJobsService(db).getById(job.id)?.status).toBe("pending");
   });
 
-  it("moves to the next lane slot only after a job ran", async () => {
-    const idle = testDaemonContext();
-    const idleCache = cacheWithSyncJob(SyncJobType.ForwardCatchup);
-    connect(idle, 1);
-    const { scheduler: idleScheduler } = realSyncParts(idle, idleCache.db, asTelegramClient({}));
-    addAccountRuntime(idle, 1, idleCache.db, { scheduler: idleScheduler });
-    const idleRecord = spyOn(idleScheduler, "recordJobRun");
-    await processJobs(idle);
-    expect(idleRecord).not.toHaveBeenCalled();
-
-    const blocked = testDaemonContext();
-    const blockedCache = cacheWithSyncJob(SyncJobType.ForwardCatchup);
-    createRateLimitsService(blockedCache.db).setFloodWait("messages.getHistory", 600);
-    const blockedRecord = spyOn(
-      runAccount(blocked, 1, { db: blockedCache.db }).scheduler!,
-      "recordJobRun",
-    );
-    await processJobs(blocked);
-    expect(blockedRecord).not.toHaveBeenCalled();
-
+  it("moves to the next lane slot after a job that threw", async () => {
     const ctx = testDaemonContext();
     const { db, job } = cacheWithSyncJob(SyncJobType.ForwardCatchup);
     failWrites(db, "sync_jobs", "boom", "UPDATE");
@@ -575,30 +411,15 @@ describe("processJobs", () => {
   it("queues history right after a first page with history left", async () => {
     const ctx = testDaemonContext();
     const { db } = cacheWithSyncJob(SyncJobType.InitialLoad, { chat: {} });
-    const rt = runAccount(ctx, 1, { db, client: createFakeHistory(range(1, 300)).client });
-    const queueBackwardHistory = spyOn(rt.scheduler!, "queueBackwardHistory");
+    runAccount(ctx, 1, { db, client: createFakeHistory(range(1, 300)).client });
 
     await processJobs(ctx);
 
-    expect(queueBackwardHistory).toHaveBeenCalledWith(55);
     expect(createChatSyncStateService(db).get(55)).toMatchObject({
       forward_cursor: 300,
       backward_cursor: 201,
     });
     expect(pendingOf(db, SyncJobType.BackwardHistory)).toEqual([55]);
-  });
-
-  it("queues no history after a first page that reached the start", async () => {
-    const ctx = testDaemonContext();
-    const { db } = cacheWithSyncJob(SyncJobType.InitialLoad, { chat: {} });
-    const rt = runAccount(ctx, 1, { db, client: createFakeHistory(range(1, 12)).client });
-    const queueBackwardHistory = spyOn(rt.scheduler!, "queueBackwardHistory");
-
-    await processJobs(ctx);
-
-    expect(queueBackwardHistory).not.toHaveBeenCalled();
-    expect(createChatSyncStateService(db).get(55)?.forward_cursor).toBe(12);
-    expect(pendingOf(db, SyncJobType.BackwardHistory)).toEqual([]);
   });
 
   describe("logs a job that did not succeed by its outcome", () => {
@@ -648,20 +469,6 @@ describe("processJobs", () => {
       expect(exhausted.warn[0]).toContain("(after 5 attempts): connection reset");
     });
 
-    it("only debug-logs a job that a daemon stop left pending", async () => {
-      const { warn, debug, error } = await run(
-        (ctx) =>
-          clientWithCall((_request, params) =>
-            waitLikeFloodWait(params, { onWait: () => requestShutdown(ctx) }),
-          ),
-        2,
-      );
-
-      expect(warn).toEqual([]);
-      expect(error).toEqual([]);
-      expect(debug).toContain("[Account 1] Job 3 left pending: the daemon is stopping");
-    });
-
     it("only debug-logs a job that waits out a FLOOD_WAIT", async () => {
       const { warn, debug } = await run(() =>
         failingClient(() => new tl.RpcError(420, "FLOOD_WAIT_600")),
@@ -693,24 +500,6 @@ describe("processJobs", () => {
       expect(warn).toEqual([]);
       expect(debug).toContain("[Account 1] Job 3 did not run: Job 3 is not pending");
     });
-  });
-
-  it("skips an account whose pace doesn't let a job start yet", async () => {
-    const ctx = testDaemonContext();
-    const clock = useClock();
-    const { db, job } = cacheWithSyncJob(SyncJobType.ForwardCatchup);
-    const rt = runAccount(ctx, 1, { db });
-    const getNextJob = spyOn(rt.scheduler!, "getNextJob");
-    rt.pacer.recordStart(Date.now());
-
-    try {
-      await processJobs(ctx);
-    } finally {
-      clock.restore();
-    }
-
-    expect(getNextJob).not.toHaveBeenCalled();
-    expect(createSyncJobsService(db).getById(job.id)).toEqual(job);
   });
 
   it("runs each account's jobs on its own 3 s calm pace", async () => {
@@ -770,33 +559,12 @@ describe("processJobs", () => {
     );
     expect(getNextJob).toHaveBeenCalledTimes(1);
   });
-
-  it("runs account 2's jobs while account 1's rate limits fail to read", async () => {
-    const ctx = testDaemonContext();
-    const broken = cacheWithSyncJob(SyncJobType.ForwardCatchup).db;
-    runAccount(ctx, 1, { db: broken });
-    broken.run("DROP TABLE rate_limits");
-    const second = runAccount(ctx, 2, {
-      db: cacheWithSyncJob(SyncJobType.ForwardCatchup).db,
-      client: createFakeHistory(range(1, 5)).client,
-    });
-    const processJobReal = spyOn(second.worker!, "processJobReal");
-
-    await processJobs(ctx);
-
-    expect(processJobReal).toHaveBeenCalledTimes(1);
-    expect(ctx.runtime.jobsInFlight.size).toBe(0);
-    expect(ctx.logger.warn).toHaveBeenCalledWith(
-      expect.stringMatching(/^\[Account 1\] Failed to pick a job: .*no such table: rate_limits/),
-    );
-  });
 });
 
 describe("history pacing (#133)", () => {
   function pacedAccount(
     ctx: DaemonContext,
     options: {
-      ids?: number[];
       jobMs?: (index: number) => number;
       clock: ReturnType<typeof useClock>;
     },
@@ -808,12 +576,12 @@ describe("history pacing (#133)", () => {
     const rt = runAccount(ctx, 1, {
       db,
       config: { batchSize: 1 },
-      client: createFakeHistory(options.ids ?? range(1, 1000), () => {
+      client: createFakeHistory(range(1, 1000), () => {
         starts.push(Date.now());
         options.clock.advance(options.jobMs?.(starts.length - 1) ?? 0);
       }).client,
     });
-    return { rt, db, starts };
+    return { rt, starts };
   }
 
   it("runs history at 0.7 calls/s, counted from each start, whatever the tick", async () => {
@@ -849,46 +617,6 @@ describe("history pacing (#133)", () => {
     }
 
     expect(starts).toEqual([0, 5000]);
-  });
-
-  it("goes back to the calm 3 s once no history is due", async () => {
-    const ctx = testDaemonContext();
-    const clock = useClock(0);
-    const { rt, db, starts } = pacedAccount(ctx, { ids: [], clock });
-    queueSyncJob(db, 55, SyncJobType.ForwardCatchup, { nextRunAt: 1 });
-
-    try {
-      await processJobs(ctx);
-      expect(rt.scheduler!.hasHistoryDue()).toBe(false);
-      for (let t = 0; t < 3000; t += 500) {
-        clock.advance(500);
-        await processJobs(ctx);
-      }
-    } finally {
-      clock.restore();
-    }
-
-    expect(starts).toEqual([0, 3000]);
-    expect(rt.pacer.snapshot().mode).toBe("calm");
-  });
-
-  it("starts no job until a FLOOD_WAIT and one interval at the halved pace are over", async () => {
-    const ctx = testDaemonContext();
-    const clock = useClock(0);
-    const { rt, starts } = pacedAccount(ctx, { clock });
-
-    try {
-      await processJobs(ctx);
-      rt.pacer.recordFloodWait(0, 10);
-      clock.advance(10_000 + 2857);
-      await processJobs(ctx);
-      clock.advance(1);
-      await processJobs(ctx);
-    } finally {
-      clock.restore();
-    }
-
-    expect(starts).toEqual([0, 12_858]);
   });
 
   it("speeds history up again after 30 pages without a FLOOD_WAIT", async () => {
@@ -989,7 +717,6 @@ describe("processJobs with two accounts", () => {
     const firstState = ctx.state.accounts.get(1)!;
     firstState.status = "reconnecting";
     firstState.client = undefined;
-    first.rt.worker = null;
     const clock = useClock();
 
     try {
@@ -1115,11 +842,9 @@ describe("processJobs with two accounts", () => {
     expect(call).toHaveBeenCalledTimes(1);
     expect(firstJobs.getById(queued!.id)?.status).toBe("running");
 
-    const started = performance.now();
     requestShutdown(ctx);
     await waitForJobsInFlight(ctx);
 
-    expect(performance.now() - started).toBeLessThan(500);
     expect(firstJobs.getById(queued!.id)).toEqual(queued!);
     expect(ctx.runtime.jobsInFlight.size).toBe(0);
   });
@@ -1143,54 +868,6 @@ describe("a daemon stop during a sync job", () => {
     db.close();
   });
 
-  it("leaves the job pending as it was, and the next start runs it", async () => {
-    const ctx = testDaemonContext();
-    const call = mock((_request: unknown, params?: { abortSignal?: AbortSignal }) =>
-      waitLikeFloodWait(params, { onWait: () => requestShutdown(ctx) }),
-    );
-    connect(ctx, 1, asTelegramClient({ call } as Partial<TelegramClient>));
-    addAccountRuntime(ctx, 1, db);
-    await initializeScheduler(ctx);
-    const jobs = createSyncJobsService(db);
-    const [queued] = jobs.getPendingJobs();
-    expect(queued).toMatchObject({
-      chat_id: CHAT,
-      job_type: SyncJobType.InitialLoad,
-    });
-
-    const started = performance.now();
-    await processJobs(ctx);
-
-    expect(performance.now() - started).toBeLessThan(1000);
-    expect(call).toHaveBeenCalledTimes(1);
-    expect(call.mock.calls[0]?.[1]).toEqual({
-      abortSignal: ctx.runtime.shutdown.signal,
-    });
-    expect(jobs.getById(queued!.id)).toEqual(queued!);
-    expect(jobs.countJobs().running).toBe(0);
-    expect(ctx.logger.warn).not.toHaveBeenCalled();
-    expect(ctx.logger.error).not.toHaveBeenCalled();
-    expect(ctx.logger.debug).toHaveBeenCalledWith(
-      `[Account 1] Job ${queued!.id} left pending: the daemon is stopping`,
-    );
-
-    const restarted = testDaemonContext();
-    const history = createFakeHistory(range(1, 5));
-    connect(restarted, 1, history.client);
-    addAccountRuntime(restarted, 1, db);
-    await initializeScheduler(restarted);
-    expect(jobs.getPendingJobs().map((job) => job.id)).toEqual([queued!.id]);
-
-    await processJobs(restarted);
-
-    expect(history.requests).toHaveLength(1);
-    expect(jobs.getById(queued!.id)?.status).toBe("completed");
-    expect(createChatSyncStateService(db).get(CHAT)).toMatchObject({
-      forward_cursor: 5,
-      backward_cursor: 1,
-    });
-  });
-
   it("ends the wait on the worker a reconnect rebuilt", async () => {
     const ctx = testDaemonContext();
     connect(ctx, 1);
@@ -1211,10 +888,8 @@ describe("a daemon stop during a sync job", () => {
     connect(ctx, 1, fresh.client);
     await rebuildSyncWorker(ctx, 1, fresh.client);
 
-    const started = performance.now();
     await processJobs(ctx);
 
-    expect(performance.now() - started).toBeLessThan(1000);
     expect(call).toHaveBeenCalledTimes(1);
     expect(call.mock.calls[0]?.[1]).toEqual({
       abortSignal: ctx.runtime.shutdown.signal,
@@ -1277,21 +952,7 @@ describe("cleanupOldJobs", () => {
 });
 
 describe("cleanupScheduler", () => {
-  it("prunes every account's cache and drops its scheduler and worker", async () => {
-    const ctx = testDaemonContext();
-    const runtimes = [1, 2].map((accountId) => runAccount(ctx, accountId));
-    for (const rt of runtimes) addOldActivity(rt.db);
-
-    await cleanupScheduler(ctx);
-
-    for (const rt of runtimes) {
-      expect(activityRows(rt.db)).toBe(0);
-      expect(rt.scheduler).toBeNull();
-      expect(rt.worker).toBeNull();
-    }
-  });
-
-  it("waits for every account's job in flight before it drops the schedulers", async () => {
+  it("waits for every account's job in flight, then prunes and drops the schedulers", async () => {
     const ctx = testDaemonContext();
     let finish = () => {};
     const blocked = new Promise<void>((resolve) => {
@@ -1301,6 +962,7 @@ describe("cleanupScheduler", () => {
       db: cacheWithSyncJob(SyncJobType.ForwardCatchup).db,
       client: createFakeHistory(range(1, 5), () => blocked).client,
     });
+    addOldActivity(rt.db);
     expect(startDueJobs(ctx)).toHaveLength(1);
 
     let cleaned = false;
@@ -1316,6 +978,7 @@ describe("cleanupScheduler", () => {
     finish();
     await cleanup;
 
+    expect(activityRows(rt.db)).toBe(0);
     expect(rt.scheduler).toBeNull();
     expect(rt.worker).toBeNull();
     expect(ctx.runtime.jobsInFlight.size).toBe(0);

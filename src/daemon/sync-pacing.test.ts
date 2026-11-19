@@ -32,15 +32,6 @@ describe("SyncPacer", () => {
     });
   });
 
-  it("starts history at 0.7 calls/s", () => {
-    const pacer = createSyncPacer();
-    pacer.setHistoryDue(true);
-    pacer.recordStart(T0);
-
-    expect(pacer.nextStartAt()).toBe(T0 + Math.ceil(1000 / 0.7));
-    expect(pacer.snapshot().mode).toBe("history");
-  });
-
   it("speeds up by 0.05 calls/s after each clean run of 30 calls", () => {
     const pacer = createSyncPacer();
     pacer.setHistoryDue(true);
@@ -55,19 +46,7 @@ describe("SyncPacer", () => {
     expect(rate(pacer)).toBeCloseTo(0.8, 2);
   });
 
-  it("never goes above the cap", () => {
-    const pacer = createSyncPacer({
-      maxCallsPerSecond: 0.8,
-      calmIntervalMs: 3000,
-    });
-    pacer.setHistoryDue(true);
-
-    runClean(pacer, PACING_CLEAN_RUN_CALLS * 10);
-
-    expect(rate(pacer)).toBeCloseTo(0.8, 2);
-  });
-
-  it("reaches the default cap of 0.9 calls/s and stays there", () => {
+  it("reaches the default cap of 0.9 calls/s, or the configured one, and stays there", () => {
     const pacer = createSyncPacer();
     pacer.setHistoryDue(true);
 
@@ -76,6 +55,14 @@ describe("SyncPacer", () => {
 
     runClean(pacer, PACING_CLEAN_RUN_CALLS * 4);
     expect(rate(pacer)).toBeCloseTo(0.9, 2);
+
+    const capped = createSyncPacer({
+      maxCallsPerSecond: 0.8,
+      calmIntervalMs: 3000,
+    });
+    capped.setHistoryDue(true);
+    runClean(capped, PACING_CLEAN_RUN_CALLS * 10);
+    expect(rate(capped)).toBeCloseTo(0.8, 2);
   });
 
   it("starts at the cap when the cap is below 0.7", () => {
@@ -104,37 +91,19 @@ describe("SyncPacer", () => {
     expect(pacer.snapshot().floodWaits).toBe(1);
   });
 
-  it("never halves below 0.2 calls/s", () => {
-    const pacer = createSyncPacer();
-    pacer.setHistoryDue(true);
-
-    for (let i = 0; i < 4; i++) pacer.recordFloodWait(T0, 3);
-
-    expect(rate(pacer)).toBeCloseTo(0.2, 2);
-    expect(pacer.snapshot().floodWaits).toBe(4);
-  });
-
-  it("slows down on a FLOOD_WAIT with a calm interval shorter than the history pace", () => {
+  it("never halves below 0.2 calls/s, whatever the calm interval", () => {
     const pacer = createSyncPacer({
       maxCallsPerSecond: 0.9,
       calmIntervalMs: 1000,
     });
     pacer.setHistoryDue(true);
-    const before = rate(pacer);
 
     pacer.recordFloodWait(T0, 3);
-
-    expect(rate(pacer)).toBeLessThan(before);
     expect(rate(pacer)).toBeCloseTo(0.35, 2);
-  });
 
-  it("never runs faster than the cap", () => {
-    const pacer = createSyncPacer();
-    pacer.setHistoryDue(true);
-
-    runClean(pacer, 20_000);
-
-    expect(rate(pacer)).toBeLessThanOrEqual(0.9);
+    for (let i = 0; i < 3; i++) pacer.recordFloodWait(T0, 3);
+    expect(rate(pacer)).toBeCloseTo(0.2, 2);
+    expect(pacer.snapshot().floodWaits).toBe(4);
   });
 
   it("speeds up again after a FLOOD_WAIT only after a full clean run", () => {

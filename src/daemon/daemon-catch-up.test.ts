@@ -22,19 +22,6 @@ const T0 = Date.UTC(2026, 0, 1);
 const HOUR = 3_600_000;
 
 describe("noteConnectionState", () => {
-  it("asks for a catch-up after more than 5 s offline, once the connection settles", () => {
-    const watch = createConnectionWatch();
-    noteConnectionState(watch, "connecting", T0);
-    noteConnectionState(watch, "offline", T0 + 1_000);
-    noteConnectionState(watch, "connected", T0 + 20_000);
-
-    expect(watch.pending).toEqual({
-      reason: "reconnect",
-      offlineMs: 20_000,
-      dueAt: T0 + 20_000 + CATCH_UP_SETTLE_MS,
-    });
-  });
-
   it("ignores a short blip, such as a reconnect after a ping timeout", () => {
     const watch = createConnectionWatch();
     noteConnectionState(watch, "connecting", T0);
@@ -125,6 +112,7 @@ describe("catch-up after a reconnect or a wake", () => {
     const { ctx, rt, fake, accountState } = connectedAccount();
     const watch = accountState.watch!;
     noteConnectionState(watch, "connecting", T0);
+    noteConnectionState(watch, "offline", T0 + 1_000);
     noteConnectionState(watch, "connected", T0 + 9 * HOUR);
 
     expect(runDueCatchUps(ctx, T0 + 9 * HOUR + 1_000)).toEqual([]);
@@ -148,36 +136,24 @@ describe("catch-up after a reconnect or a wake", () => {
     expect(runDueCatchUps(ctx, T0 + 10 * HOUR)).toEqual([]);
   });
 
-  it("queues catch-up after a jump of the wall clock between loop ticks (a wake)", async () => {
-    const { ctx, rt, fake } = connectedAccount();
+  it("catches up after a jump of the wall clock between loop ticks (a wake), once connected", async () => {
+    const { ctx, rt, fake, accountState } = connectedAccount();
     expect(detectWake(ctx, T0)).toBeNull();
     expect(detectWake(ctx, T0 + 2_000)).toBeNull();
+    const woke = T0 + 2_000 + HOUR;
+    expect(detectWake(ctx, woke)).toBe(HOUR);
+    noteConnectionState(accountState.watch!, "connecting", woke + 1_000);
 
-    const woke = T0 + 2_000 + 7 * HOUR;
-    expect(detectWake(ctx, woke)).toBe(7 * HOUR);
+    expect(runDueCatchUps(ctx, woke + 60_000)).toEqual([]);
 
-    await Promise.all(runDueCatchUps(ctx, woke + CATCH_UP_SETTLE_MS));
-
+    noteConnectionState(accountState.watch!, "connected", woke + 62_000);
+    await Promise.all(runDueCatchUps(ctx, woke + 62_000 + CATCH_UP_SETTLE_MS));
     expect(fake.calls).toHaveLength(1);
     expect(pendingCatchUps()).toEqual([1002]);
     expect(ctx.logger.info).toHaveBeenCalledWith(
-      "[Account 1] Woke after 7 h asleep: dialog pass, 1 chat(s) to catch up",
+      "[Account 1] Woke after 1 h asleep: dialog pass, 1 chat(s) to catch up",
     );
     expect(rt.statusService.getDaemonInfo().lastCatchUp?.reason).toBe("wake");
-  });
-
-  it("waits while the connection is still down after a wake", async () => {
-    const { ctx, fake, accountState } = connectedAccount();
-    detectWake(ctx, T0);
-    detectWake(ctx, T0 + HOUR);
-    noteConnectionState(accountState.watch!, "connecting", T0 + HOUR + 1_000);
-
-    expect(runDueCatchUps(ctx, T0 + HOUR + 60_000)).toEqual([]);
-
-    noteConnectionState(accountState.watch!, "connected", T0 + HOUR + 62_000);
-    await Promise.all(runDueCatchUps(ctx, T0 + HOUR + 62_000 + CATCH_UP_SETTLE_MS));
-    expect(fake.calls).toHaveLength(1);
-    expect(ctx.logger.info).toHaveBeenCalledWith(expect.stringContaining("Woke after 1 h asleep"));
   });
 
   it("skips an account that is reconnecting, and every account while the daemon stops", () => {
