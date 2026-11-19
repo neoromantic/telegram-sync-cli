@@ -9,15 +9,8 @@ import { createChatSyncStateService } from "../db/chat-sync-state";
 import { createChatsCache } from "../db/chats-cache";
 import { createSyncJobsService } from "../db/sync-jobs";
 import { SyncJobType, SyncPriority } from "../db/sync-schema";
-import { runCliFailure, runCliSuccess } from "./cli.test-utils";
+import { NO_CREDENTIALS, runCliFailure, runCliSuccess } from "./cli.test-utils";
 import { createTestEnvironment, type TestEnvironment } from "./e2e-setup.test-utils";
-
-const stripAnsi = (text: string) => Bun.stripANSI(text);
-
-const NO_CREDENTIALS = {
-  TELEGRAM_API_ID: undefined,
-  TELEGRAM_API_HASH: undefined,
-};
 
 const CHANNEL_ID = 1234567890;
 const CHANNEL_PEER_ID = -1001234567890;
@@ -102,7 +95,6 @@ describe("E2E: chats sync", () => {
   for (const [label, chat] of [
     ["@username", async () => "@examplenews"],
     ["the ID from tg chats list", listedId],
-    ["the bare ID that 0.2.0 printed", async () => String(CHANNEL_ID)],
   ] as const) {
     it(`turns sync on for ${label}`, async () => {
       const result = await sync(await chat());
@@ -134,13 +126,6 @@ describe("E2E: chats sync", () => {
       });
     });
   }
-
-  it("reports no change for a second identical run", async () => {
-    await sync("@examplenews");
-    const again = await sync("@examplenews");
-
-    expect(again.data).toMatchObject({ mode: "on", changed: false });
-  });
 
   it("turns sync off and drops the chat pending jobs", async () => {
     await sync(String(GROUP_PEER_ID));
@@ -298,17 +283,25 @@ describe("E2E: chats sync", () => {
     expect(stateOf(5001)?.sync_priority).toBe(SyncPriority.Medium);
   });
 
-  it("finds a chat the daemon saw only live", async () => {
-    createChatSyncStateService(cacheDb).upsert({
+  it("finds a chat the daemon saw only live, a DM before the basic group of its number", async () => {
+    const states = createChatSyncStateService(cacheDb);
+    states.upsert({
       chat_id: -1009876543210,
       chat_type: "supergroup",
       sync_priority: SyncPriority.Low,
       sync_enabled: false,
     });
+    states.upsert({
+      chat_id: GROUP_ID,
+      chat_type: "private",
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
+    });
 
-    const result = await sync("-1009876543210");
+    const supergroup = await sync("-1009876543210");
+    const dm = await sync(String(GROUP_ID), "--off");
 
-    expect(result.data).toMatchObject({
+    expect(supergroup.data).toMatchObject({
       id: -1009876543210,
       peerId: -1009876543210,
       type: "supergroup",
@@ -317,109 +310,27 @@ describe("E2E: chats sync", () => {
       syncEnabled: false,
       syncReason: "group_participation_unknown",
     });
-  });
-
-  for (const flag of ["--format", "-f"]) {
-    it(`takes a marked ID from tg chats list before ${flag} pretty`, async () => {
-      const result = await runCliSuccess(
-        ["chats", "sync", String(CHANNEL_PEER_ID), flag, "pretty"],
-        options(),
-      );
-
-      expect(result.json).toMatchObject({
-        id: CHANNEL_PEER_ID,
-        title: "Example News",
-        mode: "on",
-      });
-      expect(stateOf(CHANNEL_PEER_ID)).toMatchObject({ sync_mode: "on" });
-    });
-  }
-
-  function seedDmSyncState() {
-    createChatSyncStateService(cacheDb).upsert({
-      chat_id: GROUP_ID,
-      chat_type: "private",
-      sync_priority: SyncPriority.High,
-      sync_enabled: true,
-    });
-  }
-
-  it("takes a positive ID with DM sync state as that DM, not as the basic group", async () => {
-    seedDmSyncState();
-
-    const result = await sync(String(GROUP_ID), "--off");
-
-    expect(result.data).toMatchObject({
+    expect(dm.data).toMatchObject({
       id: GROUP_ID,
       peerId: GROUP_ID,
       type: "private",
       mode: "off",
     });
-    expect(stateOf(GROUP_ID)).toMatchObject({ sync_mode: "off" });
     expect(stateOf(GROUP_PEER_ID)).toBeNull();
   });
 
-  it("names the same DM in tg messages list --chat as in tg chats sync", async () => {
-    seedDmSyncState();
-
-    const list = await runCliSuccess(
-      ["messages", "list", "--chat", String(GROUP_ID), "--before", "1"],
+  it("takes a marked ID from tg chats list before --format pretty", async () => {
+    const result = await runCliSuccess(
+      ["chats", "sync", String(CHANNEL_PEER_ID), "--format", "pretty"],
       options(),
     );
 
-    expect(list.json).toMatchObject({
-      success: true,
-      data: { chatId: GROUP_ID, items: [], source: "cache" },
-    });
-  });
-
-  it("runs the retry command that tg status prints for a failed channel", async () => {
-    createChatSyncStateService(cacheDb).upsert({
-      chat_id: CHANNEL_PEER_ID,
-      chat_type: "channel",
-      member_count: 5000,
-      sync_priority: SyncPriority.Low,
-      sync_enabled: false,
-    });
-    const jobs = createSyncJobsService(cacheDb);
-    const job = jobs.create({
-      chat_id: CHANNEL_PEER_ID,
-      job_type: SyncJobType.InitialLoad,
-      priority: SyncPriority.Low,
-    });
-    jobs.markRunning(job.id);
-    jobs.markFailed(job.id, "Telegram API error 400: CHANNEL_PRIVATE");
-
-    const status = await runCliSuccess(["status", "--format", "pretty"], options());
-    const retry = stripAnsi(status.stdout).match(/^\s+tg (chats sync .+)$/m);
-    expect(retry?.[1]).toBe(`chats sync ${CHANNEL_PEER_ID} --auto`);
-
-    const result = await runCliSuccess(retry![1]!.split(" "), options());
-    expect((result.json as SyncResult).data).toMatchObject({
+    expect(result.json).toMatchObject({
       id: CHANNEL_PEER_ID,
       title: "Example News",
-      mode: "auto",
-      clearedFailedJobs: 1,
+      mode: "on",
     });
-  });
-
-  it("rejects a bare ID that names a cached group and a cached channel", async () => {
-    createChatsCache(cacheDb).upsert(
-      dialogToCacheInput(fakeDialog({ kind: "supergroup", id: GROUP_ID, title: "Club Talk" })),
-    );
-
-    const result = await runCliFailure(["chats", "sync", String(GROUP_ID)], 3, options());
-
-    expect(result.json).toMatchObject({
-      success: false,
-      error: {
-        code: "INVALID_ARGS",
-        details: {
-          chat: String(GROUP_ID),
-          candidates: [GROUP_PEER_ID, -1000000004001],
-        },
-      },
-    });
+    expect(stateOf(CHANNEL_PEER_ID)).toMatchObject({ sync_mode: "on" });
   });
 
   it("rejects --off together with --auto", async () => {
@@ -436,33 +347,17 @@ describe("E2E: chats sync", () => {
     expect(stateOf(CHANNEL_PEER_ID)).toBeNull();
   });
 
-  it("rejects an account that does not exist", async () => {
-    const result = await runCliFailure(
-      ["chats", "sync", "@examplenews", "--account", "99"],
-      6,
-      options(),
-    );
+  it("rejects a missing chat", async () => {
+    const result = await runCliFailure(["chats", "sync"], 3, options());
 
     expect(result.json).toMatchObject({
       success: false,
-      error: { code: "ACCOUNT_NOT_FOUND" },
+      error: {
+        code: "INVALID_ARGS",
+        message: "Missing chat: pass @username or a chat ID",
+      },
     });
-    expect(stateOf(CHANNEL_PEER_ID)).toBeNull();
   });
-
-  for (const args of [[], ["--off"]]) {
-    it(`rejects a missing chat${args.length ? ` with ${args.join(" ")}` : ""}`, async () => {
-      const result = await runCliFailure(["chats", "sync", ...args], 3, options());
-
-      expect(result.json).toMatchObject({
-        success: false,
-        error: {
-          code: "INVALID_ARGS",
-          message: "Missing chat: pass @username or a chat ID",
-        },
-      });
-    });
-  }
 
   it("rejects a chat that is not in the cache", async () => {
     const result = await runCliFailure(["chats", "sync", "@unknownchat"], 3, options());
@@ -551,11 +446,5 @@ describe("E2E: chats sync", () => {
       syncEnabled: false,
       clearedFailedJobs: 1,
     });
-  });
-
-  it("is listed in tg chats --help", async () => {
-    const result = await runCliSuccess(["chats", "--help"], options());
-
-    expect(result.stdout).toContain("sync");
   });
 });

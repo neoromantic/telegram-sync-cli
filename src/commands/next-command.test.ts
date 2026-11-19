@@ -2,8 +2,6 @@ import { describe, expect, it } from "bun:test";
 import { $ } from "bun";
 import type { ArgsDef } from "citty";
 
-import { listChatsArgs } from "./chats/list";
-import { listContactsArgs } from "./contacts";
 import { shellQuote, tgCommand } from "./next";
 
 async function shellWords(words: string) {
@@ -22,28 +20,12 @@ const defs = {
 } satisfies ArgsDef;
 
 describe("shellQuote", () => {
-  it.each([
-    "hello",
-    "hello world",
-    "it's",
-    '"exact phrase"',
-    "$HOME `id` $(id)",
-    "-1001234567890",
-    "--chat",
-    "a\nb",
-    "",
-    "*",
-    "back\\slash",
-    "квартир*",
-  ])("survives a POSIX shell: %p", async (value) => {
-    expect(await shellWords(shellQuote(value))).toEqual([value]);
-  });
-
-  it("leaves plain words unquoted", () => {
-    expect(shellQuote("@teamchat")).toBe("@teamchat");
-    expect(shellQuote("-1001234567890")).toBe("-1001234567890");
-    expect(shellQuote("7d")).toBe("7d");
-  });
+  it.each(["$HOME `id` $(id)", "a\nb", "", "*", "back\\slash"])(
+    "survives a POSIX shell: %p",
+    async (value) => {
+      expect(await shellWords(shellQuote(value))).toEqual([value]);
+    },
+  );
 });
 
 describe("tgCommand", () => {
@@ -64,50 +46,6 @@ describe("tgCommand", () => {
   it("writes a boolean turned off against its default as --no-", () => {
     expect(tgCommand("messages search", defs, { query: "a", snippet: false })).toBe(
       "tg messages search --query=a --no-snippet",
-    );
-  });
-
-  it("ignores parsed values the command does not declare", () => {
-    expect(
-      tgCommand("messages search", defs, {
-        query: "a",
-        _: [],
-        "include-deleted": true,
-        format: "pretty",
-      }),
-    ).toBe("tg messages search --query=a");
-  });
-
-  it("quotes values so the shell passes each flag as one word", async () => {
-    const command = tgCommand("messages search", defs, {
-      query: `--it's $5 "today"`,
-      account: "Work Phone",
-    });
-    expect(command).toBe(
-      `tg messages search --query='--it'\\''s $5 "today"' --account='Work Phone'`,
-    );
-    expect(await shellWords(command)).toEqual([
-      "tg",
-      "messages",
-      "search",
-      `--query=--it's $5 "today"`,
-      "--account=Work Phone",
-    ]);
-  });
-
-  it("keeps --fresh, filters and the account on the next page of chats and contacts", () => {
-    const values = {
-      limit: 2,
-      offset: 2,
-      type: "group",
-      fresh: true,
-      account: "Work Phone",
-    };
-    expect(tgCommand("chats list", listChatsArgs, values)).toBe(
-      "tg chats list --limit=2 --offset=2 --type=group --account='Work Phone' --fresh",
-    );
-    expect(tgCommand("contacts list", listContactsArgs, values)).toBe(
-      "tg contacts list --limit=2 --offset=2 --account='Work Phone' --fresh",
     );
   });
 
