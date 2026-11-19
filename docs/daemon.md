@@ -390,6 +390,9 @@ account's scheduler → its sync_jobs → its worker and client → its messages
 - An account whose first connect fails (login, `getMe` or the updates loop)
   has its client closed right away, so its connection and session file aren't
   left open until the daemon stops
+- An account that signs in as the Telegram user of another account fails to
+  connect the same way, and both accounts stay as they are
+  ([auth.md](auth.md#notes))
 - A reconnect closes the old client before it opens a new one on the same
   session file, registers the update handlers on the new client, starts its
   updates loop and rebuilds the account's sync worker; a failed attempt closes

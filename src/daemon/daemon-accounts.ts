@@ -383,30 +383,11 @@ export async function connectAccount(
 
     const existingByUserId = ctx.accountsDb.getByUserId(me.id);
     if (existingByUserId && existingByUserId.id !== accountId) {
-      const currentAccount = ctx.accountsDb.getById(accountId);
-      const currentHasRealPhone = currentAccount && !currentAccount.phone.startsWith("user:");
-      const existingHasRealPhone = !existingByUserId.phone.startsWith("user:");
-
-      if (currentHasRealPhone && !existingHasRealPhone) {
-        ctx.logger.info(
-          `Merging duplicate account: keeping ${label()}, removing ${accountLabel({ accountId: existingByUserId.id, phone: existingByUserId.phone })}`,
-        );
-        ctx.accountsDb.delete(existingByUserId.id);
-        ctx.accountsDb.update(accountId, { user_id: me.id });
-        dropAccountRuntime(ctx, existingByUserId.id);
-      } else {
-        ctx.logger.info(
-          `Merging duplicate account: keeping ${accountLabel({ accountId: existingByUserId.id, phone: existingByUserId.phone })}, removing ${label()}`,
-        );
-        ctx.accountsDb.setActive(existingByUserId.id);
-        ctx.accountsDb.delete(accountId);
-
-        ctx.state.accounts.delete(accountId);
-        dropAccountRuntime(ctx, accountId);
-        await releaseClient(ctx, accountState, "duplicate account merged");
-        return false;
-      }
-    } else if (!existingByUserId) {
+      throw new Error(
+        `Same Telegram user as account #${existingByUserId.id}. Run tg auth login or tg auth login-qr again to move the session to account #${existingByUserId.id}, or tg accounts remove --id ${accountId}`,
+      );
+    }
+    if (!existingByUserId) {
       const currentAccount = ctx.accountsDb.getById(accountId);
       if (currentAccount && currentAccount.user_id === null) {
         ctx.accountsDb.update(accountId, { user_id: me.id });
@@ -435,19 +416,6 @@ export async function connectAccount(
     accountState.lastError = errorMessage;
 
     return false;
-  }
-}
-
-function dropAccountRuntime(ctx: DaemonContext, accountId: number) {
-  const rt = ctx.runtime.accounts.get(accountId);
-  if (!rt) return;
-  ctx.runtime.accounts.delete(accountId);
-  try {
-    rt.statusService.setDaemonStopped();
-  } catch (err) {
-    ctx.logger.warn(
-      `[Account ${accountId}] Failed to mark the account stopped: ${formatError(err)}`,
-    );
   }
 }
 

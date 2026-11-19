@@ -95,6 +95,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A login of a user who already has an account under another phone or a QR login gives that
   account the new session. Until now the account kept its old session, so after the old
   session was ended in Telegram the login succeeded but the account stayed signed out.
+- The daemon no longer deletes an account when two accounts sign in as the same Telegram user.
+  It picked the one to keep by the kind of phone, so it could delete the account with the cache,
+  label and active choice, or the one with the only working session. Now it leaves both and
+  doesn't sync the second; its error says to log in again or remove it.
 
 ## [0.14.0] - 2026-11-18
 
