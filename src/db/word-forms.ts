@@ -3,7 +3,7 @@ import type { Database } from "bun:sqlite";
 import { fold, tokenize } from "../utils/search-snippet";
 import { lightStem } from "../utils/word-stems";
 
-/** At most this many index words stand for one query word: the query word itself, then the most frequent */
+/** At most this many words stand for one query word: the word as typed, then its most frequent forms */
 export const MAX_FORMS = 30;
 
 const MAX_YO_VARIANTS = 3;
@@ -74,9 +74,10 @@ export function findQueryForms(db: Database, query: string) {
       ([a, aDocs], [b, bDocs]) =>
         Number(b === word) - Number(a === word) || bDocs - aDocs || (a < b ? -1 : 1),
     );
+    const limit = found[0]?.[0] === piece ? MAX_FORMS : MAX_FORMS - 1;
     forms.set(piece, {
-      words: found.slice(0, MAX_FORMS).map(([term]) => term),
-      cut: found.length > MAX_FORMS,
+      words: found.slice(0, limit).map(([term]) => term),
+      cut: found.length > limit,
     });
   }
   return forms;

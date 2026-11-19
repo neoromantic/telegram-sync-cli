@@ -15,14 +15,14 @@ function quotePhrase(text: string) {
 }
 
 function anyOf(words: string[]) {
-  const quoted = words.map(quotePhrase);
+  const quoted = [...new Set(words)].map(quotePhrase);
   return quoted.length > 1 ? `(${quoted.join(" OR ")})` : quoted[0];
 }
 
 /**
  * The FTS5 MATCH expression for a user query. A plain query matches every
  * word in any order: each word is quoted, so punctuation (`don't`, `e-mail`)
- * is never syntax. With `forms`, a plain word matches any of its forms. A
+ * is never syntax. With `forms`, a plain word matches itself or any of its forms. A
  * query with FTS5 syntax goes to FTS5 as written, and `phrase` makes the
  * whole query one phrase.
  */
@@ -32,9 +32,7 @@ export function toFts5Query(query: string, options: { phrase?: boolean; forms?: 
   const words = query.split(/\s+/).filter(Boolean);
   const { forms } = options;
   if (!forms) return words.map(quotePhrase).join(" ");
-  return words
-    .map((word) => anyOf(forms.get(word)?.words ?? []) ?? quotePhrase(word))
-    .join(" AND ");
+  return words.map((word) => anyOf([word, ...(forms.get(word)?.words ?? [])])).join(" AND ");
 }
 
 /**

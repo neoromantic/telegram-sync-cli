@@ -466,9 +466,11 @@ clients read the same file.
 - **A word that is several index words** (`e-mail`, `don't`) is matched as written: it is a
   phrase to FTS5.
 - **A word with no form in the index** stays as it is and finds nothing, as with `--exact`.
-- **At most 30 forms a word**: the query word itself, then the most frequent. A Russian
-  adjective has about 12 forms with one stem and a noun about 10, so a longer list means very
-  different words share the stem; the answer marks such a word with `cut: true`.
+- **At most 30 forms a word**: the word as typed, then its most frequent forms. The word as
+  typed is always searched, also where the index keeps it apart from its forms: `мой` typed
+  with `и` and a combining breve is the index word `мои`. A Russian adjective has about 12 forms
+  with one stem and a noun about 10, so a longer list means very different words share the
+  stem; the answer marks such a word with `cut: true`.
 - The forms are words of the whole index: of deleted messages and of sender and chat names too,
   as a plain word matches them.
 - **Not while `allowedChats` is set**: the words are matched only as typed, as with `--exact`,

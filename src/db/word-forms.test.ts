@@ -105,6 +105,11 @@ describe("findQueryForms", () => {
     expect(cut).toBe(true);
     expect(found).toHaveLength(MAX_FORMS);
     expect(found.slice(0, 3)).toEqual(["жзку", "жзкой", "жзкам"]);
+
+    const typed = "Жзку";
+    const group = toFts5Query(typed, { forms: findQueryForms(db, typed) }).split(" OR ");
+    expect(group).toHaveLength(MAX_FORMS);
+    expect(group[0]).toBe('("Жзку"');
   });
 });
 
@@ -117,6 +122,17 @@ describe("toFts5Query with forms", () => {
     );
     const one = "сдаю";
     expect(toFts5Query(one, { forms: findQueryForms(db, one) })).toBe('"сдаю"');
+  });
+
+  it("keeps the word as typed, which the index may split otherwise than its forms", () => {
+    const db = cacheWith("это мой дом", "это мои\u0306 кот");
+    const typed = "мои\u0306";
+    const match = toFts5Query(typed, { forms: findQueryForms(db, typed) });
+    expect(match).toBe('("мои\u0306" OR "мой")');
+    const found = db
+      .query("SELECT count(*) AS n FROM message_search WHERE message_search MATCH ?")
+      .get(match) as { n: number };
+    expect(found.n).toBe(2);
   });
 });
 
