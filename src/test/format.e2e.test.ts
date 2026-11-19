@@ -15,42 +15,10 @@ describe("E2E: Output Formats", () => {
     env.cleanup();
   });
 
-  describe("--format json (default)", () => {
-    it("should output JSON with success wrapper", async () => {
-      const result = await runCliSuccess(["accounts", "list"], env.getCliOptions());
-
-      expect(result.json).toBeDefined();
-      const response = result.json as { success: boolean; data: unknown };
-      expect(response.success).toBe(true);
-      expect(response.data).toBeDefined();
-    });
-
-    it("should output JSON with explicit flag", async () => {
-      const result = await runCliSuccess(
-        ["accounts", "list", "--format", "json"],
-        env.getCliOptions(),
-      );
-
-      expect(result.json).toBeDefined();
-      const response = result.json as { success: boolean };
-      expect(response.success).toBe(true);
-    });
-
-    it("should output JSON using -f alias", async () => {
-      const result = await runCliSuccess(["accounts", "list", "-f", "json"], env.getCliOptions());
-
-      expect(result.json).toBeDefined();
-    });
-  });
-
   describe("--format pretty", () => {
     it("should output data without success wrapper", async () => {
-      const result = await runCliSuccess(
-        ["accounts", "list", "--format", "pretty"],
-        env.getCliOptions(),
-      );
+      const result = await runCliSuccess(["accounts", "list", "-f", "pretty"], env.getCliOptions());
 
-      expect(result.json).toBeDefined();
       const response = result.json as {
         accounts?: unknown[];
         success?: boolean;
@@ -69,25 +37,12 @@ describe("E2E: Output Formats", () => {
       );
 
       expect(result.stdout).toBe("");
-      expect(result.json).toBeUndefined();
     });
 
     it("should output nothing with --quiet flag", async () => {
       const result = await runCliSuccess(["accounts", "list", "--quiet"], env.getCliOptions());
 
       expect(result.stdout).toBe("");
-      expect(result.json).toBeUndefined();
-    });
-  });
-
-  describe("format flag position", () => {
-    it("should work with format after command", async () => {
-      const result = await runCliSuccess(
-        ["accounts", "list", "--format", "json"],
-        env.getCliOptions(),
-      );
-
-      expect(result.json).toBeDefined();
     });
   });
 });

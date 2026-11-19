@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { join } from "node:path";
 import * as mtcute from "@mtcute/bun";
 
 process.env.NODE_ENV = "test";
@@ -33,7 +34,7 @@ describe("createDefaultClientFactory", () => {
   });
 
   it("passes custom flood waiter options and session path", async () => {
-    const { createDefaultClientFactory, getSessionPath } = await import("./telegram");
+    const { createDefaultClientFactory } = await import("./telegram");
 
     const floodWaiter = {
       maxRetries: 1,
@@ -60,7 +61,7 @@ describe("createDefaultClientFactory", () => {
     expect(options.apiId).toBe(123);
     expect(options.apiHash).toBe("hash");
     expect(options.logLevel).toBe(3);
-    expect(options.storage).toBe(getSessionPath(7, "/tmp/data"));
+    expect(options.storage).toBe(join("/tmp/data", "session_7.db"));
     expect(options.network.middlewares[0]).toEqual({ kind: "floodWaiter" });
   });
 

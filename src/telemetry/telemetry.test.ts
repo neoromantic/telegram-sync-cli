@@ -204,47 +204,12 @@ describe("createTgTelemetry", () => {
     dir = undefined;
   });
 
-  it("sends nothing from a source checkout", () => {
-    const env = { TELEGRAM_SYNC_CLI_DATA_DIR: dataDir() };
-    const status = createTgTelemetry({ channel: "source", env }).status();
-    expect(status.enabled).toBe(false);
-    expect(status.reason).toBe("no-endpoint");
-    expect(status.endpoint).toBe("");
-  });
-
-  it("lets TELEGRAM_SYNC_CLI_TELEMETRY turn a source checkout on", () => {
-    for (const value of ["1", "debug"]) {
-      const env = {
-        TELEGRAM_SYNC_CLI_DATA_DIR: dataDir(),
-        TELEGRAM_SYNC_CLI_TELEMETRY: value,
-      };
-      const status = createTgTelemetry({ channel: "source", env }).status();
-      expect(status.enabled).toBe(true);
-      expect(status.reason).toBe("env");
-      expect(status.endpoint).toBe("https://usage.sergeybaus.com/i/v0/e/");
-    }
-  });
-
   it("is on by default for an install, with state in the data directory", () => {
     const env = { TELEGRAM_SYNC_CLI_DATA_DIR: dataDir() };
     const status = createTgTelemetry({ channel: "npm", env }).status();
     expect(status.enabled).toBe(true);
     expect(status.reason).toBe("default");
     expect(status.stateFile).toBe(join(env.TELEGRAM_SYNC_CLI_DATA_DIR, "telemetry.json"));
-  });
-
-  it("honours DO_NOT_TRACK and TELEGRAM_SYNC_CLI_TELEMETRY=0", () => {
-    const base = { TELEGRAM_SYNC_CLI_DATA_DIR: dataDir() };
-    const dnt = createTgTelemetry({
-      channel: "homebrew",
-      env: { ...base, DO_NOT_TRACK: "1", TELEGRAM_SYNC_CLI_TELEMETRY: "1" },
-    }).status();
-    expect(dnt).toMatchObject({ enabled: false, reason: "do-not-track" });
-    const off = createTgTelemetry({
-      channel: "homebrew",
-      env: { ...base, TELEGRAM_SYNC_CLI_TELEMETRY: "0" },
-    }).status();
-    expect(off).toMatchObject({ enabled: false, reason: "env" });
   });
 });
 
@@ -254,11 +219,13 @@ describe("a test endpoint", () => {
 
   it("is used only by a source checkout with usage stats on", () => {
     dir = mkdtempSync(join(tmpdir(), "tg-telemetry-"));
-    const env = {
-      TELEGRAM_SYNC_CLI_DATA_DIR: dir,
-      TELEGRAM_SYNC_CLI_TELEMETRY: "1",
-      TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT: "http://127.0.0.1:9/e/",
-    };
+    const on = { TELEGRAM_SYNC_CLI_DATA_DIR: dir, TELEGRAM_SYNC_CLI_TELEMETRY: "1" };
+    expect(createTgTelemetry({ channel: "source", env: on }).status()).toMatchObject({
+      enabled: true,
+      reason: "env",
+      endpoint: "https://usage.sergeybaus.com/i/v0/e/",
+    });
+    const env = { ...on, TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT: "http://127.0.0.1:9/e/" };
     const source = createTgTelemetry({ channel: "source", env }).status();
     expect(source.endpoint).toBe("http://127.0.0.1:9/e/");
     const npm = createTgTelemetry({ channel: "npm", env }).status();

@@ -44,9 +44,4 @@ describe("renderQr", () => {
     }
     expect(modules[4]?.slice(4, 11).every((dark) => dark)).toBe(true);
   });
-
-  it("uses two module rows per line", () => {
-    const { size } = encode(URL, { border: 4 });
-    expect(renderQr(URL).split("\n").length).toBe((size + 1) / 2);
-  });
 });

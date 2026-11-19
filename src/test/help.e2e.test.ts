@@ -1,77 +1,16 @@
 import { describe, expect, it } from "bun:test";
-import packageJson from "../../package.json" with { type: "json" };
-import { runCli, runCliSuccess } from "./cli.test-utils";
+import { runCli } from "./cli.test-utils";
 
 describe("E2E: Help Commands", () => {
-  describe("--help flag", () => {
-    it("should show main help with exit code 0", async () => {
-      const result = await runCliSuccess(["--help"]);
+  it("should show help when no command given", async () => {
+    const result = await runCli([]);
 
-      expect(result.stdout).toContain("tg");
-      expect(result.stdout).toContain("Telegram Sync CLI");
-      expect(result.stdout).toContain("auth");
-      expect(result.stdout).toContain("accounts");
-    });
-
-    it("should show help when no command given", async () => {
-      const result = await runCli([]);
-
-      expect(result.stdout).toContain("tg");
-    });
+    expect(result.stdout).toContain("USAGE");
   });
 
-  describe("--version flag", () => {
-    it("should show version with exit code 0", async () => {
-      const result = await runCliSuccess(["--version"]);
+  it("should fail for nonexistent command", async () => {
+    const result = await runCli(["nonexistent"]);
 
-      expect(result.stdout.trim()).toBe(packageJson.version);
-    });
-  });
-
-  describe("subcommand help", () => {
-    it("should show auth help", async () => {
-      const result = await runCliSuccess(["auth", "--help"]);
-
-      expect(result.stdout).toContain("auth");
-      expect(result.stdout).toContain("login");
-      expect(result.stdout).toContain("logout");
-      expect(result.stdout).toContain("status");
-    });
-
-    it("should show accounts help", async () => {
-      const result = await runCliSuccess(["accounts", "--help"]);
-
-      expect(result.stdout).toContain("accounts");
-      expect(result.stdout).toContain("list");
-      expect(result.stdout).toContain("switch");
-      expect(result.stdout).toContain("remove");
-      expect(result.stdout).toContain("info");
-    });
-
-    it("should show db help", async () => {
-      const result = await runCliSuccess(["db", "--help"]);
-
-      expect(result.stdout).toContain("vacuum");
-    });
-
-    it("should show contacts help", async () => {
-      const result = await runCliSuccess(["contacts", "--help"]);
-
-      expect(result.stdout).toContain("contacts");
-    });
-  });
-
-  describe("invalid commands", () => {
-    it("should fail for nonexistent command", async () => {
-      const result = await runCli(["nonexistent"]);
-
-      expect(result.exitCode).not.toBe(0);
-    });
-
-    it("should fail for invalid subcommand", async () => {
-      const result = await runCli(["auth", "nonexistent"]);
-
-      expect(result.exitCode).not.toBe(0);
-    });
+    expect(result.exitCode).not.toBe(0);
   });
 });

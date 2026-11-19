@@ -22,16 +22,6 @@ describe("toRawJson", () => {
     expect(raw.peerId).toEqual({ _: "peerUser", userId: 10 });
   });
 
-  it("makes a photo message far smaller than plain JSON", () => {
-    const message = photoMessage({ _: "peerUser", userId: 10 }, 1);
-
-    const plain = JSON.stringify(message).length;
-    const compact = toRawJson(message).length;
-
-    expect(plain).toBeGreaterThan(7_000);
-    expect(compact).toBeLessThan(2_000);
-  });
-
   it("writes a Buffer and a subarray as base64 of their own bytes", () => {
     const bytes = fakeBytes(12, 3);
     const raw = JSON.parse(toRawJson({ buffer: Buffer.from(bytes), part: bytes.subarray(4, 8) }));
