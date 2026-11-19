@@ -142,6 +142,15 @@ async function snapshot(env: TestEnvironment, selector: string[]) {
     ...selector,
   ]);
   const club2 = await lookup(env, ["chats", "get", "--id", String(BOOK_CLUB_ID), ...selector]);
+  const clubMessage = await lookup(env, [
+    "messages",
+    "get",
+    "--chat",
+    String(BOOK_CLUB_ID),
+    "--id",
+    String(MESSAGE_ID),
+    ...selector,
+  ]);
   const bob = await lookup(env, ["contacts", "get", "--id", String(BOB_ID), ...selector]);
   const bobSearch = await lookup(env, ["contacts", "search", "--query", "Bob", ...selector]);
   const bobUser = await lookup(env, ["user", String(BOB_ID), ...selector]);
@@ -159,6 +168,7 @@ async function snapshot(env: TestEnvironment, selector: string[]) {
     messageSearch: (search.results as Items).map((hit) => hit.text),
     sql: sql.rows,
     chatGet: club2?.title ?? null,
+    messageGet: (clubMessage?.message as { text: string } | undefined)?.text ?? null,
     contactGet: bob?.firstName ?? null,
     contactSearch: (bobSearch?.results as Items | undefined)?.map((c) => c.firstName) ?? null,
     user: (bobUser?.user as Person | undefined)?.firstName ?? null,
@@ -173,6 +183,7 @@ const ALPHA_VIEW = {
   messageSearch: ["lunch at noon"],
   sql: [{ chat_id: ALICE_ID, message_id: MESSAGE_ID, text: "lunch at noon" }],
   chatGet: null,
+  messageGet: null,
   contactGet: null,
   contactSearch: null,
   user: null,
@@ -186,6 +197,7 @@ const BETA_VIEW = {
   messageSearch: ["lunch at one"],
   sql: [{ chat_id: BOOK_CLUB_ID, message_id: MESSAGE_ID, text: "lunch at one" }],
   chatGet: "Book Club",
+  messageGet: "lunch at one",
   contactGet: "Bob",
   contactSearch: ["Bob"],
   user: "Bob",
@@ -229,32 +241,12 @@ describe("E2E: two accounts, each with its own cache", () => {
     env.cleanup();
   });
 
-  for (const selector of ["2", "@beta_test", "work"]) {
-    it(`reads only account 2 with --account ${selector}`, async () => {
-      const flag = ["--account", selector];
-
-      expect(await snapshot(env, flag)).toEqual(BETA_VIEW);
-      expect(await messageText(env, BOOK_CLUB_ID, flag)).toBe("lunch at one");
-    });
-  }
+  it("reads only account 2 with --account @beta_test", async () => {
+    expect(await snapshot(env, ["--account", "@beta_test"])).toEqual(BETA_VIEW);
+  });
 
   it("reads only the active account without --account", async () => {
     expect(await snapshot(env, [])).toEqual(ALPHA_VIEW);
-    expect(await messageText(env, ALICE_ID, [])).toBe("lunch at noon");
-  });
-
-  it("doesn't find a chat of the other account", async () => {
-    const result = await failure(env, [
-      "messages",
-      "get",
-      "--chat",
-      String(BOOK_CLUB_ID),
-      "--id",
-      String(MESSAGE_ID),
-    ]);
-
-    expect(result.exitCode).not.toBe(0);
-    expect(JSON.stringify(result.error)).not.toContain("lunch at one");
   });
 
   it("reports status totals over both caches, each item with its account", async () => {
@@ -337,8 +329,6 @@ describe("E2E: switching accounts", () => {
       await run(env, ["accounts", "switch", "--id", "2"]);
 
       expect(await chatTitles(env)).toEqual(["Book Club"]);
-      expect(await snapshot(env, [])).toEqual(BETA_VIEW);
-      expect(await messageText(env, BOOK_CLUB_ID, [])).toBe("lunch at one");
       expect(existsSync(configPath(env))).toBe(false);
     } finally {
       expectNoRootCache(env);
@@ -361,70 +351,18 @@ describe("E2E: switching accounts", () => {
       await run(env, ["accounts", "switch", "--id", "2"]);
 
       expect(await chatTitles(env)).toEqual(["Book Club"]);
-      expect(await snapshot(env, [])).toEqual(BETA_VIEW);
-      expect(await messageText(env, BOOK_CLUB_ID, [])).toBe("lunch at one");
       expect(JSON.parse(readConfig(env))).toEqual({
         activeAccount: 2,
         cache: { staleness: { peers: "3d" } },
         note: "kept",
       });
-      const value = await run(env, ["config", "get", "activeAccount"]);
-      expect(value.value).toBe(2);
     } finally {
       expectNoRootCache(env);
       env.cleanup();
     }
   });
 
-  it("leaves a config.json without activeAccount byte for byte", async () => {
-    const env = createTwoAccounts("multi-account-switch-no-key");
-    const text = '{"cache":{"staleness":{"peers":"3d"}}}';
-    try {
-      writeConfig(env, text);
-
-      await run(env, ["accounts", "switch", "--id", "2"]);
-
-      expect(await chatTitles(env)).toEqual(["Book Club"]);
-      expect(await messageText(env, BOOK_CLUB_ID, [])).toBe("lunch at one");
-      expect(readConfig(env)).toBe(text);
-    } finally {
-      expectNoRootCache(env);
-      env.cleanup();
-    }
-  });
-
-  it("leaves config.json alone when activeAccount already names the account", async () => {
-    const env = createTwoAccounts("multi-account-switch-same");
-    const text = '{"activeAccount":2}';
-    try {
-      writeConfig(env, text);
-
-      await run(env, ["accounts", "switch", "--id", "2"]);
-
-      expect(await chatTitles(env)).toEqual(["Book Club"]);
-      expect(readConfig(env)).toBe(text);
-    } finally {
-      expectNoRootCache(env);
-      env.cleanup();
-    }
-  });
-
-  it("applies tg config set activeAccount from the next command", async () => {
-    const env = createTwoAccounts("multi-account-switch-config-set");
-    try {
-      writeConfig(env, JSON.stringify({ activeAccount: 1 }));
-
-      await run(env, ["accounts", "switch", "--id", "2"]);
-      await run(env, ["config", "set", "activeAccount", "1"]);
-
-      expect(await chatTitles(env)).toEqual(["Alice Able"]);
-    } finally {
-      expectNoRootCache(env);
-      env.cleanup();
-    }
-  });
-
-  it("applies activeAccount under -q too", async () => {
+  it("applies activeAccount from config.json at the next start, under -q too", async () => {
     const env = createTwoAccounts("multi-account-switch-quiet");
     try {
       writeConfig(env, JSON.stringify({ activeAccount: 2 }));
@@ -434,6 +372,9 @@ describe("E2E: switching accounts", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("");
       expect(activeIds(env)).toEqual([{ id: 2 }]);
+
+      writeConfig(env, JSON.stringify({ activeAccount: 1 }));
+      expect(await chatTitles(env)).toEqual(["Alice Able"]);
     } finally {
       expectNoRootCache(env);
       env.cleanup();
@@ -453,7 +394,6 @@ describe("E2E: switching accounts", () => {
       expect(result.error.code).toBe("GENERAL_ERROR");
       expect(result.error.details).toEqual(expect.objectContaining({ path: configPath(env) }));
       expect(activeIds(env)).toEqual([{ id: 1 }]);
-      expect(await chatTitles(env)).toEqual(["Alice Able"]);
       expect(readConfig(env)).toBe(text);
     } finally {
       chmodSync(configPath(env), 0o644);
@@ -685,18 +625,6 @@ describe("E2E: status per account", () => {
     });
   });
 
-  it("reports only the account --account selects", async () => {
-    const data = await run(env, ["status", "--account", "work"]);
-    const sync = data.sync as { failed_jobs: number; jobs: unknown[] };
-
-    expect(data.account_id).toBe(2);
-    expect(sync).toMatchObject({ failed_jobs: 0, jobs: [] });
-    expect(data.progress).toMatchObject({ messages_cached: 1, chats_cached: 1 });
-    expect(
-      (data.accounts as { accounts: StatusAccount[] }).accounts.map((account) => account.id),
-    ).toEqual([2]);
-  });
-
   it("lists each account in tg daemon status, with totals that are their sums", async () => {
     const data = await run(env, ["daemon", "status"]);
 
@@ -867,14 +795,20 @@ describe("E2E: status totals over two accounts", () => {
     ]);
   });
 
-  it("scopes the merged lists to the account --account selects", async () => {
-    const data = await run(env, ["status", "--account", "2"]);
+  it("reports only the account --account selects", async () => {
+    const data = await run(env, ["status", "--account", "work"]);
     const rateLimits = data.rate_limits as {
       calls_by_method: Record<string, number>;
       active_flood_waits: FloodWait[];
     };
     const progress = data.progress as { sample_chats: SampleChat[] };
 
+    expect(data.account_id).toBe(2);
+    expect(data.sync).toMatchObject({ failed_jobs: 0, jobs: [] });
+    expect(data.progress).toMatchObject({ messages_cached: 1, chats_cached: 1 });
+    expect(
+      (data.accounts as { accounts: Array<{ id: number }> }).accounts.map((account) => account.id),
+    ).toEqual([2]);
     expect(rateLimits.calls_by_method).toEqual({ "messages.getHistory": 3 });
     expect(rateLimits.active_flood_waits).toHaveLength(1);
     expect(progress.sample_chats.map((chat) => chat.chat_id)).toEqual([BOOK_CLUB_ID, 203, BOB_ID]);

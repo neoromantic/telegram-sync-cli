@@ -134,7 +134,8 @@ Once that lands, the Telegram client fakes above need an explicit override in `.
   creating the file), and a failed one, or one whose `config.json` can't be written, leaves
   the active account alone
 - `db.test.ts` — database operations
-- `output.test.ts` — JSON/pretty/quiet output formatting
+- `output.test.ts` — the JSON success output, which errors are retryable, exit codes, `info`
+  and `verbose`
 - `telegram.test.ts` — Telegram service layer
 - `sync-jobs.test.ts` — sync job lifecycle, retries and counts
 - `sync-scheduler.test.ts` — what the scheduler queues and the lane turns
@@ -167,8 +168,7 @@ request's peer).
   adopting but only defers setting aside
 - `cache-meta.test.ts` — the owner stamp of an account's cache
 - `cache-db-lock.test.ts` — several processes opening, migrating and moving caches at once
-- `account-selector.test.ts` — `resolveAccount`: `--account`, the active account, the only one,
-  and the errors
+- `account-selector.test.ts` — `--account` as an ID, an @username or a label, and the errors
 - `api-request.test.ts` — `buildApiRequest`, typed by the TL schema: chats as InputPeer,
   InputUser, InputChannel and vectors of them, resolved from the cache or Telegram; longs as
   Long; the zeros, random ID and empty offset peer of required arguments left out; full TL
@@ -269,9 +269,8 @@ is for tests only.
 
 ### E2E Files
 
-- `help.e2e.test.ts` — `--help`, subcommand help, invalid commands
-- `exit-codes.e2e.test.ts` — exit codes for common failure modes
-- `format.e2e.test.ts` — `--format` json/pretty/quiet behavior
+- `help.e2e.test.ts` — the usage without a command, an invalid command
+- `format.e2e.test.ts` — `-f pretty`, `--format quiet` and `--quiet`
 - `accounts.e2e.test.ts` — `list`, `switch`, `remove`, `info`
 - `config.e2e.test.ts` — `tg config path`, `get` and `set`; `tg config` repairs an invalid
   `config.json` and `tg skill` runs with one after any format flag (`-q`, `-f <format>`), as

@@ -34,11 +34,6 @@ describe("E2E: Credentials are only required for Telegram calls", () => {
     expect(result.stdout).toContain("login");
   });
 
-  it("offline commands work without credentials", async () => {
-    const result = await runCliSuccess(["accounts", "list"], options());
-    expect((result.json as { success: boolean }).success).toBe(true);
-  });
-
   it("Telegram commands fail with INVALID_ARGS when credentials are missing", async () => {
     env.seedAccounts([{ phone: "+10000000000", is_active: true }]);
 

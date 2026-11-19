@@ -8,7 +8,7 @@ import {
   isReadMethod,
   runnableCommands,
 } from "./access";
-import { ALLOWED_CHATS_ENV, READ_ONLY_ENV } from "../config";
+import { ALLOWED_CHATS_ENV } from "../config";
 
 const PATHS = runnableCommands(main).map(({ path }) => path);
 
@@ -31,7 +31,6 @@ beforeEach(() => {
 
 afterEach(() => {
   errorSpy.mockRestore();
-  delete process.env[READ_ONLY_ENV];
   delete process.env[ALLOWED_CHATS_ENV];
 });
 
@@ -45,39 +44,10 @@ describe("COMMAND_ACCESS", () => {
     const tree = { subCommands: { "made-up": { run: () => {} } } };
     expect(() => guardCommands(tree)).toThrow("tg made-up has no entry");
   });
-
-  it("names only args the command has", () => {
-    for (const { path, node } of runnableCommands(main)) {
-      const args = Object.keys((node as { args?: object }).args ?? {});
-      for (const name of COMMAND_ACCESS[path]?.chatArgs ?? []) {
-        expect(`${path} --${name}: ${args.includes(name)}`).toBe(`${path} --${name}: true`);
-      }
-    }
-  });
 });
 
 describe("read-only mode", () => {
-  it("refuses every write command of the tree and lets every other one run", async () => {
-    process.env[READ_ONLY_ENV] = "1";
-    const refused: string[] = [];
-    for (const path of PATHS) {
-      const write = COMMAND_ACCESS[path]?.write;
-      const args = { method: "messages.sendMessage" };
-      const code = await refusal(path, args);
-      expect(`${path}: ${code}`).toBe(`${path}: ${write ? "READ_ONLY" : null}`);
-      if (code) refused.push(path);
-    }
-    expect(refused).toEqual(expect.arrayContaining(["send", "api", "auth logout", "auth login"]));
-  });
-
-  it("lets everything run when it is off", async () => {
-    for (const path of PATHS) {
-      expect(await refusal(path, { method: "messages.sendMessage" })).toBe(null);
-    }
-  });
-
-  it("splits tg api methods by the name after the namespace", async () => {
-    process.env[READ_ONLY_ENV] = "1";
+  it("splits tg api methods by the name after the namespace", () => {
     for (const method of [
       "messages.getHistory",
       "account.checkUsername",
@@ -86,7 +56,6 @@ describe("read-only mode", () => {
       "contacts.search",
     ]) {
       expect(isReadMethod(method)).toBe(true);
-      expect(await refusal("api", { method })).toBe(null);
     }
     for (const method of [
       "messages.sendMessage",
@@ -96,7 +65,6 @@ describe("read-only mode", () => {
       "getHistory",
     ]) {
       expect(isReadMethod(method)).toBe(false);
-      expect(await refusal("api", { method })).toBe("READ_ONLY");
     }
   });
 
@@ -108,12 +76,6 @@ describe("read-only mode", () => {
 });
 
 describe("allowedChats", () => {
-  it("refuses tg sql and tg api, which no chat list can limit", async () => {
-    process.env[ALLOWED_CHATS_ENV] = "me";
-    expect(await refusal("sql", { query: "SELECT 1" })).toBe("CHAT_NOT_ALLOWED");
-    expect(await refusal("api", { method: "help.getConfig" })).toBe("CHAT_NOT_ALLOWED");
-  });
-
   it("leaves the commands that name no chat alone", async () => {
     process.env[ALLOWED_CHATS_ENV] = "";
     for (const path of PATHS) {

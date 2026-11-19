@@ -115,18 +115,6 @@ describe("E2E: Accounts Commands", () => {
       );
       expect(response.error.retryable).toBe(false);
     });
-
-    it("should verify account is now active after switch", async () => {
-      await runCliSuccess(["accounts", "switch", "--id", "2"], env.getCliOptions());
-
-      const result = await runCliSuccess(["accounts", "info"], env.getCliOptions());
-
-      const response = result.json as {
-        data: { account: { id: number; isActive: boolean } };
-      };
-      expect(response.data.account.id).toBe(2);
-      expect(response.data.account.isActive).toBe(true);
-    });
   });
 
   describe("accounts remove", () => {
@@ -150,6 +138,13 @@ describe("E2E: Accounts Commands", () => {
       expect(response.success).toBe(true);
       expect(response.data.message).toContain("Removed account 2");
       expect(response.data.removedAccount.id).toBe(2);
+
+      const list = await runCliSuccess(["accounts", "list"], env.getCliOptions());
+      const remaining = list.json as {
+        data: { accounts: Array<{ id: number }>; total: number };
+      };
+      expect(remaining.data.accounts.map((account) => account.id)).toEqual([1]);
+      expect(remaining.data.total).toBe(1);
     });
 
     it("should fail for non-existent account", async () => {
@@ -160,20 +155,6 @@ describe("E2E: Accounts Commands", () => {
       );
 
       expect(result.exitCode).toBe(6);
-    });
-
-    it("should verify account is gone after removal", async () => {
-      await runCliSuccess(["accounts", "remove", "--id", "2"], env.getCliOptions());
-
-      const result = await runCliSuccess(["accounts", "list"], env.getCliOptions());
-
-      const response = result.json as {
-        data: { accounts: Array<{ id: number }>; total: number };
-      };
-      expect(response.data.accounts).toHaveLength(1);
-      expect(response.data.total).toBe(1);
-      const remainingAccount = response.data.accounts[0];
-      expect(remainingAccount?.id).toBe(1);
     });
   });
 

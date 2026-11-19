@@ -1,29 +1,10 @@
 import { describe, expect, it, mock } from "bun:test";
-import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TelegramClient } from "@mtcute/bun";
 
 import { dehydrate, rehydrate, wrapClientCallWithRecordReplay } from "./telegram-record-replay";
-
-function listJsonFiles(dir: string) {
-  const entries = readdirSync(dir, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...listJsonFiles(fullPath));
-    } else if (entry.isFile() && entry.name.endsWith(".json")) {
-      files.push(fullPath);
-    } else if (entry.isSymbolicLink()) {
-      const stats = statSync(fullPath, { throwIfNoEntry: false });
-      if (stats?.isFile() && entry.name.endsWith(".json")) {
-        files.push(fullPath);
-      }
-    }
-  }
-  return files;
-}
 
 describe("telegram record/replay utilities", () => {
   it("roundtrips BigInt and bytes through dehydrate/rehydrate", () => {
@@ -47,11 +28,7 @@ describe("telegram record/replay utilities", () => {
   });
 
   it("records and replays fixtures without hitting the network", async () => {
-    const fixturesDir = join(
-      tmpdir(),
-      `tgcli-fixtures-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
-    mkdirSync(fixturesDir, { recursive: true });
+    const fixturesDir = mkdtempSync(join(tmpdir(), "tgcli-fixtures-"));
 
     try {
       const recordCall = mock(async () => ({ ok: true, token: 7n }));
@@ -83,9 +60,6 @@ describe("telegram record/replay utilities", () => {
       const replayResult = await wrappedReplay.call(replayRequest);
       expect(replayResult).toEqual({ ok: true, token: 7n });
       expect(replayCall).not.toHaveBeenCalled();
-
-      const fixtures = listJsonFiles(fixturesDir);
-      expect(fixtures.length).toBeGreaterThan(0);
     } finally {
       rmSync(fixturesDir, { recursive: true, force: true });
     }

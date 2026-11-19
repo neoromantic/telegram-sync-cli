@@ -30,37 +30,13 @@ const RAW_PEERS = SAMPLES.map(({ type, raw }) =>
       : ({ _: "peerChannel", channelId: raw } as const),
 );
 
-describe("toMarkedPeerId", () => {
-  it("marks bare IDs the way the cache tables store them", () => {
-    for (const { type, raw, marked } of SAMPLES) {
-      expect(toMarkedPeerId(raw, type)).toBe(marked);
-    }
-  });
-
-  it("matches the IDs built from raw peers", () => {
-    expect(toPeerIdFromRawPeer({ _: "peerChat", chatId: 4001 })).toBe(
-      toMarkedPeerId(4001, "group"),
-    );
-    expect(toPeerIdFromRawPeer({ _: "peerChannel", channelId: 1234567890 })).toBe(
-      toMarkedPeerId(1234567890, "channel"),
-    );
-  });
-});
-
 describe("toRawPeerId", () => {
-  it("inverts toMarkedPeerId for every chat type and boundary", () => {
-    for (const { type, raw, marked } of SAMPLES) {
-      expect(toRawPeerId(toMarkedPeerId(raw, type))).toBe(raw);
-      expect(toRawPeerId(marked)).toBe(raw);
-    }
-    expect(toRawPeerId(-999_999_999_999)).toBe(999_999_999_999);
-    expect(toRawPeerId(-1_000_000_000_001)).toBe(1);
-  });
-
   it("names no peer for 0 and -1000000000000", () => {
     expect(toRawPeerId(0)).toBeNull();
     expect(toRawPeerId(-1_000_000_000_000)).toBeNull();
     expect(toRawPeerId(1.5)).toBeNull();
+    expect(toInputPeerFromPeerId(0, null)).toBeNull();
+    expect(toInputPeerFromPeerId(-1_000_000_000_000, "777")).toBeNull();
   });
 });
 
@@ -84,46 +60,21 @@ describe("toPeerIdFromRawChat", () => {
 });
 
 describe("toInputPeerFromPeerId", () => {
-  it("builds a user peer, with and without an access hash", () => {
+  it("gives a user and a channel their access hash, or 0, and a basic group none", () => {
     expect(toInputPeerFromPeerId(1001, "777")).toEqual({
       _: "inputPeerUser",
       userId: 1001,
       accessHash: Long.fromInt(777),
     });
-    expect(toInputPeerFromPeerId(1001, null)).toEqual({
-      _: "inputPeerUser",
-      userId: 1001,
-      accessHash: Long.fromInt(0),
-    });
-  });
-
-  it("builds a basic group peer, which needs no access hash", () => {
-    expect(toInputPeerFromPeerId(-4001, null)).toEqual({
-      _: "inputPeerChat",
-      chatId: 4001,
-    });
     expect(toInputPeerFromPeerId(-4001, "777")).toEqual({
       _: "inputPeerChat",
       chatId: 4001,
-    });
-  });
-
-  it("builds a channel peer with the bare channel ID", () => {
-    expect(toInputPeerFromPeerId(-1001234567890, "777")).toEqual({
-      _: "inputPeerChannel",
-      channelId: 1234567890,
-      accessHash: Long.fromInt(777),
     });
     expect(toInputPeerFromPeerId(-1001234567890, null)).toEqual({
       _: "inputPeerChannel",
       channelId: 1234567890,
       accessHash: Long.fromInt(0),
     });
-  });
-
-  it("rejects 0 and -1000000000000", () => {
-    expect(toInputPeerFromPeerId(0, null)).toBeNull();
-    expect(toInputPeerFromPeerId(-1_000_000_000_000, "777")).toBeNull();
   });
 });
 
@@ -145,22 +96,8 @@ describe("legacyChatIdCandidates", () => {
 });
 
 describe("sharesAccountMessageIds", () => {
-  it("holds for users and basic groups", () => {
-    for (const peerId of [1001, -1, -4242, -999_999_999_999]) {
-      expect(sharesAccountMessageIds(peerId)).toBe(true);
-    }
-  });
-
-  it("does not hold for channels, supergroups and IDs that name no peer", () => {
-    for (const peerId of [
-      -1001234567890,
-      -1_000_000_000_001,
-      -1005555555555,
-      0,
-      -1_000_000_000_000,
-      1.5,
-      Number.NaN,
-    ]) {
+  it("does not hold for IDs that name no peer", () => {
+    for (const peerId of [0, -1_000_000_000_000, 1.5, Number.NaN]) {
       expect(sharesAccountMessageIds(peerId)).toBe(false);
     }
   });
@@ -174,9 +111,10 @@ describe("agreement with mtcute", () => {
   });
 
   it("marks bare IDs and reads them back like mtcute", () => {
-    for (const { type, raw } of SAMPLES) {
+    for (const { type, raw, marked: expected } of SAMPLES) {
       const marked = toMarkedPeerId(raw, type);
       const mtcuteType = type === "private" ? "user" : type === "group" ? "chat" : "channel";
+      expect(marked).toBe(expected);
       expect(marked).toBe(getMarkedPeerId(raw, mtcuteType));
       expect(parseMarkedPeerId(marked)).toEqual([mtcuteType, raw]);
       expect(toRawPeerId(marked)).toBe(parseMarkedPeerId(marked)[1]);

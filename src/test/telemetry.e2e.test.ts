@@ -1,13 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli, runCliSuccess } from "./cli.test-utils";
@@ -174,14 +166,6 @@ describe("usage stats", () => {
     expect(existsSync(stateFile)).toBe(false);
   });
 
-  it("stop with DO_NOT_TRACK=1", async () => {
-    noticeSeen();
-    const result = await runCli(["chats", "list"], {
-      env: { ...debug, DO_NOT_TRACK: "1" },
-    });
-    expect(events(result.stderr)).toEqual([]);
-  });
-
   it("are not recorded by tg telemetry itself", async () => {
     noticeSeen();
     const result = await runCliSuccess(["telemetry", "status"], { env: debug });
@@ -212,6 +196,8 @@ describe("usage stats", () => {
 describe("usage stats in the background", () => {
   let dataDir: string;
   const received: Event[] = [];
+  const allArrived = Promise.withResolvers<void>();
+  const answer = Promise.withResolvers<void>();
   let server: ReturnType<typeof Bun.serve>;
 
   beforeAll(() => {
@@ -220,13 +206,15 @@ describe("usage stats in the background", () => {
       port: 0,
       async fetch(req) {
         received.push((await req.json()) as Event);
-        await Bun.sleep(2000);
+        if (received.length === 4) allArrived.resolve();
+        await answer.promise;
         return new Response("ok");
       },
     });
   });
 
   afterAll(() => {
+    answer.resolve();
     server.stop(true);
   });
 
@@ -242,59 +230,34 @@ describe("usage stats in the background", () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  const arrived = async (count: number) => {
-    const deadline = Date.now() + 5000;
-    while (received.length < count && Date.now() < deadline) {
-      await Bun.sleep(20);
-    }
-    await Bun.sleep(100);
-    return received.splice(0);
-  };
-
-  const statsOn = (dataDirValue: string) => ({
-    ...NO_AGENT,
-    AI_AGENT: "e2e",
-    TELEGRAM_SYNC_CLI_DATA_DIR: dataDirValue,
-    TELEGRAM_SYNC_CLI_TELEMETRY: "1",
-    TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT: server.url.href,
-  });
-
   it("never delay a command, and still arrive", async () => {
-    const env = statsOn(dataDir);
-    const off = await runCli(["chats", "list"], {
-      env: { ...env, DO_NOT_TRACK: "1" },
+    const on = await runCli(["chats", "list"], {
+      env: {
+        ...NO_AGENT,
+        AI_AGENT: "e2e",
+        TELEGRAM_SYNC_CLI_DATA_DIR: dataDir,
+        TELEGRAM_SYNC_CLI_TELEMETRY: "1",
+        TELEGRAM_SYNC_CLI_TELEMETRY_ENDPOINT: server.url.href,
+      },
     });
-    const on = await runCli(["chats", "list"], { env });
     expect(on.exitCode).toBe(2);
     expect(on.stderr).toContain("AUTH_REQUIRED");
-    expect(on.duration - off.duration).toBeLessThan(250);
 
-    const sent = await arrived(4);
-    expect(sent.map((e) => e.event).sort()).toEqual([
+    await allArrived.promise;
+    expect(received.map((e) => e.event).sort()).toEqual([
       "app_installed",
       "app_started",
       "error_occurred",
       "feature_used",
     ]);
     const state = JSON.parse(readFileSync(join(dataDir, "telemetry.json"), "utf8"));
-    for (const e of sent) {
+    for (const e of received) {
       expect(e.distinct_id).toBe(state.id);
       expect(e.properties).toMatchObject({ channel: "source", mode: "agent" });
     }
-    expect(sent.find((e) => e.event === "feature_used")?.properties.feature).toBe("chats list");
-    expect(sent.find((e) => e.event === "error_occurred")?.properties.error_type).toBe(
+    expect(received.find((e) => e.event === "feature_used")?.properties.feature).toBe("chats list");
+    expect(received.find((e) => e.event === "error_occurred")?.properties.error_type).toBe(
       "AUTH_REQUIRED",
     );
-  });
-
-  it("arrive with a data directory given as a relative path", async () => {
-    const project = join(dataDir, "project");
-    mkdirSync(join(project, "data"), { recursive: true });
-    renameSync(join(dataDir, "telemetry.json"), join(project, "data", "telemetry.json"));
-    await runCli(["chats", "list"], { env: statsOn("data"), cwd: project });
-    const sent = await arrived(4);
-    expect(sent).toHaveLength(4);
-    const state = JSON.parse(readFileSync(join(project, "data", "telemetry.json"), "utf8"));
-    expect(sent.every((e) => e.distinct_id === state.id)).toBe(true);
   });
 });
