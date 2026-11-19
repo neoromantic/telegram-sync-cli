@@ -54,7 +54,7 @@ export async function resolveHistoryChat(
   identifier: string,
   deps: ResolveHistoryChatDeps,
 ) {
-  const { inputPeer } = await resolvePeer(
+  const { inputPeer, name } = await resolvePeer(
     client,
     identifier,
     deps.usersCache,
@@ -69,7 +69,7 @@ export async function resolveHistoryChat(
   if (chatId === null) {
     throw new Error(`Could not resolve chat ${identifier}`);
   }
-  const result: HistoryChat = { chatId, inputPeer };
+  const result: HistoryChat & { name: string } = { chatId, inputPeer, name };
   return result;
 }
 
