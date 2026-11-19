@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   such as the `user:<id>` account of a QR login or a number they have since changed (#213).
   The phone moves to that account, which keeps its cache. Until now the login failed with
   `UNIQUE constraint failed: accounts.phone` and left a second account behind.
+- A login of a user who already has an account under another phone or a QR login gives that
+  account the new session. Until now the account kept its old session, so after the old
+  session was ended in Telegram the login succeeded but the account stayed signed out.
 
 ## [0.14.0] - 2026-11-18
 

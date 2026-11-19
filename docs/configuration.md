@@ -73,6 +73,14 @@ exists, and rename `accounts/<old-id>/` to `accounts/<new-id>/`. tg takes it on 
 because the file is stamped for the same Telegram user and its old account ID is gone. A cache
 stamped for another Telegram user is refused with `CACHE_UNAVAILABLE` (`owner_mismatch`).
 
+A login of a Telegram user who still has an account keeps that account's ID and cache,
+also when it comes by another way: `tg auth login-qr` after a phone login, or
+`tg auth login --phone` after a QR login or with a changed number. The new session replaces the
+account's session, so a login after the old session was ended in Telegram makes the account
+work again. A running daemon uses the new session after `tg daemon stop` and `tg daemon start`.
+If the session can't be moved, the login fails and keeps the account it made for the new
+session.
+
 ### Which account a command uses
 
 Every command that reads or writes a cache works on one account:
