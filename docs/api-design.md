@@ -411,6 +411,12 @@ chat's access hash, or from the ID alone with no API call. Telegram may refuse a
 peer built without an access hash; cache reads don't need one. Users that an `@username` or
 phone lookup returns are cached, so the next lookup by ID needs no API call.
 
+A command that changes Telegram (`tg send`, `tg messages read`, a `tg api` method that is not a
+read) resolves an `@username` with `contacts.resolveUsername`, never from the cache: a username
+can move to another user or chat, and its previous owner keeps it in the cache until fetched
+again. Pass an ID to skip that call. Reads stay cache-first and take the latest fetched owner
+of a username.
+
 Note: `tg chats get` fetches from Telegram by **@username only**; an ID works for a cached chat.
 An ID the cache doesn't hold, or any ID with `--fresh`, is `INVALID_ARGS` (exit 3) before any
 Telegram call, so it needs no account or credentials.

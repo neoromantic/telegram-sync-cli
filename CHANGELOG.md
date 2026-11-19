@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A command acts on the chat and account it checked against
   `allowedChats`: the check pins the account and hands its resolved chat to the command, so a
   switch of the active account or a second lookup in between can't move it (#217).
+- `tg send`, `tg messages read` and `tg api` write methods resolve an `@username` through
+  Telegram, not the cache, so a username that moved never sends to its previous owner. Reads
+  take the latest fetched owner of a username (#217).
 - A flag a command doesn't declare (`--acount 2`) and a value after a boolean flag
   (`--silent false`, which ran as `--silent`) are `INVALID_ARGS` instead of being ignored (#217).
 - A Telegram call that succeeded is no longer reported as failed when tg can't write it to its

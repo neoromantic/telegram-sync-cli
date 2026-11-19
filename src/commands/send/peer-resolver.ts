@@ -161,14 +161,15 @@ async function resolveByUsername(
   client: TelegramClientLike,
   username: string,
   { usersCache, chatsCache }: CacheDeps,
+  fresh: boolean,
 ) {
-  const cachedUser = usersCache.getByUsername(username);
+  const cachedUser = fresh ? null : usersCache.getByUsername(username);
   if (cachedUser?.access_hash) {
     verbose(`Found user @${username} in cache`);
     return buildUserPeerFromCache(cachedUser, `@${username}`);
   }
 
-  const cachedChat = chatsCache.getByUsername(username);
+  const cachedChat = fresh ? null : chatsCache.getByUsername(username);
   if (
     cachedChat?.access_hash &&
     (cachedChat.type === "channel" || cachedChat.type === "supergroup")
@@ -347,12 +348,22 @@ function resolveByMarkedId(identifier: string, { chatsCache }: CacheDeps) {
 
 const SELF_IDENTIFIERS = new Set(["me", "self"]);
 
+export interface ResolvePeerOptions {
+  /**
+   * Resolve an @username through Telegram, not the cache: a username can
+   * move to another chat, and its old owner keeps it in the cache. Writes
+   * pass it, so they never act on the previous owner.
+   */
+  freshUsername?: boolean;
+}
+
 export async function resolvePeer(
   client: TelegramClientLike,
   identifier: string,
   usersCache: UsersCache,
   chatsCache: ChatsCache,
   dms?: DmLookup,
+  { freshUsername = false }: ResolvePeerOptions = {},
 ) {
   const normalized = identifier.trim();
   const deps = { usersCache, chatsCache, dms };
@@ -370,7 +381,7 @@ export async function resolvePeer(
 
   if (isUsernameIdentifier(normalized)) {
     const username = normalizeUsername(normalized);
-    return resolveByUsername(client, username, deps);
+    return resolveByUsername(client, username, deps, freshUsername);
   }
 
   if (/^-\d+$/.test(normalized)) {

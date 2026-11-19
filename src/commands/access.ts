@@ -192,7 +192,7 @@ export async function checkAccess(
     if (typeof input === "string" && input.trim() !== "") {
       const { account } = openAccountCache(args.account as string | undefined);
       args.account = String(account.id);
-      chats.set(name, await checkChatAllowed(input, account.id, allowed));
+      chats.set(name, await checkChatAllowed(input, account.id, allowed, write === true));
     }
   }
   checkedChats.set(args, chats);
@@ -230,12 +230,17 @@ async function resolveAllowed(entries: string[], deps: HistoryDeps) {
 const ALLOWED_SUGGESTION =
   "Only the chats in allowedChats (config.json or TELEGRAM_SYNC_CLI_ALLOWED_CHATS) can be used; tg status lists them";
 
-async function checkChatAllowed(input: string, accountId: number, allowed: string[]) {
+async function checkChatAllowed(
+  input: string,
+  accountId: number,
+  allowed: string[],
+  write: boolean,
+) {
   const deps = openHistory(accountId, "cli:allowed-chats");
   let chat: CheckedChat;
   let ids: Set<number>;
   try {
-    chat = await resolveHistoryChat(deps.client, input, deps);
+    chat = await resolveHistoryChat(deps.client, input, deps, { freshUsername: write });
     ids = await resolveAllowed(allowed, deps);
   } catch (err) {
     reportHistoryError(err, `check ${input} against allowedChats`);

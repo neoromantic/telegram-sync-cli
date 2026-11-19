@@ -266,10 +266,38 @@ describe("send command", () => {
     }
   });
 
+  const resolvedTo = (id: number, accessHash: string) => ({
+    _: "contacts.resolvedPeer",
+    peer: { _: "peerUser", userId: id },
+    users: [
+      { _: "user", id, accessHash: toLong(accessHash), firstName: "Test", username: "testuser" },
+    ],
+    chats: [],
+  });
+  const requests = () => commandCall.mock.calls.map(([request]) => (request as { _: string })._);
+
+  it("sends to the user who holds @username now, not its previous owner in the cache", async () => {
+    createUsersCache(commandCacheDb).upsert(createTestUser({ fetched_at: 1 }));
+    commandReplies.push(async () => resolvedTo(654321, "555"), sentUpdates);
+    const { sendCommand } = await import("./send");
+    const logSpy = spyOn(console, "log");
+    try {
+      await runCommand(sendCommand, { rawArgs: ["--to", "@testuser", "-m", "hi"] });
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    expect(requests()).toEqual(["contacts.resolveUsername", "messages.sendMessage"]);
+    const sent = commandCall.mock.calls[1]?.[0] as tl.messages.RawSendMessageRequest;
+    assertPeer(sent.peer, "inputPeerUser");
+    expect(sent.peer.userId).toBe(654321);
+    expect(createUsersCache(commandCacheDb).getByUsername("testuser")?.user_id).toBe("654321");
+  });
+
   it("sends to the chat and account allowedChats checked, even when both move before it runs", async () => {
     const users = createUsersCache(commandCacheDb);
     users.upsert(createTestUser({ access_hash: "111" }));
-    commandReplies.push(sentUpdates);
+    commandReplies.push(async () => resolvedTo(123456, "111"), sentUpdates);
     process.env[ALLOWED_CHATS_ENV] = "@testuser";
     const { sendCommand } = await import("./send");
     const send = {
@@ -292,7 +320,8 @@ describe("send command", () => {
     }
 
     expect(secondCall).not.toHaveBeenCalled();
-    const sent = commandCall.mock.calls[0]?.[0] as tl.messages.RawSendMessageRequest;
+    expect(requests()).toEqual(["contacts.resolveUsername", "messages.sendMessage"]);
+    const sent = commandCall.mock.calls[1]?.[0] as tl.messages.RawSendMessageRequest;
     expect(sent._).toBe("messages.sendMessage");
     assertPeer(sent.peer, "inputPeerUser");
     expect(sent.peer.userId).toBe(123456);

@@ -2,6 +2,7 @@ import { MtInvalidPeerTypeError, type TelegramClient, type tl } from "@mtcute/bu
 import { randomLong, toInputChannel, toInputUser } from "@mtcute/bun/utils.js";
 import { defineCommand } from "citty";
 
+import { isReadMethod } from "./access";
 import { createChatsCache } from "../db/chats-cache";
 import { createUsersCache } from "../db/users-cache";
 import { getClientForAccount } from "../services/telegram";
@@ -114,7 +115,9 @@ export const apiCommand = defineCommand({
       const chatsCache = createChatsCache(db);
       const dms = createDmLookup(db);
       const request = await buildApiRequest(method, params, async (id) => {
-        const peer = await resolvePeer(apiClient, id, usersCache, chatsCache, dms);
+        const peer = await resolvePeer(apiClient, id, usersCache, chatsCache, dms, {
+          freshUsername: !isReadMethod(method),
+        });
         return peer.inputPeer;
       });
       const result = await client.call(request);

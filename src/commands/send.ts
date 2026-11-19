@@ -295,7 +295,9 @@ export const sendCommand = defineCommand({
       verbose(`Resolving recipient: ${recipient}`);
       const { inputPeer, name } =
         checkedChat(args, "to") ??
-        (await resolvePeer(client, recipient, usersCache, chatsCache, createDmLookup(cacheDb)));
+        (await resolvePeer(client, recipient, usersCache, chatsCache, createDmLookup(cacheDb), {
+          freshUsername: true,
+        }));
 
       const text = content.file === null ? content.text : content.caption;
       let result: tl.TypeUpdates;
