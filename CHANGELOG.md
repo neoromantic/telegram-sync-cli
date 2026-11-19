@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tg send`, `tg messages read` and `tg api` write methods resolve an `@username` through
+  Telegram, not the cache, so a username that moved never sends to its previous owner. The
+  `allowedChats` check of a write resolves the list's `@username` entries the same way: an entry
+  allows the chat that holds the username now, not its previous owner by ID. Reads take the
+  latest fetched owner of a username (#217).
+
+## [0.15.0] - 2026-11-19
+
 ### Added
 
 - An agent skill, `skills/telegram-sync-cli/SKILL.md`: when to use `tg`, finding chats and
@@ -71,11 +81,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A command acts on the chat and account it checked against
   `allowedChats`: the check pins the account and hands its resolved chat to the command, so a
   switch of the active account or a second lookup in between can't move it (#217).
-- `tg send`, `tg messages read` and `tg api` write methods resolve an `@username` through
-  Telegram, not the cache, so a username that moved never sends to its previous owner. The
-  `allowedChats` check of a write resolves the list's `@username` entries the same way: an entry
-  allows the chat that holds the username now, not its previous owner by ID. Reads take the
-  latest fetched owner of a username (#217).
 - A flag a command doesn't declare (`--acount 2`) and a value after a boolean flag
   (`--silent false`, which ran as `--silent`) are `INVALID_ARGS` instead of being ignored (#217).
 - A Telegram call that succeeded is no longer reported as failed when tg can't write it to its
@@ -1114,7 +1119,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.2...v0.13.0
