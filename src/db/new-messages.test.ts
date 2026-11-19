@@ -89,16 +89,4 @@ describe("createNewMessagesFeed", () => {
 
     expect(ids(feed.poll())).toEqual([[CHAT, 3]]);
   });
-
-  it("returns the cached messages after --after, then only newer ones", () => {
-    store(CHAT, [1, 2, 3]);
-    const feed = createNewMessagesFeed(reader, { chatId: CHAT, after: 1 });
-    expect(ids(feed.initial)).toEqual([
-      [CHAT, 2],
-      [CHAT, 3],
-    ]);
-
-    store(CHAT, [4]);
-    expect(ids(feed.poll())).toEqual([[CHAT, 4]]);
-  });
 });

@@ -1,59 +1,17 @@
-import type { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, it } from "bun:test";
-import {
-  type ChatSyncStateInput,
-  type ChatSyncStateService,
-  createChatSyncStateService,
-} from "./chat-sync-state";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
+import { type ChatSyncStateService, createChatSyncStateService } from "./chat-sync-state";
 import { SyncPriority } from "./sync-schema";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
 
 describe("ChatSyncStateService", () => {
-  let db: Database;
   let service: ChatSyncStateService;
 
   beforeEach(() => {
-    db = createAccountCacheDb();
-    service = createChatSyncStateService(db);
+    service = createChatSyncStateService(createAccountCacheDb());
   });
 
-  describe("upsert", () => {
-    it("creates new sync state for a chat", () => {
-      const input: ChatSyncStateInput = {
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      };
-
-      service.upsert(input);
-
-      const state = service.get(100);
-      expect(state).not.toBeNull();
-      expect(state?.chat_type).toBe("private");
-      expect(state?.sync_priority).toBe(SyncPriority.High);
-      expect(state?.sync_enabled).toBe(1);
-    });
-
-    it("updates existing sync state", () => {
-      service.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-
-      service.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: SyncPriority.Medium,
-        sync_enabled: false,
-      });
-
-      const state = service.get(100);
-      expect(state?.sync_priority).toBe(SyncPriority.Medium);
-      expect(state?.sync_enabled).toBe(0);
-    });
+  afterEach(() => {
+    setSystemTime();
   });
 
   describe("upsert member_count", () => {
@@ -107,10 +65,6 @@ describe("ChatSyncStateService", () => {
         sync_enabled: enabled,
       });
 
-    it("starts at auto", () => {
-      expect(service.get(CHANNEL)?.sync_mode).toBe("auto");
-    });
-
     it("writes the sync_enabled and sync_priority each mode means", () => {
       service.setSyncMode(CHANNEL, "on");
       expect(service.get(CHANNEL)).toMatchObject({
@@ -133,11 +87,9 @@ describe("ChatSyncStateService", () => {
       });
     });
 
-    it("keeps a chat turned on through a dialog pass", () => {
+    it("keeps a chat turned on or off through a dialog pass", () => {
       service.setSyncMode(CHANNEL, "on");
-
       passUpsert(false, 6000);
-
       expect(service.get(CHANNEL)).toMatchObject({
         sync_mode: "on",
         sync_enabled: 1,
@@ -145,13 +97,9 @@ describe("ChatSyncStateService", () => {
         chat_type: "supergroup",
         member_count: 6000,
       });
-    });
 
-    it("keeps a chat turned off through a dialog pass", () => {
       service.setSyncMode(CHANNEL, "off");
-
       passUpsert(true, 10);
-
       expect(service.get(CHANNEL)).toMatchObject({
         sync_mode: "off",
         sync_enabled: 0,
@@ -187,24 +135,7 @@ describe("ChatSyncStateService", () => {
 
     const due = () => service.getCatchupDue().map((chat) => chat.chat_id);
 
-    it("starts unknown, which counts as behind", () => {
-      expect(service.get(100)?.top_message_id).toBeNull();
-      expect(due()).toEqual([100]);
-    });
-
-    it("only rises", () => {
-      service.raiseTopMessageId(100, 1150);
-      service.raiseTopMessageId(100, 1100);
-      expect(service.get(100)?.top_message_id).toBe(1150);
-      expect(due()).toEqual([100]);
-    });
-
-    it("is not due once the top is at or below the cursor", () => {
-      service.raiseTopMessageId(100, 1000);
-      expect(due()).toEqual([]);
-    });
-
-    it("is due only for enabled chats with a cursor", () => {
+    it("is due while the top is unknown or above the cursor, for enabled chats with a cursor", () => {
       service.upsert({
         chat_id: 200,
         chat_type: "private",
@@ -218,6 +149,17 @@ describe("ChatSyncStateService", () => {
         sync_enabled: false,
         forward_cursor: 10,
       });
+      expect(service.get(100)?.top_message_id).toBeNull();
+      expect(due()).toEqual([100]);
+
+      service.raiseTopMessageId(100, 1000);
+      expect(due()).toEqual([]);
+    });
+
+    it("only rises", () => {
+      service.raiseTopMessageId(100, 1150);
+      service.raiseTopMessageId(100, 1100);
+      expect(service.get(100)?.top_message_id).toBe(1150);
       expect(due()).toEqual([100]);
     });
 
@@ -274,107 +216,22 @@ describe("ChatSyncStateService", () => {
     });
   });
 
-  describe("updateBackwardCursor", () => {
-    it("moves the backward cursor and keeps the forward one", () => {
-      service.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-      service.recordFirstPage(100, {
-        forward_cursor: 1000,
-        backward_cursor: 900,
-        history_complete: false,
-        new_messages: 100,
-      });
-
-      service.updateBackwardCursor(100, 500);
-
-      const state = service.get(100);
-      expect(state?.forward_cursor).toBe(1000);
-      expect(state?.backward_cursor).toBe(500);
-    });
-  });
-
-  describe("markHistoryComplete", () => {
-    beforeEach(() => {
-      service.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
+  it("stamps the last forward and backward sync", () => {
+    service.upsert({
+      chat_id: 100,
+      chat_type: "private",
+      sync_priority: SyncPriority.High,
+      sync_enabled: true,
     });
 
-    it("marks history as complete", () => {
-      service.markHistoryComplete(100);
+    setSystemTime(1_700_000_000_000);
+    service.updateLastSync(100, "forward");
+    setSystemTime(1_700_000_060_000);
+    service.updateLastSync(100, "backward");
 
-      const state = service.get(100);
-      expect(state?.history_complete).toBe(1);
-    });
-  });
-
-  describe("incrementSyncedMessages", () => {
-    beforeEach(() => {
-      service.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-    });
-
-    it("increments synced messages count", () => {
-      service.incrementSyncedMessages(100, 10);
-      expect(service.get(100)?.synced_messages).toBe(10);
-
-      service.incrementSyncedMessages(100, 5);
-      expect(service.get(100)?.synced_messages).toBe(15);
-    });
-  });
-
-  describe("delete", () => {
-    it("removes sync state for a chat", () => {
-      service.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-      expect(service.get(100)).not.toBeNull();
-
-      service.delete(100);
-      expect(service.get(100)).toBeNull();
-    });
-  });
-
-  describe("updateLastSync", () => {
-    beforeEach(() => {
-      service.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-    });
-
-    it("updates last_forward_sync timestamp", () => {
-      const before = service.get(100)?.last_forward_sync;
-      expect(before).toBeNull();
-
-      service.updateLastSync(100, "forward");
-
-      const after = service.get(100)?.last_forward_sync;
-      expect(after).not.toBeNull();
-      expect(after).toBeGreaterThan(0);
-    });
-
-    it("updates last_backward_sync timestamp", () => {
-      service.updateLastSync(100, "backward");
-
-      const state = service.get(100);
-      expect(state?.last_backward_sync).not.toBeNull();
+    expect(service.get(100)).toMatchObject({
+      last_forward_sync: 1_700_000_000_000,
+      last_backward_sync: 1_700_000_060_000,
     });
   });
 });

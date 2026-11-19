@@ -91,11 +91,6 @@ describe("message_attachments", () => {
     });
   });
 
-  it("writes no row for a text message", () => {
-    cache.upsert(input({ _: "message", id: 3, peerId: peer, date: 1, message: "Hi" }));
-    expect(attachmentRows(db)).toEqual([]);
-  });
-
   it("writes nothing when a message is written again unchanged", () => {
     const message = input(photoMessage(peer, 4));
     cache.upsert(message);

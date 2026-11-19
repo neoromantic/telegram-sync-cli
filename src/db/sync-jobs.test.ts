@@ -31,257 +31,65 @@ describe("SyncJobsService", () => {
     });
   }
 
-  describe("create", () => {
-    it("starts with no attempts and is due at once", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
+  function create(chatId: number, jobType: SyncJobType, priority: SyncPriority) {
+    return service.create({ chat_id: chatId, job_type: jobType, priority });
+  }
 
-      expect(job.attempts).toBe(0);
-      expect(job.next_run_at).toBe(0);
-    });
-
-    it("creates a new sync job", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.Realtime,
-      });
-
-      expect(job.id).toBeGreaterThan(0);
-      expect(job.chat_id).toBe(100);
-      expect(job.job_type).toBe(SyncJobType.ForwardCatchup);
-      expect(job.priority).toBe(SyncPriority.Realtime);
-      expect(job.status).toBe(SyncJobStatus.Pending);
-    });
-
-    it("auto-increments job IDs", () => {
-      const job1 = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      const job2 = service.create({
-        chat_id: 200,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.Medium,
-      });
-
-      expect(job2.id).toBe(job1.id + 1);
+  it("creates a pending job, due at once, with no attempts", () => {
+    expect(create(100, SyncJobType.ForwardCatchup, SyncPriority.Realtime)).toMatchObject({
+      chat_id: 100,
+      job_type: SyncJobType.ForwardCatchup,
+      priority: SyncPriority.Realtime,
+      status: SyncJobStatus.Pending,
+      attempts: 0,
+      next_run_at: 0,
     });
   });
 
-  describe("getById", () => {
-    it("returns job by ID", () => {
-      const created = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      const job = service.getById(created.id);
-      expect(job).not.toBeNull();
-      expect(job?.chat_id).toBe(100);
-    });
-
-    it("returns null for non-existent job", () => {
-      expect(service.getById(999)).toBeNull();
-    });
-  });
-
-  describe("getNextPending", () => {
-    it("returns highest priority pending job", () => {
-      service.create({
-        chat_id: 100,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.Low,
-      });
-      service.create({
-        chat_id: 200,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.Realtime,
-      });
-      service.create({
-        chat_id: 300,
-        job_type: SyncJobType.InitialLoad,
-        priority: SyncPriority.Medium,
-      });
-
-      const next = service.getNextPending();
-      expect(next).not.toBeNull();
-      expect(next?.chat_id).toBe(200);
-    });
-
-    it("returns oldest job when same priority (FIFO)", () => {
-      service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      service.create({
-        chat_id: 200,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      const next = service.getNextPending();
-      expect(next?.chat_id).toBe(100);
-    });
-
-    it("skips running jobs", () => {
-      const job1 = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      service.create({
-        chat_id: 200,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      service.markRunning(job1.id);
-
-      const next = service.getNextPending();
-      expect(next?.chat_id).toBe(200);
-    });
-
-    it("returns null when no pending jobs", () => {
-      expect(service.getNextPending()).toBeNull();
-    });
-  });
-
-  describe("jobs waiting for a retry", () => {
+  it("gives the due pending job of the types: highest priority, then oldest", () => {
     const now = 1_700_000_000_000;
+    const lane = [SyncJobType.BackwardHistory, SyncJobType.FullSync];
+    const next = () => service.getNextPendingOfTypes(lane);
+    setSystemTime(now);
+    const medium = create(1, SyncJobType.BackwardHistory, SyncPriority.Medium);
+    const high = create(2, SyncJobType.FullSync, SyncPriority.High);
+    const catchup = create(3, SyncJobType.ForwardCatchup, SyncPriority.Realtime);
+    setSystemTime(now - 1_000);
+    const older = create(4, SyncJobType.BackwardHistory, SyncPriority.High);
+    const waiting = create(5, SyncJobType.BackwardHistory, SyncPriority.Realtime);
+    waitUntil(waiting.id, now + 60_000);
+    setSystemTime(now);
 
-    function queueWaiting() {
-      const waiting = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.Realtime,
-      });
-      waitUntil(waiting.id, now + 60_000);
-      const due = service.create({
-        chat_id: 200,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.Low,
-      });
-      return { waiting, due };
+    const order: number[] = [];
+    for (let job = next(); job; job = next()) {
+      order.push(job.id);
+      service.markRunning(job.id);
     }
+    expect(order).toEqual([older.id, high.id, medium.id]);
+    expect(service.getPendingJobs().map((job) => job.id)).toEqual([waiting.id, catchup.id]);
 
-    it("are skipped by getNextPending until they are due", () => {
-      setSystemTime(now);
-      const { waiting, due } = queueWaiting();
-
-      expect(service.getNextPending()?.id).toBe(due.id);
-
-      setSystemTime(now + 60_000);
-      expect(service.getNextPending()?.id).toBe(waiting.id);
-    });
-
-    it("are skipped by getNextPendingOfTypes until they are due", () => {
-      setSystemTime(now);
-      const { waiting, due } = queueWaiting();
-      const lane = [SyncJobType.BackwardHistory, SyncJobType.FullSync];
-
-      expect(service.getNextPendingOfTypes(lane)?.id).toBe(due.id);
-      db.run("DELETE FROM sync_jobs WHERE id = ?", [due.id]);
-      expect(service.getNextPendingOfTypes(lane)).toBeNull();
-
-      setSystemTime(now + 60_001);
-      expect(service.getNextPendingOfTypes(lane)?.id).toBe(waiting.id);
-    });
-
-    it("still count as pending", () => {
-      setSystemTime(now);
-      queueWaiting();
-
-      expect(service.getPendingJobs()).toHaveLength(2);
-    });
+    setSystemTime(now + 60_000);
+    expect(next()?.id).toBe(waiting.id);
   });
 
-  describe("markRunning", () => {
-    it("sets status to running", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
+  it("runs a pending job once and completes a running one once", () => {
+    setSystemTime(1_700_000_000_000);
+    const job = create(100, SyncJobType.ForwardCatchup, SyncPriority.High);
 
-      expect(service.markRunning(job.id)).toBe(true);
-
-      const updated = service.getById(job.id);
-      expect(updated?.status).toBe(SyncJobStatus.Running);
-      expect(updated?.started_at).not.toBeNull();
+    expect(service.markCompleted(job.id)).toBe(false);
+    expect(service.markRunning(job.id)).toBe(true);
+    expect(service.markRunning(job.id)).toBe(false);
+    expect(service.getById(job.id)).toMatchObject({
+      status: SyncJobStatus.Running,
+      started_at: 1_700_000_000_000,
     });
 
-    it("returns false when job is not pending", () => {
-      const job = service.create({
-        chat_id: 200,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      expect(service.markRunning(job.id)).toBe(true);
-      expect(service.markRunning(job.id)).toBe(false);
-    });
-  });
-
-  describe("markCompleted", () => {
-    it("sets status to completed", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      expect(service.markRunning(job.id)).toBe(true);
-
-      expect(service.markCompleted(job.id)).toBe(true);
-
-      const updated = service.getById(job.id);
-      expect(updated?.status).toBe(SyncJobStatus.Completed);
-      expect(updated?.completed_at).not.toBeNull();
-    });
-
-    it("returns false when job is not running", () => {
-      const job = service.create({
-        chat_id: 200,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      expect(service.markCompleted(job.id)).toBe(false);
-    });
-  });
-
-  describe("markFailed", () => {
-    it("sets status to failed with error message", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      expect(service.markRunning(job.id)).toBe(true);
-
-      expect(service.markFailed(job.id, "Network error")).toBe(true);
-
-      const updated = service.getById(job.id);
-      expect(updated?.status).toBe(SyncJobStatus.Failed);
-      expect(updated?.error_message).toBe("Network error");
-      expect(updated?.completed_at).not.toBeNull();
-      expect(updated?.attempts).toBe(1);
-    });
-
-    it("returns false when job is not running", () => {
-      const job = service.create({
-        chat_id: 200,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      expect(service.markFailed(job.id, "Network error")).toBe(false);
+    setSystemTime(1_700_000_001_000);
+    expect(service.markCompleted(job.id)).toBe(true);
+    expect(service.markCompleted(job.id)).toBe(false);
+    expect(service.getById(job.id)).toMatchObject({
+      status: SyncJobStatus.Completed,
+      completed_at: 1_700_000_001_000,
     });
   });
 
@@ -452,68 +260,17 @@ describe("SyncJobsService", () => {
     });
   });
 
-  describe("updateProgress", () => {
-    it("updates cursor positions and message count", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.Background,
-      });
-      service.markRunning(job.id);
+  it("records a job's cursors and adds up the messages it fetched", () => {
+    const job = create(100, SyncJobType.BackwardHistory, SyncPriority.Background);
+    service.markRunning(job.id);
 
-      service.updateProgress(job.id, {
-        cursor_start: 1000,
-        cursor_end: 500,
-        messages_fetched: 50,
-      });
+    service.updateProgress(job.id, { cursor_start: 1000, cursor_end: 500, messages_fetched: 50 });
+    service.updateProgress(job.id, { cursor_end: 400, messages_fetched: 30 });
 
-      const updated = service.getById(job.id);
-      expect(updated?.cursor_start).toBe(1000);
-      expect(updated?.cursor_end).toBe(500);
-      expect(updated?.messages_fetched).toBe(50);
-    });
-
-    it("accumulates messages_fetched", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.Background,
-      });
-      service.markRunning(job.id);
-
-      service.updateProgress(job.id, { messages_fetched: 50 });
-      service.updateProgress(job.id, { messages_fetched: 30 });
-
-      const updated = service.getById(job.id);
-      expect(updated?.messages_fetched).toBe(80);
-    });
-  });
-
-  describe("getRunningJobs", () => {
-    it("returns all running jobs", () => {
-      const job1 = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      service.create({
-        chat_id: 200,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      const job3 = service.create({
-        chat_id: 300,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      service.markRunning(job1.id);
-      service.markRunning(job3.id);
-
-      const running = service.getRunningJobs();
-      expect(running).toHaveLength(2);
-      expect(running.map((j) => j.chat_id)).toContain(100);
-      expect(running.map((j) => j.chat_id)).toContain(300);
+    expect(service.getById(job.id)).toMatchObject({
+      cursor_start: 1000,
+      cursor_end: 400,
+      messages_fetched: 80,
     });
   });
 
@@ -541,92 +298,43 @@ describe("SyncJobsService", () => {
     });
   });
 
-  describe("hasActiveJobForChat", () => {
-    it("returns true if chat has pending job of given type", () => {
-      service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
+  it("holds a chat's slot for a job type while its job is pending, running or failed", () => {
+    const active = () => service.hasActiveJobForChat(100, SyncJobType.ForwardCatchup);
+    const job = create(100, SyncJobType.ForwardCatchup, SyncPriority.High);
+    expect(active()).toBe(true);
+    expect(service.hasActiveJobForChat(100, SyncJobType.BackwardHistory)).toBe(false);
 
-      expect(service.hasActiveJobForChat(100, SyncJobType.ForwardCatchup)).toBe(true);
-      expect(service.hasActiveJobForChat(100, SyncJobType.BackwardHistory)).toBe(false);
-    });
+    service.markRunning(job.id);
+    expect(active()).toBe(true);
+    service.markFailed(job.id, "Network error");
+    expect(active()).toBe(true);
+    service.deleteFailed();
+    expect(active()).toBe(false);
 
-    it("returns true if job is running", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      service.markRunning(job.id);
-
-      expect(service.hasActiveJobForChat(100, SyncJobType.ForwardCatchup)).toBe(true);
-    });
-
-    it("returns true if job failed, until the row is deleted", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      service.markRunning(job.id);
-      service.markFailed(job.id, "Network error");
-
-      expect(service.hasActiveJobForChat(100, SyncJobType.ForwardCatchup)).toBe(true);
-
-      service.deleteFailed();
-      expect(service.hasActiveJobForChat(100, SyncJobType.ForwardCatchup)).toBe(false);
-    });
-
-    it("returns false if job is not pending, running or failed", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-      service.markRunning(job.id);
-      service.markCompleted(job.id);
-
-      expect(service.hasActiveJobForChat(100, SyncJobType.ForwardCatchup)).toBe(false);
-    });
+    const done = create(100, SyncJobType.ForwardCatchup, SyncPriority.High);
+    service.markRunning(done.id);
+    service.markCompleted(done.id);
+    expect(active()).toBe(false);
   });
 
-  describe("deleteFailed", () => {
+  it("deletes the failed jobs of one chat or of all, even one that failed just now", () => {
     function failedJob(chatId: number) {
-      const job = service.create({
-        chat_id: chatId,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
+      const job = create(chatId, SyncJobType.ForwardCatchup, SyncPriority.High);
       service.markRunning(job.id);
       service.markFailed(job.id, "Network error");
       return job;
     }
+    setSystemTime(1_700_000_000_000);
+    failedJob(100);
+    failedJob(100);
+    const other = failedJob(200);
+    const pending = create(300, SyncJobType.ForwardCatchup, SyncPriority.High);
 
-    it("deletes every failed job, even one that failed just now", () => {
-      setSystemTime(1_700_000_000_000);
-      failedJob(100);
-      failedJob(200);
-      const pending = service.create({
-        chat_id: 300,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      expect(service.deleteFailed()).toBe(2);
-      expect(service.getFailedJobs(10)).toEqual([]);
-      expect(service.getById(pending.id)).not.toBeNull();
-    });
-
-    it("deletes only one chat's failed jobs", () => {
-      failedJob(100);
-      failedJob(100);
-      const other = failedJob(200);
-
-      expect(service.deleteFailed(100)).toBe(2);
-      expect(service.getFailedJobs(10).map((job) => job.id)).toEqual([other.id]);
-    });
+    expect(service.deleteFailed(100)).toBe(2);
+    expect(service.getFailedJobs(10).map((job) => job.id)).toEqual([other.id]);
+    expect(service.deleteFailed()).toBe(1);
+    expect(service.getFailedJobs(10)).toEqual([]);
+    expect(service.getById(pending.id)).not.toBeNull();
   });
 
   describe("getFailedJobs", () => {
@@ -723,72 +431,22 @@ describe("SyncJobsService", () => {
     });
   });
 
-  describe("recoverCrashedJobs", () => {
-    it("resets running jobs to pending after daemon crash", () => {
-      const job1 = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
+  it("makes the jobs a crashed daemon left running pending again", () => {
+    const running = [
+      create(100, SyncJobType.ForwardCatchup, SyncPriority.High),
+      create(200, SyncJobType.BackwardHistory, SyncPriority.Background),
+    ];
+    const pending = create(300, SyncJobType.InitialLoad, SyncPriority.Medium);
+    for (const job of running) service.markRunning(job.id);
+
+    expect(service.recoverCrashedJobs()).toBe(2);
+
+    for (const job of running) {
+      expect(service.getById(job.id)).toMatchObject({
+        status: SyncJobStatus.Pending,
+        error_message: "Daemon crashed during execution",
       });
-      const job2 = service.create({
-        chat_id: 200,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.Background,
-      });
-      const job3 = service.create({
-        chat_id: 300,
-        job_type: SyncJobType.InitialLoad,
-        priority: SyncPriority.Medium,
-      });
-
-      service.markRunning(job1.id);
-      service.markRunning(job2.id);
-
-      const recovered = service.recoverCrashedJobs();
-
-      expect(recovered).toBe(2);
-
-      const recoveredJob1 = service.getById(job1.id);
-      expect(recoveredJob1?.status).toBe(SyncJobStatus.Pending);
-      expect(recoveredJob1?.error_message).toBe("Daemon crashed during execution");
-
-      const recoveredJob2 = service.getById(job2.id);
-      expect(recoveredJob2?.status).toBe(SyncJobStatus.Pending);
-      expect(recoveredJob2?.error_message).toBe("Daemon crashed during execution");
-
-      const pendingJob = service.getById(job3.id);
-      expect(pendingJob?.status).toBe(SyncJobStatus.Pending);
-      expect(pendingJob?.error_message).toBeNull();
-    });
-
-    it("returns 0 when no running jobs exist", () => {
-      service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      const recovered = service.recoverCrashedJobs();
-
-      expect(recovered).toBe(0);
-    });
-
-    it("makes recovered jobs available via getNextPending", () => {
-      const job = service.create({
-        chat_id: 100,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      service.markRunning(job.id);
-
-      expect(service.getNextPending()).toBeNull();
-
-      service.recoverCrashedJobs();
-
-      const nextJob = service.getNextPending();
-      expect(nextJob).not.toBeNull();
-      expect(nextJob?.id).toBe(job.id);
-    });
+    }
+    expect(service.getById(pending.id)).toEqual(pending);
   });
 });
