@@ -289,9 +289,10 @@ Before anything runs, a provider declares:
 - `engine` and `model`, stored as `runner` and `model`, and its `id`, stored as `source`
 
 A provider answers each request with the text, language and model, or a failure that says
-whether trying again can work: `rejected` (it won't as it is), `retry_later` (a rate limit, a
-result not ready yet) or `outcome_unknown` (the request may have been accepted and billed, so
-it is reported with `details.outcome: "unknown"`, not retryable, and nothing is stored).
+whether trying again can work: `rejected` (it won't as it is; reported as not retryable, whatever
+the error), `retry_later` (a rate limit, a result not ready yet; reported as retryable) or
+`outcome_unknown` (the request may have been accepted and billed, so it is reported with
+`details.outcome: "unknown"`, not retryable, and nothing is stored).
 
 Only the local provider exists: the programs above, which take WAV, cost nothing and send
 nothing anywhere. The `transcribe.*` keys configure it.

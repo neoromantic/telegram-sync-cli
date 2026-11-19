@@ -99,7 +99,7 @@ function failureError(
     case "retry_later":
       return withMessage(result.error, chatId, messageId, { retryable: true });
     case "rejected":
-      return withMessage(result.error, chatId, messageId);
+      return withMessage(result.error, chatId, messageId, { retryable: false });
   }
 }
 

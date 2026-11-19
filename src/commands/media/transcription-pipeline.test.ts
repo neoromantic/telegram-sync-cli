@@ -292,6 +292,24 @@ describe("transcribeMessages with a provider that uploads the original file", ()
     expect(fake.calls).toHaveLength(2);
   });
 
+  it("reports a rejection as not retryable, even of a network error, and retry_later as retryable", async () => {
+    voiceNote(1, { bytes: "first" });
+    voiceNote(2, { bytes: "second" });
+    const networkError = () =>
+      new MediaError(ErrorCodes.NETWORK_ERROR, "The service refused the audio", {});
+    const fake = remoteProvider((request) => ({
+      status: "failed",
+      failure: request.messageId === 1 ? "rejected" : "retry_later",
+      error: networkError(),
+    }));
+
+    const outcomes = await transcribeMessages(deps(fake.provider), "me", [1, 2]);
+
+    expect(networkError().retryable).toBe(true);
+    expect(asError(outcomes[0]).retryable).toBe(false);
+    expect(asError(outcomes[1]).retryable).toBe(true);
+  });
+
   it("keeps the ready results of a batch when other messages fail", async () => {
     voiceNote(1, { bytes: "first" });
     createMessagesCache(db).upsert(parseRawMessage(photoMessage(SELF, 2), SELF_ID)!);
