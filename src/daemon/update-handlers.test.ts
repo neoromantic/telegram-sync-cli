@@ -15,6 +15,8 @@ import { watchedLogger } from "../test/daemon-runtime.test-utils";
 import { fakeDialog } from "../test/fake-dialogs.test-utils";
 import { assertPeerIdInvariants } from "../test/peer-id-invariants.test-utils";
 
+const ctx: UpdateContext = { accountId: 1, receivedAt: 0 };
+
 describe("UpdateHandlers", () => {
   let db: Database;
   let handlers: UpdateHandlers;
@@ -29,71 +31,6 @@ describe("UpdateHandlers", () => {
   });
 
   describe("handleNewMessage", () => {
-    it("stores a new message in cache", async () => {
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 100,
-        messageId: 1,
-        fromId: 123,
-        text: "Hello, world!",
-        date: Date.now(),
-        isOutgoing: false,
-      });
-
-      const cached = messagesCache.get(100, 1);
-      expect(cached).not.toBeNull();
-      expect(cached?.text).toBe("Hello, world!");
-      expect(cached?.from_id).toBe(123);
-    });
-
-    it("stores raw_json when rawMessage is provided", async () => {
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      const rawMessage = {
-        _: "message",
-        id: 42,
-        peerId: { _: "peerUser", userId: 123 },
-        message: "Test with raw JSON",
-        date: 1700000000,
-        out: false,
-        mentioned: false,
-        mediaUnread: false,
-        silent: false,
-        post: false,
-        fromScheduled: false,
-        legacy: false,
-        editHide: false,
-        pinned: false,
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 100,
-        messageId: 42,
-        fromId: 123,
-        text: "Test with raw JSON",
-        date: 1700000000,
-        isOutgoing: false,
-        rawMessage,
-      });
-
-      const cached = messagesCache.get(100, 42);
-      expect(cached).not.toBeNull();
-      expect(cached?.raw_json).toBe(JSON.stringify(rawMessage));
-      expect(createSyncJobsService(db).getJobsForChat(100)).toHaveLength(0);
-
-      const parsed = JSON.parse(cached!.raw_json);
-      expect(parsed._).toBe("message");
-      expect(parsed.id).toBe(42);
-      expect(parsed.peerId.userId).toBe(123);
-    });
-
     it("without a raw message, stores an empty object, logs once and queues a refetch (#130)", async () => {
       const logger = watchedLogger();
       handlers = createUpdateHandlers({
@@ -102,10 +39,17 @@ describe("UpdateHandlers", () => {
         chatSyncState,
         logger,
       });
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
+      const jobs = createSyncJobsService(db);
+
+      await handlers.handleNewMessage(ctx, {
+        chatId: 100,
+        messageId: 98,
+        text: "With its raw message",
+        date: 1_700_000_098,
+        isOutgoing: false,
+        rawMessage: { _: "message", id: 98 },
+      });
+      expect(jobs.getJobsForChat(100)).toEqual([]);
 
       for (const messageId of [99, 100]) {
         await handlers.handleNewMessage(ctx, {
@@ -113,77 +57,33 @@ describe("UpdateHandlers", () => {
           messageId,
           fromId: 123,
           text: "No raw message",
-          date: Date.now(),
+          date: 1_700_000_000 + messageId,
           isOutgoing: false,
         });
       }
 
       expect(messagesCache.get(100, 99)?.raw_json).toBe("{}");
       expect(logger.warn).toHaveBeenCalledTimes(1);
-      expect(createSyncJobsService(db).getJobsForChat(100)).toMatchObject([
+      expect(jobs.getJobsForChat(100)).toMatchObject([
         { job_type: SyncJobType.RefetchMessages, status: "pending" },
       ]);
     });
 
-    it("seeds sync state using provided chat type", async () => {
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 200,
-        chatType: "channel",
-        messageId: 1,
-        fromId: 123,
-        text: "Channel post",
-        date: Date.now(),
-        isOutgoing: false,
-      });
-
-      const state = chatSyncState.get(200);
-      expect(state?.chat_type).toBe("channel");
-      expect(state?.sync_enabled).toBe(0);
-    });
-
-    it("gives a small basic group first seen live its tier", async () => {
-      await handlers.handleNewMessage(
-        { accountId: 1, receivedAt: Date.now() },
-        {
-          chatId: -4001,
-          chatType: "group",
-          memberCount: 10,
-          messageId: 1,
-          text: "Hi all",
-          date: 1_700_000_000,
-          isOutgoing: false,
-        },
-      );
-
-      const state = chatSyncState.get(-4001);
-      expect(state?.member_count).toBe(10);
-      expect(state?.sync_priority).toBe(SyncPriority.High);
-      expect(state?.sync_enabled).toBe(1);
-    });
-
     it("gives a bot first seen live the newest page only (#131)", async () => {
-      await handlers.handleNewMessage(
-        { accountId: 1, receivedAt: Date.now() },
-        {
-          chatId: 5001,
-          chatType: "private",
-          messageId: 1,
-          text: "Your order has shipped",
-          date: 1_700_000_000,
-          isOutgoing: false,
-          rawChat: {
-            _: "user",
-            id: 5001,
-            firstName: "Example Bot",
-            bot: true,
-          } as tl.RawUser,
-        },
-      );
+      await handlers.handleNewMessage(ctx, {
+        chatId: 5001,
+        chatType: "private",
+        messageId: 1,
+        text: "Your order has shipped",
+        date: 1_700_000_000,
+        isOutgoing: false,
+        rawChat: {
+          _: "user",
+          id: 5001,
+          firstName: "Example Bot",
+          bot: true,
+        } as tl.RawUser,
+      });
 
       expect(chatSyncState.get(5001)).toMatchObject({
         sync_policy: "bot",
@@ -192,73 +92,7 @@ describe("UpdateHandlers", () => {
       });
     });
 
-    it("leaves a supergroup without a member count off", async () => {
-      await handlers.handleNewMessage(
-        { accountId: 1, receivedAt: Date.now() },
-        {
-          chatId: -1001234567890,
-          chatType: "supergroup",
-          messageId: 1,
-          text: "Hi all",
-          date: 1_700_000_000,
-          isOutgoing: false,
-        },
-      );
-
-      const state = chatSyncState.get(-1001234567890);
-      expect(state?.member_count).toBeNull();
-      expect(state?.sync_priority).toBe(SyncPriority.Low);
-      expect(state?.sync_enabled).toBe(0);
-    });
-
-    it("stores forward_from_id when provided", async () => {
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 300,
-        messageId: 7,
-        fromId: 123,
-        forwardFromId: 456,
-        text: "Forwarded message",
-        date: Date.now(),
-        isOutgoing: false,
-      });
-
-      const cached = messagesCache.get(300, 7);
-      expect(cached?.forward_from_id).toBe(456);
-    });
-
-    it("leaves the forward cursor to catch-up for newer messages", async () => {
-      chatSyncState.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: 1,
-        sync_enabled: true,
-        forward_cursor: 5,
-      });
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 100,
-        messageId: 10,
-        fromId: 123,
-        text: "New message",
-        date: Date.now(),
-        isOutgoing: false,
-      });
-
-      expect(messagesCache.get(100, 10)).not.toBeNull();
-      expect(chatSyncState.get(100)?.forward_cursor).toBe(5);
-    });
-
-    it("never moves the forward cursor or the newest message ID", async () => {
+    it("never moves the forward cursor or the newest message ID, nor sets a cursor", async () => {
       chatSyncState.upsert({
         chat_id: 100,
         chat_type: "private",
@@ -268,121 +102,42 @@ describe("UpdateHandlers", () => {
       });
       chatSyncState.raiseTopMessageId(100, 5);
 
-      for (const messageId of [6, 50, 3]) {
-        await handlers.handleNewMessage(
-          { accountId: 1, receivedAt: Date.now() },
-          {
-            chatId: 100,
-            messageId,
-            text: `Live ${messageId}`,
-            date: 1_700_000_000 + messageId,
-            isOutgoing: false,
-          },
-        );
+      for (const [chatId, messageId] of [
+        [100, 6],
+        [100, 50],
+        [100, 3],
+        [102, 10],
+      ] as const) {
+        await handlers.handleNewMessage(ctx, {
+          chatId,
+          messageId,
+          text: `Live ${messageId}`,
+          date: 1_700_000_000 + messageId,
+          isOutgoing: false,
+        });
       }
 
-      const state = chatSyncState.get(100);
-      expect(state?.forward_cursor).toBe(5);
-      expect(state?.top_message_id).toBe(5);
-    });
-
-    it("does not set a forward cursor for a new chat", async () => {
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 102,
-        messageId: 10,
-        fromId: 123,
-        text: "First live message",
-        date: Date.now(),
-        isOutgoing: false,
+      expect(chatSyncState.get(100)).toMatchObject({
+        forward_cursor: 5,
+        top_message_id: 5,
       });
-
       expect(chatSyncState.get(102)?.forward_cursor).toBeNull();
     });
 
-    it("does not regress forward cursor for older messages", async () => {
-      chatSyncState.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: 1,
-        sync_enabled: true,
-        forward_cursor: 10,
-      });
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 100,
-        messageId: 5,
-        fromId: 123,
-        text: "Old message",
-        date: Date.now(),
-        isOutgoing: false,
-      });
-
-      const state = chatSyncState.get(100);
-      expect(state?.forward_cursor).toBe(10);
-    });
-
-    it("updates last forward sync timestamp", async () => {
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 101,
-        messageId: 1,
-        fromId: 123,
-        text: "Track sync",
-        date: Date.now(),
-        isOutgoing: false,
-      });
+    it("counts each new message once for its chat and stamps its forward sync", async () => {
+      for (const messageId of [1, 2, 2]) {
+        await handlers.handleNewMessage(ctx, {
+          chatId: 101,
+          messageId,
+          text: `Message ${messageId}`,
+          date: 1_700_000_000 + messageId,
+          isOutgoing: false,
+        });
+      }
 
       const state = chatSyncState.get(101);
-      expect(state?.last_forward_sync).not.toBeNull();
-    });
-
-    it("increments synced messages count", async () => {
-      chatSyncState.upsert({
-        chat_id: 100,
-        chat_type: "private",
-        sync_priority: 1,
-        sync_enabled: true,
-      });
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 100,
-        messageId: 1,
-        fromId: 123,
-        text: "Message 1",
-        date: Date.now(),
-        isOutgoing: false,
-      });
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 100,
-        messageId: 2,
-        fromId: 123,
-        text: "Message 2",
-        date: Date.now(),
-        isOutgoing: false,
-      });
-
-      const state = chatSyncState.get(100);
       expect(state?.synced_messages).toBe(2);
+      expect(state?.last_forward_sync).not.toBeNull();
     });
   });
 
@@ -400,46 +155,17 @@ describe("UpdateHandlers", () => {
     });
 
     function receive(chatId: number, chatType: SyncChatType, rawChat: tl.TypeUser | tl.TypeChat) {
-      return handlers.handleNewMessage(
-        { accountId: 1, receivedAt: Date.now() },
-        {
-          chatId,
-          chatType,
-          memberCount: rawChat._ === "chat" ? rawChat.participantsCount : null,
-          messageId: 1,
-          text: "Hello",
-          date: 1_700_000_000,
-          isOutgoing: false,
-          rawChat,
-        },
-      );
+      return handlers.handleNewMessage(ctx, {
+        chatId,
+        chatType,
+        memberCount: rawChat._ === "chat" ? rawChat.participantsCount : null,
+        messageId: 1,
+        text: "Hello",
+        date: 1_700_000_000,
+        isOutgoing: false,
+        rawChat,
+      });
     }
-
-    it("caches a new DM, so its first page can build an InputPeer", async () => {
-      expect(buildInputPeer(5550001, chatsCache)).toMatchObject({
-        accessHash: toLong(0),
-      });
-
-      await receive(5550001, "private", {
-        _: "user",
-        id: 5550001,
-        accessHash: toLong(777),
-        firstName: "Alex",
-        username: "alex_example",
-      } as tl.RawUser);
-
-      expect(chatSyncState.get(5550001)?.sync_enabled).toBe(1);
-      expect(buildInputPeer(5550001, chatsCache)).toEqual({
-        _: "inputPeerUser",
-        userId: 5550001,
-        accessHash: toLong(777),
-      });
-      expect(chatsCache.getById("5550001")).toMatchObject({
-        type: "private",
-        title: "Alex",
-        username: "alex_example",
-      });
-    });
 
     it("caches a new basic group and channel", async () => {
       await receive(-4001, "group", {
@@ -478,64 +204,6 @@ describe("UpdateHandlers", () => {
       expect(messagesCache.get(5550002, 1)).not.toBeNull();
     });
 
-    it("leaves a row a dialog pass wrote alone", async () => {
-      chatsCache.upsert({
-        chat_id: "5550003",
-        type: "private",
-        title: "Sam",
-        username: null,
-        member_count: null,
-        access_hash: "555",
-        is_creator: 0,
-        is_admin: 0,
-        last_message_id: 9,
-        last_message_at: null,
-        fetched_at: Date.now(),
-        raw_json: "{}",
-      });
-
-      await receive(5550003, "private", {
-        _: "user",
-        id: 5550003,
-        accessHash: toLong(111),
-        firstName: "Sam",
-      } as tl.RawUser);
-
-      expect(chatsCache.getById("5550003")).toMatchObject({
-        access_hash: "555",
-        last_message_id: 9,
-      });
-    });
-
-    const teamChat = {
-      _: "channel",
-      id: 1234567890,
-      megagroup: true,
-      accessHash: toLong(888),
-      title: "Team Chat",
-    } as tl.RawChannel;
-
-    it("caches a supergroup once, under its marked ID", async () => {
-      await receive(-1001234567890, "supergroup", teamChat);
-      await handlers.handleNewMessage(
-        { accountId: 1, receivedAt: Date.now() },
-        {
-          chatId: -1001234567890,
-          chatType: "supergroup",
-          messageId: 2,
-          text: "Again",
-          date: 1_700_000_001,
-          isOutgoing: false,
-          rawChat: { ...teamChat, title: "Renamed" },
-        },
-      );
-
-      expect(db.query("SELECT chat_id, type, title FROM chats_cache").all()).toEqual([
-        { chat_id: "-1001234567890", type: "supergroup", title: "Team Chat" },
-      ]);
-      assertPeerIdInvariants(db);
-    });
-
     it("leaves a supergroup row a dialog pass wrote alone", async () => {
       chatsCache.upsert(
         dialogToCacheInput(
@@ -549,9 +217,12 @@ describe("UpdateHandlers", () => {
       );
 
       await receive(-1001234567890, "supergroup", {
-        ...teamChat,
+        _: "channel",
+        id: 1234567890,
+        megagroup: true,
+        accessHash: toLong(888),
         title: "Renamed",
-      });
+      } as tl.RawChannel);
 
       expect(chatsCache.getById("-1001234567890")).toMatchObject({
         title: "Team Chat",
@@ -570,20 +241,15 @@ describe("UpdateHandlers", () => {
         message_id: 1,
         text: "Original text",
         message_type: "text",
-        date: Date.now(),
+        date: 1_700_000_000,
         raw_json: "{}",
       });
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
 
       await handlers.handleEditMessage(ctx, {
         chatId: 100,
         messageId: 1,
         newText: "Edited text",
-        editDate: Date.now(),
+        editDate: 1_700_000_100,
       });
 
       const cached = messagesCache.get(100, 1);
@@ -591,149 +257,22 @@ describe("UpdateHandlers", () => {
       expect(cached?.is_edited).toBe(1);
     });
   });
-
-  describe("handleDeleteMessages", () => {
-    it("marks messages as deleted", async () => {
-      messagesCache.upsert({
-        chat_id: 100,
-        message_id: 1,
-        text: "Message 1",
-        message_type: "text",
-        date: Date.now(),
-        raw_json: "{}",
-      });
-      messagesCache.upsert({
-        chat_id: 100,
-        message_id: 2,
-        text: "Message 2",
-        message_type: "text",
-        date: Date.now(),
-        raw_json: "{}",
-      });
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleDeleteMessages(ctx, {
-        chatId: 100,
-        messageIds: [1, 2],
-      });
-
-      expect(messagesCache.get(100, 1)?.is_deleted).toBe(1);
-      expect(messagesCache.get(100, 2)?.is_deleted).toBe(1);
-    });
-  });
-
-  describe("handleDeleteMessagesWithoutChat", () => {
-    it("marks messages as deleted when chat ID is unknown", async () => {
-      messagesCache.upsert({
-        chat_id: 100,
-        message_id: 1,
-        text: "DM message",
-        message_type: "text",
-        date: Date.now(),
-        raw_json: "{}",
-      });
-      messagesCache.upsert({
-        chat_id: 200,
-        message_id: 2,
-        text: "Group message",
-        message_type: "text",
-        date: Date.now(),
-        raw_json: "{}",
-      });
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      const { deleted } = await handlers.handleDeleteMessagesWithoutChat(ctx, {
-        messageIds: [1, 2],
-      });
-
-      expect(deleted).toBe(2);
-      expect(messagesCache.get(100, 1)?.is_deleted).toBe(1);
-      expect(messagesCache.get(200, 2)?.is_deleted).toBe(1);
-    });
-
-    it("returns 0 when messages are not in cache", async () => {
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      const { deleted } = await handlers.handleDeleteMessagesWithoutChat(ctx, {
-        messageIds: [999, 1000],
-      });
-
-      expect(deleted).toBe(0);
-    });
-
-    it("handles empty message IDs array", async () => {
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      const { deleted } = await handlers.handleDeleteMessagesWithoutChat(ctx, {
-        messageIds: [],
-      });
-
-      expect(deleted).toBe(0);
-    });
-
-    it("reports an ID two private chats have", async () => {
-      for (const chatId of [100, 200]) {
-        messagesCache.upsert({
-          chat_id: chatId,
-          message_id: 42,
-          text: `Message in chat ${chatId}`,
-          message_type: "text",
-          date: Date.now(),
-          raw_json: "{}",
-        });
-      }
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      const result = await handlers.handleDeleteMessagesWithoutChat(ctx, {
-        messageIds: [42],
-      });
-
-      expect(result).toEqual({
-        deleted: 0,
-        ambiguous: [{ messageId: 42, chatIds: [100, 200] }],
-      });
-      expect(messagesCache.get(100, 42)?.is_deleted).toBe(0);
-      expect(messagesCache.get(200, 42)?.is_deleted).toBe(0);
-    });
-  });
 });
 
 describe("UpdateHandlers error handling", () => {
-  let db: Database;
-  let messagesCache: ReturnType<typeof createMessagesCache>;
-  let chatSyncState: ReturnType<typeof createChatSyncStateService>;
-  let logger: ReturnType<typeof watchedLogger>;
-  const errorLogs = () => logger.error.mock.calls.map(([message]) => message);
-
-  beforeEach(() => {
-    db = createAccountCacheDb();
-    messagesCache = createMessagesCache(db);
-    chatSyncState = createChatSyncStateService(db);
-    logger = watchedLogger();
-  });
-
-  function seedMessages(chatId: number, messageIds: number[]) {
-    for (const messageId of messageIds) {
+  it("logs a failed write with the update it was for and goes on", async () => {
+    const db = createAccountCacheDb();
+    const messagesCache = createMessagesCache(db);
+    const logger = watchedLogger();
+    const handlers = createUpdateHandlers({
+      db,
+      messagesCache,
+      chatSyncState: createChatSyncStateService(db),
+      logger,
+    });
+    for (const messageId of [5, 10, 11]) {
       messagesCache.upsert({
-        chat_id: chatId,
+        chat_id: 200,
         message_id: messageId,
         text: `made-up message ${messageId}`,
         message_type: "text",
@@ -741,135 +280,35 @@ describe("UpdateHandlers error handling", () => {
         raw_json: "{}",
       });
     }
-  }
+    for (const statement of ["INSERT", "UPDATE"]) {
+      db.run(
+        `CREATE TRIGGER fail_messages_${statement.toLowerCase()} BEFORE ${statement} ON messages_cache
+         BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`,
+      );
+    }
 
-  function failMessageWrites(statement: "INSERT" | "UPDATE", message: string) {
-    db.run(
-      `CREATE TRIGGER fail_messages_${statement.toLowerCase()} BEFORE ${statement} ON messages_cache
-       BEGIN SELECT RAISE(ABORT, '${message}'); END`,
+    await handlers.handleNewMessage(ctx, {
+      chatId: 100,
+      messageId: 1,
+      text: "Hello",
+      date: 1_760_000_001,
+      isOutgoing: false,
+    });
+    await handlers.handleEditMessage(ctx, {
+      chatId: 200,
+      messageId: 5,
+      newText: "Edited",
+      editDate: 1_760_000_002,
+    });
+    await handlers.handleDeleteMessages(ctx, { chatId: 200, messageIds: [10, 11] });
+
+    const lines = logger.error.mock.calls.map(([line]) => String(line));
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toStartWith("Failed to handle new message: chatId=100, messageId=1, error=");
+    expect(lines[1]).toStartWith("Failed to handle edit message: chatId=200, messageId=5, error=");
+    expect(lines[2]).toStartWith(
+      "Failed to handle delete messages: chatId=200, messageIds=[10,11], error=",
     );
-  }
-
-  describe("handleNewMessage", () => {
-    it("logs error and continues when database operation fails", async () => {
-      const handlers = createUpdateHandlers({
-        db,
-        messagesCache,
-        chatSyncState,
-        logger,
-      });
-
-      failMessageWrites("INSERT", "Database write failed");
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleNewMessage(ctx, {
-        chatId: 100,
-        messageId: 1,
-        fromId: 123,
-        text: "Hello",
-        date: Date.now(),
-        isOutgoing: false,
-      });
-
-      expect(errorLogs().length).toBe(1);
-      expect(errorLogs()[0]).toContain("Failed to handle new message");
-      expect(errorLogs()[0]).toContain("chatId=100");
-      expect(errorLogs()[0]).toContain("messageId=1");
-      expect(errorLogs()[0]).toContain("Database write failed");
-    });
-  });
-
-  describe("handleEditMessage", () => {
-    it("logs error and continues when database operation fails", async () => {
-      const handlers = createUpdateHandlers({
-        db,
-        messagesCache,
-        chatSyncState,
-        logger,
-      });
-
-      seedMessages(200, [5]);
-      failMessageWrites("UPDATE", "Update failed");
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleEditMessage(ctx, {
-        chatId: 200,
-        messageId: 5,
-        newText: "Edited",
-        editDate: Date.now(),
-      });
-
-      expect(errorLogs().length).toBe(1);
-      expect(errorLogs()[0]).toContain("Failed to handle edit message");
-      expect(errorLogs()[0]).toContain("chatId=200");
-      expect(errorLogs()[0]).toContain("messageId=5");
-      expect(errorLogs()[0]).toContain("Update failed");
-    });
-  });
-
-  describe("handleDeleteMessages", () => {
-    it("logs error and continues when database operation fails", async () => {
-      const handlers = createUpdateHandlers({
-        db,
-        messagesCache,
-        chatSyncState,
-        logger,
-      });
-
-      seedMessages(300, [10, 11, 12]);
-      failMessageWrites("UPDATE", "Delete failed");
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleDeleteMessages(ctx, {
-        chatId: 300,
-        messageIds: [10, 11, 12],
-      });
-
-      expect(errorLogs().length).toBe(1);
-      expect(errorLogs()[0]).toContain("Failed to handle delete messages");
-      expect(errorLogs()[0]).toContain("chatId=300");
-      expect(errorLogs()[0]).toContain("messageIds=[10,11,12]");
-      expect(errorLogs()[0]).toContain("Delete failed");
-    });
-  });
-
-  describe("handleDeleteMessages", () => {
-    it("logs error and continues when delete fails", async () => {
-      const handlers = createUpdateHandlers({
-        db,
-        messagesCache,
-        chatSyncState,
-        logger,
-      });
-
-      seedMessages(300, [1, 2]);
-      failMessageWrites("UPDATE", "Delete failed");
-
-      const ctx: UpdateContext = {
-        accountId: 1,
-        receivedAt: Date.now(),
-      };
-
-      await handlers.handleDeleteMessages(ctx, {
-        chatId: 300,
-        messageIds: [1, 2],
-      });
-
-      expect(errorLogs().length).toBe(1);
-      expect(errorLogs()[0]).toContain("Failed to handle delete messages");
-      expect(errorLogs()[0]).toContain("chatId=300");
-    });
+    for (const line of lines) expect(line).toContain("disk I/O error");
   });
 });

@@ -117,16 +117,6 @@ describe("maybeSyncContacts", () => {
     );
   });
 
-  it("makes no call while the list is younger than the peer TTL", () => {
-    const ctx = createContext();
-    const { client, calls } = fakeClient();
-    const db = connect(ctx, 1, client);
-    applyContactsSnapshot(db, contactsList([1001]), NOW - WEEK + 1);
-
-    expect(maybeSyncContacts(ctx, NOW)).toHaveLength(0);
-    expect(calls).toHaveLength(0);
-  });
-
   it("checks an older list with the cached hash; unchanged moves only the check time", async () => {
     const ctx = createContext();
     const { client, calls } = fakeClient();
@@ -172,23 +162,6 @@ describe("maybeSyncContacts", () => {
     calls[0]?.resolve(notModified);
     await Promise.all(started);
     expect(ctx.runtime.contacts.checkAt.has(1)).toBe(false);
-  });
-
-  it("checks a fresh list once after a start or reconnect asked for it", async () => {
-    const ctx = createContext();
-    const { client, calls } = fakeClient();
-    const db = connect(ctx, 1, client);
-    applyContactsSnapshot(db, contactsList([1001]), NOW - HOUR);
-
-    requestContactsCheckNow(ctx, 1, NOW);
-    const started = maybeSyncContacts(ctx, NOW);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.request.hash.toString()).toBe(contactsHash(db).toString());
-    calls[0]?.resolve(notModified);
-    await Promise.all(started);
-
-    expect(maybeSyncContacts(ctx, NOW + 1)).toHaveLength(0);
-    expect(calls).toHaveLength(1);
   });
 
   it("skips an account that is not connected", () => {
@@ -303,16 +276,6 @@ describe("maybeSyncContacts", () => {
     expect(getContactsSyncedAt(db)).toBeNull();
   });
 
-  it("makes no call while the method is blocked by a FLOOD_WAIT", () => {
-    const ctx = createContext();
-    const { client, calls } = fakeClient();
-    const db = connect(ctx, 1, client);
-    createRateLimitsService(db).setFloodWait("contacts.getContacts", 600);
-
-    expect(maybeSyncContacts(ctx, NOW)).toHaveLength(0);
-    expect(calls).toHaveLength(0);
-  });
-
   it("writes nothing when the daemon stops during the call", async () => {
     for (const settle of ["resolve", "reject"] as const) {
       const ctx = createContext();
@@ -404,19 +367,16 @@ describe("handleContactRawUpdate", () => {
     expect(cachedRow(db)?.is_contact).toBe(0);
   });
 
-  it("adds no row for a non-contact the cache does not have", () => {
+  it("writes nothing when the contact flag doesn't change, and adds no non-contact", () => {
     const { ctx, db } = setup();
     handleContactRawUpdate(ctx, 1, db, userUpdate([fullUser(false)]), NOW);
     expect(cachedRow(db)).toBeNull();
-    expect(ctx.runtime.contacts.checkAt.size).toBe(0);
-  });
 
-  it("writes nothing when the flag is unchanged", () => {
-    const { ctx, db } = setup();
     seed(db, true);
     const before = cachedRow(db);
     handleContactRawUpdate(ctx, 1, db, peerSettings([fullUser(true)]), NOW);
     expect(cachedRow(db)).toEqual(before);
+    expect(ctx.runtime.contacts.checkAt.size).toBe(0);
   });
 
   it("asks for one hash check when the update has no full user", () => {

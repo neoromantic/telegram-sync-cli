@@ -30,13 +30,17 @@ describe("daemon commands", () => {
   });
 
   describe("tg daemon status", () => {
-    it("shows stopped when daemon is not running", async () => {
-      const result = await runCliSuccess(["daemon", "status"], { env });
-      const json = result.json as JsonResult;
+    it("shows stopped without a PID file or with a dead process's", async () => {
+      for (const pid of [null, "999999999"]) {
+        if (pid !== null) writeFileSync(join(testDir, "daemon.pid"), pid);
 
-      expect(json?.success).toBe(true);
-      expect(json?.data?.status).toBe("stopped");
-      expect(json?.data?.pid).toBeNull();
+        const result = await runCliSuccess(["daemon", "status"], { env });
+
+        expect(result.json).toMatchObject({
+          success: true,
+          data: { status: "stopped", pid: null },
+        });
+      }
     });
 
     it("shows running when PID file exists with live process", async () => {
@@ -50,17 +54,6 @@ describe("daemon commands", () => {
       expect(json?.data?.status).toBe("running");
       expect(json?.data?.pid).toBe(process.pid);
     });
-
-    it("shows stopped when PID file has dead process", async () => {
-      const pidPath = join(testDir, "daemon.pid");
-      writeFileSync(pidPath, "999999999");
-
-      const result = await runCliSuccess(["daemon", "status"], { env });
-      const json = result.json as JsonResult;
-
-      expect(json?.success).toBe(true);
-      expect(json?.data?.status).toBe("stopped");
-    });
   });
 
   describe("tg daemon stop", () => {
@@ -71,17 +64,6 @@ describe("daemon commands", () => {
       expect(result.exitCode).toBe(1);
       expect(json?.success).toBe(false);
       expect(json?.error?.code).toBe("DAEMON_NOT_RUNNING");
-    });
-  });
-
-  describe("tg daemon help", () => {
-    it("shows daemon help", async () => {
-      const result = await runCliSuccess(["daemon", "--help"], { env });
-
-      expect(result.stdout).toContain("daemon");
-      expect(result.stdout).toContain("start");
-      expect(result.stdout).toContain("stop");
-      expect(result.stdout).toContain("status");
     });
   });
 });

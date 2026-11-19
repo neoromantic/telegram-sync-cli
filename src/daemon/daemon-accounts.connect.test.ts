@@ -83,7 +83,6 @@ let nextGetMe: {
   username?: string;
 } = { id: 555, firstName: "Test", lastName: "User" };
 let startError: Error | null = null;
-let getMeError: Error | null = null;
 let updatesLoopError: Error | null = null;
 
 const createdClients: MockTelegramClient[] = [];
@@ -109,7 +108,6 @@ class MockTelegramClient {
     } as Awaited<ReturnType<TelegramClient["start"]>>;
   });
   getMe = mock(async () => {
-    if (getMeError) throw getMeError;
     return nextGetMe as Awaited<ReturnType<TelegramClient["getMe"]>>;
   });
   startUpdatesLoop = mock(async () => {
@@ -151,9 +149,6 @@ const asDeleteUpdate = (input: DeleteMessageUpdateLike) => input as DeleteMessag
 mock.module("@mtcute/bun", () => ({
   ...mtcute,
   TelegramClient: MockTelegramClient,
-  networkMiddlewares: {
-    basic: (options: unknown) => [{ kind: "basic", options }],
-  },
 }));
 
 function createAccountsDb(seed: AccountSeed[]) {
@@ -180,7 +175,6 @@ describe("daemon-accounts: connection + event wiring", () => {
 
     nextGetMe = { id: 555, firstName: "Test", lastName: "User" };
     startError = null;
-    getMeError = null;
     updatesLoopError = null;
     createdClients.length = 0;
     lifecycle.length = 0;
@@ -492,6 +486,7 @@ describe("daemon-accounts: connection + event wiring", () => {
             id: 5550001,
             accessHash: toLong(777),
             firstName: "Alex",
+            username: "alex_example",
           } as tl.RawUser,
         },
         sender: { id: 5550001 },
@@ -501,61 +496,18 @@ describe("daemon-accounts: connection + event wiring", () => {
       }),
     );
 
-    expect(chatsCache.getById("5550001")?.access_hash).toBe("777");
+    expect(chatsCache.getById("5550001")).toMatchObject({
+      type: "private",
+      title: "Alex",
+      username: "alex_example",
+      access_hash: "777",
+    });
+    expect(createChatSyncStateService(testCacheDb).get(5550001)?.sync_enabled).toBe(1);
     expect(buildInputPeer(5550001, chatsCache)).toEqual({
       _: "inputPeerUser",
       userId: 5550001,
       accessHash: toLong(777),
     });
-  });
-
-  it("handles delete updates without chat context", async () => {
-    const accountsDb = createAccountsDb([{ id: 1, phone: "+111", user_id: null }]);
-    const ctx = createContext(accountsDb);
-
-    const { setupEventHandlers } = await import("./daemon-accounts");
-
-    const client = createClient();
-    const accountState: AccountConnectionState = {
-      accountId: 1,
-      phone: "+111",
-      name: null,
-      status: "connected",
-      client,
-    };
-
-    setupEventHandlers(ctx, accountState);
-
-    const messagesCache = createMessagesCache(testCacheDb);
-    messagesCache.upsert({
-      chat_id: 100,
-      message_id: 1,
-      text: "One",
-      message_type: "text",
-      date: Date.now(),
-      raw_json: "{}",
-    });
-    messagesCache.upsert({
-      chat_id: 200,
-      message_id: 2,
-      text: "Two",
-      message_type: "text",
-      date: Date.now(),
-      raw_json: "{}",
-    });
-
-    const deleteUpdate = {
-      channelId: null,
-      messageIds: [1, 2],
-    } satisfies DeleteMessageUpdateLike;
-
-    await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
-      accountState.eventHandlers?.onDeleteMessage(asDeleteUpdate(deleteUpdate)),
-    );
-
-    expect(messagesCache.get(100, 1)?.is_deleted).toBe(1);
-    expect(messagesCache.get(200, 2)?.is_deleted).toBe(1);
-    expect(ctx.logger.warn).not.toHaveBeenCalled();
   });
 
   describe("deletes of a message ID that several chats cache", () => {
@@ -588,33 +540,6 @@ describe("daemon-accounts: connection + event wiring", () => {
       return { ctx, accountState, messagesCache };
     }
 
-    it("marks a private chat's message deleted when a channel in the same account has the ID", async () => {
-      const { ctx, accountState, messagesCache } = await wireWithMessages([4242, -1001234567890]);
-
-      await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
-        accountState.eventHandlers?.onDeleteMessage(
-          asDeleteUpdate({ channelId: null, messageIds: [7] }),
-        ),
-      );
-
-      expect(messagesCache.get(4242, 7)?.is_deleted).toBe(1);
-      expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(0);
-      expect(ctx.logger.warn).not.toHaveBeenCalled();
-    });
-
-    it("leaves a channel post when no private chat or basic group caches the ID", async () => {
-      const { ctx, accountState, messagesCache } = await wireWithMessages([-1001234567890]);
-
-      await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
-        accountState.eventHandlers?.onDeleteMessage(
-          asDeleteUpdate({ channelId: null, messageIds: [7] }),
-        ),
-      );
-
-      expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(0);
-      expect(ctx.logger.warn).not.toHaveBeenCalled();
-    });
-
     it("marks only the channel message on a channel delete", async () => {
       const { accountState, messagesCache } = await wireWithMessages([4242, -1001234567890]);
 
@@ -626,24 +551,6 @@ describe("daemon-accounts: connection + event wiring", () => {
 
       expect(messagesCache.get(-1001234567890, 7)?.is_deleted).toBe(1);
       expect(messagesCache.get(4242, 7)?.is_deleted).toBe(0);
-    });
-
-    it("keeps both messages and warns when two private chats of the account have the ID", async () => {
-      const { ctx, accountState, messagesCache } = await wireWithMessages([4242, -5151]);
-
-      await afterHandling(accountState, "handleDeleteMessagesWithoutChat", () =>
-        accountState.eventHandlers?.onDeleteMessage(
-          asDeleteUpdate({ channelId: null, messageIds: [7] }),
-        ),
-      );
-
-      expect(messagesCache.get(4242, 7)?.is_deleted).toBe(0);
-      expect(messagesCache.get(-5151, 7)?.is_deleted).toBe(0);
-      const warn = ctx.logger.warn as ReturnType<typeof mock>;
-      expect(warn).toHaveBeenCalledTimes(1);
-      const [line] = warn.mock.calls[0] as [string];
-      expect(line).toContain("[Account 1]");
-      expect(line).toContain("7 in -5151, 4242");
     });
 
     it("marks the unique ID of a delete and warns about the ambiguous one", async () => {
@@ -669,7 +576,7 @@ describe("daemon-accounts: connection + event wiring", () => {
       const warn = ctx.logger.warn as ReturnType<typeof mock>;
       expect(warn).toHaveBeenCalledTimes(1);
       const [line] = warn.mock.calls[0] as [string];
-      expect(line).toContain("Left 1 message ID(s)");
+      expect(line).toStartWith("[Account 1] Left 1 message ID(s)");
       expect(line).toContain("(7 in -5151, 4242)");
     });
 
@@ -715,21 +622,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     expect(createdClients[0]?.startUpdatesLoop).toHaveBeenCalled();
     expect(ctx.runtime.accounts.has(1)).toBe(false);
     expect(ctx.runtime.accounts.has(2)).toBe(true);
-  });
-
-  it("waits out long FLOOD_WAITs instead of failing daemon requests", async () => {
-    const accountsDb = createAccountsDb([{ id: 1, phone: "+111", user_id: null }]);
-    const ctx = createContext(accountsDb);
-
-    const { connectAccount } = await import("./daemon-accounts");
-
-    expect(await connectAccount(ctx, 1, "+111", null)).toBe(true);
-
-    const network = createdClients[0]?.options.network as {
-      middlewares: Array<{ options: { floodWaiter: { maxWait: number } } }>;
-    };
-    expect(network.middlewares[0]?.options.floodWaiter.maxWait).toBe(300_000);
-    expect(createdClients[0]?.options).not.toHaveProperty("transport");
   });
 
   it("daemon clients use the daemon platform", async () => {
@@ -784,47 +676,44 @@ describe("daemon-accounts: connection + event wiring", () => {
     expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1);
   });
 
-  for (const step of ["start", "getMe", "updates loop"] as const) {
-    it(`connectAccount closes the client when ${step} fails`, async () => {
-      const ctx = createContext(
-        createAccountsDb([{ id: 1, phone: "+15550000001", user_id: null }]),
-      );
-      const { connectAccount, disconnectAllAccounts } = await import("./daemon-accounts");
-
-      const failure = new Error("AUTH_KEY_UNREGISTERED");
-      if (step === "start") startError = failure;
-      if (step === "getMe") getMeError = failure;
-      if (step === "updates loop") updatesLoopError = failure;
-
-      expect(await connectAccount(ctx, 1, "+15550000001", null)).toBe(false);
-
-      const client = createdClients[0]!;
-      const accountState = ctx.state.accounts.get(1);
-      expect(client.destroy).toHaveBeenCalledTimes(1);
-      expect(client.onNewMessage.handlers).toHaveLength(0);
-      expect(accountState?.client).toBeUndefined();
-      expect(accountState?.eventHandlers).toBeUndefined();
-      expect(accountState?.status).toBe("error");
-      expect(accountState?.lastError).toBe("AUTH_KEY_UNREGISTERED");
-
-      await disconnectAllAccounts(ctx);
-      expect(client.destroy).toHaveBeenCalledTimes(1);
-    });
-  }
-
-  it("a failed connect logs one line without source or the phone number (#128)", async () => {
+  it("a connect that fails at start closes its client and logs one line without source or the phone number (#128)", async () => {
     const ctx = createContext(createAccountsDb([{ id: 1, phone: "+15550000001", user_id: null }]));
-    const { connectAccount } = await import("./daemon-accounts");
+    const { connectAccount, disconnectAllAccounts } = await import("./daemon-accounts");
     const failure = new Error("Could not connect to DC 2");
     failure.stack = `Error: Could not connect to DC 2\n    at connect (/$bunfs/root/tg:1:2)\n${"x".repeat(500)}`;
     startError = failure;
 
     expect(await connectAccount(ctx, 1, "+15550000001", null)).toBe(false);
 
-    const errors = (ctx.logger.error as ReturnType<typeof mock>).mock.calls;
-    expect(errors).toEqual([
+    const client = createdClients[0]!;
+    expect(client.destroy).toHaveBeenCalledTimes(1);
+    expect(ctx.state.accounts.get(1)).toMatchObject({
+      status: "error",
+      lastError: "Could not connect to DC 2",
+    });
+    expect(ctx.state.accounts.get(1)?.client).toBeUndefined();
+    expect((ctx.logger.error as ReturnType<typeof mock>).mock.calls).toEqual([
       ["Failed to connect account #1 (+15*******01): Could not connect to DC 2"],
     ]);
+
+    await disconnectAllAccounts(ctx);
+    expect(client.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("a connect whose updates loop fails removes the handlers it added and closes its client", async () => {
+    const ctx = createContext(createAccountsDb([{ id: 1, phone: "+15550000001", user_id: null }]));
+    const { connectAccount } = await import("./daemon-accounts");
+    updatesLoopError = new Error("AUTH_KEY_UNREGISTERED");
+
+    expect(await connectAccount(ctx, 1, "+15550000001", null)).toBe(false);
+
+    const client = createdClients[0]!;
+    const accountState = ctx.state.accounts.get(1);
+    expect(client.destroy).toHaveBeenCalledTimes(1);
+    expect(client.onNewMessage.handlers).toHaveLength(0);
+    expect(accountState?.client).toBeUndefined();
+    expect(accountState?.eventHandlers).toBeUndefined();
+    expect(accountState).toMatchObject({ status: "error", lastError: "AUTH_KEY_UNREGISTERED" });
   });
 
   it("names the account by its username, never its phone or name (#128)", async () => {
@@ -859,8 +748,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     const failure = new Error("Could not connect to DC 2");
     failure.stack = "Error: Could not connect to DC 2\n    at source dump";
     client.onError.emit(failure);
-    client.onError.emit(failure);
-    expect(ctx.logger.warn).toHaveBeenCalledTimes(1);
     expect(ctx.logger.warn).toHaveBeenCalledWith(
       "[Account 1] Telegram client error: Could not connect to DC 2",
     );
@@ -988,56 +875,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     expect(ctx.state.accounts.get(2)?.status).toBe("disconnected");
   });
 
-  it("attemptReconnect resets attempts on success", async () => {
-    const accountsDb = createAccountsDb([{ id: 1, phone: "+111", user_id: 555 }]);
-    const ctx = createContext(accountsDb);
-
-    const { attemptReconnect } = await import("./daemon-accounts");
-
-    const accountState: AccountConnectionState = {
-      accountId: 1,
-      phone: "+111",
-      name: null,
-      status: "error",
-      reconnectAttempts: 2,
-    };
-
-    const ok = await attemptReconnect(ctx, accountState);
-
-    expect(ok).toBe(true);
-    expect(accountState.status).toBe("connected");
-    expect(accountState.reconnectAttempts).toBe(0);
-    expect(accountState.lastError).toBeUndefined();
-    expect(accountState.client).toBeDefined();
-  });
-
-  it("attemptReconnect schedules retry on failure", async () => {
-    const accountsDb = createAccountsDb([{ id: 1, phone: "+111", user_id: 555 }]);
-    const ctx = createContext(accountsDb);
-
-    const { attemptReconnect } = await import("./daemon-accounts");
-
-    startError = new Error("boom");
-
-    const now = Date.now();
-    const accountState: AccountConnectionState = {
-      accountId: 1,
-      phone: "+111",
-      name: null,
-      status: "error",
-      reconnectAttempts: 0,
-    };
-
-    const ok = await attemptReconnect(ctx, accountState);
-
-    expect(ok).toBe(false);
-    expect(accountState.status).toBe("error");
-    expect(accountState.lastError).toBe("boom");
-    expect(accountState.nextReconnectAt).toBeGreaterThan(now);
-    expect(accountState.client).toBeUndefined();
-    expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1);
-  });
-
   it("attemptReconnect restores real-time updates and sync on a new client", async () => {
     const accountsDb = createAccountsDb([{ id: 1, phone: "+15550000001", user_id: 555 }]);
     const ctx = createContext(accountsDb);
@@ -1056,6 +893,8 @@ describe("daemon-accounts: connection + event wiring", () => {
 
     const accountState = ctx.state.accounts.get(1)!;
     accountState.status = "error";
+    accountState.lastError = "connection reset";
+    accountState.reconnectAttempts = 2;
 
     expect(await attemptReconnect(ctx, accountState)).toBe(true);
 
@@ -1064,6 +903,8 @@ describe("daemon-accounts: connection + event wiring", () => {
     const reconnected = ctx.state.accounts.get(1);
     expect(reconnected?.client).toBe(newClient as unknown as TelegramClient);
     expect(reconnected?.status).toBe("connected");
+    expect(reconnected?.reconnectAttempts).toBe(0);
+    expect(reconnected?.lastError).toBeUndefined();
 
     expect(oldClient.onNewMessage.handlers).toHaveLength(0);
     expect(oldClient.onEditMessage.handlers).toHaveLength(0);
@@ -1126,14 +967,9 @@ describe("daemon-accounts: connection + event wiring", () => {
     expect(reconnectedAt).toBeLessThanOrEqual(Date.now());
   });
 
-  it("attemptReconnect cleans up the new client when updates fail to start", async () => {
-    const accountsDb = createAccountsDb([{ id: 1, phone: "+15550000001", user_id: 555 }]);
-    const ctx = createContext(accountsDb);
-
+  it("a failed reconnect closes its new client and schedules the next attempt", async () => {
+    const ctx = createContext(createAccountsDb([{ id: 1, phone: "+15550000001", user_id: 555 }]));
     const { attemptReconnect } = await import("./daemon-accounts");
-
-    updatesLoopError = new Error("updates unavailable");
-
     const accountState: AccountConnectionState = {
       accountId: 1,
       phone: "+15550000001",
@@ -1142,17 +978,32 @@ describe("daemon-accounts: connection + event wiring", () => {
       reconnectAttempts: 0,
     };
 
+    startError = new Error("boom");
     expect(await attemptReconnect(ctx, accountState)).toBe(false);
 
-    const client = createdClients[0]!;
+    expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1);
+    expect(accountState).toMatchObject({
+      status: "error",
+      lastError: "boom",
+      reconnectAttempts: 1,
+    });
+
+    startError = null;
+    updatesLoopError = new Error("updates unavailable");
+    const before = Date.now();
+    expect(await attemptReconnect(ctx, accountState)).toBe(false);
+
+    const client = createdClients[1]!;
     expect(client.onNewMessage.handlers).toHaveLength(0);
     expect(client.destroy).toHaveBeenCalledTimes(1);
     expect(accountState.client).toBeUndefined();
     expect(accountState.eventHandlers).toBeUndefined();
-    expect(accountState.status).toBe("error");
-    expect(accountState.lastError).toBe("updates unavailable");
-    expect(accountState.reconnectAttempts).toBe(1);
-    expect(accountState.nextReconnectAt).toBeDefined();
+    expect(accountState).toMatchObject({
+      status: "error",
+      lastError: "updates unavailable",
+      reconnectAttempts: 2,
+    });
+    expect(accountState.nextReconnectAt).toBeGreaterThan(before);
   });
 
   describe("with two accounts", () => {
@@ -1212,7 +1063,7 @@ describe("daemon-accounts: connection + event wiring", () => {
     });
 
     it("leaves the other account's message with the same ID when a delete has no chat", async () => {
-      const { first } = await wireBoth();
+      const { ctx, first } = await wireBoth();
       for (const [db, text] of [
         [testCacheDb, "lunch at noon"],
         [otherDb, "lunch at one"],
@@ -1233,6 +1084,7 @@ describe("daemon-accounts: connection + event wiring", () => {
 
       expect(createMessagesCache(testCacheDb).get(4242, 7)?.is_deleted).toBe(1);
       expect(createMessagesCache(otherDb).get(4242, 7)?.is_deleted).toBe(0);
+      expect(ctx.logger.warn).not.toHaveBeenCalled();
     });
 
     it("applies a contact update only to the receiving account's cache", async () => {

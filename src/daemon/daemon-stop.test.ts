@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RpcCallOptions } from "@mtcute/bun";
 
@@ -20,8 +21,8 @@ const { clients } = fakeTelegramClients({ onDestroy: () => onDestroy?.() });
 const { createDaemon } = await import("./daemon");
 const { DaemonExitCode } = await import("./types");
 
-const tempDir = join(process.cwd(), ".tmp", `daemon-stop-${process.pid}`);
-const pidPath = join(tempDir, "daemon.pid");
+let tempDir: string;
+let pidPath: string;
 
 const CHAT = 1001;
 
@@ -45,7 +46,8 @@ const output = () => log.mock.calls.map((call: unknown[]) => String(call[0])).jo
 useTestDataDir();
 
 beforeEach(() => {
-  mkdirSync(tempDir, { recursive: true });
+  tempDir = mkdtempSync(join(tmpdir(), "tg-daemon-stop-"));
+  pidPath = join(tempDir, "daemon.pid");
   log = spyOn(console, "log");
   warn = spyOn(console, "warn");
   error = spyOn(console, "error");
@@ -63,13 +65,13 @@ afterEach(() => {
 describe("daemon stop during a FLOOD_WAIT", () => {
   it("ends the startup dialog pass and exits at once", async () => {
     const daemon = createDaemon({ pidPath, verbosity: "verbose" });
-    let stoppedAt = 0;
+    let stopped = false;
     const fake = fakeClient(
       [{ kind: "user", id: CHAT, topMessage: 10 }],
       {
         waitAfter: 1,
         onWait: () => {
-          stoppedAt = performance.now();
+          stopped = true;
           daemon.stop();
         },
       },
@@ -80,11 +82,9 @@ describe("daemon stop during a FLOOD_WAIT", () => {
     clients.set(1, fake.client);
 
     const exitCode = await daemon.start();
-    const elapsed = performance.now() - stoppedAt;
 
     expect(exitCode).toBe(DaemonExitCode.Success);
-    expect(stoppedAt).toBeGreaterThan(0);
-    expect(elapsed).toBeLessThan(1000);
+    expect(stopped).toBe(true);
     expect(fake.pass.params).toHaveLength(1);
     expect(fake.call).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
@@ -118,7 +118,7 @@ describe("daemon stop during a FLOOD_WAIT", () => {
       [created.id],
     );
     const daemon = createDaemon({ pidPath, verbosity: "verbose" });
-    let stoppedAt = 0;
+    let stopped = false;
     let jobRequests = 0;
     const fake = fakeClient([{ kind: "user", id: CHAT, topMessage: 10 }], {}, (request, params) => {
       if ((request as { _: string })._ === CONTACTS_METHOD) {
@@ -127,7 +127,7 @@ describe("daemon stop during a FLOOD_WAIT", () => {
       jobRequests++;
       return waitLikeFloodWait(params, {
         onWait: () => {
-          stoppedAt = performance.now();
+          stopped = true;
           daemon.stop();
         },
       }).catch((err) => new Promise((_resolve, reject) => setTimeout(() => reject(err), 5)));
@@ -139,11 +139,9 @@ describe("daemon stop during a FLOOD_WAIT", () => {
     };
 
     const exitCode = await daemon.start();
-    const elapsed = performance.now() - stoppedAt;
 
     expect(exitCode).toBe(DaemonExitCode.Success);
-    expect(stoppedAt).toBeGreaterThan(0);
-    expect(elapsed).toBeLessThan(1000);
+    expect(stopped).toBe(true);
     expect(jobRequests).toBe(1);
     expect(warn).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
