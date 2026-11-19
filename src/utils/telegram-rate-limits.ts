@@ -5,7 +5,7 @@ import { getErrorMessage } from "../daemon/daemon-utils";
 import { getAccountCacheDb } from "../db";
 import { createRateLimitsService, type RateLimitsService } from "../db/rate-limits";
 import { ErrorCodes } from "../types";
-import { error } from "./output";
+import { error, verbose } from "./output";
 
 export class RateLimitError extends Error {
   readonly method: string;
@@ -96,6 +96,17 @@ function apiErrorCode(error: unknown) {
   return extractFloodWaitSeconds(error) ? tl.RpcError.FLOOD : null;
 }
 
+function logActivity(
+  rateLimits: RateLimitsService,
+  entry: Parameters<RateLimitsService["logActivity"]>[0],
+) {
+  try {
+    rateLimits.logActivity(entry);
+  } catch (err) {
+    verbose(`Could not log ${entry.method} to api_activity: ${getErrorMessage(err)}`);
+  }
+}
+
 /**
  * Make one API call and account for it: count it in its rate window, and
  * log it to api_activity when it ends, with when it started (ms), whether
@@ -112,23 +123,16 @@ export async function trackApiCall<T>(
   const start = rateLimits.now();
   rateLimits.recordCall(method);
 
+  let result: T;
   try {
-    const result = await call();
-    rateLimits.logActivity({
-      timestamp: start,
-      method,
-      success: 1,
-      response_ms: rateLimits.now() - start,
-      context,
-    });
-    return result;
+    result = await call();
   } catch (err) {
     const waitSeconds = extractFloodWaitSeconds(err);
     if (waitSeconds) {
       rateLimits.setFloodWait(method, waitSeconds);
     }
 
-    rateLimits.logActivity({
+    logActivity(rateLimits, {
       timestamp: start,
       method,
       success: 0,
@@ -138,6 +142,14 @@ export async function trackApiCall<T>(
     });
     throw err;
   }
+  logActivity(rateLimits, {
+    timestamp: start,
+    method,
+    success: 1,
+    response_ms: rateLimits.now() - start,
+    context,
+  });
+  return result;
 }
 
 async function callWithRateLimits<T>({

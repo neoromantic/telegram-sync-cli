@@ -73,6 +73,14 @@ exists, and rename `accounts/<old-id>/` to `accounts/<new-id>/`. tg takes it on 
 because the file is stamped for the same Telegram user and its old account ID is gone. A cache
 stamped for another Telegram user is refused with `CACHE_UNAVAILABLE` (`owner_mismatch`).
 
+A login of a Telegram user who still has an account keeps that account's ID and cache,
+also when it comes by another way: `tg auth login-qr` after a phone login, or
+`tg auth login --phone` after a QR login or with a changed number. The new session replaces the
+account's session, so a login after the old session was ended in Telegram makes the account
+work again. A running daemon uses the new session after `tg daemon stop` and `tg daemon start`.
+If the session can't be moved, the login fails and keeps the account it made for the new
+session.
+
 ### Which account a command uses
 
 Every command that reads or writes a cache works on one account:
@@ -303,7 +311,8 @@ while it is set, even to an empty string) limit the commands that read or send t
   `tg media download` and `transcribe`, `--id` of
   `tg chats get` and the chat of `tg chats sync`. The chat and the list resolve the same way,
   cache-first: `@name` and its ID are the same chat, `me` is the account's own user ID (Saved
-  Messages), and an ID in the list is taken as written.
+  Messages), and an ID in the list is taken as written. The command acts on the chat and
+  account the check resolved, so a switch of the active account in between doesn't move it.
 - Commands that read across chats show only allowed ones: `tg chats list` (with `--unread`
   too), `tg chats search`, `tg messages search` (its `chat:` query filter narrows within them),
   and `tg messages wait`, `watch` and `unread`, all without `--chat`.

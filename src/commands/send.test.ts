@@ -8,11 +8,13 @@ import { createChatsCache } from "../db/chats-cache";
 import { createMessagesSearch } from "../db/messages-search";
 import { createUsersCache } from "../db/users-cache";
 import { toLong } from "../utils/long";
-import { getAccountCacheDb } from "../db";
+import { ALLOWED_CHATS_ENV } from "../config";
+import { accountsDb, getAccountCacheDb } from "../db";
 import { testAccount, useTestDataDir } from "../test/accounts.test-utils";
 import { fakeDialog } from "../test/fake-dialogs.test-utils";
 import { assertPeer, expectLongEqual } from "../test/input-peer.test-utils";
 import { cell, richTlMessage } from "../test/rich-message.test-utils";
+import { guardCommands } from "./access";
 
 let commandCacheDb: Database;
 let secondCacheDb: Database;
@@ -262,5 +264,38 @@ describe("send command", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it("sends to the chat and account allowedChats checked, even when both move before it runs", async () => {
+    const users = createUsersCache(commandCacheDb);
+    users.upsert(createTestUser({ access_hash: "111" }));
+    commandReplies.push(sentUpdates);
+    process.env[ALLOWED_CHATS_ENV] = "@testuser";
+    const { sendCommand } = await import("./send");
+    const send = {
+      ...sendCommand,
+      run: (context: Parameters<SendRun>[0]) => {
+        accountsDb.setActive(2);
+        users.upsert(createTestUser({ username: "someoneelse" }));
+        users.upsert(createTestUser({ user_id: "654321", access_hash: "555" }));
+        return (sendCommand.run as SendRun)(context);
+      },
+    };
+    const tree = { subCommands: { send } };
+    guardCommands(tree);
+    const logSpy = spyOn(console, "log");
+    try {
+      await runCommand(tree, { rawArgs: ["send", "--to", "@testuser", "-m", "hi"] });
+    } finally {
+      logSpy.mockRestore();
+      delete process.env[ALLOWED_CHATS_ENV];
+    }
+
+    expect(secondCall).not.toHaveBeenCalled();
+    const sent = commandCall.mock.calls[0]?.[0] as tl.messages.RawSendMessageRequest;
+    expect(sent._).toBe("messages.sendMessage");
+    assertPeer(sent.peer, "inputPeerUser");
+    expect(sent.peer.userId).toBe(123456);
+    expectLongEqual(sent.peer.accessHash, "111");
   });
 });

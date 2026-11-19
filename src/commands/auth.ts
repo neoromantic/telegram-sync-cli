@@ -164,22 +164,33 @@ interface QrLoginAccount {
   label?: string | null;
 }
 
-function saveLoggedInUser(
-  accountsDb: AccountsDbInterface,
+async function saveLoggedInUser(
+  deps: AuthDependencies,
   account: Account,
+  client: TelegramClient,
   user: User,
   fields: { phone?: string; label?: string },
 ) {
-  const existing = accountsDb.getByUserId(user.id);
-  const finalAccount = existing && existing.id !== account.id ? existing : account;
-  accountsDb.update(finalAccount.id, {
+  const data = {
     ...fields,
     user_id: user.id,
     name: `${user.firstName}${user.lastName ? ` ${user.lastName}` : ""}`,
     username: user.username ?? null,
-  });
-  if (finalAccount !== account) accountsDb.delete(account.id);
-  return finalAccount;
+  };
+  const existing = deps.accountsDb.getByUserId(user.id);
+  if (!existing || existing.id === account.id) {
+    deps.accountsDb.update(account.id, data);
+    return account;
+  }
+
+  const target = deps.createClient(existing.id);
+  try {
+    await target.importSession(await client.exportSession(), true);
+  } finally {
+    await target.destroy();
+  }
+  deps.accountsDb.merge(account.id, existing.id, data);
+  return existing;
 }
 
 /**
@@ -206,7 +217,7 @@ export async function loginWithPhone(
       password: async () => promptPassword("Enter 2FA password: "),
     });
 
-    const finalAccount = saveLoggedInUser(accountsDb, account, user, {
+    const finalAccount = await saveLoggedInUser(deps, account, client, user, {
       phone,
       label: labelValue,
     });
@@ -248,6 +259,7 @@ export async function loginWithQr(accountName: string | undefined, deps: AuthDep
 
   const client = createClient(account.id);
   let loggedIn: QrLoginAccount;
+  let signedIn = false;
 
   try {
     const user = await client.signInQr({
@@ -265,7 +277,9 @@ export async function loginWithQr(accountName: string | undefined, deps: AuthDep
       },
     });
 
-    const finalAccount = saveLoggedInUser(accountsDb, account, user, {
+    signedIn = true;
+
+    const finalAccount = await saveLoggedInUser(deps, account, client, user, {
       label: label && label.length > 0 ? label : undefined,
     });
     if (finalAccount.id === account.id) {
@@ -283,7 +297,7 @@ export async function loginWithQr(accountName: string | undefined, deps: AuthDep
     };
   } catch (err) {
     await client.destroy().catch(() => {});
-    accountsDb.delete(account.id);
+    if (!signedIn) accountsDb.delete(account.id);
     const message = err instanceof Error ? err.message : "Unknown error";
     const result: LoginResult<QrLoginAccount> = { success: false, error: message };
     return result;
