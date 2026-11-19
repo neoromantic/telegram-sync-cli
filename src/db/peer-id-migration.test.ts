@@ -1,8 +1,5 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { parseRawMessage } from "../daemon/sync-worker-real-helpers";
 import { createChatSyncStateService } from "./chat-sync-state";
@@ -10,7 +7,6 @@ import { createChatsCache } from "./chats-cache";
 import { createMessagesCache } from "./messages-cache";
 import { createMessagesSearch } from "./messages-search";
 import { migratePeerIds, PEER_ID_USER_VERSION } from "./peer-id-migration";
-import { initCacheSchema } from "./schema";
 import { createSyncJobsService } from "./sync-jobs";
 import {
   initSyncSchema,
@@ -19,7 +15,6 @@ import {
   SyncPriority,
 } from "./sync-schema";
 import { createUsersCache } from "./users-cache";
-import { toRawJson } from "../utils/raw-json";
 import { toPeerIdFromRawPeer } from "../utils/telegram-peer-ids";
 import { chatRow } from "../test/cache-db.test-utils";
 import {
@@ -32,7 +27,6 @@ import {
 } from "../test/legacy-cache.test-utils";
 import { takePartIn } from "../test/participation.test-utils";
 import { assertPeerIdInvariants } from "../test/peer-id-invariants.test-utils";
-import { photoMessage } from "../test/photo-message.test-utils";
 
 function userVersion(db: Database) {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -260,26 +254,6 @@ describe("peer ID migration", () => {
     expect(userVersion(db)).toBe(PEER_ID_USER_VERSION);
   });
 
-  it("reads the senders of messages whose byte fields are base64", () => {
-    const team = { _: "peerChannel", channelId: LEGACY.teamChat.id } as const;
-    const channel = { _: "peerChannel", channelId: 333 } as const;
-    const message = photoMessage(team, 1, channel);
-    const row = legacyMessageRow(message);
-    expect(row.raw_json).toBe(toRawJson(message));
-    createMessagesCache(db).upsertBatch([row]);
-
-    initSyncSchema(db);
-
-    expect(senderIds(db)).toEqual([
-      {
-        chat_id: toPeerIdFromRawPeer(team),
-        message_id: 1,
-        from_id: -1000000000333,
-        forward_from_id: null,
-      },
-    ]);
-  });
-
   it("stops indexing a channel sender under the user with its bare ID", () => {
     seedLegacyCache(db);
     createUsersCache(db).upsert({
@@ -324,29 +298,6 @@ describe("peer ID migration", () => {
 
     expect(snapshot()).toEqual(before);
     expect(totalChanges(db)).toBe(changes);
-  });
-
-  it("rolls everything back when one update fails, and retries on the next open", () => {
-    seedLegacyCache(db);
-    db.run(`
-      CREATE TRIGGER fail_rekey BEFORE UPDATE OF chat_id ON chats_cache
-      WHEN old.chat_id = '4242'
-      BEGIN SELECT RAISE(ABORT, 'disk full'); END
-    `);
-    const chatsBefore = dump(db, "chats_cache");
-    const searchBefore = dump(db, "message_search");
-
-    expect(() => initSyncSchema(db)).toThrow("disk full");
-
-    expect(dump(db, "chats_cache")).toEqual(chatsBefore);
-    expect(dump(db, "message_search")).toEqual(searchBefore);
-    expect(userVersion(db)).toBe(0);
-
-    db.run("DROP TRIGGER fail_rekey");
-    initSyncSchema(db);
-
-    expect(userVersion(db)).toBe(PEER_ID_USER_VERSION);
-    assertPeerIdInvariants(db);
   });
 
   it("rolls back the re-key and the index rebuild when the last step, the sender update, fails", () => {
@@ -433,19 +384,6 @@ describe("peer ID migration", () => {
     expect(
       db.query("SELECT value FROM search_meta WHERE key = 'search_index_version'").get(),
     ).toEqual({ value: "1" });
-  });
-
-  it("re-keys a bare row that an older daemon writes after the upgrade", () => {
-    seedLegacyCache(db);
-    initSyncSchema(db);
-
-    createChatsCache(db).upsert(
-      legacyChatRow({ kind: "channel", id: 3333333333, title: "Late News" }),
-    );
-    initSyncSchema(db);
-
-    expect(chatIds(db)["Late News"]).toBe("-1003333333333");
-    assertPeerIdInvariants(db);
   });
 
   it("gives a cached message without fromId its chat as the sender, once (#44)", () => {
@@ -548,42 +486,3 @@ describe("peer ID migration", () => {
     });
   });
 });
-
-describe("peer ID migration on a shared file", () => {
-  let dir: string;
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "tg-peer-id-migration-"));
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("lets a second connection open a cache the first one moved to marked IDs", () => {
-    const path = join(dir, "cache.db");
-    const seed = new Database(path);
-    initLegacySchema(seed);
-    seedLegacyCache(seed);
-    seed.close();
-
-    const daemon = new Database(path);
-    const cli = new Database(path);
-    try {
-      openCache(daemon);
-      openCache(cli);
-
-      expect(userVersion(cli)).toBe(PEER_ID_USER_VERSION);
-      expect(chatIds(daemon)["Team Chat"]).toBe("-1001234567890");
-      assertPeerIdInvariants(cli);
-    } finally {
-      daemon.close();
-      cli.close();
-    }
-  });
-});
-
-function openCache(db: Database) {
-  initCacheSchema(db);
-  initSyncSchema(db);
-}

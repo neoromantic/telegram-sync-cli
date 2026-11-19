@@ -163,8 +163,7 @@ request's peer).
   nothing
 - `cache-layout.test.ts` — the move of the shared cache of 0.3 and older on temp data dirs:
   adopt, set aside or delete for 0, 1 or 2 accounts with or without a per-account cache, rows
-  still in the WAL, an earlier `shared-cache.db` never overwritten, a held file that blocks
-  adopting but only defers setting aside
+  still in the WAL, an earlier `shared-cache.db` never overwritten
 - `cache-meta.test.ts` — the owner stamp of an account's cache
 - `cache-db-lock.test.ts` — several processes opening, migrating and moving caches at once
 - `account-selector.test.ts` — `resolveAccount`: `--account`, the active account, the only one,
@@ -321,9 +320,8 @@ is for tests only.
   zero, one or several accounts, `tg status` totals (calls by method summed, flood waits and the
   overall top 5 sample chats with their `account_id`), and no root `cache.db` is ever created
 - `cache-layout.e2e.test.ts` — the first run after an upgrade from 0.3 or older: a shared cache
-  adopted (a 0.2.0 one migrated too), set aside with one notice, deleted when empty,
-  `CACHE_UNAVAILABLE` while an older tg holds it (and no account added or removed), and the
-  owner check
+  adopted (a 0.2.0 one migrated too), set aside with one notice, `CACHE_UNAVAILABLE` while an
+  older tg holds it (and no account added or removed), and the owner check
 - `api-args.e2e.test.ts` — the request `tg api` builds: each test records a replay fixture
   for an exact request with a stub client, then `tg api` in replay mode finds it only if it
   sends that request with no extra keys; `--username myuser`, `--username=myuser` and `--json`

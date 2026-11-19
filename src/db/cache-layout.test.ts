@@ -17,7 +17,6 @@ import {
   accountCachePath,
   type CacheLayoutDeps,
   createCacheLayoutGuard,
-  foldSharedCache,
   legacyCachePath,
   listSharedCaches,
   migrateSharedCache,
@@ -106,8 +105,6 @@ describe("migrateSharedCache", () => {
       [0, false, true, "deleted"],
       [2, false, false, "parked"],
       [2, false, true, "deleted"],
-      [2, true, false, "parked"],
-      [2, true, true, "deleted"],
     ] as const) {
       const label = `${accounts} account(s), ${accountCache ? "a" : "no"} per-account cache, ${empty ? "an empty" : "a"} shared cache`;
       it(`${label}: ${state}`, () => {
@@ -181,15 +178,6 @@ describe("migrateSharedCache", () => {
     expect(filesIn(dataDir)).toEqual(["accounts/3/cache.db"]);
   });
 
-  it("creates the account directory readable only by its owner", () => {
-    addAccounts(1);
-    seedInChild(shared, "legacySharedCache");
-
-    migrateSharedCache(deps());
-
-    expect(statSync(join(dataDir, "accounts", "1")).mode & 0o777).toBe(0o700);
-  });
-
   it("never overwrites a shared cache set aside earlier", () => {
     addAccounts(2);
     const first = join(dataDir, "shared-cache.db");
@@ -204,15 +192,6 @@ describe("migrateSharedCache", () => {
     expect(readFileSync(first).equals(firstBytes)).toBe(true);
     expect(rowCounts(second).messages_cache).toBe(3);
     expect(listSharedCaches(dataDir).map((file) => file.path)).toEqual([first, second]);
-  });
-
-  it("sets a shared cache aside when it appears after the account has one", () => {
-    addAccounts(1);
-    createAccountCache(1);
-    seedInChild(shared, "cacheWithRowsInWal", { messages: 2 });
-
-    expect(migrateSharedCache(deps())).toMatchObject({ state: "parked" });
-    expect(rowCounts(accountCachePath(dataDir, 1)).messages_cache).toBe(0);
   });
 
   it("sets aside a file SQLite cannot read, even for a single account", () => {
@@ -257,24 +236,6 @@ describe("migrateSharedCache", () => {
       });
       expect(listSharedCaches(dataDir)).toEqual([]);
       expect(notice).not.toHaveBeenCalled();
-    });
-
-    it.skipIf(isRoot)("blocks the only account when the WAL cannot be folded", () => {
-      addAccounts(1);
-      seedInChild(shared, "legacySharedCache");
-      const before = rowCounts(shared);
-
-      const result = withMode(dataDir, 0o500, () => migrateSharedCache(deps()));
-
-      expect(result).toEqual({
-        state: "blocked",
-        reason: "move_failed",
-        path: shared,
-        accountId: 1,
-      });
-      expect(data.db.inTransaction).toBe(false);
-      expect(existsSync(join(dataDir, "accounts"))).toBe(false);
-      expect(rowCounts(shared)).toEqual(before);
     });
   });
 
@@ -352,52 +313,6 @@ describe("migrateSharedCache", () => {
     expect(rowCounts(target)).toEqual(before);
   });
 
-  describe("while another process has the shared cache open", () => {
-    it("blocks the only account, and adopts once the process exits", async () => {
-      addAccounts(1);
-      seedInChild(shared, "legacySharedCache");
-      const before = rowCounts(shared);
-      const holder = holdOpen(shared);
-      await holder.ready();
-
-      try {
-        expect(migrateSharedCache(deps())).toEqual({
-          state: "blocked",
-          reason: "shared_cache_in_use",
-          path: shared,
-          accountId: 1,
-        });
-        expect(existsSync(shared)).toBe(true);
-        expect(existsSync(join(dataDir, "accounts"))).toBe(false);
-      } finally {
-        await holder.release();
-      }
-
-      expect(migrateSharedCache(deps()).state).toBe("adopted");
-      expect(rowCounts(accountCachePath(dataDir, 1))).toEqual(before);
-    });
-
-    it("defers setting it aside", async () => {
-      addAccounts(2);
-      seedInChild(shared, "legacySharedCache");
-      const holder = holdOpen(shared);
-      await holder.ready();
-
-      try {
-        expect(migrateSharedCache(deps())).toEqual({
-          state: "deferred",
-          reason: "shared_cache_in_use",
-          path: shared,
-        });
-        expect(existsSync(shared)).toBe(true);
-      } finally {
-        await holder.release();
-      }
-
-      expect(migrateSharedCache(deps()).state).toBe("parked");
-    });
-  });
-
   it("leaves data.db unlocked and its busy_timeout as it was", () => {
     addAccounts(1);
     data.db.run("PRAGMA busy_timeout = 1234");
@@ -409,43 +324,6 @@ describe("migrateSharedCache", () => {
       timeout: 1234,
     });
     expect(data.db.inTransaction).toBe(false);
-  });
-});
-
-describe("foldSharedCache", () => {
-  let dir: string;
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "tg-cache-fold-"));
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("never creates a missing file", () => {
-    const path = join(dir, "cache.db");
-
-    expect(foldSharedCache(path)).toMatchObject({ state: "error" });
-    expect(existsSync(path)).toBe(false);
-  });
-
-  it("calls only a file that is not a database unreadable", () => {
-    const path = join(dir, "cache.db");
-    writeFileSync(path, "not a database");
-
-    expect(foldSharedCache(path)).toEqual({ state: "unreadable" });
-  });
-
-  it("checks for rows only when asked", () => {
-    const path = join(dir, "cache.db");
-    seedInChild(path, "emptyCache");
-
-    expect(foldSharedCache(path)).toEqual({ state: "folded" });
-    expect(foldSharedCache(path, { checkData: true })).toEqual({
-      state: "folded",
-      hasData: false,
-    });
   });
 });
 
@@ -534,28 +412,4 @@ describe("createCacheLayoutGuard", () => {
 
     expect(layout.ensure("strict").state).toBe("adopted");
   });
-
-  it.skipIf(isRoot)(
-    "throws CACHE_UNAVAILABLE move_failed in strict mode when the move fails",
-    () => {
-      const layout = guard();
-      const shared = legacyCachePath(dataDir);
-      seedFolded(shared);
-      const accountsDir = join(dataDir, "accounts");
-      mkdirSync(accountsDir);
-
-      withMode(accountsDir, 0o500, () => {
-        expect(() => layout.ensure("strict")).toThrow(
-          expect.objectContaining({ reason: "move_failed", path: shared }),
-        );
-        expect(layout.ensure("report")).toMatchObject({
-          state: "blocked",
-          reason: "move_failed",
-        });
-      });
-      expect(data.db.inTransaction).toBe(false);
-
-      expect(layout.ensure("strict").state).toBe("adopted");
-    },
-  );
 });

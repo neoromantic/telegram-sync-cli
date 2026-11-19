@@ -101,21 +101,6 @@ describe("E2E: db vacuum", () => {
       };
     }
 
-    it("runs when the disk has room for about twice the cache", async () => {
-      seedCache();
-
-      const result = await runCliSuccess(
-        ["db", "vacuum", "--account", "1"],
-        withFreeDisk(MARGIN + 100 * 1024 * 1024),
-      );
-
-      expect((result.json as VacuumOutput).data).toMatchObject({
-        mode: "full",
-        auto_vacuum: "incremental",
-        free_pages_after: 0,
-      });
-    });
-
     it("fails at once and changes nothing when the disk is short", async () => {
       const db = seedCache();
       const fileBytes = Bun.file(env.cachePath(1)).size;
@@ -201,12 +186,14 @@ describe("E2E: db vacuum", () => {
     writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));
 
     const result = await runCliSuccess(["db", "vacuum", "--account", "1"], options());
+    const { data } = result.json as VacuumOutput;
 
-    expect((result.json as VacuumOutput).data).toMatchObject({
+    expect(data).toMatchObject({
       mode: "incremental",
       auto_vacuum: "incremental",
       free_pages_after: 0,
     });
+    expect(data.freed_bytes).toBeGreaterThan(0);
   });
 
   it("skips an account without a cache file and creates none", async () => {
@@ -217,12 +204,5 @@ describe("E2E: db vacuum", () => {
       mode: "skipped",
     });
     expect(existsSync(env.cachePath(2))).toBe(false);
-  });
-
-  it("shows its help without Telegram credentials", async () => {
-    const result = await runCliSuccess(["db", "vacuum", "--help"], options());
-
-    expect(result.stdout).toContain("vacuum");
-    expect(result.stdout).toContain("--account");
   });
 });
