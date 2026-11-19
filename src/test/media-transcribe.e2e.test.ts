@@ -640,7 +640,7 @@ describe("E2E: media transcribe", () => {
       });
     }
 
-    it("prints the ready results of a batch when the program is missing for the rest", async () => {
+    it("prints the ready results of a batch when the program is missing for the rest, uncached ones included", async () => {
       install("ffmpeg", FAKE_FFMPEG);
       install("whisper", FAKE_OPENAI_RUNNER);
       note(1, "Already done.");
@@ -648,7 +648,7 @@ describe("E2E: media transcribe", () => {
       rmSync(join(binDir, "whisper"));
       note(2, "Still waiting.");
 
-      const result = await transcribe("--id", "1", "--id", "2");
+      const result = await transcribe("--id", "1", "--id", "2", "--id", "3");
 
       expect(result.exitCode).toBe(1);
       expect(lines(result.stdout)).toEqual([
@@ -665,6 +665,13 @@ describe("E2E: media transcribe", () => {
           error: expect.objectContaining({
             code: "TRANSCRIBER_NOT_FOUND",
             details: expect.objectContaining({ chatId: SELF_ID, messageId: 2 }),
+          }),
+        },
+        {
+          success: false,
+          error: expect.objectContaining({
+            code: "TRANSCRIBER_NOT_FOUND",
+            details: expect.objectContaining({ chatId: SELF_ID, messageId: 3 }),
           }),
         },
       ]);

@@ -342,13 +342,17 @@ async function checkAndReuse(
   },
 ) {
   const { outcomes, fail, save } = report;
-  const { download, force } = deps;
+  const { download, force, setup } = deps;
   const store = createMessageTranscriptsStore(download.cacheDb);
   const pending: Pending[] = [];
   for (const messageId of messageIds) {
     download.signal.throwIfAborted();
     let attachment: AttachmentInfo;
     try {
+      if (!setup.ready && !readCachedAttachment(download, chat, messageId)) {
+        fail(messageId, setup.problem);
+        continue;
+      }
       attachment = await checkedAttachment(download, chat, messageId);
     } catch (err) {
       if (!(err instanceof MediaError)) throw err;

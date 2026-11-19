@@ -229,8 +229,9 @@ Each setup problem is an error whose `suggestion` holds the commands to run:
 | whisper.cpp, model file missing or unreadable      | `INVALID_ARGS`, `details: { runner, model }`                                                  | the `curl` download to that path                                                                                                                                   |
 | the program exited non-zero or wrote no transcript | `GENERAL_ERROR` for that message, `details: { runner, exitCode, stderr }` (the last 20 lines) | none                                                                                                                                                               |
 
-A setup problem fails each message that still needs the program, with `chatId` and `messageId`
-in `details`; messages answered from stored transcripts in the same run are printed as usual.
+A setup problem fails each message that still needs the program, and each message the cache
+doesn't hold before Telegram is asked for it, with `chatId` and `messageId` in `details`;
+messages answered from stored transcripts in the same run are printed as usual.
 
 Example, on Linux with ffmpeg but no program:
 
@@ -265,7 +266,8 @@ A source of transcripts is a provider. Every provider implements one protocol
 
 1. Eligibility: the message's attachment as it is now, from the cache or fetched from
    Telegram, checked as `tg media download` checks it (content protection), and only voice
-   and video notes.
+   and video notes. A message the cache doesn't hold is fetched only when the provider is
+   ready; otherwise it fails with the setup problem.
 2. Reuse: a stored transcript of that message for the same file, else of the same file in
    another message.
 3. Setup: the provider's readiness; a problem fails the messages still pending.
