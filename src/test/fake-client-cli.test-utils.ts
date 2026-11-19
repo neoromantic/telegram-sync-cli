@@ -13,6 +13,8 @@ export const FAKE_SELF_ID = 999;
 
 /** A message of someone else: messages.editMessage refuses it */
 export const FAKE_FOREIGN_MESSAGE = 14;
+/** A message in Saved Messages that holds a file */
+export const FAKE_FILE_MESSAGE = 16;
 
 export const FAKE_MESSAGE_DATE = 1_760_000_000;
 
@@ -68,12 +70,35 @@ if (import.meta.main) {
     async call(request: {
       _: string;
       maxId?: number;
-      id?: number;
+      id?: number | { id: number }[];
       message?: string;
       richMessage?: { _: string; markdown?: string; html?: string };
       peer?: FakeInputPeer;
     }) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
+      if (request._ === "messages.getMessages" && Array.isArray(request.id)) {
+        return {
+          _: "messages.messages",
+          messages: request.id.map(({ id }) =>
+            id === FAKE_FILE_MESSAGE
+              ? {
+                  _: "message",
+                  id,
+                  out: true,
+                  peerId: { _: "peerUser", userId: FAKE_SELF_ID },
+                  date: FAKE_MESSAGE_DATE,
+                  message: "Notes from Monday",
+                  media: {
+                    _: "messageMediaDocument",
+                    document: { _: "document", mimeType: "text/plain", attributes: [] },
+                  },
+                }
+              : { _: "messageEmpty", id },
+          ),
+          chats: [],
+          users: [],
+        };
+      }
       if (request._ === "messages.editMessage") {
         console.error(
           `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: request.id, message: request.message, rich: request.richMessage?._ })}`,

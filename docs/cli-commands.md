@@ -442,8 +442,11 @@ mutation, so it needs credentials and a connection; the daemon never marks anyth
 you sent, or the caption of a message with a file, through `messages.editMessage`. The new text
 is plain: formatting the message had is dropped, and its file stays. With `--markdown` or
 `--html` the new text becomes a rich message (headings, tables, lists), parsed by Telegram as
-`tg send` describes; both flags together give `INVALID_ARGS` (exit 3). `format` in the result is
-`markdown`, `html`, or `null` for plain text. The command prints the
+`tg send` describes; both flags together give `INVALID_ARGS` (exit 3). So does a rich edit of a
+message with a file or another attachment, checked with one more request before the edit: its
+caption can only be plain text, and Telegram would drop the caption it has. A text message with
+a link preview can become rich. `format` in the result is `markdown`, `html`, or `null` for
+plain text. The command prints the
 edited message as `tg messages get` prints it and writes it to the cache at once, as `tg send`
 does for a sent message. So `tg messages search` finds the new text, and no longer the old,
 without a daemon:

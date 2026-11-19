@@ -1,7 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import { type TelegramClient, tl } from "@mtcute/bun";
 
-import { EditRefusedError, editMessage, editMessageRequest } from "./edit-message";
+import {
+  EditRefusedError,
+  editMessage,
+  editMessageRequest,
+  RichCaptionError,
+} from "./edit-message";
 import type { HistoryChat } from "./history";
 import { createMessagesHistory } from "../../db/messages-history";
 import { createAccountCacheDb } from "../../test/cache-db.test-utils";
@@ -12,17 +17,32 @@ const ALICE: HistoryChat = {
   inputPeer: { _: "inputPeerUser", userId: 10, accessHash: toLong(7) },
 };
 
-function clientThat(call: () => Promise<unknown>) {
+function clientThat(call: (request: { _: string }) => Promise<unknown>) {
   return { call } as unknown as TelegramClient;
+}
+
+function holding(message: object, edit: () => Promise<unknown>) {
+  const methods: string[] = [];
+  const client = clientThat(async (request) => {
+    methods.push(request._);
+    if (request._ !== "messages.getMessages") return edit();
+    return {
+      _: "messages.messages",
+      messages: [{ _: "message", id: 12, peerId: { _: "peerUser", userId: 10 }, ...message }],
+      chats: [],
+      users: [],
+    };
+  });
+  return { client, methods };
+}
+
+function rpcError(code: number, text: string) {
+  return tl.RpcError.fromTl({ _: "rpc_error", errorCode: code, errorMessage: text });
 }
 
 function refusing(code: number, text: string) {
   return clientThat(async () => {
-    throw tl.RpcError.fromTl({
-      _: "rpc_error",
-      errorCode: code,
-      errorMessage: text,
-    });
+    throw rpcError(code, text);
   });
 }
 
@@ -86,14 +106,10 @@ describe("editMessage", () => {
   });
 
   it("turns a refused rich message into a refusal with what to change", async () => {
-    const attempt = editMessage(
-      refusing(400, "RICH_MESSAGE_TABLE_COLS_TOO_MANY"),
-      createAccountCacheDb(),
-      ALICE,
-      12,
-      "| a |",
-      "markdown",
-    );
+    const { client } = holding({ message: "Old text" }, async () => {
+      throw rpcError(400, "RICH_MESSAGE_TABLE_COLS_TOO_MANY");
+    });
+    const attempt = editMessage(client, createAccountCacheDb(), ALICE, 12, "| a |", "markdown");
 
     const err = await attempt.catch((e: unknown) => e);
     expect(err).toBeInstanceOf(EditRefusedError);
@@ -101,6 +117,38 @@ describe("editMessage", () => {
       "RICH_MESSAGE_TABLE_COLS_TOO_MANY",
     );
     expect((err as EditRefusedError).suggestion).toBe("Use at most 20 table columns.");
+  });
+
+  it("refuses a rich edit of a message with a file and sends nothing", async () => {
+    const { client, methods } = holding(
+      {
+        message: "Notes from Monday",
+        media: {
+          _: "messageMediaDocument",
+          document: { _: "document", mimeType: "text/plain", attributes: [] },
+        },
+      },
+      async () => ({ _: "updates", updates: [] }),
+    );
+
+    const attempt = editMessage(client, createAccountCacheDb(), ALICE, 12, "# Notes", "markdown");
+
+    const err = await attempt.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RichCaptionError);
+    expect((err as RichCaptionError).details).toEqual({ chatId: 10, messageId: 12 });
+    expect(methods).toEqual(["messages.getMessages"]);
+  });
+
+  it("makes a text message with a link preview rich", async () => {
+    const { client, methods } = holding(
+      { message: "example.com", media: { _: "messageMediaWebPage", webpage: { _: "webPage" } } },
+      async () => ({ _: "updates", updates: [] }),
+    );
+
+    const result = await editMessage(client, createAccountCacheDb(), ALICE, 12, "# Hi", "markdown");
+
+    expect(result.format).toBe("markdown");
+    expect(methods).toEqual(["messages.getMessages", "messages.editMessage"]);
   });
 
   it("reports the edit without a message when the response holds none", async () => {

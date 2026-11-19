@@ -5,7 +5,7 @@ import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { error, success } from "../../utils/output";
 import { readRichFormat } from "../send/rich-message";
-import { EditRefusedError, editMessage } from "./edit-message";
+import { EditRefusedError, editMessage, RichCaptionError } from "./edit-message";
 import {
   CHAT_ARG_DESCRIPTION,
   MAX_MESSAGE_ID,
@@ -72,6 +72,14 @@ export const editMessageCommand = defineCommand({
     } catch (err) {
       if (err instanceof EditRefusedError) {
         error(ErrorCodes.TELEGRAM_ERROR, err.message, err.details, err.suggestion);
+      }
+      if (err instanceof RichCaptionError) {
+        error(
+          ErrorCodes.INVALID_ARGS,
+          err.message,
+          err.details,
+          "Edit it without --markdown or --html",
+        );
       }
       reportHistoryError(err, "edit the message");
     }

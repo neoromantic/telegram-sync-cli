@@ -16,6 +16,7 @@ import {
   FAKE_CLIENT_CALL,
   FAKE_CLIENT_CLI,
   FAKE_EDIT_DATE,
+  FAKE_FILE_MESSAGE,
   FAKE_FOREIGN_MESSAGE,
   FAKE_MESSAGE_DATE,
   FAKE_SELF_ID,
@@ -226,6 +227,27 @@ describe("E2E: messages edit", () => {
       messageId: 12,
       format: "markdown",
     });
+  });
+
+  it("refuses to make the caption of a file rich and leaves the message alone", async () => {
+    const result = await runCli(
+      [
+        "messages",
+        "edit",
+        "--chat",
+        "me",
+        "--id",
+        String(FAKE_FILE_MESSAGE),
+        "-m",
+        "# Notes",
+        "--markdown",
+      ],
+      fake(),
+    );
+
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).toContain("has an attachment: its caption can only be plain text");
+    expect(result.stderr).not.toContain('"method":"messages.editMessage"');
   });
 
   it("refuses --markdown with --html before it needs Telegram", async () => {

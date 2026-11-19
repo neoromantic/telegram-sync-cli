@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `tg messages edit --chat <peer> --id <id> --message <text>` replaces the text of a message you
   sent, or the caption of a message with a file, as plain text, or with `--markdown` or `--html`
-  as a rich message (`messages.editMessage`; the edit part of #23). It prints the edited message as `tg messages get` does and stores it in the
+  as a rich message (`messages.editMessage`; the edit part of #23). A rich edit of a message with
+  a file is refused: its caption can only be plain text. It prints the edited message as `tg messages get` does and stores it in the
   cache at once, so search finds the new text without a daemon. Telegram's refusals (not your
   message, too old, same text, too long, no permission) are `TELEGRAM_ERROR` with the reason in
   `details.telegramError`. It is a write: read-only mode refuses it and `allowedChats` applies.

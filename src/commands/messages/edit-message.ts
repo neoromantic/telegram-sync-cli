@@ -2,11 +2,13 @@ import type { Database } from "bun:sqlite";
 import { type TelegramClient, tl } from "@mtcute/bun";
 
 import { getErrorMessage } from "../../daemon/daemon-utils";
-import { parseRawMessage } from "../../daemon/sync-worker-real-helpers";
+import { fetchMessagesByIdRaw, parseRawMessage } from "../../daemon/sync-worker-real-helpers";
 import { createMessagesCache } from "../../db/messages-cache";
 import { createMessagesHistory } from "../../db/messages-history";
 import type { MessageSearchItem } from "../../types";
+import { rawMediaType } from "../../utils/message-type";
 import { verbose } from "../../utils/output";
+import { toPeerIdFromRawPeer } from "../../utils/telegram-peer-ids";
 import { type RichFormat, richErrorHints, richMessage } from "../send/rich-message";
 import { messageRowsToItems } from "./helpers";
 import { type HistoryChat, withPeerHint } from "./history";
@@ -42,6 +44,27 @@ export class EditRefusedError extends Error {
     this.details = { chatId, messageId, telegramError };
     this.suggestion = suggestion;
   }
+}
+
+/** Telegram accepts a rich edit of a message with an attachment, then drops the rich text and the old caption */
+export class RichCaptionError extends Error {
+  readonly details: { chatId: number; messageId: number };
+
+  constructor(chatId: number, messageId: number) {
+    super(`Message ${messageId} has an attachment: its caption can only be plain text`);
+    this.name = "RichCaptionError";
+    this.details = { chatId, messageId };
+  }
+}
+
+async function hasAttachment(client: CallClient, chat: HistoryChat, messageId: number) {
+  const { messages } = await fetchMessagesByIdRaw(client, chat.inputPeer, [messageId]);
+  return (messages as tl.TypeMessage[]).some((message) => {
+    if (message._ !== "message" || message.id !== messageId) return false;
+    if (toPeerIdFromRawPeer(message.peerId) !== chat.chatId) return false;
+    const media = rawMediaType(message.media);
+    return media !== null && media !== "webpage";
+  });
 }
 
 /** Plain text carries no entities, so Telegram drops the old formatting; a format replaces the message with a rich one */
@@ -121,6 +144,9 @@ export async function editMessage(
 ) {
   let result: tl.TypeUpdates;
   try {
+    if (format && (await hasAttachment(client, chat, messageId))) {
+      throw new RichCaptionError(chat.chatId, messageId);
+    }
     result = await client.call(editMessageRequest(chat.inputPeer, messageId, text, format));
   } catch (err) {
     if (tl.RpcError.is(err)) {
