@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS search_meta (
   value TEXT,
   updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
 );
+
+-- the index's words, for --forms (stores nothing)
+CREATE VIRTUAL TABLE IF NOT EXISTS message_search_vocab USING fts5vocab(message_search, row);
 ```
 
 ### A contentless index
@@ -349,6 +352,12 @@ same order. For a page of P (`--limit` plus `--offset`) of N messages:
   re-indexed messages ([above](#keeping-the-index-merged)), costs a quarter more at most.
 - **A prefix** (`word*`) always uses the query above: asking about the messages would read every
   word the prefix starts.
+- **Forms** (`--forms`). A word with one form in the index is the same quoted word, and a
+  one-word query keeps the shortcut of counting without reading rowids. A word with several
+  forms is an `OR` of them, so the counting reads rowids as for several words, and the walk asks
+  the index about the whole group. On a merged index of 20,000 made-up messages, a word whose
+  eight forms occur in 40% of them took 0.8 ms; finding the forms first is a range scan of the
+  vocabulary ([below](#other-word-forms---forms)), a fraction of a millisecond there.
 
 On the merged index of a 1M made-up cache, going through a message costs a few µs, so the walk
 pays from a few percent of matches on. The same cache file, 0.11.1 against now:
@@ -410,9 +419,10 @@ or `^` inside a word is punctuation:
 | `квартир*`         | every form of a word: `квартира`, `квартиру`, `квартирой`     |
 | `^hello`           | messages whose text starts with `hello`                       |
 
-FTS5 doesn't stem words, so a prefix (`word*`) is the way to find other forms of a word, in
-Russian especially. Matching ignores case, and diacritics in Latin letters (`cafe` finds
-`café`); `ё` and `й` stay distinct from `е` and `и`.
+FTS5 doesn't stem words: a plain query finds the word as typed. `--forms` finds its other forms
+([below](#other-word-forms---forms)), and a prefix (`word*`) finds every word that starts the
+same way. Matching ignores case, and diacritics in Latin letters (`cafe` finds `café`); without
+`--forms`, `ё` and `й` stay distinct from `е` and `и` (`еще` doesn't find `ещё`).
 
 `--phrase` matches the whole query as one exact phrase, the way `tg messages search` read
 every query up to 0.5: `--query "function(arg)" --phrase` finds the text without reading the
@@ -421,6 +431,47 @@ parentheses as syntax.
 A query FTS5 can't parse, such as `error OR` or `meet at 10:30` (`10:` reads as a column
 name), returns `INVALID_ARGS` (exit 3) with a suggestion: quote the words with punctuation
 (`meet at "10:30"`) or pass `--phrase`. Other SQLite errors return `GENERAL_ERROR`.
+
+### Other word forms (`--forms`)
+
+`--forms` makes each plain word of the query match its other forms too:
+`--query квартира --forms` finds `квартиру`, `квартирой` and `квартирах`, `meeting` finds
+`meetings`, and `еще` finds `ещё` (and the reverse). Without it search stays exact.
+
+How it works ([#92](https://github.com/neoromantic/telegram-sync-cli/issues/92)): tg reads the
+index's own words from `message_search_vocab` and keeps those with the same stem as the query
+word. The stemmers are light: for a Cyrillic word, Russian noun and adjective case endings are
+stripped and `ё` reads as `е`; for a Latin word, only a plural `s` (`cities` to `city`); other
+words stay as they are (`src/utils/word-stems.ts`). The words come from a range scan of the
+vocabulary on the stem without its last letter, with `е` and `ё` both, then the stem filter. Each
+query word becomes an `OR` of its forms, and the words are joined with `AND`. On the made-up
+cache of the example in [cli-commands.md](cli-commands.md#messages), `квартира парк` becomes:
+
+```
+("квартира" OR "квартирах" OR "квартирой" OR "квартиру" OR "квартиры") AND ("парк" OR "парка")
+```
+
+Nothing changes in the index, so there is no migration, and older versions and other SQLite
+clients read the same file.
+
+- **Plain words only.** A query with FTS5 syntax (`"phrase"`, `word*`, `OR`, `NOT`, `sender:`,
+  `chat:`) or `--phrase` with `--forms` is `INVALID_ARGS` (exit 3), with the suggestion to drop
+  one of them. Forms inside a phrase, a `NOT` or a column filter would change what the query
+  means, and expanding only the words outside them would change it silently.
+- **A word that is several index words** (`e-mail`, `don't`) is matched as written: it is a
+  phrase to FTS5.
+- **A word with no form in the index** stays as it is and finds nothing, as without `--forms`.
+- **At most 30 forms a word**: the query word itself, then the most frequent. A Russian
+  adjective has about 12 forms with one stem and a noun about 10, so a longer list means very
+  different words share the stem; the answer marks such a word with `cut: true`.
+- The forms are words of the whole index: of deleted messages and of sender and chat names too,
+  as a plain word matches them.
+- **Quality**, measured on public Russian and English sentences ([storage.md
+  §9](storage.md#9-other-word-forms-and-typos)): a Russian word finds 0.70 of the messages with
+  any of its forms instead of 0.37, with 0.95 of the results right instead of 1.0; English 0.84
+  instead of 0.75, 0.997 right. The wrong ones are other words with the same stem (`брат` and
+  `брать`, `лет` and `лето`, `как` and `какой`) or of the same family (`больше` for `большой`).
+  Verb forms and irregular forms (`meet` and `met`) are not found. So it is opt-in.
 
 ### Supported Filters
 
@@ -434,6 +485,7 @@ Any other value that is neither an ID nor a username is `INVALID_ARGS`, never an
 
 - `--includeDeleted` (alias: `--include-deleted`)
 - `--phrase`: the whole query as one phrase
+- `--forms`: other forms of each plain word ([above](#other-word-forms---forms))
 - `--since`, `--until`: the date range, on the date a message was sent (see below)
 - `--sort date|relevance`: `date` (default) is newest first; `relevance` is best match first,
   by FTS5's bm25 rank over the text, sender and chat, with ties newest first
@@ -463,8 +515,9 @@ tg messages search --query "hello world" --limit 10 --count
 {
   "query": "hello world",
   "filters": { "chat": null, "sender": null, "includeDeleted": false, "phrase": false,
-               "since": "7d", "until": null },
+               "forms": false, "since": "7d", "until": null },
   "sort": "date",
+  "forms": null,
   "results": [ … ],
   "total": 10,
   "count": 42,
@@ -479,6 +532,22 @@ tg messages search --query "hello world" --limit 10 --count
 messages that match with the same filters, over every page, and is `null` without `--count`: it
 is a second query, so it is opt-in. Page with `--offset` until `results` is empty, or until
 `offset + total` reaches `count`.
+
+`forms` is `null` without `--forms`. With it, each plain word of the query, as typed, maps to the
+index words searched for it (`words`), and `cut` says whether more forms were left out. A result
+found by another form shows it in its `text`, and `--snippet` highlights it:
+
+```json
+"forms": {
+  "квартира": {
+    "words": ["квартира", "квартирах", "квартирой", "квартиру", "квартиры"],
+    "cut": false
+  }
+}
+```
+
+A word with no form in the index has `"words": []`; a word that is several index words
+(`e-mail`) isn't listed.
 
 The `files` column is empty for now: attachment names are in `message_attachments` and in
 each item's `attachment`, but not in the index yet
@@ -504,8 +573,8 @@ The words come from the query's free text: column filters other than `text` (`se
 `chat:`) and `NOT` terms are left out. They match the way the index does: case-insensitively,
 a Latin letter with one diacritic read as the bare letter (`cafe` finds `café`, `o` doesn't find
 `ộ`), and a prefix (`hel*`) matches every word that starts with it, in Latin
-and Cyrillic. A message the query found only by its sender or chat gets the start of its text,
-nothing highlighted; a message without text gets `""`. FTS5's `snippet()` can't run on the
+and Cyrillic. With `--forms`, every form searched for is highlighted too. A message the query
+found only by its sender or chat gets the start of its text, nothing highlighted; a message without text gets `""`. FTS5's `snippet()` can't run on the
 contentless index, so tg builds the fragment from `messages_cache.text`.
 
 ## SQL: the `message_search_text` view

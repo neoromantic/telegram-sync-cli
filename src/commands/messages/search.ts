@@ -140,7 +140,7 @@ export const searchMessagesCommand = defineCommand({
   meta: {
     name: "search",
     description:
-      'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
+      'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form; --forms finds other forms of plain words',
   },
   args: searchArgs,
   async run({ args }) {
@@ -149,12 +149,18 @@ export const searchMessagesCommand = defineCommand({
       error(ErrorCodes.INVALID_ARGS, "Search query is required");
     }
 
-    if (args.forms && (args.phrase || hasFts5Syntax(query))) {
+    if (args.forms && args.phrase) {
       error(
         ErrorCodes.INVALID_ARGS,
-        args.phrase
-          ? "--forms can't be combined with --phrase"
-          : "--forms works on plain words only, and this query has FTS5 syntax",
+        "--forms can't be combined with --phrase",
+        { query },
+        "Drop --forms to match the exact phrase, or drop --phrase to match the words in any order with their forms",
+      );
+    }
+    if (args.forms && hasFts5Syntax(query)) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        "--forms works on plain words only, and this query has FTS5 syntax",
         { query },
         "Drop --forms to run the query as written, or write the forms into it yourself (квартир*)",
       );

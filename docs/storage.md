@@ -396,9 +396,26 @@ common word.
 
 ### 9. Other word forms and typos
 
-**Decision.** Pending ([#92](https://github.com/neoromantic/telegram-sync-cli/issues/92)). The
-benchmark below was defined before any candidate ran; a change made afterwards is listed under
-it with the reason.
+**Decision** ([#92](https://github.com/neoromantic/telegram-sync-cli/issues/92)): E2, as the
+opt-in flag `tg messages search --forms`. Each plain query word becomes an `OR` of the index's
+own words with the same light stem (Savoy's Russian, Lucene's plural-only English, `ё` read as
+`е`), read from a persistent `fts5vocab` table; the index is unchanged. Why E2: of the
+candidates that find the same messages, it is the simplest (a query rewrite: no index change,
+no migration, and older versions and other SQLite clients read the same file), and it doubles
+Russian recall (0.368 to 0.704, +0.34 [0.30, 0.37]; pairs 0.111 to 0.323) and raises English
+recall (0.749 to 0.843). D1/E1 find more (0.839) but are right less often (0.887), B2 and C less
+still. Why opt-in: no candidate passed Q3, the precision limit fixed in advance; E2 loses 0.059
+of Russian precision (to 0.946), 0.053 in the first 50, against a limit of 0.05, so the default
+stays exact and the maintainer can make it the default from these numbers. Production adds two
+things the benchmark's candidate didn't have: at most 30 forms a word (the word itself, then the
+most frequent), and the vocabulary scan reads `е` and `ё` both at every position of the stem's
+prefix, where the candidate stopped the prefix at the first of them. Both scans cover every
+word with the stem, so below the cap they find the same words, only with fewer words read; the
+benchmark's E2 now runs through the shipped code (`findQueryForms`). Typo correction is a separate change. How `--forms` works:
+[search.md](search.md#other-word-forms---forms).
+
+The benchmark below was defined before any candidate ran; a change made afterwards is listed
+under it with the reason.
 
 **Benchmark** (`bun run bench:search`). The question: should a plain query find other forms of
 its words (`квартира` finding `квартиру`, `meeting` finding `meetings`), and how; separately,

@@ -71,7 +71,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Unread messages: chats with unread messages (`tg chats list --unread`), their unread messages
   (`tg messages unread`) and marking them read (`tg messages read`); the daemon keeps the
   counts current
-- Full-text search (FTS5) over cached messages
+- Full-text search (FTS5) over cached messages; `--forms` also finds other forms of each word
+  (`квартира` finds `квартиру`, `meeting` finds `meetings`)
 - Rich messages: `tg send --markdown` or `--html` sends headings, tables, lists, quotations,
   code blocks and formulas that Telegram renders natively
 - Files: send one with `tg send --file`; download a message's file into a per-account media
@@ -128,6 +129,7 @@ tg chats sync @examplenews          # also sync a large group or channel
 tg messages list --chat @username --limit 20
 tg messages get --chat @username --id 42 --context 3
 tg messages search --query "hello world" --since 7d   # both words, any order
+tg messages search --query "квартира" --forms        # квартиру, квартирой… too
 tg messages wait --chat @username --after 42 --timeout 60   # block until the next reply
 tg messages unread                   # unread messages of every chat
 tg messages read --chat @username    # mark the chat read
@@ -234,4 +236,5 @@ on, why, and the install ID. Everything that is sent:
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md). Security issues:
-[SECURITY.md](SECURITY.md). License: [MIT](LICENSE).
+[SECURITY.md](SECURITY.md). License: [MIT](LICENSE); third-party notices:
+[NOTICE](NOTICE).

@@ -29,7 +29,8 @@
     "!src/**/*.test.ts",
     "!src/**/*.test-utils.ts",
     "!src/test/**",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "NOTICE"
   ],
   "type": "module",
   "publishConfig": {
