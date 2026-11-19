@@ -1,6 +1,6 @@
 import { accessSync, constants, statSync } from "node:fs";
 import { basename } from "node:path";
-import { tl } from "@mtcute/bun";
+import type { tl } from "@mtcute/bun";
 import { defineCommand } from "citty";
 
 import { accountsDb } from "../db";
@@ -63,8 +63,9 @@ const richErrorHints: Record<string, string> = {
   RICH_MESSAGE_TABLE_COLS_TOO_MANY: "Use at most 20 table columns.",
 };
 
-function handleSendError(recipient: string, err: unknown, rich: boolean): never {
-  if (rich && tl.RpcError.is(err) && err.text.startsWith("RICH_MESSAGE_")) {
+async function handleSendError(recipient: string, err: unknown, rich: boolean) {
+  const mtcute = await import("@mtcute/bun");
+  if (rich && mtcute.tl.RpcError.is(err) && err.text.startsWith("RICH_MESSAGE_")) {
     error(
       ErrorCodes.TELEGRAM_ERROR,
       err.message,
@@ -287,7 +288,7 @@ export const sendCommand = defineCommand({
       const usersCache = createUsersCache(cacheDb);
       const chatsCache = createChatsCache(cacheDb);
 
-      const client = wrapClientCallWithRateLimits(getClientForAccount(accountId), {
+      const client = wrapClientCallWithRateLimits(await getClientForAccount(accountId), {
         context: "cli:send",
         accountId,
       });
@@ -360,7 +361,7 @@ export const sendCommand = defineCommand({
         });
       }
       reportConfigOrRateLimitError(err);
-      handleSendError(recipient, err, content.file === null && content.format !== null);
+      await handleSendError(recipient, err, content.file === null && content.format !== null);
     }
   },
 });

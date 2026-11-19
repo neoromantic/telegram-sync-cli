@@ -172,7 +172,7 @@ export const listChatsCommand = defineCommand({
       }
 
       verbose("Fetching dialogs from Telegram API...");
-      const client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+      const client = wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
         context: "cli:chats.list",
         accountId: account.id,
       });

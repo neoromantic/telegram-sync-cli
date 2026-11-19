@@ -191,7 +191,7 @@ Key files:
 
 - `src/daemon/sync-worker-real-jobs.ts`
 - `src/daemon/sync-worker-real-context.ts`
-- `src/daemon/sync-retry.ts` (backoff and permanent errors)
+- `src/daemon/sync-retry.ts` (backoff) and `src/daemon/sync-worker-utils.ts` (job results, permanent errors)
 
 ### Missing senders
 
