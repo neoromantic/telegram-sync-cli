@@ -61,25 +61,38 @@ describe("publishing without hard links", () => {
     expect(lacksHardLinks(Object.assign(new Error(`${code}: link`), { code }))).toBe(false);
   });
 
-  it("copies the file to a new target", () => {
+  it("copies the file to a new target", async () => {
     const bytes = fakeBytes(70_000);
     const tmp = join(root, "copy.part");
     const target = join(root, "notes.txt");
     fs.writeFileSync(tmp, bytes);
 
-    publishByCopy(tmp, target);
+    await publishByCopy(tmp, target);
 
     expect(Buffer.compare(fs.readFileSync(target), bytes)).toBe(0);
   });
 
-  it("refuses to replace an existing target and leaves it as it was", () => {
+  it("refuses to replace an existing target and leaves it as it was", async () => {
     const tmp = join(root, "copy.part");
     const target = join(root, "notes.txt");
     fs.writeFileSync(tmp, fakeBytes(70_000));
     fs.writeFileSync(target, "edited copy");
 
-    expect(() => publishByCopy(tmp, target)).toThrow(expect.objectContaining({ code: "EEXIST" }));
+    await expect(publishByCopy(tmp, target)).rejects.toMatchObject({ code: "EEXIST" });
     expect(fs.readFileSync(target, "utf-8")).toBe("edited copy");
+  });
+
+  it("removes only a target it created when the copy fails", async () => {
+    const missing = join(root, "missing.part");
+    const taken = join(root, "taken.txt");
+    const fresh = join(root, "fresh.txt");
+    fs.writeFileSync(taken, "another writer");
+
+    await expect(publishByCopy(missing, taken)).rejects.toMatchObject({ code: "EEXIST" });
+    await expect(publishByCopy(missing, fresh)).rejects.toMatchObject({ code: "ENOENT" });
+
+    expect(fs.readFileSync(taken, "utf-8")).toBe("another writer");
+    expect(fs.existsSync(fresh)).toBe(false);
   });
 });
 

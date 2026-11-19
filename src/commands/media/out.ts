@@ -1,13 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  constants,
-  copyFileSync,
-  linkSync,
-  mkdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { closeSync, linkSync, mkdirSync, openSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { ErrorCodes } from "../../types";
@@ -96,23 +88,24 @@ export function lacksHardLinks(err: unknown) {
 }
 
 /** Copy tmp to target unless target exists (EEXIST); not atomic, a reader can see the copy in progress */
-export function publishByCopy(tmp: string, target: string) {
+export async function publishByCopy(tmp: string, target: string) {
+  const fd = openSync(target, "wx");
   try {
-    copyFileSync(tmp, target, constants.COPYFILE_EXCL);
+    await Bun.write(Bun.file(fd), Bun.file(tmp));
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-      rmSync(target, { force: true });
-    }
+    closeSync(fd);
+    rmSync(target, { force: true });
     throw err;
   }
+  closeSync(fd);
 }
 
-function publishNew(tmp: string, target: string) {
+async function publishNew(tmp: string, target: string) {
   try {
     linkSync(tmp, target);
   } catch (err) {
     if (!lacksHardLinks(err)) throw err;
-    publishByCopy(tmp, target);
+    await publishByCopy(tmp, target);
   }
 }
 
@@ -132,7 +125,7 @@ async function publishCopy(
       if (previous && published?.has(previous)) return false;
       renameSync(tmp, target);
     } else {
-      publishNew(tmp, target);
+      await publishNew(tmp, target);
     }
     if (published) published.add(fileKey(target)!);
     return true;
