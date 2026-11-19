@@ -65,9 +65,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tg skill install` and `tg skill validate` work with a corrupt `data.db`, which stopped every
   command with a SQLite stack trace before it started: `data.db` now opens when a command first
   reads an account. Install writes the skill, and validate names the file as an issue.
+- A command acts on the chat and account it checked against
+  `allowedChats`: the check pins the account and hands its resolved chat to the command, so a
+  switch of the active account or a second lookup in between can't move it (#217).
+- A flag a command doesn't declare (`--acount 2`) and a value after a boolean flag
+  (`--silent false`, which ran as `--silent`) are `INVALID_ARGS` instead of being ignored (#217).
+- A Telegram call that succeeded is no longer reported as failed when tg can't write it to its
+  local `api_activity` log, so a retry doesn't repeat a send (#217).
 - The npm package declares `long`, which tg imports directly. Until now it only arrived
   through `@mtcute/core`, so an install that doesn't hoist transitive dependencies could fail
   to start.
+- `tg auth login --phone` works for a user who already has an account under another phone,
+  such as the `user:<id>` account of a QR login or a number they have since changed (#213).
+  The phone moves to that account, which keeps its cache. Until now the login failed with
+  `UNIQUE constraint failed: accounts.phone` and left a second account behind.
+- A login of a user who already has an account under another phone or a QR login gives that
+  account the new session. Until now the account kept its old session, so after the old
+  session was ended in Telegram the login succeeded but the account stayed signed out.
 
 ## [0.14.0] - 2026-11-18
 
