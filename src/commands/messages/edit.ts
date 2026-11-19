@@ -4,6 +4,7 @@ import { ErrorCodes } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { error, success } from "../../utils/output";
+import { checkedChat } from "../access";
 import { readRichFormat } from "../send/rich-message";
 import { EditRefusedError, editMessage, RichCaptionError } from "./edit-message";
 import {
@@ -67,7 +68,8 @@ export const editMessageCommand = defineCommand({
 
     try {
       const deps = openHistory(account.id, "cli:messages.edit");
-      const chat = await resolveHistoryChat(deps.client, args.chat, deps);
+      const chat =
+        checkedChat(args, "chat") ?? (await resolveHistoryChat(deps.client, args.chat, deps));
       success(await editMessage(deps.client, deps.cacheDb, chat, messageId, args.message, format));
     } catch (err) {
       if (err instanceof EditRefusedError) {
