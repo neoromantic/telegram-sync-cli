@@ -351,9 +351,11 @@ and examples are in [search.md](search.md#query-rules).
 Each plain word also matches its other forms in the cache: Russian case forms (`квартира`,
 `квартиру`, `квартирой`), English plurals (`meeting`, `meetings`), with `ё` read as `е`.
 `--exact` turns this off, and a query with FTS5 syntax or `--phrase` is matched as written,
-without forms. The answer's `forms` lists, for each query word as typed, the index words
-searched for (`words`) and whether more were left out (`cut`, past 30); it is `null` when the
-query wasn't expanded, and `filters.exact` says whether `--exact` was given. `next` keeps
+without forms. While `allowedChats` is set, words are matched only as typed, as with `--exact`
+(`forms` is `null`): the forms come from the whole cache and could show words of other chats.
+The answer's `forms` lists, for each query word as typed, the index words searched for
+(`words`) and whether more were left out (`cut`, past 30); it is `null` when the query wasn't
+expanded, and `filters.exact` says whether `--exact` was given. `next` keeps
 `--exact`. How it works, its limits and its measured quality: [search.md](search.md#word-forms).
 From a made-up cache, with each result trimmed to its ID and text:
 

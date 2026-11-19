@@ -182,7 +182,7 @@ export const searchMessagesCommand = defineCommand({
 
     try {
       const search = createMessagesSearch(cacheDb);
-      const expand = !args.exact && !args.phrase && !hasFts5Syntax(query);
+      const expand = allowed === null && !args.exact && !args.phrase && !hasFts5Syntax(query);
       const forms = expand ? findQueryForms(cacheDb, query) : undefined;
 
       const options = {

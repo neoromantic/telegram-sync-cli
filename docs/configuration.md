@@ -294,7 +294,8 @@ while it is set, even to an empty string) limit the commands that read or send t
   cache-first: `@name` and its ID are the same chat, `me` is the account's own user ID (Saved
   Messages), and an ID in the list is taken as written.
 - Commands that read across chats show only allowed ones: `tg chats list` (with `--unread`
-  too), `tg chats search`, `tg messages search` (its `chat:` query filter narrows within them),
+  too), `tg chats search`, `tg messages search` (its `chat:` query filter narrows within them;
+  words match only as typed, without their other forms, which come from the whole cache),
   and `tg messages wait`, `watch` and `unread`, all without `--chat`.
 - `tg sql` and `tg api` can't be limited to some chats, so they fail with `CHAT_NOT_ALLOWED`
   (`details: { command }`) while a list is set.

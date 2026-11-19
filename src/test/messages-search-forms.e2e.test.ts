@@ -180,12 +180,15 @@ describe("E2E: messages search word forms", () => {
     expect(await ids("квартира", "--includeDeleted")).toEqual([1, 2, 3, 8, 9]);
   });
 
-  it("keeps only allowed chats", async () => {
+  it("matches words as typed while allowedChats is set, so no word of another chat shows", async () => {
     const result = await runCliSuccess(["messages", "search", "--query", "квартира"], {
       env: { ...env.getCliOptions().env, TELEGRAM_SYNC_CLI_ALLOWED_CHATS: "@teamchat" },
     });
     const { data } = result.json as SearchAnswer;
-    expect(data.results.map((item) => item.messageId)).toEqual([1, 2]);
+    expect(data.results.map((item) => item.messageId)).toEqual([2]);
+    expect(data.forms).toBeNull();
+    expect(result.stdout).not.toContain("квартирах");
+    expect(result.stdout).not.toContain("квартиры");
   });
 
   it("sorts by relevance, counts, and highlights every form in snippets", async () => {

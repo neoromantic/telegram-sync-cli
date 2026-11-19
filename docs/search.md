@@ -470,6 +470,8 @@ clients read the same file.
   different words share the stem; the answer marks such a word with `cut: true`.
 - The forms are words of the whole index: of deleted messages and of sender and chat names too,
   as a plain word matches them.
+- **Not while `allowedChats` is set**: the words are matched only as typed, as with `--exact`,
+  since the forms of the whole index would show words of chats outside the list.
 - **Quality**, measured on public Russian and English sentences ([storage.md
   §9](storage.md#9-other-word-forms-and-typos)): a Russian word finds 0.70 of the messages with
   any of its forms instead of 0.37, with 0.95 of the results right instead of 1.0; English 0.84
@@ -539,7 +541,8 @@ messages that match with the same filters, over every page, and is `null` withou
 is a second query, so it is opt-in. Page with `--offset` until `results` is empty, or until
 `offset + total` reaches `count`.
 
-`forms` is `null` when the query wasn't expanded: with `--exact`, `--phrase` or FTS5 syntax.
+`forms` is `null` when the query wasn't expanded: with `--exact`, `--phrase`, FTS5 syntax or
+`allowedChats`.
 Otherwise each plain word of the query, as typed, maps to the index words searched for it
 (`words`), and `cut` says whether more forms were left out. A result
 found by another form shows it in its `text`, and `--snippet` highlights it:
