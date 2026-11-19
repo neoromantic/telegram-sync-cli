@@ -244,15 +244,16 @@ describe("filtered list snapshot", () => {
       new Proxy(statement, {
         get(target, prop, receiver) {
           const value = Reflect.get(target, prop, receiver);
-          if (typeof value !== "function" || !["get", "all", "values"].includes(String(prop))) {
+          if (typeof value !== "function" || prop !== "all") {
             return typeof value === "function" ? value.bind(target) : value;
           }
           return (...args: unknown[]) => {
-            if (!fired && sql.includes("history_ranges")) {
+            const result = value.apply(target, args);
+            if (!fired && sql.includes("FROM messages_cache m")) {
               fired = true;
               hook();
             }
-            return value.apply(target, args);
+            return result;
           };
         },
       });
