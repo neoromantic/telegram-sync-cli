@@ -85,10 +85,13 @@ export const unreadMessagesCommand = defineCommand({
         ];
       } else {
         if (fresh || !chatsCache.hasUnreadState()) {
-          const dialogsClient = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
-            context: CONTEXT,
-            accountId: account.id,
-          });
+          const dialogsClient = wrapClientCallWithRateLimits(
+            await getClientForAccount(account.id),
+            {
+              context: CONTEXT,
+              accountId: account.id,
+            },
+          );
           await fetchChatsFromApi(dialogsClient, cacheDb);
         }
         const allowed = await allowedChatIds(account.id);
