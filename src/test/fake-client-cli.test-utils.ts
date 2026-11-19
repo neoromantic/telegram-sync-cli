@@ -40,6 +40,14 @@ if (import.meta.main) {
   const client = {
     async call(request: { _: string; maxId?: number }) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
+      if (request._ === "messages.getHistory") {
+        return {
+          _: "messages.messages",
+          messages: [],
+          chats: [],
+          users: [],
+        };
+      }
       if (request._ === "messages.readHistory" || request._ === "channels.readHistory") {
         console.error(
           `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, maxId: request.maxId })}`,
