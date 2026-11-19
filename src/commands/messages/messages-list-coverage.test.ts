@@ -185,6 +185,25 @@ describe("filtered list coverage", () => {
     expect((await list(db, { limit: 20 }, { since: DATE })).complete).toBe(true);
   });
 
+  it("ignores a media row waiting for its raw message that the page leaves out", async () => {
+    cache(db, [
+      { id: 1, type: "text" },
+      { id: 2, type: "video", rawJson: "{}" },
+      { id: 3, type: "video", rawJson: "{}", date: DATE - 100 },
+      { id: 4, type: "text" },
+    ]);
+    cover(db, 1, 4);
+    db.run("UPDATE messages_cache SET is_deleted = 1 WHERE chat_id = ? AND message_id = 2", [
+      CHAT_ID,
+    ]);
+
+    expect(await list(db, { limit: 20 }, { types: ["round"], since: DATE })).toMatchObject({
+      items: [],
+      complete: true,
+      missing: [],
+    });
+  });
+
   it("marks a gap it can not fill in a group the account left", async () => {
     cache(db, [{ id: 1 }, { id: 5 }]);
     cover(db, 1, 1);

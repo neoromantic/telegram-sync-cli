@@ -479,7 +479,7 @@ export function readFilteredPage(
       filter.types !== undefined && isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION);
     const newestAwaitingRaw =
       filter.types !== undefined && span !== null
-        ? history.newestUntyped(chatId, span.low, span.high)
+        ? history.newestUntyped(chatId, span.low, span.high, { ...filter, includeDeleted })
         : null;
     const untyped =
       migrating || newestAwaitingRaw !== null ? { migrating, newestAwaitingRaw } : null;

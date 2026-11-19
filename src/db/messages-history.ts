@@ -48,8 +48,13 @@ export interface MessagesHistory {
   firstSentFrom(chatId: number, low: number, high: number, time: number): number | null;
   /** The highest cached message ID from `low` to `high` sent before `time` */
   lastSentBefore(chatId: number, low: number, high: number, time: number): number | null;
-  /** The newest message from `low` to `high` with no type yet (AWAITING_RAW_MESSAGE) */
-  newestUntyped(chatId: number, low: number, high: number): number | null;
+  /** The newest untyped row (AWAITING_RAW_MESSAGE) from `low` to `high` a page would list */
+  newestUntyped(
+    chatId: number,
+    low: number,
+    high: number,
+    options: Pick<MessageFilter, "since" | "until"> & { includeDeleted: boolean },
+  ): number | null;
 }
 
 export function createMessagesHistory(db: Database) {
@@ -147,14 +152,24 @@ export function createMessagesHistory(db: Database) {
       return row.id;
     },
 
-    newestUntyped(chatId, low, high) {
+    newestUntyped(chatId, low, high, { includeDeleted, since, until }) {
       const row = db
         .query(`
           SELECT MAX(m.message_id) AS id FROM messages_cache m
-          WHERE m.chat_id = ? AND m.message_id BETWEEN ? AND ?
+          WHERE m.chat_id = $chat_id AND m.message_id BETWEEN $low AND $high
             AND ${AWAITING_RAW_MESSAGE}
+            AND ($deleted = 1 OR m.is_deleted = 0)
+            AND ($since IS NULL OR m.date >= $since)
+            AND ($until IS NULL OR m.date < $until)
         `)
-        .get(chatId, low, high) as { id: number | null };
+        .get({
+          $chat_id: chatId,
+          $low: low,
+          $high: high,
+          $deleted: includeDeleted ? 1 : 0,
+          $since: since ?? null,
+          $until: until ?? null,
+        }) as { id: number | null };
       return row.id;
     },
   };
