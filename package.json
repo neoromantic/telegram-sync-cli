@@ -43,7 +43,7 @@
     "build:minify": "bun build ./src/index.ts --compile --minify --sourcemap --outfile dist/tg",
     "build:all": "bun run scripts/build-all.ts",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run check:knip",
-    "check:knip": "knip",
+    "check:knip": "knip --cache",
     "typecheck": "tsc --noEmit",
     "test": "bun test --parallel --timings=test-timings.json --path-ignore-patterns='**/*.e2e.test.ts' --path-ignore-patterns='**/*.integration.test.ts'",
     "test:e2e": "bun test --parallel --timings=test-timings.json --timeout 30000 .e2e.test.ts",
