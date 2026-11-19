@@ -1,35 +1,26 @@
-/**
- * Output utilities for consistent CLI output
- */
-import {
-  ExitPending,
-  exitAfterFlush,
-  isExiting,
-  reportCliError,
-} from '../telemetry'
+import { ExitPending, exitAfterFlush, isExiting, reportCliError } from "../telemetry";
 import {
   type ErrorCode,
   ErrorCodes,
   type NextCommand,
   type Output,
   type OutputFormat,
-} from '../types'
+} from "../types";
 
-/** Current output format (can be overridden per-command) */
-let currentFormat: OutputFormat = 'json'
+let currentFormat: OutputFormat = "json";
 
 /**
  * Set the output format
  */
-export function setOutputFormat(format: OutputFormat): void {
-  currentFormat = format
+export function setOutputFormat(format: OutputFormat) {
+  currentFormat = format;
 }
 
 /**
  * Get current output format
  */
-export function getOutputFormat(): OutputFormat {
-  return currentFormat
+export function getOutputFormat() {
+  return currentFormat;
 }
 
 /**
@@ -37,70 +28,61 @@ export function getOutputFormat(): OutputFormat {
  * Note: In production mode, this exits the process to close any active connections.
  * In test mode, this just logs and returns.
  */
-export function success<T>(data: T, next: NextCommand[] = []): void {
-  // An exit is under way: the run already printed its result
-  if (isExiting()) return
+export function success<T>(data: T, next: NextCommand[] = []) {
+  if (isExiting()) return;
   const result: Output<T> =
-    next.length > 0 ? { success: true, data, next } : { success: true, data }
+    next.length > 0 ? { success: true, data, next } : { success: true, data };
 
   switch (currentFormat) {
-    case 'json':
-      console.log(JSON.stringify(result, null, 2))
-      break
-    case 'pretty':
-      console.log(JSON.stringify(data, null, 2))
-      // stderr keeps stdout the data's JSON alone
+    case "json":
+      console.log(JSON.stringify(result, null, 2));
+      break;
+    case "pretty":
+      console.log(JSON.stringify(data, null, 2));
       for (const { command, why } of next) {
-        console.error(`Next: ${why}\n  ${command}`)
+        console.error(`Next: ${why}\n  ${command}`);
       }
-      break
-    case 'quiet':
-      // No output for quiet mode
-      break
+      break;
+    case "quiet":
+      break;
   }
 
-  exitAfterSuccess()
+  exitAfterSuccess();
 }
 
 /**
  * Output text as is, without the success wrapper or the output format
  * (`tg api --raw`). Exits in production, as success() does.
  */
-export function raw(text: string): void {
-  if (isExiting()) return
-  console.log(text)
-  exitAfterSuccess()
+export function raw(text: string) {
+  if (isExiting()) return;
+  console.log(text);
+  exitAfterSuccess();
 }
 
 /**
  * Write a file's bytes to stdout as they are, without JSON (`tg media
  * download --out -`). Exits in production, as success() does.
  */
-export async function rawFile(path: string): Promise<void> {
-  await Bun.write(Bun.stdout, Bun.file(path))
-  exitAfterSuccess()
+export async function rawFile(path: string) {
+  await Bun.write(Bun.stdout, Bun.file(path));
+  exitAfterSuccess();
 }
 
-/**
- * In production mode, exit to close any active connections (e.g., mtcute TelegramClient)
- * This prevents the process from hanging when the event loop is kept alive by open sockets.
- * Only the daemon's exit waits for usage stats, up to 500 ms.
- */
-function exitAfterSuccess(): void {
-  if (process.env.BUN_ENV !== 'test' && process.env.NODE_ENV !== 'test') {
-    void exitAfterFlush(0)
+function exitAfterSuccess() {
+  if (process.env.BUN_ENV !== "test" && process.env.NODE_ENV !== "test") {
+    void exitAfterFlush(0);
   }
 }
 
-/** Codes whose command can succeed when run again unchanged */
 const RETRYABLE_CODES: ReadonlySet<ErrorCode> = new Set([
   ErrorCodes.RATE_LIMITED,
   ErrorCodes.NETWORK_ERROR,
-])
+]);
 
 /** Whether an error of this code is retryable unless its caller says otherwise */
-export function isRetryableCode(code: ErrorCode): boolean {
-  return RETRYABLE_CODES.has(code)
+export function isRetryableCode(code: ErrorCode) {
+  return RETRYABLE_CODES.has(code);
 }
 
 /**
@@ -114,46 +96,39 @@ export function error(
   suggestion?: string,
   retryable = isRetryableCode(code),
 ): never {
-  // An exit is under way: the run already reported its outcome
-  if (isExiting()) throw new ExitPending()
+  if (isExiting()) throw new ExitPending();
   const result: Output<never> = {
     success: false,
     error: { code, message, details, suggestion, retryable },
+  };
+
+  if (currentFormat !== "quiet") {
+    console.error(JSON.stringify(result, null, 2));
   }
 
-  if (currentFormat !== 'quiet') {
-    console.error(JSON.stringify(result, null, 2))
-  }
-
-  // In test mode, throw instead of exiting
-  if (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') {
+  if (process.env.BUN_ENV === "test" || process.env.NODE_ENV === "test") {
     const err = new Error(message) as Error & {
-      code: ErrorCode
-      details?: Record<string, unknown>
-      suggestion?: string
-      retryable: boolean
-    }
-    err.code = code
-    err.details = details
-    err.suggestion = suggestion
-    err.retryable = retryable
-    throw err
+      code: ErrorCode;
+      details?: Record<string, unknown>;
+      suggestion?: string;
+      retryable: boolean;
+    };
+    err.code = code;
+    err.details = details;
+    err.suggestion = suggestion;
+    err.retryable = retryable;
+    throw err;
   }
 
-  // The code (or Telegram's RPC error name) only: messages can name chats,
-  // users or a query
-  reportCliError(code, message)
-  // Exits at once, or in the daemon after up to 500 ms of sending usage
-  // stats. Then the throw ends the command, and src/index.ts holds it until
-  // the exit.
-  void exitAfterFlush(getExitCode(code))
-  throw new ExitPending()
+  reportCliError(code, message);
+  void exitAfterFlush(getExitCode(code));
+  throw new ExitPending();
 }
 
 /**
  * Map error code to exit code
  */
-export function getExitCode(code: ErrorCode): number {
+export function getExitCode(code: ErrorCode) {
   const exitCodes: Record<ErrorCode, number> = {
     AUTH_REQUIRED: 2,
     INVALID_ARGS: 3,
@@ -182,25 +157,25 @@ export function getExitCode(code: ErrorCode): number {
     FILE_EXISTS: 1,
     READ_ONLY: 1,
     CHAT_NOT_ALLOWED: 1,
-  }
+  };
 
-  return exitCodes[code] ?? 1
+  return exitCodes[code] ?? 1;
 }
 
 /**
  * Log verbose output (only in verbose mode)
  */
-export function verbose(message: string): void {
-  if (process.env.VERBOSE === '1') {
-    console.error(`[verbose] ${message}`)
+export function verbose(message: string) {
+  if (process.env.VERBOSE === "1") {
+    console.error(`[verbose] ${message}`);
   }
 }
 
 /**
  * Log info message (not in quiet mode)
  */
-export function info(message: string): void {
-  if (currentFormat !== 'quiet' && !isExiting()) {
-    console.error(message)
+export function info(message: string) {
+  if (currentFormat !== "quiet" && !isExiting()) {
+    console.error(message);
   }
 }

@@ -1,17 +1,17 @@
-import { defineCommand } from 'citty'
+import { defineCommand } from "citty";
 
-import { getChatCommand } from './chats/get'
-import { listChatsCommand } from './chats/list'
-import { searchChatsCommand } from './chats/search'
-import { syncChatCommand } from './chats/sync'
+import { getChatCommand } from "./chats/get";
+import { listChatsCommand } from "./chats/list";
+import { searchChatsCommand } from "./chats/search";
+import { syncChatCommand } from "./chats/sync";
 
 /**
  * Chats subcommand group
  */
 export const chatsCommand = defineCommand({
   meta: {
-    name: 'chats',
-    description: 'Chat and dialog management commands',
+    name: "chats",
+    description: "Chat and dialog management commands",
   },
   subCommands: {
     list: listChatsCommand,
@@ -19,6 +19,6 @@ export const chatsCommand = defineCommand({
     get: getChatCommand,
     sync: syncChatCommand,
   },
-})
+});
 
-export { getChatCommand, listChatsCommand, searchChatsCommand, syncChatCommand }
+export { getChatCommand, listChatsCommand, searchChatsCommand, syncChatCommand };

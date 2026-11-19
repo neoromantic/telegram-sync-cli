@@ -1,0 +1,172 @@
+import type { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it, type mock } from "bun:test";
+import {
+  CATCH_UP_MIN_INTERVAL_MS,
+  CATCH_UP_SETTLE_MS,
+  createConnectionWatch,
+  detectWake,
+  noteConnectionState,
+  runDueCatchUps,
+} from "./daemon-catch-up";
+import { createSyncScheduler } from "./scheduler";
+import type { AccountConnectionState } from "./types";
+import { createChatSyncStateService } from "../db/chat-sync-state";
+import { createMessagesCache } from "../db/messages-cache";
+import { createSyncJobsService } from "../db/sync-jobs";
+import { SyncJobType, SyncPriority } from "../db/sync-schema";
+import { createAccountCacheDb } from "../test/cache-db.test-utils";
+import { addAccountRuntime, testDaemonContext } from "../test/daemon-runtime.test-utils";
+import { fakeDialogClient } from "../test/fake-dialogs.test-utils";
+
+const T0 = Date.UTC(2026, 0, 1);
+const HOUR = 3_600_000;
+
+describe("noteConnectionState", () => {
+  it("ignores a short blip, such as a reconnect after a ping timeout", () => {
+    const watch = createConnectionWatch();
+    noteConnectionState(watch, "connecting", T0);
+    noteConnectionState(watch, "connected", T0 + 3_000);
+    noteConnectionState(watch, "updating", T0 + 3_500);
+    noteConnectionState(watch, "connected", T0 + 4_000);
+
+    expect(watch.pending).toBeUndefined();
+    expect(watch.online).toBe(true);
+  });
+
+  it("debounces a flapping connection: one pass in 5 minutes", () => {
+    const watch = createConnectionWatch();
+    watch.lastCatchUpAt = T0;
+    noteConnectionState(watch, "offline", T0 + 60_000);
+    noteConnectionState(watch, "connected", T0 + 90_000);
+    expect(watch.pending?.dueAt).toBe(T0 + CATCH_UP_MIN_INTERVAL_MS);
+
+    noteConnectionState(watch, "offline", T0 + 100_000);
+    noteConnectionState(watch, "connected", T0 + 102_000);
+    expect(watch.pending).toMatchObject({
+      offlineMs: 30_000,
+      dueAt: T0 + CATCH_UP_MIN_INTERVAL_MS,
+    });
+  });
+});
+
+describe("catch-up after a reconnect or a wake", () => {
+  let cacheDb: Database;
+  let jobsService: ReturnType<typeof createSyncJobsService>;
+  let chatSyncState: ReturnType<typeof createChatSyncStateService>;
+
+  beforeEach(() => {
+    cacheDb = createAccountCacheDb();
+    jobsService = createSyncJobsService(cacheDb);
+    chatSyncState = createChatSyncStateService(cacheDb);
+    for (const userId of [1001, 1002]) {
+      chatSyncState.upsert({
+        chat_id: userId,
+        chat_type: "private",
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 1000,
+        backward_cursor: 1,
+      });
+      chatSyncState.markHistoryComplete(userId);
+      chatSyncState.raiseTopMessageId(userId, 1000);
+    }
+  });
+
+  afterEach(() => {
+    cacheDb.close();
+  });
+
+  function connectedAccount() {
+    const ctx = testDaemonContext();
+    const rt = addAccountRuntime(ctx, 1, cacheDb, {
+      scheduler: createSyncScheduler({
+        db: cacheDb,
+        jobsService,
+        chatSyncState,
+        messagesCache: createMessagesCache(cacheDb),
+      }),
+    });
+    const fake = fakeDialogClient([
+      { kind: "user", id: 1001, topMessage: 1000 },
+      { kind: "user", id: 1002, topMessage: 1004 },
+    ]);
+    const accountState: AccountConnectionState = {
+      accountId: 1,
+      phone: "+15550000001",
+      name: null,
+      status: "connected",
+      client: fake.client,
+      watch: createConnectionWatch(),
+    };
+    ctx.state.accounts.set(1, accountState);
+    return { ctx, rt, fake, accountState };
+  }
+
+  const pendingCatchUps = () =>
+    jobsService
+      .getPendingJobs()
+      .filter((job) => job.job_type === SyncJobType.ForwardCatchup)
+      .map((job) => job.chat_id);
+
+  it("queues catch-up on the same client after mtcute reconnected on its own", async () => {
+    const { ctx, rt, fake, accountState } = connectedAccount();
+    const watch = accountState.watch!;
+    noteConnectionState(watch, "connecting", T0);
+    noteConnectionState(watch, "offline", T0 + 1_000);
+    noteConnectionState(watch, "connected", T0 + 9 * HOUR);
+
+    expect(runDueCatchUps(ctx, T0 + 9 * HOUR + 1_000)).toEqual([]);
+    const started = runDueCatchUps(ctx, T0 + 9 * HOUR + CATCH_UP_SETTLE_MS);
+    expect(started).toHaveLength(1);
+    await Promise.all(started);
+
+    expect(fake.calls).toEqual([{ archived: "keep" }]);
+    expect(accountState.client).toBe(fake.client);
+    expect(chatSyncState.get(1002)?.top_message_id).toBe(1004);
+    expect(pendingCatchUps()).toEqual([1002]);
+    expect((ctx.logger.info as ReturnType<typeof mock>).mock.calls).toEqual([
+      ["[Account 1] Reconnected after 9 h offline: dialog pass, 1 chat(s) to catch up"],
+    ]);
+    expect(rt.statusService.getDaemonInfo().lastCatchUp).toMatchObject({
+      reason: "reconnect",
+      offlineMs: 9 * HOUR,
+      chats: 1,
+    });
+
+    expect(runDueCatchUps(ctx, T0 + 10 * HOUR)).toEqual([]);
+  });
+
+  it("catches up after a jump of the wall clock between loop ticks (a wake), once connected", async () => {
+    const { ctx, rt, fake, accountState } = connectedAccount();
+    expect(detectWake(ctx, T0)).toBeNull();
+    expect(detectWake(ctx, T0 + 2_000)).toBeNull();
+    const woke = T0 + 2_000 + HOUR;
+    expect(detectWake(ctx, woke)).toBe(HOUR);
+    noteConnectionState(accountState.watch!, "connecting", woke + 1_000);
+
+    expect(runDueCatchUps(ctx, woke + 60_000)).toEqual([]);
+
+    noteConnectionState(accountState.watch!, "connected", woke + 62_000);
+    await Promise.all(runDueCatchUps(ctx, woke + 62_000 + CATCH_UP_SETTLE_MS));
+    expect(fake.calls).toHaveLength(1);
+    expect(pendingCatchUps()).toEqual([1002]);
+    expect(ctx.logger.info).toHaveBeenCalledWith(
+      "[Account 1] Woke after 1 h asleep: dialog pass, 1 chat(s) to catch up",
+    );
+    expect(rt.statusService.getDaemonInfo().lastCatchUp?.reason).toBe("wake");
+  });
+
+  it("skips an account that is reconnecting, and every account while the daemon stops", () => {
+    const { ctx, accountState } = connectedAccount();
+    noteConnectionState(accountState.watch!, "offline", T0);
+    noteConnectionState(accountState.watch!, "connected", T0 + HOUR);
+
+    accountState.status = "reconnecting";
+    expect(runDueCatchUps(ctx, T0 + 2 * HOUR)).toEqual([]);
+
+    accountState.status = "connected";
+    ctx.state.shutdownRequested = true;
+    expect(runDueCatchUps(ctx, T0 + 2 * HOUR)).toEqual([]);
+    expect(accountState.watch?.pending).toBeDefined();
+  });
+});

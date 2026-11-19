@@ -6,33 +6,33 @@
 
 ## Command Index
 
-| Command | Notes |
-|---------|-------|
-| `auth` | login, login-qr, logout, status |
-| `accounts` | list, switch, remove, info |
-| `contacts` | list, search, get (cached; supports `--fresh`) |
-| `chats` | list, search (cache-only), get (@username only), sync (cache-only) |
-| `messages` | list, get (cache-first, `--fresh`), search (FTS5, cache-only), wait and watch (new messages the daemon stores), unread (cache, `--fresh`), read (marks a chat read on Telegram) |
-| `send` | send a message or one file (`--to`, `--message`, `--file`) |
-| `media` | download (cache-first), clean |
-| `api` | raw Telegram API calls |
-| `me` | current user |
-| `user` | user lookup |
-| `status` | system status |
-| `daemon` | start/stop/status |
-| `db` | vacuum: prune an account's cache and give its free space back to the disk; migrate: finish its background migrations |
-| `sql` | read-only cache queries |
-| `telemetry` | status, on, off: [usage stats](configuration.md#usage-stats) |
+| Command     | Notes                                                                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`      | login, login-qr, logout, status                                                                                                                                                 |
+| `accounts`  | list, switch, remove, info                                                                                                                                                      |
+| `contacts`  | list, search, get (cached; supports `--fresh`)                                                                                                                                  |
+| `chats`     | list, search (cache-only), get (@username only), sync (cache-only)                                                                                                              |
+| `messages`  | list, get (cache-first, `--fresh`), search (FTS5, cache-only), wait and watch (new messages the daemon stores), unread (cache, `--fresh`), read (marks a chat read on Telegram) |
+| `send`      | send a message or one file (`--to`, `--message`, `--file`)                                                                                                                      |
+| `media`     | download (cache-first), clean                                                                                                                                                   |
+| `api`       | raw Telegram API calls                                                                                                                                                          |
+| `me`        | current user                                                                                                                                                                    |
+| `user`      | user lookup                                                                                                                                                                     |
+| `status`    | system status                                                                                                                                                                   |
+| `daemon`    | start/stop/status                                                                                                                                                               |
+| `db`        | vacuum: prune an account's cache and give its free space back to the disk; migrate: finish its background migrations                                                            |
+| `sql`       | read-only cache queries                                                                                                                                                         |
+| `telemetry` | status, on, off: [usage stats](configuration.md#usage-stats)                                                                                                                    |
 
 ## Global Flags
 
 Available on the root command:
 
-| Flag | Short | Description | Default |
-|------|-------|-------------|---------|
-| `--format` | `-f` | Output format: `json`, `pretty`, `quiet` | `json` |
-| `--verbose` | `-v` | Verbose logging | Off |
-| `--quiet` | `-q` | Minimal output | Off |
+| Flag        | Short | Description                              | Default |
+| ----------- | ----- | ---------------------------------------- | ------- |
+| `--format`  | `-f`  | Output format: `json`, `pretty`, `quiet` | `json`  |
+| `--verbose` | `-v`  | Verbose logging                          | Off     |
+| `--quiet`   | `-q`  | Minimal output                           | Off     |
 
 > `--account` and `--fresh` are **per-command** options where supported. `--account` accepts an ID, `@username`, or label,
 > and picks the account whose cache the command reads and writes: each account has its own,
@@ -83,6 +83,7 @@ account joined once a daemon start or `tg chats list --fresh` has cached them.
 
 The `data` of `tg chats list`:
 
+<!-- prettier-ignore-start -->
 <!-- output: chats list -->
 | Field | Type | Description |
 |---|---|---|
@@ -106,6 +107,7 @@ The `data` of `tg chats list`:
 | `source` | `cache` or `api` | `cache`, or `api` with `--fresh` or when the cache has no matching chat |
 | `stale` | boolean | A matching cached chat is older than `cache.staleness.dialogs`; always `false` from the API |
 <!-- /output -->
+<!-- prettier-ignore-end -->
 
 `--unread` lists only chats with unread messages, in the same order; it answers from the cache
 once a dialog list has given the chats their counts, and otherwise reads the dialog list from
@@ -286,16 +288,16 @@ says what happened. It is read from `raw_json` too, and `type` is always set:
 { "type": "phone_call", "video": false, "duration": 1834, "reason": "hangup" }
 ```
 
-| `type` | Other fields |
-| --- | --- |
-| `phone_call` | `video`; `duration` in seconds, `null` for a call nobody answered; `reason` it ended: `missed`, `busy` (declined), `hangup`, `disconnect`, or `null` |
-| `group_call` | `duration`: `null` when the video chat started, seconds when it ended |
-| `pin_message` | `messageId`, the pinned message (`null` if Telegram didn't say) |
-| `chat_create` | `title`, `userIds` |
-| `channel_create`, `chat_edit_title`, `topic_create` | `title`, the new title |
-| `chat_add_user` | `userIds` added (a user who joined adds themself) |
-| `chat_delete_user` | `userId` removed (the sender, when they left) |
-| `chat_joined_by_link` | `inviterId`, who made the link |
+| `type`                                              | Other fields                                                                                                                                         |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `phone_call`                                        | `video`; `duration` in seconds, `null` for a call nobody answered; `reason` it ended: `missed`, `busy` (declined), `hangup`, `disconnect`, or `null` |
+| `group_call`                                        | `duration`: `null` when the video chat started, seconds when it ended                                                                                |
+| `pin_message`                                       | `messageId`, the pinned message (`null` if Telegram didn't say)                                                                                      |
+| `chat_create`                                       | `title`, `userIds`                                                                                                                                   |
+| `channel_create`, `chat_edit_title`, `topic_create` | `title`, the new title                                                                                                                               |
+| `chat_add_user`                                     | `userIds` added (a user who joined adds themself)                                                                                                    |
+| `chat_delete_user`                                  | `userId` removed (the sender, when they left)                                                                                                        |
+| `chat_joined_by_link`                               | `inviterId`, who made the link                                                                                                                       |
 
 Any other action has only `type`, its Telegram name in snake case without `messageAction`
 (`chat_edit_photo`, `screenshot_taken`, `history_clear`…), so nothing is dropped. Search doesn't
@@ -311,9 +313,9 @@ Telegram's rich Markdown, the syntax a rich message is sent with
 
 Harvest is **on track**
 
-| Crop | Kg |
-|---|---:|
-| Zucchini | 12 |
+| Crop     |  Kg |
+| -------- | --: |
+| Zucchini |  12 |
 ```
 
 Headings are `#`, styles `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `==marked==`,
@@ -423,8 +425,13 @@ basic group or Saved Messages and `channels.readHistory` for a supergroup or cha
 the chat's dialog (`messages.getPeerDialogs`) and writes its new unread state to the cache:
 
 ```json
-{ "chatId": -1001234567890, "maxId": null, "method": "channels.readHistory",
-  "unreadCount": 0, "readInboxMaxId": 1185 }
+{
+  "chatId": -1001234567890,
+  "maxId": null,
+  "method": "channels.readHistory",
+  "unreadCount": 0,
+  "readInboxMaxId": 1185
+}
 ```
 
 `maxId` is the `--max-id` passed, `null` for everything. Like `tg send`, it is a Telegram
@@ -449,14 +456,14 @@ the account hasn't written in for 90 days
 `TELEGRAM_ERROR` (exit 5) with Telegram's error name in `details.telegramError`, beside `chatId`
 and `messageId`, and the cached message stays as it was:
 
-| `details.telegramError` | Meaning |
-|-------------------------|---------|
-| `MESSAGE_NOT_MODIFIED` | the message already has this text |
-| `MESSAGE_ID_INVALID` | the chat has no message with this ID that can be edited |
-| `MESSAGE_AUTHOR_REQUIRED` | someone else sent the message |
-| `MESSAGE_EDIT_TIME_EXPIRED` | the message is too old to edit |
-| `MESSAGE_TOO_LONG`, `MEDIA_CAPTION_TOO_LONG` | the text is too long for a message, or for a caption |
-| `CHAT_WRITE_FORBIDDEN`, `CHAT_ADMIN_REQUIRED` | no permission to edit messages in this chat |
+| `details.telegramError`                       | Meaning                                                 |
+| --------------------------------------------- | ------------------------------------------------------- |
+| `MESSAGE_NOT_MODIFIED`                        | the message already has this text                       |
+| `MESSAGE_ID_INVALID`                          | the chat has no message with this ID that can be edited |
+| `MESSAGE_AUTHOR_REQUIRED`                     | someone else sent the message                           |
+| `MESSAGE_EDIT_TIME_EXPIRED`                   | the message is too old to edit                          |
+| `MESSAGE_TOO_LONG`, `MEDIA_CAPTION_TOO_LONG`  | the text is too long for a message, or for a caption    |
+| `CHAT_WRITE_FORBIDDEN`, `CHAT_ADMIN_REQUIRED` | no permission to edit messages in this chat             |
 
 Any other failure is `Failed to edit the message: <Telegram's error>`. Deleting, forwarding and
 pinning still go through `tg api`
@@ -940,7 +947,13 @@ Errors:
 ```json
 {
   "success": false,
-  "error": { "code": "INVALID_ARGS", "message": "...", "details": {}, "suggestion": "...", "retryable": false }
+  "error": {
+    "code": "INVALID_ARGS",
+    "message": "...",
+    "details": {},
+    "suggestion": "...",
+    "retryable": false
+  }
 }
 ```
 
@@ -976,13 +989,13 @@ A success answer may add `next`, the commands that continue the read, beside `da
 - `--format pretty` prints each suggestion on stderr as `Next: <why>` and the command on the
   line below, so stdout stays the data's JSON; `--quiet` prints nothing.
 
-| Command | `next` |
-| --- | --- |
-| `tg messages list` | after a full page: `--before <nextBefore>` (older), or with `--after`, `--after <nextAfter>` (newer); none past message 1 |
-| `tg messages search` | when another page has matches: `--offset <offset + limit>` |
-| `tg chats list`, `tg contacts list` | when `hasMore`: `--offset <offset + limit>`; `--fresh` is kept, so the page comes from the same list |
-| `tg messages wait --chat` | after new messages: the same wait with `--after` the newest of them |
-| `tg chats search` | with no result: `tg chats list --fresh`, then the same search |
+| Command                             | `next`                                                                                                                    |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `tg messages list`                  | after a full page: `--before <nextBefore>` (older), or with `--after`, `--after <nextAfter>` (newer); none past message 1 |
+| `tg messages search`                | when another page has matches: `--offset <offset + limit>`                                                                |
+| `tg chats list`, `tg contacts list` | when `hasMore`: `--offset <offset + limit>`; `--fresh` is kept, so the page comes from the same list                      |
+| `tg messages wait --chat`           | after new messages: the same wait with `--after` the newest of them                                                       |
+| `tg chats search`                   | with no result: `tg chats list --fresh`, then the same search                                                             |
 
 The cursors (`nextBefore`, `nextAfter`, `hasMore`, `offset`) and `message` stay as they were;
 `next` only spells out the command they lead to.

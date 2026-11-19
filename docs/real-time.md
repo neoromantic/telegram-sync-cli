@@ -13,6 +13,7 @@ mtcute provides event-based update handling, which the daemon wires per account:
   [Unread counts](#unread-counts))
 
 Handlers live in:
+
 - `src/daemon/daemon-accounts.ts`
 - `src/daemon/handlers.ts`
 
@@ -85,6 +86,7 @@ next pass. Without a running daemon they are as old as the last dialog list; `tg
 ### Message Type Mapping
 
 Media types are normalized to `message_type` values such as:
+
 - `text`, `photo`, `video`, `document`, `sticker`, `voice`, `audio`
 - `poll`, `contact`, `location`, `venue`, `game`, `invoice`, `webpage`, `dice`
 - `service` for service messages

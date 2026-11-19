@@ -2,6 +2,7 @@
 
 <!-- devkit:agents v1 -->
 <!-- managed by devkit v1: edit in https://github.com/neoromantic/devkit/blob/main/agents/AGENTS.shared.md -->
+
 ## Shared rules (devkit)
 
 These rules apply to people and coding agents in every repo that uses
@@ -12,29 +13,54 @@ Where they conflict, the project section wins.
 
 - Use only made-up data in tests, fixtures, examples, docs and screenshots. No real people, chats,
   phone numbers, tokens, session files or local paths such as home directories.
-- Never commit `.env` files or credentials. Tests run offline by default; live API tests are
-  opt-in and read their credentials from the environment.
+- Never commit `.env` files with values, or credentials; `.env.example` and password-manager
+  reference files are fine. Tests run offline by default; live API tests are opt-in and read
+  their credentials from the environment.
 
 ### Commands
 
 Use the project section's native commands for checks, offline tests and builds:
 
 - Bun: `bun run <script>` (`check`, or `lint` and `typecheck`; `test`, `test:e2e`, `build`).
+  `bun run format` formats; `check` fails on unformatted code and on lint errors.
 - Python: the documented `uv run` / `uvx` commands, such as pytest, unittest and ruff.
 - Go: the documented `go` commands from `go.mod`. Do not add Bun wrappers for Python or Go.
 - Use Bun, uv or Go modules for installs. Use npm only for `npm publish` and `npm view`.
 
+### Code
+
+- Make the smallest change that works, then make it smaller. No drive-by refactors.
+- Validate input at the boundaries (CLI arguments, HTTP, files, environment) and trust it
+  inside: no fallbacks or checks for states that can't happen, no compatibility code for
+  callers that don't exist. Published interfaces change only as the release procedure allows.
+- No helpers or abstractions for logic with a single caller. More in the
+  [code patterns standard](https://github.com/neoromantic/devkit/blob/main/docs/standards/code-patterns.md).
+
 ### Definition of done
 
 - The change works end to end and the project's applicable checks and tests pass locally.
+  Verify with targeted checks and builds for what changed; wait for a full CI run only when the
+  task needs its result. Required checks still gate the merge.
 - README, docs and affected demos change with the behaviour they describe; follow the
   [product content standard](https://github.com/neoromantic/devkit/blob/main/docs/standards/product-content.md).
 - No new warnings, no commented-out code, no stray debug output.
+- JS and TS follow the [lint and format standard](https://github.com/neoromantic/devkit/blob/main/docs/standards/lint-format.md):
+  no prose comments (rationale goes in the PR), tests beside their code, no mocks of the code
+  under test, no fixed sleeps or retries. Fix the code; exceptions go in `.oxlintrc.json`.
+- A test names the behaviour it protects and fails on a believable bug. Strengthen the test that
+  owns a contract instead of adding another; delete tests that repeat one or restate the code.
+  Tests run in parallel workers, each with its own temp dir, port, database and environment
+  ([testing standard](https://github.com/neoromantic/devkit/blob/main/docs/standards/testing.md)).
+- A pull request's CI runs one runtime version and only the jobs its diff can affect; other
+  versions and platforms run after merge, on a schedule or on request
+  ([CI speed standard](https://github.com/neoromantic/devkit/blob/main/docs/standards/ci-speed.md)).
 
 ### Commits and releases
 
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`, `ci:`.
-  A breaking change adds `!` (`feat!:`) and a `BREAKING CHANGE:` footer.
+  A breaking change adds `!` (`feat!:`) and a `BREAKING CHANGE:` footer. In a monorepo the
+  scope names the workspace (`feat(web):`). With squash merges the pull request title is the
+  commit title and follows the same format.
 - One logical change per commit. Never rewrite published history or force-push `main`.
 - Follow the project's documented release procedure, including any owner-only steps. It defines
   versioning, tags, changelog and delivery (release, skill revision or production deployment).
@@ -46,8 +72,10 @@ Use the project section's native commands for checks, offline tests and builds:
 - Don't add agent hooks that rewrite tracked files.
 - `AGENTS.md` is the canonical instruction file. `CLAUDE.md` contains only `@AGENTS.md`.
 - Files marked "managed by devkit" (this block, `SECURITY.md`, `CONTRIBUTING.md`, the PR
-  template, `.gitleaks.toml`, `.github/zizmor.yml`, `renovate.json`, `lefthook.yml` and the
-  CI stub) are synced from devkit. Change them there, not here.
+  template, `.gitleaks.toml`, `.github/zizmor.yml`, `renovate.json`, `lefthook.yml`, the
+  CI stub, `.oxfmtrc.jsonc`, the `.oxlintrc.devkit*.jsonc` configs and the usage telemetry
+  clients) are synced from devkit. Change them there, not here.
+
 <!-- /devkit:agents -->
 
 ## Project
@@ -60,14 +88,15 @@ and raw access to any MTProto method. It runs on Bun and is built on
 
 ```bash
 bun run src/index.ts <command>   # run the CLI from source
-bun run check                    # lint (Biome) + typecheck + check:knip
+bun run check                    # format:check (oxfmt) + lint (oxlint) + typecheck + check:knip
+bun run format                   # format the repo with oxfmt
 bun run check:knip               # Knip: unused files and dependencies, unlisted or unresolved imports
-bun run test                     # unit tests, offline
-bun run test:e2e                 # CLI e2e tests, offline
+bun run test                     # unit tests, offline, in parallel workers
+bun run test:e2e                 # CLI e2e tests, offline, in parallel workers
+bun test --changed=main          # quick pass: test files that import a file changed since main
 bun run build                    # compile dist/tg for this platform
 bun run build:all                # cross-compile every target
 bun run test:integration         # real Telegram API, opt-in (see Testing)
-bun run lint:fix                 # Biome autofix (also the pre-commit hook)
 bun run bench:storage            # storage benchmark on made-up data, opt-in (docs/storage.md)
 bun run docs:outputs             # regenerate output tables in docs/cli-commands.md
 ```
@@ -81,8 +110,12 @@ bun run docs:outputs             # regenerate output tables in docs/cli-commands
 - The compiled binary (70–100 MB, embedded Bun + SQLite) is never shipped in the npm tarball.
   The release workflow attaches one per target to the GitHub Release, and the Homebrew formula
   `neoromantic/tap/tg` installs it. Targets: darwin arm64/x64, linux x64/arm64, windows x64.
-- Git hooks: `lefthook.yml` runs `lint:fix` and `typecheck` on commit, plus devkit's gitleaks
-  and privacy scan (needs `gitleaks` on `PATH`).
+- Lint and format: oxfmt and oxlint with the landmines rules, devkit's shared standard
+  (`.oxfmtrc.jsonc`, `.oxlintrc.devkit.jsonc`). This repo's exceptions go in `.oxlintrc.json`,
+  paths oxfmt must leave alone in `.prettierignore`. The landmines rules need Node >= 22.18 on
+  `PATH`.
+- Git hooks: `lefthook.yml` runs `typecheck` on commit, plus devkit's shared hooks: gitleaks, the
+  privacy scan and the oxfmt/oxlint check of staged files (needs `gitleaks` on `PATH`).
 - CI: `.github/workflows/ci.yml` calls devkit's `ci-bun` (check, build, pack, test, test:e2e)
   and `hygiene` workflows. `ci-bun`'s pack step installs the npm tarball in a clean project and
   runs `tg --help` and `tg --version` with no Telegram credentials; the `binary` job compiles
@@ -181,7 +214,9 @@ src/services/        Telegram client manager (lazy credentials)
 src/db/              schema, caches, sync jobs, per-chat sync state, rate limits
 src/daemon/          daemon entry, loop, scheduler, update handlers, sync workers
 src/utils/           output, args, formatting, mappers, peer resolution
-src/__tests__/       unit tests      src/__e2e__/  CLI e2e      src/__integration__/  live API
+*.test.ts            unit tests, beside the module they test
+*.e2e.test.ts        CLI e2e (mostly src/test/)   *.integration.test.ts  live API (src/test/)
+src/test/            CLI-level e2e and integration tests, shared *.test-utils.ts helpers
 ~/.telegram-sync-cli/  user data: config.json, daemon.pid, data.db (accounts),
                        session_<id>.db (mtcute), accounts/<id>/cache.db (the
                        account's cache, sync state, jobs, rate limits)
@@ -203,28 +238,34 @@ longer exists since mtcute 0.29.
 - `test-setup.ts` (preloaded via `bunfig.toml`) always overwrites `TELEGRAM_API_ID`/
   `TELEGRAM_API_HASH` with dummies, because Bun auto-loads the developer's `.env` first. Real
   values are stashed as `TELEGRAM_TEST_API_ID`/`TELEGRAM_TEST_API_HASH` for the integration
-  suite. CI has no Telegram secrets. It also always points `TELEGRAM_SYNC_CLI_DATA_DIR` at
-  `.tmp/test-data-<pid>`, even if the shell or `.env` sets it, and sets
-  `TELEGRAM_SYNC_CLI_TELEMETRY=0` (usage stats off).
+  suite. CI has no Telegram secrets. It also always points `TELEGRAM_SYNC_CLI_DATA_DIR` at a
+  new `tg-test-data-*` dir in the system temp dir for each test file, removed after the file,
+  even if the shell or `.env` sets it, and sets `TELEGRAM_SYNC_CLI_TELEMETRY=0` (usage stats
+  off).
+- Both suites run their files in parallel worker processes (`--parallel`, one per CPU core). A
+  test file owns its state: `mkdtemp` dirs, its own databases, port 0. Run the full scripts
+  before a PR. `test-timings.json` holds each file's duration, so the slowest files start
+  first; a missing or stale entry only costs speed. Refresh it after big test changes with
+  `bun run test --update-timings` and `bun run test:e2e --update-timings`.
 - Unit tests mock the mtcute client and use `createTestDatabase()` for in-memory databases.
 - E2E tests spawn the CLI with `bun --no-env-file` and an isolated
   `TELEGRAM_SYNC_CLI_DATA_DIR`:
 
   ```ts
-  const env = createTestEnvironment('my-test')
-  env.initDatabase()
-  env.seedAccounts([{ phone: '+15550000000', is_active: true }])
-  createChatsCache(env.openCacheDb(1)).upsertMany(chats) // env.cachePath(1)
-  const result = await runCliSuccess(['chats', 'list'], env.getCliOptions())
-  expect(result.json?.success).toBe(true)
-  env.cleanup()
+  const env = createTestEnvironment("my-test");
+  env.initDatabase();
+  env.seedAccounts([{ phone: "+15550000000", is_active: true }]);
+  createChatsCache(env.openCacheDb(1)).upsertMany(chats); // env.cachePath(1)
+  const result = await runCliSuccess(["chats", "list"], env.getCliOptions());
+  expect(result.json?.success).toBe(true);
+  env.cleanup();
   ```
 
   A test that writes `<dataDir>/cache.db` (the shared cache of 0.3 and older) seeds it from a
   child process with `seedInChild`: a file the test process wrote stays open after `close()`,
   and tg moves the file only when no other process has it open.
 
-- Integration tests (`src/__integration__/`) are a live smoke suite against the real API and
+- Integration tests (`src/test/telegram.integration.test.ts`) are a live smoke suite against the real API and
   are never part of `test`. They need `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` (or the
   `TELEGRAM_TEST_` variants), `TELEGRAM_TEST_ACCOUNT` and `TELEGRAM_TEST_SESSION_PATH` (or
   `TELEGRAM_TEST_SESSION`), pointing at a session logged in only for tests. Each test copies the
