@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A command acts on the chat and account it checked against
+  `allowedChats`: the check pins the account and hands its resolved chat to the command, so a
+  switch of the active account or a second lookup in between can't move it (#217).
 - The npm package declares `long`, which tg imports directly. Until now it only arrived
   through `@mtcute/core`, so an install that doesn't hoist transitive dependencies could fail
   to start.

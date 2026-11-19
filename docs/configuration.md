@@ -292,7 +292,8 @@ while it is set, even to an empty string) limit the commands that read or send t
   `tg media download`, `--id` of
   `tg chats get` and the chat of `tg chats sync`. The chat and the list resolve the same way,
   cache-first: `@name` and its ID are the same chat, `me` is the account's own user ID (Saved
-  Messages), and an ID in the list is taken as written.
+  Messages), and an ID in the list is taken as written. The command acts on the chat and
+  account the check resolved, so a switch of the active account in between doesn't move it.
 - Commands that read across chats show only allowed ones: `tg chats list` (with `--unread`
   too), `tg chats search`, `tg messages search` (its `chat:` query filter narrows within them),
   and `tg messages wait`, `watch` and `unread`, all without `--chat`.

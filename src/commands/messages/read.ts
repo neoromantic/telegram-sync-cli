@@ -1,5 +1,6 @@
 import { defineCommand } from "citty";
 
+import { checkedChat } from "../access";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { success } from "../../utils/output";
@@ -44,7 +45,8 @@ export const readMessagesCommand = defineCommand({
 
     try {
       const deps = openHistory(account.id, "cli:messages.read");
-      const chat = await resolveHistoryChat(deps.client, args.chat, deps);
+      const chat =
+        checkedChat(args, "chat") ?? (await resolveHistoryChat(deps.client, args.chat, deps));
       success(await markRead(deps.client, deps.cacheDb, chat, maxId ?? null));
     } catch (err) {
       reportHistoryError(err, "mark messages read");
