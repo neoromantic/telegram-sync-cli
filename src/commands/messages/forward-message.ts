@@ -1,80 +1,70 @@
-/**
- * Forwarding messages for `tg messages forward`: one
- * messages.forwardMessages call, and the copies Telegram returns go into
- * messages_cache right away, as a message `tg send` sent does
- * (send/sent-message-cache.ts).
- */
-import type { Database } from 'bun:sqlite'
-import { type TelegramClient, tl } from '@mtcute/bun'
-import { randomLong } from '@mtcute/bun/utils.js'
+import type { Database } from "bun:sqlite";
+import { type TelegramClient, tl } from "@mtcute/bun";
+import { randomLong } from "@mtcute/bun/utils.js";
 
-import { getErrorMessage } from '../../daemon/daemon-utils'
-import { createMessagesCache } from '../../db/messages-cache'
-import { createMessagesHistory } from '../../db/messages-history'
-import type { MessageSearchItem } from '../../types'
-import { verbose } from '../../utils/output'
-import { newMessageInputs } from '../send/sent-message-cache'
-import { messageRowsToItems } from './helpers'
-import { type HistoryChat, withPeerHint } from './history'
+import { getErrorMessage } from "../../daemon/daemon-utils";
+import { createMessagesCache } from "../../db/messages-cache";
+import { createMessagesHistory } from "../../db/messages-history";
+import type { MessageSearchItem } from "../../types";
+import { verbose } from "../../utils/output";
+import { newMessageInputs } from "../send/sent-message-cache";
+import { messageRowsToItems } from "./helpers";
+import { type HistoryChat, withPeerHint } from "./history";
 
-type CallClient = Pick<TelegramClient, 'call'>
+type CallClient = Pick<TelegramClient, "call">;
 
 /** Telegram takes at most this many message IDs per messages.forwardMessages */
-export const MAX_FORWARD_IDS = 100
+export const MAX_FORWARD_IDS = 100;
 
-const NO_SOURCE_MESSAGE =
-  'Telegram has no message with this ID in the source chat'
-const NO_PERMISSION = 'You do not have permission to post in the target chat'
+const NO_SOURCE_MESSAGE = "Telegram has no message with this ID in the source chat";
+const NO_PERMISSION = "You do not have permission to post in the target chat";
 
-/** Telegram's refusals of a forward that say what to change, by RPC error name */
 const REFUSALS: Record<string, string> = {
   CHAT_FORWARDS_RESTRICTED:
-    'The source chat protects its content: Telegram does not allow forwarding from it',
+    "The source chat protects its content: Telegram does not allow forwarding from it",
   MESSAGE_ID_INVALID: NO_SOURCE_MESSAGE,
   MSG_ID_INVALID: NO_SOURCE_MESSAGE,
-  MESSAGE_IDS_EMPTY: 'Telegram found none of these messages in the source chat',
+  MESSAGE_IDS_EMPTY: "Telegram found none of these messages in the source chat",
   CHAT_WRITE_FORBIDDEN: NO_PERMISSION,
   CHAT_ADMIN_REQUIRED: NO_PERMISSION,
   CHAT_RESTRICTED: NO_PERMISSION,
   CHAT_GUEST_SEND_FORBIDDEN: NO_PERMISSION,
   USER_BANNED_IN_CHANNEL: NO_PERMISSION,
-  CHANNEL_PRIVATE: 'You are not a member of one of these chats',
-  USER_IS_BLOCKED: 'The recipient has blocked you',
-  YOU_BLOCKED_USER:
-    'You blocked the recipient: unblock them to forward to them',
+  CHANNEL_PRIVATE: "You are not a member of one of these chats",
+  USER_IS_BLOCKED: "The recipient has blocked you",
+  YOU_BLOCKED_USER: "You blocked the recipient: unblock them to forward to them",
   PEER_ID_INVALID:
-    'Telegram does not know one of these chats: run tg chats list --fresh or pass the @username',
+    "Telegram does not know one of these chats: run tg chats list --fresh or pass the @username",
   SLOWMODE_MULTI_MSGS_DISABLED:
-    'Slow mode in the target chat allows forwarding only one message at a time',
-}
+    "Slow mode in the target chat allows forwarding only one message at a time",
+};
 
-/** CHAT_SEND_PHOTOS_FORBIDDEN and the like: the target refuses a kind of message */
-const SEND_KIND_FORBIDDEN = /^CHAT_SEND_(\w+)_FORBIDDEN$/
+const SEND_KIND_FORBIDDEN = /^CHAT_SEND_(\w+)_FORBIDDEN$/;
 
-function refusalMessage(telegramError: string): string | undefined {
-  const refusal = REFUSALS[telegramError]
-  if (refusal) return refusal
-  const kind = SEND_KIND_FORBIDDEN.exec(telegramError)?.[1]
+function refusalMessage(telegramError: string) {
+  const refusal = REFUSALS[telegramError];
+  if (refusal) return refusal;
+  const kind = SEND_KIND_FORBIDDEN.exec(telegramError)?.[1];
   return kind
     ? `The target chat does not allow this kind of message (${kind.toLowerCase()})`
-    : undefined
+    : undefined;
 }
 
 export interface ForwardRefusalDetails {
-  fromChatId: number
-  toChatId: number
-  messageIds: number[]
-  telegramError: string
+  fromChatId: number;
+  toChatId: number;
+  messageIds: number[];
+  telegramError: string;
 }
 
 /** Telegram refused the forward for a reason the caller can act on */
 export class ForwardRefusedError extends Error {
-  readonly details: ForwardRefusalDetails
+  readonly details: ForwardRefusalDetails;
 
   constructor(message: string, details: ForwardRefusalDetails) {
-    super(message)
-    this.name = 'ForwardRefusedError'
-    this.details = details
+    super(message);
+    this.name = "ForwardRefusedError";
+    this.details = details;
   }
 }
 
@@ -83,14 +73,14 @@ export function forwardMessagesRequest(
   from: tl.TypeInputPeer,
   to: tl.TypeInputPeer,
   messageIds: number[],
-): tl.messages.RawForwardMessagesRequest {
+) {
   return {
-    _: 'messages.forwardMessages',
+    _: "messages.forwardMessages",
     fromPeer: from,
     toPeer: to,
     id: messageIds,
     randomId: messageIds.map(() => randomLong()),
-  }
+  } satisfies tl.messages.RawForwardMessagesRequest;
 }
 
 /**
@@ -99,67 +89,56 @@ export function forwardMessagesRequest(
  * new ID. Null for a message the response has no updateMessageID for.
  */
 export function pairForwardedIds(
-  request: Pick<tl.messages.RawForwardMessagesRequest, 'id' | 'randomId'>,
+  request: Pick<tl.messages.RawForwardMessagesRequest, "id" | "randomId">,
   result: tl.TypeUpdates,
-): Array<number | null> {
-  const newIds = new Map<string, number>()
-  if ('updates' in result) {
+) {
+  const newIds = new Map<string, number>();
+  if ("updates" in result) {
     for (const update of result.updates) {
-      if (update._ === 'updateMessageID') {
-        newIds.set(update.randomId.toString(), update.id)
+      if (update._ === "updateMessageID") {
+        newIds.set(update.randomId.toString(), update.id);
       }
     }
   }
-  return request.id.map(
-    (_, i) => newIds.get(request.randomId[i]?.toString() ?? '') ?? null,
-  )
+  return request.id.map((_, i) => newIds.get(request.randomId[i]?.toString() ?? "") ?? null);
 }
 
-/**
- * Store the forwarded copies and read them back as message items, by new
- * ID. Empty when the cache write failed: the forward is done either way,
- * so a failure is only logged.
- */
 function cacheForwardedMessages(
   cacheDb: Database,
   toChatId: number,
   newIds: number[],
   result: tl.TypeUpdates,
-): Map<number, MessageSearchItem> {
+) {
   try {
-    const inputs = 'updates' in result ? newMessageInputs(result.updates) : []
+    const inputs = "updates" in result ? newMessageInputs(result.updates) : [];
     if (inputs.length === 0) {
-      verbose(`Forwarded messages not cached: no message in ${result._}`)
-      return new Map()
+      verbose(`Forwarded messages not cached: no message in ${result._}`);
+      return new Map<number, MessageSearchItem>();
     }
-    createMessagesCache(cacheDb).upsertBatch(inputs)
-    const history = createMessagesHistory(cacheDb)
-    const rows = newIds
-      .map((id) => history.get(toChatId, id))
-      .filter((row) => row !== null)
-    return new Map(
-      messageRowsToItems(cacheDb, rows).map((item) => [item.messageId, item]),
-    )
+    createMessagesCache(cacheDb).upsertBatch(inputs);
+    const history = createMessagesHistory(cacheDb);
+    const rows = newIds.map((id) => history.get(toChatId, id)).filter((row) => row !== null);
+    return new Map(messageRowsToItems(cacheDb, rows).map((item) => [item.messageId, item]));
   } catch (err) {
-    verbose(`Could not cache the forwarded messages: ${getErrorMessage(err)}`)
-    return new Map()
+    verbose(`Could not cache the forwarded messages: ${getErrorMessage(err)}`);
+    return new Map<number, MessageSearchItem>();
   }
 }
 
 export interface ForwardedMessage {
   /** The ID in the source chat */
-  messageId: number
+  messageId: number;
   /** The ID of the copy in the target chat; null if the response lacks it */
-  newMessageId: number | null
+  newMessageId: number | null;
   /** The copy as `tg messages get` prints it; null if it could not be cached */
-  message: MessageSearchItem | null
+  message: MessageSearchItem | null;
 }
 
 export interface ForwardMessagesResult {
-  fromChatId: number
-  toChatId: number
+  fromChatId: number;
+  toChatId: number;
   /** In the order the IDs were given */
-  forwarded: ForwardedMessage[]
+  forwarded: ForwardedMessage[];
 }
 
 /** Forward messages in one call and store the copies in the cache */
@@ -169,48 +148,43 @@ export async function forwardMessages(
   from: HistoryChat,
   to: HistoryChat,
   messageIds: number[],
-): Promise<ForwardMessagesResult> {
-  const request = forwardMessagesRequest(
-    from.inputPeer,
-    to.inputPeer,
-    messageIds,
-  )
-  let result: tl.TypeUpdates
+) {
+  const request = forwardMessagesRequest(from.inputPeer, to.inputPeer, messageIds);
+  let result: tl.TypeUpdates;
   try {
-    result = await client.call(request)
+    result = await client.call(request);
   } catch (err) {
     if (tl.RpcError.is(err)) {
-      const refusal = refusalMessage(err.text)
+      const refusal = refusalMessage(err.text);
       if (refusal) {
         throw new ForwardRefusedError(refusal, {
           fromChatId: from.chatId,
           toChatId: to.chatId,
           messageIds,
           telegramError: err.text,
-        })
+        });
       }
     }
-    throw withPeerHint(err)
+    throw withPeerHint(err);
   }
 
-  const newIds = pairForwardedIds(request, result)
+  const newIds = pairForwardedIds(request, result);
   const items = cacheForwardedMessages(
     cacheDb,
     to.chatId,
     newIds.filter((id) => id !== null),
     result,
-  )
+  );
   return {
     fromChatId: from.chatId,
     toChatId: to.chatId,
     forwarded: messageIds.map((messageId, i) => {
-      const newMessageId = newIds[i] ?? null
+      const newMessageId = newIds[i] ?? null;
       return {
         messageId,
         newMessageId,
-        message:
-          newMessageId === null ? null : (items.get(newMessageId) ?? null),
-      }
+        message: newMessageId === null ? null : (items.get(newMessageId) ?? null),
+      };
     }),
-  }
+  } satisfies ForwardMessagesResult;
 }

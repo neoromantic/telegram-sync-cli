@@ -1,2 +1,2 @@
 #!/usr/bin/env bun
-import './src/index'
+import "./src/index";

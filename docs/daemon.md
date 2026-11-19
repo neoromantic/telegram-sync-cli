@@ -5,6 +5,7 @@
 ## Overview
 
 The `tg daemon` subcommand runs a long-lived process that:
+
 - Maintains MTProto connections for configured accounts
 - Processes real-time updates (new/edit/delete messages)
 - Bootstraps dialogs on startup and after each reconnect (seed `chats_cache` +
@@ -15,6 +16,7 @@ The `tg daemon` subcommand runs a long-lived process that:
 - Writes only to local cache/sync tables (read-only to Telegram)
 
 **Key Principles:**
+
 - **READ-ONLY**: The daemon never performs mutations (no sending/editing messages)
 - **Foreground execution**: Users manage backgrounding (tmux, systemd, etc.)
 - **Multi-account**: Connects all configured accounts (soft limit planned). Each account has
@@ -70,6 +72,7 @@ debug level.
 ### Daemon PID
 
 PID file location:
+
 - `~/.telegram-sync-cli/daemon.pid`
 - Respecting `TELEGRAM_SYNC_CLI_DATA_DIR` override
 
@@ -117,6 +120,7 @@ runs only on that account's client, with that account's access hashes and rate l
 
 Real-time handlers update `messages_cache`, `chat_sync_state` and, for contacts,
 `users_cache` in the receiving account's cache:
+
 - New message → insert/update message row; in a group the account doesn't take part in, only
   the chat and its sync state are updated ([sync-strategy.md](sync-strategy.md#group-participation))
 - Edit message → update text/edit_date
@@ -131,12 +135,14 @@ Real-time handlers update `messages_cache`, `chat_sync_state` and, for contacts,
   [real-time.md](real-time.md#unread-counts))
 
 Handlers live in:
+
 - `src/daemon/handlers.ts`
 - `src/daemon/daemon-accounts.ts`
 
 ### Sync Scheduling
 
 The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
+
 - Forward catchup for chats that are behind: their newest message (`top_message_id`, from the
   dialog pass) is above the forward cursor or unknown. It runs on start, after each reconnect
   or wake and until a gap is closed, not as polling; a chat that is caught up costs no calls.
@@ -168,6 +174,7 @@ The scheduler decides which chats to sync and creates jobs in `sync_jobs`:
 See [sync-strategy.md](sync-strategy.md) for the rules.
 
 Key files:
+
 - `src/daemon/scheduler.ts`
 - `src/daemon/daemon-scheduler.ts`
 - `src/db/sync-jobs.ts`
@@ -176,10 +183,12 @@ Key files:
 ### Sync Worker
 
 Workers execute jobs and update:
+
 - `messages_cache`
 - `chat_sync_state` (cursors, progress)
 
 Key files:
+
 - `src/daemon/sync-worker-real-jobs.ts`
 - `src/daemon/sync-worker-real-context.ts`
 - `src/daemon/sync-retry.ts` (backoff and permanent errors)
@@ -259,6 +268,7 @@ removed contacts. New rows come only from new contacts. Nothing is deleted, and 
 holds one row per account cache.
 
 Key files:
+
 - `src/daemon/daemon-contacts.ts`
 - `src/db/contacts-sync.ts`
 
@@ -266,6 +276,7 @@ Key files:
 
 Every 300 loop ticks (about five minutes) and once at shutdown, the daemon prunes the cache of
 every account it opened, connected or not:
+
 - `api_activity` rows older than `cache.retention.apiActivity` (default 7 days);
 - `rate_limits` windows older than `cache.retention.rateLimits` (default 1 hour), keeping the
   current 60-second window and any FLOOD_WAIT that is still running;
@@ -314,6 +325,7 @@ Key files: `src/db/background-migrations.ts`, `src/daemon/daemon-migrations.ts`
 ## Status Output
 
 `tg daemon status` returns totals over every account's cache:
+
 - `status` (`running`/`stopped`)
 - `pid`
 - `uptime`
