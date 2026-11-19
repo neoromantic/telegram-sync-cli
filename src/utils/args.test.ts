@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { type ArgsDef, parseArgs } from "citty";
 
+import { main } from "../cli";
+import { runnableCommands } from "../commands/access";
 import { apiCommand } from "../commands/api";
 import { sendCommand } from "../commands/send";
-import { flagValues, spacedFlagValues } from "./args";
+import { flagValues, spacedFlagValues, undeclaredArg } from "./args";
 
 function spaced(...argv: string[]) {
   const args = parseArgs(argv, apiCommand.args as ArgsDef) as Record<string, unknown>;
@@ -91,5 +93,40 @@ describe("flagValues", () => {
     const args = parseArgs(argv, sendCommand.args as ArgsDef) as Record<string, unknown>;
     expect(args.file).toBe("b.png");
     expect(flagValues(argv, "file")).toEqual(["a.pdf", "b.png"]);
+  });
+});
+
+describe("undeclaredArg", () => {
+  const known = (path: string) => {
+    const node = runnableCommands(main).find((command) => command.path === path)?.node;
+    return { ...(main.args as ArgsDef), ...(node?.args as ArgsDef) };
+  };
+  const send = (...argv: string[]) =>
+    undeclaredArg(["--to", "me", "-m", "hi", ...argv], known("send"));
+
+  it("names a flag the command doesn't declare, which citty would take as true", () => {
+    expect(send("--acount", "2")).toBe("Unknown option --acount");
+    expect(send("-x")).toBe("Unknown option -x");
+  });
+
+  it("refuses a value after a boolean flag, which citty would drop", () => {
+    expect(send("--silent", "false")).toBe(
+      "--silent takes no value: pass --silent or --no-silent, not --silent false",
+    );
+    expect(send("stray")).toBe("Unexpected argument stray");
+  });
+
+  it("takes declared flags, aliases, --no-, =values, global flags and negative IDs", () => {
+    expect(
+      undeclaredArg(
+        ["--to", "-1001234567890", "-m", "-5", "--silent=false", "--no-markdown", "-f", "pretty"],
+        known("send"),
+      ),
+    ).toBeNull();
+    expect(send("-vq", "--account=2", "--", "--anything")).toBeNull();
+    expect(undeclaredArg(["-1001234567890", "--auto"], known("chats sync"))).toBeNull();
+    expect(undeclaredArg(["@team", "@club"], known("chats sync"))).toBe(
+      "Unexpected argument @club",
+    );
   });
 });
