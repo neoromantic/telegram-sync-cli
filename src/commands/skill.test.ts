@@ -1,8 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import packageJson from "../../package.json" with { type: "json" };
 
 let skillModule: typeof import("./skill");
 let dataDir: string;
@@ -51,28 +59,17 @@ afterAll(() => {
 });
 
 describe("Skill Command Helpers", () => {
-  it("builds a stable manifest", () => {
-    const manifest = skillModule.buildSkillManifest();
-
-    expect(manifest).toMatchObject({
-      name: "@goodit/telegram-sync-cli",
-      description: "Agent-friendly Telegram Sync CLI",
-      install_command: "bun install -g @goodit/telegram-sync-cli",
-      entrypoint: "tg",
-      version: packageJson.version,
-      output: "json",
-    });
-  });
-
   it("validates environment and data directory", async () => {
     const result = await skillModule.validateSkillEnvironment();
 
-    expect(result.valid).toBe(true);
     expect(result.env.telegram_api_id.valid).toBe(true);
     expect(result.env.telegram_api_hash.valid).toBe(true);
     expect(result.data_dir.path).toBe(dataDir);
     expect(result.data_dir.writable).toBe(true);
-    expect(result.issues).toHaveLength(0);
+    expect(result.valid).toBe(false);
+    expect(result.account).toBeNull();
+    expect(result.daemon).toEqual({ status: "stopped", pid: null });
+    expect(result.issues).toEqual(["No account: log in with tg auth login"]);
   });
 
   it("reports missing environment variables", async () => {
@@ -121,30 +118,46 @@ describe("Skill Command Helpers", () => {
       .catch(() => {});
   });
 
-  it("installs the manifest and reports overwrites", async () => {
-    const targetPath = join(dataDir, "skill-test.json");
+  it("installs SKILL.md under <dir>/telegram-sync-cli and reports overwrites", async () => {
+    const dir = join(dataDir, "skills");
 
     try {
-      const first = await skillModule.installSkillManifest(targetPath);
+      const first = await skillModule.installSkill(dir);
+      const path = join(dir, "telegram-sync-cli", "SKILL.md");
 
-      expect(first.path).toBe(targetPath);
-      expect(first.overwritten).toBe(false);
-      expect(first.bytes).toBeGreaterThan(0);
-      expect(first.manifest.name).toBe("@goodit/telegram-sync-cli");
+      expect(first).toEqual({
+        path,
+        bytes: Buffer.byteLength(skillModule.SKILL_MARKDOWN),
+        overwritten: false,
+      });
+      expect(await Bun.file(path).text()).toBe(skillModule.SKILL_MARKDOWN);
 
-      const second = await skillModule.installSkillManifest(targetPath);
-
+      const second = await skillModule.installSkill(dir);
       expect(second.overwritten).toBe(true);
-
-      const manifestText = await Bun.file(targetPath).text();
-      const manifest = JSON.parse(manifestText);
-
-      expect(manifest.name).toBe("@goodit/telegram-sync-cli");
-      expect(manifest.entrypoint).toBe("tg");
+      expect(readdirSync(join(dir, "telegram-sync-cli"))).toEqual(["SKILL.md"]);
     } finally {
-      await Bun.file(targetPath)
-        .delete()
-        .catch(() => {});
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never writes through a link at a staging path in the skill directory", async () => {
+    const dir = join(dataDir, "skills-planted");
+    const skillDir = join(dir, "telegram-sync-cli");
+    const outside = join(dataDir, "outside.txt");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(outside, "outside\n");
+    symlinkSync(outside, join(skillDir, `.SKILL.md.${process.pid}.tmp`));
+
+    try {
+      await skillModule.installSkill(dir);
+
+      expect(readFileSync(outside, "utf8")).toBe("outside\n");
+      const path = join(skillDir, "SKILL.md");
+      expect(lstatSync(path).isFile()).toBe(true);
+      expect(readFileSync(path, "utf8")).toBe(skillModule.SKILL_MARKDOWN);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { force: true });
     }
   });
 });
@@ -262,23 +275,19 @@ describe("skillInstallCommand error path", () => {
     try {
       chmodSync(readOnlyDir, 0o444);
 
-      const targetPath = join(readOnlyDir, "skill.json");
-
-      await expect(skillModule.installSkillManifest(targetPath)).rejects.toThrow();
+      await expect(skillModule.installSkill(readOnlyDir)).rejects.toThrow();
     } finally {
       chmodSync(readOnlyDir, 0o755);
       rmSync(readOnlyDir, { recursive: true, force: true });
     }
   });
 
-  it("installSkillManifest throws on ENOTDIR path", async () => {
+  it("installSkill throws on ENOTDIR path", async () => {
     const blockingFile = join(dataDir, "blocking-install-file.txt");
     await Bun.write(blockingFile, "block");
 
-    const invalidPath = join(blockingFile, "subdir", "skill.json");
-
     try {
-      await expect(skillModule.installSkillManifest(invalidPath)).rejects.toThrow();
+      await expect(skillModule.installSkill(join(blockingFile, "subdir"))).rejects.toThrow();
     } finally {
       await Bun.file(blockingFile)
         .delete()
@@ -291,27 +300,20 @@ describe("skillInstallCommand error path", () => {
       return;
     }
 
-    const prevDataDir = process.env.TELEGRAM_SYNC_CLI_DATA_DIR;
-    const readOnlyDataDir = join(dataDir, "readonly-data");
-    mkdirSync(readOnlyDataDir, { recursive: true });
+    const readOnlyDir = join(dataDir, "readonly-skills");
+    mkdirSync(readOnlyDir, { recursive: true });
 
     try {
-      chmodSync(readOnlyDataDir, 0o444);
-      process.env.TELEGRAM_SYNC_CLI_DATA_DIR = readOnlyDataDir;
+      chmodSync(readOnlyDir, 0o444);
 
-      const freshModule = await import("./skill");
-
-      await expect(freshModule.skillInstallCommand.run?.({} as never)).rejects.toThrow(
-        "Failed to write skill manifest",
-      );
+      await expect(
+        skillModule.skillInstallCommand.run?.({
+          args: { dir: readOnlyDir },
+        } as never),
+      ).rejects.toThrow("Failed to write the skill");
     } finally {
-      chmodSync(readOnlyDataDir, 0o755);
-      rmSync(readOnlyDataDir, { recursive: true, force: true });
-      if (prevDataDir === undefined) {
-        delete process.env.TELEGRAM_SYNC_CLI_DATA_DIR;
-      } else {
-        process.env.TELEGRAM_SYNC_CLI_DATA_DIR = prevDataDir;
-      }
+      chmodSync(readOnlyDir, 0o755);
+      rmSync(readOnlyDir, { recursive: true, force: true });
     }
   });
 });

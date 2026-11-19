@@ -9,11 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An agent skill, `skills/telegram-sync-cli/SKILL.md`: when to use `tg`, finding chats and
+  messages, counting and reading whole chats with one `tg sql` query and checking that the
+  cache covers the chat, confirming before `tg send`, the error schema and the exit codes.
+  Install it with `bunx skills add neoromantic/telegram-sync-cli` or
+  `tg skill install --dir <skills dir>`, which writes the same file from `tg` itself. A test
+  runs every command in its examples against made-up data and checks the answers of its SQL.
+- `tg skill validate` reports the account record the next command uses without `--account`
+  (`account`, `accounts_total`): `activeAccount` in `config.json`, else the active account,
+  else the only one. It also reports whether a live process holds `daemon.pid`
+  (`daemon: { status, pid }`). Neither checks that the session is authorized or online. No
+  account, several and none active, or an invalid `config.json` is an issue. Each value is
+  read on its own: one that can't be read is `null` (`accounts_total`) or `unknown`
+  (`daemon.status`), with the reason, and the others stay accurate.
 - `tg send --markdown` and `--html` send rich messages such as headings and tables on
   supported accounts. The result includes `format`. File captions stay plain text.
 
 ### Changed
 
+- `tg` starts about five times faster for every command that answers from the cache, and for
+  `--help` and `--version`: it loads the Telegram client library only when a command calls
+  Telegram (0.1 s of CPU instead of 0.5 s on a source install).
 - A group (basic group or supergroup) adds new messages to the cache only while you take part
   in it: you sent an ordinary message there in the last 90 days. Reading a group doesn't count.
   The rule holds in every `tg chats sync` mode and in `tg messages list`/`get`, `--fresh`
@@ -25,9 +41,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the reason `group_participation_required` or `group_participation_unknown` and
   `lastOwnMessageAt`, and `tg status` leaves it out of the chats with sync on and of the history
   progress. See [docs/sync-strategy.md](docs/sync-strategy.md#group-participation).
+- **Breaking:** `tg skill` installs only the Markdown skill. tg 0.14.0 and older wrote
+  `<dataDir>/skill.json` there and ignored `--dir`. Now:
+  - `tg skill manifest` is removed;
+  - `tg skill install` needs `--dir`, the agent's skills directory, and rejects an empty one;
+  - it writes `<dir>/telegram-sync-cli/SKILL.md` instead of `<dataDir>/skill.json`,
+    replacing a file already there, local edits included, and refusing a symbolic link for
+    `telegram-sync-cli` or `SKILL.md` (the skills directory itself may be one);
+  - its JSON drops `data.manifest` and keeps `path`, `bytes` and `overwritten`.
+
+  Replace `tg skill install` with:
+
+  ```bash
+  tg skill install --dir ~/.claude/skills
+  ```
+
+- **Breaking:** `tg skill validate` reports a missing account as an issue, so before
+  `tg auth login` it prints `valid: false`, still with exit 0. tg 0.14.0 and older checked only
+  the credentials and the data directory.
+- **Breaking:** `src/db/index.ts` no longer exports `db`, the open `data.db` connection. Code
+  that imports it from the package source calls `getDataDb()`, which opens `data.db` on first
+  use.
 
 ### Fixed
 
+- `tg skill install` and `tg skill validate` work with a corrupt `data.db`, which stopped every
+  command with a SQLite stack trace before it started: `data.db` now opens when a command first
+  reads an account. Install writes the skill, and validate names the file as an issue.
+- A command acts on the chat and account it checked against
+  `allowedChats`: the check pins the account and hands its resolved chat to the command, so a
+  switch of the active account or a second lookup in between can't move it (#217).
+- A flag a command doesn't declare (`--acount 2`) and a value after a boolean flag
+  (`--silent false`, which ran as `--silent`) are `INVALID_ARGS` instead of being ignored (#217).
+- A Telegram call that succeeded is no longer reported as failed when tg can't write it to its
+  local `api_activity` log, so a retry doesn't repeat a send (#217).
 - The npm package declares `long`, which tg imports directly. Until now it only arrived
   through `@mtcute/core`, so an install that doesn't hoist transitive dependencies could fail
   to start.

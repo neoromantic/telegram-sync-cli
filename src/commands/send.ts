@@ -1,6 +1,6 @@
 import { accessSync, constants, statSync } from "node:fs";
 import { basename } from "node:path";
-import { tl } from "@mtcute/bun";
+import type { tl } from "@mtcute/bun";
 import { defineCommand } from "citty";
 
 import { accountsDb } from "../db";
@@ -18,6 +18,7 @@ import {
   reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from "../utils/telegram-rate-limits";
+import { checkedChat } from "./access";
 import { AmbiguousPeerError, createDmLookup, resolvePeer } from "./send/peer-resolver";
 import { sendFile, sentAttachment } from "./send/send-file";
 import { cacheSentMessage, resolveSelfId } from "./send/sent-message-cache";
@@ -62,8 +63,9 @@ const richErrorHints: Record<string, string> = {
   RICH_MESSAGE_TABLE_COLS_TOO_MANY: "Use at most 20 table columns.",
 };
 
-function handleSendError(recipient: string, err: unknown, rich: boolean): never {
-  if (rich && tl.RpcError.is(err) && err.text.startsWith("RICH_MESSAGE_")) {
+async function handleSendError(recipient: string, err: unknown, rich: boolean) {
+  const mtcute = await import("@mtcute/bun");
+  if (rich && mtcute.tl.RpcError.is(err) && err.text.startsWith("RICH_MESSAGE_")) {
     error(
       ErrorCodes.TELEGRAM_ERROR,
       err.message,
@@ -286,19 +288,15 @@ export const sendCommand = defineCommand({
       const usersCache = createUsersCache(cacheDb);
       const chatsCache = createChatsCache(cacheDb);
 
-      const client = wrapClientCallWithRateLimits(getClientForAccount(accountId), {
+      const client = wrapClientCallWithRateLimits(await getClientForAccount(accountId), {
         context: "cli:send",
         accountId,
       });
 
       verbose(`Resolving recipient: ${recipient}`);
-      const { inputPeer, name } = await resolvePeer(
-        client,
-        recipient,
-        usersCache,
-        chatsCache,
-        createDmLookup(cacheDb),
-      );
+      const { inputPeer, name } =
+        checkedChat(args, "to") ??
+        (await resolvePeer(client, recipient, usersCache, chatsCache, createDmLookup(cacheDb)));
 
       const text = content.file === null ? content.text : content.caption;
       let result: tl.TypeUpdates;
@@ -363,7 +361,7 @@ export const sendCommand = defineCommand({
         });
       }
       reportConfigOrRateLimitError(err);
-      handleSendError(recipient, err, content.file === null && content.format !== null);
+      await handleSendError(recipient, err, content.file === null && content.format !== null);
     }
   },
 });

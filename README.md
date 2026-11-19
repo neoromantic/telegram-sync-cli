@@ -29,6 +29,16 @@ The npm package runs the TypeScript source with Bun; nothing is compiled at inst
 for every platform, Windows included, are attached to each
 [GitHub Release](https://github.com/neoromantic/telegram-sync-cli/releases).
 
+The agent skill for Claude Code, Codex and other coding agents:
+
+```bash
+bunx skills add neoromantic/telegram-sync-cli
+```
+
+`tg skill install --dir` and the `tg skill validate` that the skill describes need tg newer than
+0.14.0. In 0.14.0 and older, `tg skill install` ignores `--dir` and writes `skill.json` into the
+data directory.
+
 From source:
 
 ```bash
@@ -191,8 +201,12 @@ Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-
   them. Then `tg messages read --chat <id> --max-id <nextAfter>` marks what was summarized read.
 - `tg sql --query "…"` runs read-only SQL over the selected account's cache (`--account`, else
   the active account); `tg sql print-schema` prints the annotated schema.
-- `tg skill manifest` prints a skill manifest, `tg skill validate` checks the environment and
-  `tg skill install` writes the manifest to the default location.
+- The agent skill, [`skills/telegram-sync-cli/SKILL.md`](skills/telegram-sync-cli/SKILL.md),
+  teaches an agent all of the above: `bunx skills add neoromantic/telegram-sync-cli`, or
+  `tg skill install --dir <skills dir>`, which replaces the file there. `tg skill validate`
+  reports the credentials, the account record the next command uses and whether a live process
+  holds `daemon.pid`; it doesn't check that the session is authorized or online. Both need tg
+  0.15.0 or later ([details](docs/api-design.md#agent-skill)).
 - The daemon never sends or edits anything, so it is safe to leave running.
 - To wait for a reply, `tg messages wait --chat @username --after <last message ID>` returns
   the new messages as soon as the daemon stores them, or `{"messages": [], "timedOut": true}`

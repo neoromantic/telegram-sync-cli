@@ -320,8 +320,8 @@ function basicDaemonMiddlewares(ctx: DaemonContext, accountId: number) {
   });
 }
 
-function createDaemonClient(ctx: DaemonContext, accountId: number, sessionPath: string) {
-  const telegramConfig = getDefaultConfig();
+async function createDaemonClient(ctx: DaemonContext, accountId: number, sessionPath: string) {
+  const telegramConfig = await getDefaultConfig();
   const validation = validateConfig(telegramConfig);
   if (!validation.valid) {
     throw new Error(validation.error);
@@ -362,7 +362,7 @@ export async function connectAccount(
     const sessionPath = join(ctx.dataDir, `session_${accountId}.db`);
     ctx.logger.debug(`Connecting account ${label()}`);
 
-    const client = createDaemonClient(ctx, accountId, sessionPath);
+    const client = await createDaemonClient(ctx, accountId, sessionPath);
     accountState.client = client;
 
     await client.start({
@@ -474,7 +474,7 @@ export async function attemptReconnect(ctx: DaemonContext, accountState: Account
     const sessionPath = join(ctx.dataDir, `session_${accountState.accountId}.db`);
     ctx.logger.debug(`Reconnecting account ${accountLabel(accountState)}`);
 
-    const client = createDaemonClient(ctx, accountState.accountId, sessionPath);
+    const client = await createDaemonClient(ctx, accountState.accountId, sessionPath);
     accountState.client = client;
 
     await client.start({
