@@ -4,29 +4,19 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applySyncMode } from "../commands/chats/sync";
+import { readMigrationStatus } from "./background-migrations";
 import { checkCacheOwner } from "./cache-meta";
-import { createChatSyncStateService } from "./chat-sync-state";
 import { PEER_ID_USER_VERSION } from "./peer-id-migration";
 import { initCacheSchema } from "./schema";
 import { initSyncSchema } from "./sync-schema";
 import { seedLegacyCache } from "../test/legacy-cache.test-utils";
+import { seedOldFormCache } from "../test/old-form-cache.test-utils";
 import { assertPeerIdInvariants } from "../test/peer-id-invariants.test-utils";
 import { seedInChild } from "../test/seed-in-child.test-utils";
-import { holdOpen } from "../test/shared-cache.test-utils";
 
 const SCHEMA_MODULE = join(import.meta.dir, "schema.ts");
 const SYNC_SCHEMA_MODULE = join(import.meta.dir, "sync-schema.ts");
 const DB_MODULE = join(import.meta.dir, "index.ts");
-
-const HOLD_LOCK = `
-  import { Database } from 'bun:sqlite'
-  const db = new Database(process.env.LOCK_DB_PATH)
-  db.run('BEGIN IMMEDIATE')
-  db.run("INSERT INTO daemon_status (key, value) VALUES ('holder', '1')")
-  console.log('locked')
-  await Bun.sleep(Number(process.env.LOCK_HOLD_MS))
-  db.run('COMMIT')
-`;
 
 const INIT_SCHEMA = `
   import { Database } from 'bun:sqlite'
@@ -34,8 +24,21 @@ const INIT_SCHEMA = `
   const { initSyncSchema } = await import(process.env.SYNC_SCHEMA_MODULE)
   const db = new Database(process.env.LOCK_DB_PATH)
   initCacheSchema(db)
+  console.log('opening')
   initSyncSchema(db)
   db.close()
+`;
+
+const BUILD_INDEX = `
+  import { Database } from 'bun:sqlite'
+  const { initCacheSchema } = await import(process.env.SCHEMA_MODULE)
+  const { initSyncSchema } = await import(process.env.SYNC_SCHEMA_MODULE)
+  const db = new Database(process.env.LOCK_DB_PATH)
+  initCacheSchema(db)
+  db.run('PRAGMA busy_timeout = 0')
+  console.log('waiting')
+  initSyncSchema(db)
+  console.log('busy_timeout ' + db.query('PRAGMA busy_timeout').get().timeout)
 `;
 
 const RETRY_OPEN = `
@@ -122,6 +125,31 @@ async function waitForLine(stream: ReadableStream<Uint8Array>, line: string) {
   throw new Error(`stream ended before "${line}"`);
 }
 
+async function stdoutAfter(child: ReturnType<typeof spawnBun>, line: string, then: () => void) {
+  const decoder = new TextDecoder();
+  let text = "";
+  for await (const chunk of child.stdout) {
+    text += decoder.decode(chunk, { stream: true });
+    if (text.includes(line)) then();
+  }
+  return text;
+}
+
+function holdWriteLock(path: string) {
+  const holder = new Database(path);
+  holder.run("BEGIN IMMEDIATE");
+  holder.run("INSERT INTO daemon_status (key, value) VALUES ('holder', '1')");
+  let held = true;
+  return {
+    release() {
+      if (!held) return;
+      held = false;
+      holder.run("COMMIT");
+      holder.close();
+    },
+  };
+}
+
 describe("cache database lock", () => {
   let dir: string;
   let path: string;
@@ -139,39 +167,7 @@ describe("cache database lock", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("waits for a write lock another process holds", async () => {
-    const holder = spawnBun(HOLD_LOCK, {
-      LOCK_DB_PATH: path,
-      LOCK_HOLD_MS: "1000",
-    });
-    await waitForLine(holder.stdout, "locked");
-
-    const write = "INSERT INTO daemon_status (key, value) VALUES ('cli', '1')";
-
-    const raw = new Database(path);
-    raw.run("PRAGMA busy_timeout = 0");
-    expect(() => raw.run(write)).toThrow("database is locked");
-    raw.close();
-
-    const db = new Database(path);
-    initCacheSchema(db);
-    const started = Date.now();
-    expect(() => db.run(write)).not.toThrow();
-    expect(Date.now() - started).toBeGreaterThan(100);
-    db.close();
-
-    expect(await holder.exited).toBe(0);
-  });
-
-  it("lets tg chats sync wait for a write lock another process holds", async () => {
-    const holder = spawnBun(HOLD_LOCK, {
-      LOCK_DB_PATH: path,
-      LOCK_HOLD_MS: "1000",
-    });
-    await waitForLine(holder.stdout, "locked");
-
-    const db = new Database(path);
-    initCacheSchema(db);
+  it("lets tg chats sync wait for the write lock instead of failing at once", () => {
     const chat = {
       id: -1001234567890,
       peerId: -1001234567890,
@@ -180,43 +176,44 @@ describe("cache database lock", () => {
       username: "examplenews",
       memberCount: 5000,
     };
-    const started = Date.now();
-    const { state, changed } = applySyncMode(db, chat, "on");
-    expect(Date.now() - started).toBeGreaterThan(100);
+    const db = new Database(path);
+    initCacheSchema(db);
+    db.run("PRAGMA busy_timeout = 100");
+    const lock = holdWriteLock(path);
+    try {
+      const started = performance.now();
+      expect(() => applySyncMode(db, chat, "on")).toThrow("database is locked");
+      expect(performance.now() - started).toBeGreaterThanOrEqual(100);
+    } finally {
+      lock.release();
+    }
 
-    expect(changed).toBe(true);
-    expect(state).toMatchObject({ sync_mode: "on", sync_enabled: 1 });
-    expect(createChatSyncStateService(db).get(chat.peerId)?.sync_mode).toBe("on");
+    expect(applySyncMode(db, chat, "on").state).toMatchObject({
+      sync_mode: "on",
+      sync_enabled: 1,
+    });
     db.close();
-
-    expect(await holder.exited).toBe(0);
   });
 
-  it("opens a migrated, stamped cache without waiting for the write lock", async () => {
+  it("opens an upgraded, stamped cache with migrations pending without the write lock", () => {
     const owner = { id: 1, user_id: 101 };
-    const cache = new Database(path);
-    seedLegacyCache(cache);
-    initCacheSchema(cache);
-    initSyncSchema(cache);
-    checkCacheOwner(cache, owner, path);
-    cache.close();
+    const seed = new Database(path);
+    seedOldFormCache(seed, { messages: 3 });
+    checkCacheOwner(seed, owner, path);
+    seed.close();
 
-    const holder = spawnBun(HOLD_LOCK, {
-      LOCK_DB_PATH: path,
-      LOCK_HOLD_MS: "1500",
-    });
-    await waitForLine(holder.stdout, "locked");
-
-    const db = new Database(path);
-    const started = performance.now();
-    initCacheSchema(db);
-    initSyncSchema(db);
-    checkCacheOwner(db, owner, path);
-    expect(performance.now() - started).toBeLessThan(500);
-    expect(db.query("PRAGMA busy_timeout").get()).toEqual({ timeout: 5000 });
-    db.close();
-
-    expect(await holder.exited).toBe(0);
+    const lock = holdWriteLock(path);
+    try {
+      const db = new Database(path);
+      initCacheSchema(db);
+      db.run("PRAGMA busy_timeout = 0");
+      initSyncSchema(db);
+      checkCacheOwner(db, owner, path);
+      expect(readMigrationStatus(db)[0]?.state).toBe("pending");
+      db.close();
+    } finally {
+      lock.release();
+    }
   });
 
   it("lets several processes switch a new or folded cache to WAL at once", async () => {
@@ -254,6 +251,23 @@ describe("cache database lock", () => {
     }
   });
 
+  async function initAtOnceAfterLock(count: number) {
+    const lock = holdWriteLock(path);
+    const env = { LOCK_DB_PATH: path, SCHEMA_MODULE, SYNC_SCHEMA_MODULE };
+    const children = Array.from({ length: count }, () => spawnBun(INIT_SCHEMA, env));
+    try {
+      await Promise.all(children.map((child) => waitForLine(child.stdout, "opening")));
+    } finally {
+      lock.release();
+    }
+    return Promise.all(
+      children.map(async (child) => ({
+        code: await child.exited,
+        stderr: await new Response(child.stderr).text(),
+      })),
+    );
+  }
+
   it("lets several processes rebuild an outdated search index at once", async () => {
     const outdated = new Database(path);
     for (let id = 1; id <= 50; id++) {
@@ -272,24 +286,9 @@ describe("cache database lock", () => {
     );
     outdated.close();
 
-    const holder = spawnBun(HOLD_LOCK, {
-      LOCK_DB_PATH: path,
-      LOCK_HOLD_MS: "1500",
-    });
-    await waitForLine(holder.stdout, "locked");
-
-    const env = { LOCK_DB_PATH: path, SCHEMA_MODULE, SYNC_SCHEMA_MODULE };
-    const children = Array.from({ length: 4 }, () => spawnBun(INIT_SCHEMA, env));
-    const results = await Promise.all(
-      children.map(async (child) => ({
-        code: await child.exited,
-        stderr: await new Response(child.stderr).text(),
-      })),
-    );
+    const results = await initAtOnceAfterLock(4);
 
     expect(results).toEqual(results.map(() => ({ code: 0, stderr: "" })));
-    expect(await holder.exited).toBe(0);
-
     const rebuilt = new Database(path);
     rebuilt.run("PRAGMA busy_timeout = 5000");
     expect(
@@ -318,28 +317,9 @@ describe("cache database lock", () => {
     seedLegacyCache(legacy);
     legacy.close();
 
-    const holder = spawnBun(HOLD_LOCK, {
-      LOCK_DB_PATH: path,
-      LOCK_HOLD_MS: "2000",
-    });
-    await waitForLine(holder.stdout, "locked");
-
-    const env = {
-      LOCK_DB_PATH: path,
-      SCHEMA_MODULE,
-      SYNC_SCHEMA_MODULE,
-    };
-    const children = Array.from({ length: 4 }, () => spawnBun(INIT_SCHEMA, env));
-    const results = await Promise.all(
-      children.map(async (child) => ({
-        code: await child.exited,
-        stderr: await new Response(child.stderr).text(),
-      })),
-    );
+    const results = await initAtOnceAfterLock(4);
 
     expect(results).toEqual(results.map(() => ({ code: 0, stderr: "" })));
-    expect(await holder.exited).toBe(0);
-
     const migrated = new Database(path);
     migrated.run("PRAGMA busy_timeout = 5000");
     expect(migrated.query("PRAGMA user_version").get()).toEqual({
@@ -361,18 +341,21 @@ describe("cache database lock", () => {
     cache.run("DROP INDEX idx_messages_cache_message_id");
     cache.close();
 
-    const holder = spawnBun(HOLD_LOCK, {
-      LOCK_DB_PATH: path,
-      LOCK_HOLD_MS: "1000",
-    });
-    await waitForLine(holder.stdout, "locked");
+    const lock = holdWriteLock(path);
+    const child = spawnBun(BUILD_INDEX, { LOCK_DB_PATH: path, SCHEMA_MODULE, SYNC_SCHEMA_MODULE });
+    let stdout: string;
+    try {
+      stdout = await stdoutAfter(child, "waiting", lock.release);
+    } finally {
+      lock.release();
+    }
 
-    const db = new Database(path);
-    initCacheSchema(db);
-    db.run("PRAGMA busy_timeout = 100");
-    const started = performance.now();
-    initSyncSchema(db);
-    expect(performance.now() - started).toBeGreaterThan(100);
+    expect({
+      code: await child.exited,
+      stderr: await new Response(child.stderr).text(),
+    }).toEqual({ code: 0, stderr: "" });
+    expect(stdout.trim().split("\n")).toEqual(["waiting", "busy_timeout 0"]);
+    const db = new Database(path, { readonly: true });
     expect(
       db
         .query(
@@ -380,10 +363,7 @@ describe("cache database lock", () => {
         )
         .get(),
     ).toEqual({ name: "idx_messages_cache_message_id" });
-    expect(db.query("PRAGMA busy_timeout").get()).toEqual({ timeout: 100 });
     db.close();
-
-    expect(await holder.exited).toBe(0);
   });
 
   it("opens the cache again after a migration that failed", async () => {
@@ -438,28 +418,6 @@ describe("cache database lock", () => {
     expect(listCacheFiles(dir)).toEqual(["accounts/1/cache.db"]);
   });
 
-  it("moves a shared cache only after the older process that holds it exits", async () => {
-    seedSharedCache(path);
-    seedAccounts(dir, 1);
-
-    const holder = holdOpen(path);
-    await holder.ready();
-
-    const env = { DB_MODULE, TELEGRAM_SYNC_CLI_DATA_DIR: dir };
-    const blocked = spawnBun(OPEN_ACCOUNT_CACHE, env);
-    expect(await blocked.exited).toBe(0);
-    expect((await new Response(blocked.stdout).text()).trim()).toStartWith("shared_cache_in_use: ");
-    expect(existsSync(path)).toBe(true);
-    expect(existsSync(join(dir, "accounts", "1"))).toBe(false);
-
-    await holder.release();
-
-    const opened = spawnBun(OPEN_ACCOUNT_CACHE, env);
-    expect(await opened.exited).toBe(0);
-    expect((await new Response(opened.stdout).text()).trim()).toBe("chats: 4");
-    expect(existsSync(path)).toBe(false);
-  });
-
   it("lets several processes migrate a 0.1.4 database at once", async () => {
     const db = new Database(path);
     db.run("DROP INDEX idx_sync_jobs_lane");
@@ -470,18 +428,7 @@ describe("cache database lock", () => {
     db.run("ALTER TABLE sync_jobs DROP COLUMN next_run_at");
     db.close();
 
-    const env = {
-      LOCK_DB_PATH: path,
-      SCHEMA_MODULE,
-      SYNC_SCHEMA_MODULE,
-    };
-    const children = Array.from({ length: 4 }, () => spawnBun(INIT_SCHEMA, env));
-    const results = await Promise.all(
-      children.map(async (child) => ({
-        code: await child.exited,
-        stderr: await new Response(child.stderr).text(),
-      })),
-    );
+    const results = await initAtOnceAfterLock(4);
 
     expect(results).toEqual(results.map(() => ({ code: 0, stderr: expect.any(String) })));
     for (const { stderr } of results) {

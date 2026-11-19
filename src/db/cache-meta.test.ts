@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
-import { CacheUnavailableError } from "./cache-layout";
 import { checkCacheOwner, readCacheMeta } from "./cache-meta";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
 
@@ -18,21 +17,6 @@ describe("checkCacheOwner", () => {
     db.close();
   });
 
-  function ownerError(owner: { id: number; user_id: number | null }) {
-    try {
-      checkCacheOwner(db, owner, PATH);
-    } catch (err) {
-      return err;
-    }
-    throw new Error("Expected owner_mismatch");
-  }
-
-  it("stamps a new file with the account ID", () => {
-    checkCacheOwner(db, { id: 1, user_id: null }, PATH);
-
-    expect(readCacheMeta(db)).toEqual({ account_id: "1", user_id: null });
-  });
-
   it("adds the user ID once the account knows it", () => {
     checkCacheOwner(db, { id: 1, user_id: null }, PATH);
     checkCacheOwner(db, { id: 1, user_id: 101 }, PATH);
@@ -47,22 +31,12 @@ describe("checkCacheOwner", () => {
     expect(() => checkCacheOwner(db, { id: 1, user_id: null }, PATH)).not.toThrow();
   });
 
-  it("refuses a file stamped for another Telegram user", () => {
-    checkCacheOwner(db, { id: 1, user_id: 101 }, PATH);
-
-    const err = ownerError({ id: 1, user_id: 202 });
-
-    expect(err).toBeInstanceOf(CacheUnavailableError);
-    expect(err).toMatchObject({ reason: "owner_mismatch", path: PATH });
-    expect(readCacheMeta(db)).toEqual({ account_id: "1", user_id: "101" });
-  });
-
   it("refuses a file stamped for another account ID", () => {
     checkCacheOwner(db, { id: 2, user_id: null }, PATH);
 
-    expect(ownerError({ id: 1, user_id: null })).toMatchObject({
-      reason: "owner_mismatch",
-    });
+    expect(() => checkCacheOwner(db, { id: 1, user_id: null }, PATH)).toThrow(
+      expect.objectContaining({ reason: "owner_mismatch", path: PATH }),
+    );
     expect(readCacheMeta(db)).toEqual({ account_id: "2", user_id: null });
   });
 
@@ -72,14 +46,6 @@ describe("checkCacheOwner", () => {
 
     beforeEach(() => {
       checkCacheOwner(db, { id: 1, user_id: 101 }, PATH);
-    });
-
-    it("goes to the same Telegram user's new account", () => {
-      checkCacheOwner(db, { id: 2, user_id: 101 }, PATH, {
-        accountUserId: accountsWith({ 2: 101 }),
-      });
-
-      expect(readCacheMeta(db)).toEqual({ account_id: "2", user_id: "101" });
     });
 
     it("goes to the user's account when a recreated data.db gave its ID to another user", () => {

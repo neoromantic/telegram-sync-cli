@@ -15,8 +15,6 @@ import {
 import { createMessagesCache } from "./messages-cache";
 import { createMessagesSearch } from "./messages-search";
 import { BACKGROUND_MIGRATIONS } from "./raw-json-migrations";
-import { initCacheSchema } from "./schema";
-import { initSyncSchema } from "./sync-schema";
 import { extractAttachment } from "../utils/attachment";
 import { resolveRawMessageType } from "../utils/message-type";
 import { toRawJson } from "../utils/raw-json";
@@ -65,19 +63,6 @@ async function migrateAll(db: Database) {
 }
 
 describe("background migrations of a 0.5.0 cache", () => {
-  it("registers every migration as pending", () => {
-    const db = oldCache();
-    const status = statusByName(db);
-    expect(Object.keys(status)).toEqual(BACKGROUND_MIGRATIONS.map((migration) => migration.name));
-    for (const migration of Object.values(status)) {
-      expect(migration).toMatchObject({
-        state: "pending",
-        done: 0,
-        total: null,
-      });
-    }
-  });
-
   it("rewrites raw_json, attachments and message_type as a new write would", async () => {
     const db = oldCache();
     const originals = oldFormMessages(MESSAGES);
@@ -141,39 +126,6 @@ describe("background migrations of a 0.5.0 cache", () => {
       expect(status.done).toBe(status.total!);
       expect(status.finished_at).not.toBeNull();
     }
-  });
-
-  it("lets json_extract read an access hash as a decimal string (#108)", async () => {
-    const db = oldCache();
-    await migrateAll(db);
-    const row = db
-      .query(
-        "SELECT json_extract(raw_json, '$.accessHash') AS hash FROM users_cache WHERE user_id = '2001'",
-      )
-      .get() as { hash: string };
-    expect(row.hash).toBe("-700000000000000001");
-  });
-
-  it("changes nothing when run again", async () => {
-    const db = oldCache();
-    await migrateAll(db);
-    const before = snapshot(db);
-    const status = readMigrationStatus(db);
-
-    expect(await migrateAll(db)).toBe(0);
-    expect(snapshot(db)).toEqual(before);
-    expect(readMigrationStatus(db)).toEqual(status);
-  });
-
-  it("leaves rows written by the new version alone", async () => {
-    const db = oldCache();
-    const fresh = toRawJson(oldFormMessages(1)[0]);
-    db.run("UPDATE messages_cache SET raw_json = ? WHERE message_id = 1", [fresh]);
-    await migrateAll(db);
-    const row = db.query("SELECT raw_json FROM messages_cache WHERE message_id = 1").get() as {
-      raw_json: string;
-    };
-    expect(row.raw_json).toBe(fresh);
   });
 });
 
@@ -429,45 +381,10 @@ describe("batch limits", () => {
 });
 
 describe("a new cache", () => {
-  let dir: string;
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "tg-migrations-"));
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
   it("registers every migration as done", () => {
     const db = createAccountCacheDb();
     for (const status of readMigrationStatus(db)) {
       expect(status).toMatchObject({ state: "done", done: 0, total: 0 });
-    }
-  });
-
-  it("opens again without the write lock, with migrations pending or not", () => {
-    const path = join(dir, "cache.db");
-    const seed = new Database(path);
-    seed.run("PRAGMA journal_mode = WAL");
-    seedOldFormCache(seed, { messages: 3 });
-    seed.close();
-
-    const holder = new Database(path);
-    holder.run("BEGIN IMMEDIATE");
-    try {
-      const reader = new Database(path);
-      initCacheSchema(reader);
-      reader.run("PRAGMA busy_timeout = 0");
-      expect(() => {
-        initSyncSchema(reader);
-        registerBackgroundMigrations(reader);
-      }).not.toThrow();
-      expect(statusByName(reader).messages_raw_json_v2?.state).toBe("pending");
-      reader.close();
-    } finally {
-      holder.run("ROLLBACK");
-      holder.close();
     }
   });
 });

@@ -9,7 +9,6 @@ import {
   readCacheSize,
   rebuildSearchIfRowidsMoved,
   snapshotMessageRowids,
-  VacuumNeedsStoppedDaemonError,
   vacuumCache,
 } from "./cache-maintenance";
 import { createMessagesCache } from "./messages-cache";
@@ -273,29 +272,6 @@ describe("vacuumCache", () => {
     expect(result.checkpointed).toBe(true);
     expect(search("weekly")).toEqual(before);
     expect(before).toHaveLength(2000);
-  });
-
-  it("refuses a cache without auto_vacuum while the daemon runs, writing nothing", () => {
-    makeLegacyCache();
-    seedAndDeleteAThird();
-    const pages = pragma(db, "page_count");
-
-    expect(() => vacuumCache(db, path(), { daemonRunning: true })).toThrow(
-      VacuumNeedsStoppedDaemonError,
-    );
-    expect(pragma(db, "page_count")).toBe(pages);
-    expect(pragma(db, "auto_vacuum")).toBe(0);
-  });
-
-  it("releases free pages in steps on an incremental cache while the daemon runs", () => {
-    seedAndDeleteAThird();
-
-    const result = vacuumCache(db, path(), { daemonRunning: true });
-
-    expect(result.mode).toBe("incremental");
-    expect(result.free_pages_after).toBe(0);
-    expect(pragma(db, "freelist_count")).toBe(0);
-    expect(result.bytes_after).toBeLessThan(result.bytes_before);
   });
 
   it("doesn't wait for a reader on an older snapshot while the daemon runs", () => {

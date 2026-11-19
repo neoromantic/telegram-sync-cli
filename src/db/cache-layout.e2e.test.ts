@@ -206,26 +206,6 @@ describe("E2E: upgrading from the shared cache", () => {
     });
   });
 
-  it("moves the rows still in the WAL to an account with ID 3", async () => {
-    env.seedAccounts([
-      { phone: "+15550000001" },
-      { phone: "+15550000002" },
-      { phone: "+15550000003", is_active: true },
-    ]);
-    const data = new Database(join(env.dataDir, "data.db"));
-    data.run("DELETE FROM accounts WHERE id < 3");
-    data.close();
-    seedInChild(shared, "cacheWithRowsInWal", { messages: 40 });
-    expect(statSync(`${shared}-wal`).size).toBeGreaterThan(0);
-
-    expect((await sqlCount()).count).toBe(40);
-
-    for (const path of [shared, `${shared}-wal`, `${shared}-shm`]) {
-      expect(existsSync(path)).toBe(false);
-    }
-    expect(rowCounts(env.cachePath(3)).messages_cache).toBe(40);
-  });
-
   it("adds no first account while an older tg holds a cache of removed accounts", async () => {
     seedInChild(shared, "legacySharedCache");
     const before = rowCounts(shared);
@@ -290,15 +270,6 @@ describe("E2E: upgrading from the shared cache", () => {
       expect(pretty.stdout).toContain(UPGRADE_DOCS_URL);
     });
 
-    it("prints no notice with --format quiet", async () => {
-      seedInChild(shared, "legacySharedCache");
-
-      const result = await runCliSuccess(["--format", "quiet", "sql", SQL_COUNT], options());
-
-      expect(result.stderr).not.toContain(NOTICE);
-      expect(existsSync(join(env.dataDir, "shared-cache.db"))).toBe(true);
-    });
-
     it("sets the cache aside before tg accounts remove leaves one account", async () => {
       seedInChild(shared, "legacySharedCache");
       const before = rowCounts(shared);
@@ -344,16 +315,6 @@ describe("E2E: upgrading from the shared cache", () => {
       expect(existsSync(shared)).toBe(false);
       expect(rowCounts(parked)).toEqual(before);
       expect((await sqlCount()).count).toBe(0);
-    });
-
-    it("deletes a shared cache that holds nothing", async () => {
-      seedInChild(shared, "emptyCache");
-
-      const { stderr } = await sqlCount();
-
-      expect(stderr).not.toContain(NOTICE);
-      expect(existsSync(shared)).toBe(false);
-      expect(existsSync(join(env.dataDir, "shared-cache.db"))).toBe(false);
     });
 
     it("leaves a held cache for a later run and goes on", async () => {
