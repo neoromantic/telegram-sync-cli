@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `messages.deleteMessages` names no chat. It prints `chatId`, `messageIds`, `deletedCount` (as
   Telegram reports it), `deletedIds` (the IDs Telegram no longer has after the delete),
   `unverifiedIds` (every ID when that check failed, else none) and `forEveryone`, and marks only
-  `deletedIds` deleted in the cache, so list and search hide them. `--no-id`, or a word it does
-  not expect such as `--revoke false` (`--revoke` takes no value), is `INVALID_ARGS` before
+  `deletedIds` deleted in the cache, so list and search hide them. `--no-id`, or a value for
+  `--revoke` such as `--revoke=no` (`--revoke` takes no value), is `INVALID_ARGS` before
   anything is sent. Telegram's refusals are `TELEGRAM_ERROR` with the reason in
   `details.telegramError`. It is a write: read-only mode refuses it and `allowedChats` applies.
 - `tg send --markdown` and `--html` send rich messages such as headings and tables on
