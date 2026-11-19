@@ -30,8 +30,10 @@ describe("lightStem", () => {
     expect(lightStem("is")).toBe("is");
   });
 
-  it("leaves words of other scripts and numbers as they are", () => {
-    for (const word of ["2026", "東京", "αβγ", "ab12"]) expect(lightStem(word)).toBe(word);
+  it("leaves words of other scripts and any word with a digit as they are", () => {
+    for (const word of ["2026", "東京", "αβγ", "ab12", "2ms", "10ms", "mp3s", "квартир1ами"]) {
+      expect(lightStem(word)).toBe(word);
+    }
   });
 
   it("keeps the forms it does not know apart (known limit: verb forms, irregular forms)", () => {

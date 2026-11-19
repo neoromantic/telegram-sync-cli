@@ -446,7 +446,8 @@ How it works ([#92](https://github.com/neoromantic/telegram-sync-cli/issues/92))
 index's own words from `message_search_vocab` and keeps those with the same stem as the query
 word. The stemmers are light: for a Cyrillic word, Russian noun and adjective case endings are
 stripped and `ё` reads as `е`; for a Latin word, only a plural `s` (`cities` to `city`); other
-words stay as they are (`src/utils/word-stems.ts`). The words come from a range scan of the
+words, and any word with a digit or a letter of another script (`2ms`), stay as they are
+(`src/utils/word-stems.ts`). The words come from a range scan of the
 vocabulary on the stem without its last letter, with `е` and `ё` both, then the stem filter. Each
 query word becomes an `OR` of its forms, and the words are joined with `AND`. On the made-up
 cache of the example in [cli-commands.md](cli-commands.md#messages), `квартира парк` becomes:

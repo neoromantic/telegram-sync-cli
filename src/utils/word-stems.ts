@@ -1,5 +1,6 @@
 const CYRILLIC = /[Ѐ-ӿ]/;
 const LATIN = /[a-z]/;
+const LETTERS = /^(?:[a-z]|[\p{Script=Cyrillic}&&\p{L}])+$/v;
 
 /** Whether a lowercase word has a Cyrillic letter */
 export function isCyrillic(word: string) {
@@ -105,13 +106,13 @@ function englishMinimal(word: string) {
 }
 
 /**
- * The light stem of a lowercase word: Russian case endings stripped for a
- * Cyrillic word (ё read as е), the plural `s` for a Latin one, any other
- * word as it is. Ports of Lucene's RussianLightStemmer and
+ * The light stem of a lowercase word of Latin (a–z) and Cyrillic letters
+ * only: Russian case endings stripped for a word with a Cyrillic letter (ё
+ * read as е), the plural `s` for a Latin one. Any other word, one with a
+ * digit (`2ms`) too, stays as it is. Ports of Lucene's RussianLightStemmer and
  * EnglishMinimalStemmer (see NOTICE).
  */
 export function lightStem(word: string) {
-  if (isCyrillic(word)) return russianLight(word);
-  if (isLatin(word)) return englishMinimal(word);
-  return word;
+  if (!LETTERS.test(word)) return word;
+  return isCyrillic(word) ? russianLight(word) : englishMinimal(word);
 }
