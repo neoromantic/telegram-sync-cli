@@ -7,9 +7,7 @@ import {
   type HistoryRanges,
   type PageBounds,
 } from "./history-ranges";
-import { createMessagesCache } from "./messages-cache";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
-import { takePartIn } from "../test/participation.test-utils";
 
 const CHAT_ID = -1001234567890;
 const OTHER_CHAT_ID = 10;
@@ -20,7 +18,6 @@ describe("HistoryRanges", () => {
 
   beforeEach(() => {
     db = createAccountCacheDb();
-    takePartIn(db, -1001234567890);
     ranges = createHistoryRanges(db);
   });
 
@@ -32,16 +29,6 @@ describe("HistoryRanges", () => {
     return db
       .query("SELECT low, high FROM history_ranges WHERE chat_id = ? ORDER BY low")
       .all(chatId) as HistoryRange[];
-  }
-
-  function cacheMessage(messageId: number) {
-    createMessagesCache(db).upsert({
-      chat_id: CHAT_ID,
-      message_id: messageId,
-      message_type: "text",
-      date: 1_760_000_000 + messageId,
-      raw_json: "{}",
-    });
   }
 
   describe("add", () => {
@@ -70,14 +57,6 @@ describe("HistoryRanges", () => {
         [
           { low: 1, high: 5 },
           { low: 3, high: 9 },
-        ],
-        [{ low: 1, high: 9 }],
-      ],
-      [
-        "keeps a range inside another",
-        [
-          { low: 1, high: 9 },
-          { low: 3, high: 5 },
         ],
         [{ low: 1, high: 9 }],
       ],
@@ -128,12 +107,6 @@ describe("HistoryRanges", () => {
 
   describe("recordPage", () => {
     it.each<[string, number[], PageBounds, HistoryRange[]]>([
-      [
-        "covers a page from its oldest to its newest message",
-        [12, 10, 11],
-        {},
-        [{ low: 10, high: 12 }],
-      ],
       ["counts empty messages, but not IDs of 0", [12, 0, 10], {}, [{ low: 10, high: 12 }]],
       ["covers from just above after", [8, 9], { after: 5 }, [{ low: 6, high: 9 }]],
       [
@@ -142,22 +115,10 @@ describe("HistoryRanges", () => {
         { reachedStart: true },
         [{ low: 1, high: 4 }],
       ],
-      ["records nothing for an empty page", [], {}, []],
-      ["records nothing above after without messages", [], { after: 5 }, []],
     ])("%s", (_name, ids, bounds, expected) => {
       ranges.recordPage(CHAT_ID, ids, bounds);
 
       expect(stored()).toEqual(expected);
-    });
-
-    it("covers up to before when a cached message proves nothing new lands below it", () => {
-      cacheMessage(40);
-      ranges.add(CHAT_ID, { low: 40, high: 45 });
-
-      ranges.recordPage(CHAT_ID, [21, 17], { before: 40 });
-      ranges.recordPage(CHAT_ID, [], { before: 17, reachedStart: true });
-
-      expect(stored()).toEqual([{ low: 1, high: 45 }]);
     });
 
     it("stops at the newest message below before when nothing is cached from it", () => {

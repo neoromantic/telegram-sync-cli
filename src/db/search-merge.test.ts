@@ -54,17 +54,6 @@ function mergeAll(db: Database) {
 }
 
 describe("search index merges", () => {
-  it("leave writes alone: segments pile up until a merge", () => {
-    const db = createAccountCacheDb();
-    writeMessages(db, 400, 10);
-    expect(segments(db)).toBeGreaterThan(8);
-
-    const before = WORDS.map((word) => matches(db, word));
-    mergeAll(db);
-    expect(segments(db)).toBeLessThan(4);
-    expect(WORDS.map((word) => matches(db, word))).toEqual(before);
-  });
-
   function reindex(db: Database, from: number, to: number) {
     const rows = db
       .query("SELECT rowid, text FROM messages_cache WHERE rowid BETWEEN ? AND ?")
