@@ -412,33 +412,36 @@ describe("E2E: media transcribe", () => {
     });
   });
 
-  it("reports a runner that failed with its exit code and the end of its stderr", async () => {
-    install("ffmpeg", FAKE_FFMPEG);
-    install(
-      "whisper",
-      '#!/bin/sh\necho "loading model" >&2\necho "RuntimeError: out of memory" >&2\nexit 2\n',
-    );
-    note(1, "Hello.");
+  for (const output of ["no JSON", "parseable JSON"] as const) {
+    it(`reports a runner that exited 2 after writing ${output} with its exit code and stderr`, async () => {
+      install("ffmpeg", FAKE_FFMPEG);
+      install(
+        "whisper",
+        `${output === "no JSON" ? "#!/bin/sh\n" : FAKE_OPENAI_RUNNER}echo "loading model" >&2\necho "RuntimeError: out of memory" >&2\nexit 2\n`,
+      );
+      note(1, "Hello.");
 
-    const result = await transcribe("--id", "1");
+      const result = await transcribe("--id", "1");
 
-    const json = result.json as { error: { message: string } };
-    expect(result.exitCode).toBe(1);
-    expect(json).toMatchObject({
-      success: false,
-      error: {
-        code: "GENERAL_ERROR",
-        details: {
-          chatId: SELF_ID,
-          messageId: 1,
-          runner: join(binDir, "whisper"),
-          exitCode: 2,
-          stderr: "loading model\nRuntimeError: out of memory",
+      const json = result.json as { error: { message: string } };
+      expect(result.exitCode).toBe(1);
+      expect(json).toMatchObject({
+        success: false,
+        error: {
+          code: "GENERAL_ERROR",
+          details: {
+            chatId: SELF_ID,
+            messageId: 1,
+            runner: join(binDir, "whisper"),
+            exitCode: 2,
+            stderr: "loading model\nRuntimeError: out of memory",
+          },
         },
-      },
+      });
+      expect(json.error.message).toStartWith("whisper produced no transcript");
+      expect(env.openCacheDb(1).query("SELECT 1 FROM message_transcripts").get()).toBeNull();
     });
-    expect(json.error.message).toStartWith("whisper produced no transcript");
-  });
+  }
 
   it("removes the converted audio when the whole run fails", async () => {
     install("ffmpeg", FAKE_FFMPEG);

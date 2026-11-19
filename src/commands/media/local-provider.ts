@@ -230,6 +230,7 @@ async function runProgram(
   for (const wav of wavs) {
     const file = Bun.file(outputPath(runner, wav, outDir));
     try {
+      if (exitCode !== 0) throw new Error(`exited with code ${exitCode}`);
       const json: unknown = await file.json();
       const transcript =
         runner.shape === "whisper.cpp" ? parseWhisperCppJson(json) : parseOpenAiWhisperJson(json);
