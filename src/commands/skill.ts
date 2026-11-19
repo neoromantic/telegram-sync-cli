@@ -395,8 +395,8 @@ export const skillInstallCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const dir = typeof args.dir === "string" ? args.dir.trim() : "";
-    if (!dir) {
+    const dir = typeof args.dir === "string" ? args.dir : "";
+    if (!dir.trim()) {
       error(
         ErrorCodes.INVALID_ARGS,
         "--dir needs a directory",

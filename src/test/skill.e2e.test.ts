@@ -43,9 +43,9 @@ describe("E2E: Skill Commands", () => {
     return (result.json as { data: ValidateData }).data;
   };
 
-  it("install writes the repo SKILL.md into <dir>/telegram-sync-cli", async () => {
+  it("install writes the repo SKILL.md into <dir>/telegram-sync-cli, <dir> as given", async () => {
     env = createTestEnvironment("skill-install");
-    const dir = join(env.dataDir, "agent-skills");
+    const dir = join(env.dataDir, "agent-skills ");
 
     const first = await runCliSuccess(["skill", "install", "--dir", dir], env.getCliOptions());
     const path = join(dir, "telegram-sync-cli", "SKILL.md");
@@ -56,6 +56,7 @@ describe("E2E: Skill Commands", () => {
       data: { path, overwritten: false },
     });
     expect(await Bun.file(path).text()).toBe(expected);
+    expect(existsSync(join(env.dataDir, "agent-skills"))).toBe(false);
 
     const second = await runCliSuccess(["skill", "install", "--dir", dir], env.getCliOptions());
     expect(second.json).toMatchObject({ data: { overwritten: true } });
