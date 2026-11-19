@@ -307,6 +307,7 @@ describe("downloadMedia from the cache", () => {
       kind: "photo",
       chatId: SELF_ID,
       messageId: 1,
+      date: photo.date,
       uniqueFileId: extractAttachment(photo)!.uniqueFileId,
       groupedId: null,
       cached: true,
@@ -484,6 +485,7 @@ describe("downloadMedia from Telegram", () => {
       kind: "document",
       chatId: SELF_ID,
       messageId: 5,
+      date: pdf.date,
       uniqueFileId: extractAttachment(pdf)!.uniqueFileId,
       groupedId: null,
       cached: false,
@@ -555,6 +557,27 @@ describe("downloadMedia from Telegram", () => {
       reason: null,
       fetched_at: NOW,
     });
+  });
+
+  it("returns the message date when the cache skips a group the account takes no part in", async () => {
+    createChatsCache(db).upsert(chatRow(-5_550_010, "group", { fetched_at: NOW }));
+    const notes = documentMessage({ _: "peerChat", chatId: 5_550_010 }, 8, {
+      mimeType: "text/plain",
+      size: 64,
+      attributes: [],
+    });
+    const telegram = fakeTelegram({ message: () => notes });
+    const transfer = fakeTransfer(async function* () {
+      yield fakeBytes(64);
+    });
+
+    const result = await downloadMedia(
+      deps({ getClient: () => telegram.client, download: transfer.download }),
+      request("-5550010", 8),
+    );
+
+    expect(createMessagesCache(db).get(-5_550_010, 8)).toBeNull();
+    expect(result.date).toBe(notes.date);
   });
 
   it("reports MESSAGE_NOT_FOUND for an empty message or one of another chat", async () => {
@@ -1171,6 +1194,7 @@ describe("downloadMedia --thumb from Telegram", () => {
       kind: "thumbnail",
       chatId: SELF_ID,
       messageId: 10,
+      date: video.date,
       uniqueFileId: thumb.uniqueFileId,
       groupedId: null,
       cached: false,

@@ -1,8 +1,6 @@
-import type { Database } from "bun:sqlite";
 import { defineCommand } from "citty";
 
 import { getAccountMediaDir } from "../../db";
-import { createMessagesCache } from "../../db/messages-cache";
 import { getClientForAccount } from "../../services/telegram";
 import { exitAfterFlush } from "../../telemetry";
 import { ErrorCodes } from "../../types";
@@ -48,15 +46,12 @@ function reportInterrupted(err: DownloadInterruptedError) {
   return exitAfterFlush(INTERRUPTED_EXIT_CODE);
 }
 
-function targetOf(out: string, result: DownloadResult, batch: boolean, cacheDb: Database) {
+function targetOf(out: string, result: DownloadResult, batch: boolean) {
   if (!batch && !isTemplate(out)) return outTarget(out, result.fileName);
-  const row = out.includes("{date}")
-    ? createMessagesCache(cacheDb).get(result.chatId, result.messageId)
-    : undefined;
   const values = {
     chat: String(result.chatId),
     id: String(result.messageId),
-    date: row ? templateDate(row.date) : "unknown",
+    date: templateDate(result.date),
     name: result.fileName,
     kind: result.kind,
   };
@@ -65,7 +60,7 @@ function targetOf(out: string, result: DownloadResult, batch: boolean, cacheDb: 
 }
 
 function outputOf(result: DownloadResult, path: string) {
-  const { path: cachePath, ...fields } = result;
+  const { path: cachePath, date, ...fields } = result;
   return { path, cachePath, ...fields };
 }
 
@@ -179,13 +174,7 @@ export const downloadMediaCommand = defineCommand({
     const copy = (result: DownloadResult) =>
       out === undefined
         ? result.path
-        : copyOut(
-            result,
-            targetOf(out, result, batch, history.cacheDb),
-            overwrite,
-            published,
-            controller.signal,
-          );
+        : copyOut(result, targetOf(out, result, batch), overwrite, published, controller.signal);
 
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);

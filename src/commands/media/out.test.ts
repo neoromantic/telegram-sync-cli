@@ -30,6 +30,7 @@ function cached(bytes: Uint8Array, messageId = 1) {
     kind: "document",
     chatId: 5_550_001,
     messageId,
+    date: 1_760_000_000,
     uniqueFileId: `unique-${messageId}`,
     groupedId: null,
     cached: true,

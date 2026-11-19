@@ -116,6 +116,8 @@ export interface DownloadResult {
   kind: AttachmentKind | "thumbnail";
   chatId: number;
   messageId: number;
+  /** The message's date, Unix seconds */
+  date: number;
   uniqueFileId: string;
   /** The message's album ID */
   groupedId: string | null;
@@ -165,6 +167,7 @@ function downloadTarget(mediaDir: string, info: AttachmentInfo, thumb: MediaThum
 interface MessageRef {
   chatId: number;
   messageId: number;
+  date: number;
   groupedId: string | null;
 }
 
@@ -182,6 +185,7 @@ function toResult(
     kind: target.kind,
     chatId: ref.chatId,
     messageId: ref.messageId,
+    date: ref.date,
     uniqueFileId: target.uniqueFileId,
     groupedId: ref.groupedId,
     cached: transfer.cached,
@@ -276,7 +280,7 @@ export function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: Do
   const file = findCachedFile(target.paths.file, target.expectedSize);
   if (!file) return null;
   touch(file.path);
-  return toResult(target, { chatId, messageId, groupedId: info.groupedId }, file, {
+  return toResult(target, { chatId, messageId, date: row.date, groupedId: info.groupedId }, file, {
     cached: true,
     resumedFrom: null,
   });
@@ -522,7 +526,7 @@ export async function downloadOnline(
     }
 
     const target = downloadTarget(deps.mediaDir, info, thumb);
-    const ref = { chatId, messageId, groupedId: info.groupedId };
+    const ref = { chatId, messageId, date: message.date, groupedId: info.groupedId };
     const servedFromCache = () => {
       const file = findCachedFile(target.paths.file, target.expectedSize);
       if (!file) return null;
