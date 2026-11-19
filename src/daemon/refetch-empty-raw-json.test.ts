@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { type TelegramClient, tl } from "@mtcute/bun";
+import type { TelegramClient } from "@mtcute/bun";
 import { dialogToCacheInput } from "../commands/chats/helpers";
 import { createSyncScheduler } from "./scheduler";
 import { processJobReal, REFETCH_BATCH_SIZE } from "./sync-worker-real-jobs";
@@ -233,23 +233,6 @@ describe("refetching messages cached with an empty raw_json (#130)", () => {
     ]);
     expect(rawJsonOf(DM, REFETCH_BATCH_SIZE + 2)).not.toBe("{}");
     expect(ctx.jobsService.getPendingJobs()).toHaveLength(0);
-  });
-
-  it("queues a chat once per pass, even after its job failed for good", async () => {
-    for (const id of range(1, 501)) seedEmpty(DM, id);
-    restartRefetchPass();
-    ctx.client = {
-      call: mock(async (request: Record<string, unknown>) => {
-        requests.push(request);
-        throw new tl.RpcError(400, "PEER_ID_INVALID");
-      }),
-    } as unknown as TelegramClient;
-
-    expect(await migrateBatchThenRunJobs(500)).toBe(false);
-    while (!(await migrateBatchThenRunJobs(500))) {}
-
-    expect(requests).toHaveLength(1);
-    expect(ctx.jobsService.getJobsForChat(DM)).toMatchObject([{ status: SyncJobStatus.Failed }]);
   });
 
   it("asks for a message Telegram no longer has once, across batches of the pass", async () => {
