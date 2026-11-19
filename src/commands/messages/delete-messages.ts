@@ -121,6 +121,10 @@ export interface DeleteMessagesResult {
   messageIds: number[];
   /** How many messages Telegram reports deleted (ptsCount) */
   deletedCount: number;
+  /** The IDs Telegram no longer has after the delete */
+  deletedIds: number[];
+  /** All IDs when Telegram could not be asked which messages are gone, else none */
+  unverifiedIds: number[];
   /** Deleted for every member; always true in a channel or supergroup */
   forEveryone: boolean;
 }
@@ -153,11 +157,9 @@ export async function deleteMessages(
     throw withPeerHint(err);
   }
 
+  let gone: number[] | undefined;
   try {
-    const gone =
-      affected.ptsCount === messageIds.length
-        ? messageIds
-        : idsOutsideChat(chat.chatId, messageIds, await fetchMessages(client, chat, messageIds));
+    gone = idsOutsideChat(chat.chatId, messageIds, await fetchMessages(client, chat, messageIds));
     createMessagesCache(cacheDb).markDeleted(chat.chatId, gone);
   } catch (err) {
     verbose(`Could not mark the messages deleted: ${getErrorMessage(err)}`);
@@ -166,6 +168,8 @@ export async function deleteMessages(
     chatId: chat.chatId,
     messageIds,
     deletedCount: affected.ptsCount,
+    deletedIds: gone ?? [],
+    unverifiedIds: gone ? [] : messageIds,
     forEveryone: request._ === "channels.deleteMessages" || revoke,
   } satisfies DeleteMessagesResult;
 }

@@ -465,17 +465,27 @@ saying which chat holds them:
 }
 ```
 
-After Telegram confirms, the cache marks the messages deleted, so `tg messages list` and
-`tg messages search` leave them out unless `--includeDeleted`:
+After Telegram confirms, the command asks Telegram which of the messages are gone and marks
+those deleted in the cache, so `tg messages list` and `tg messages search` leave them out unless
+`--includeDeleted`:
 
 ```json
-{ "chatId": 10, "messageIds": [12, 13], "deletedCount": 2, "forEveryone": true }
+{
+  "chatId": 10,
+  "messageIds": [12, 13],
+  "deletedCount": 2,
+  "deletedIds": [12, 13],
+  "unverifiedIds": [],
+  "forEveryone": true
+}
 ```
 
 `messageIds` are the IDs asked for. `deletedCount` is the number Telegram reports deleted
 (`ptsCount`), which can be lower, for example for a message that was already gone; the command
-still succeeds, asks Telegram which of the messages are gone and marks only those deleted in
-the cache. `forEveryone` is `true` with `--revoke` and always in a supergroup or channel.
+still succeeds. `deletedIds` are the IDs Telegram no longer has. If that check fails, for example
+on a flood wait, the delete has still happened and the command succeeds with `deletedIds: []`
+and every ID in `unverifiedIds`, and the cache stays as it was. `forEveryone` is `true` with
+`--revoke` and always in a supergroup or channel.
 When Telegram refuses, the error is `TELEGRAM_ERROR` (exit 5) with Telegram's error name in
 `details.telegramError`, beside `chatId` and `messageIds`, and the cache stays as it was:
 

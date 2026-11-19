@@ -30,6 +30,9 @@ export const FAKE_GONE_MESSAGE = 26;
 /** A message a delete leaves in place without an error, and does not count */
 export const FAKE_KEPT_MESSAGE = 27;
 
+/** A message a delete removes, but whose fetch Telegram answers with FLOOD_WAIT */
+export const FAKE_UNCHECKABLE_MESSAGE = 28;
+
 /** The method Telegram answers with FLOOD_WAIT_<FAKE_FLOOD_SECONDS> */
 export const FAKE_FLOOD_METHOD = "help.getNearestDc";
 
@@ -90,6 +93,13 @@ if (import.meta.main) {
       if (request._ === "messages.getMessages" || request._ === "channels.getMessages") {
         const ids = (request.id ?? []).map((item) => (typeof item === "number" ? item : item.id));
         console.error(`${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: ids })}`);
+        if (ids.includes(FAKE_UNCHECKABLE_MESSAGE)) {
+          throw tl.RpcError.fromTl({
+            _: "rpc_error",
+            errorCode: 420,
+            errorMessage: `FLOOD_WAIT_${FAKE_FLOOD_SECONDS}`,
+          });
+        }
         const channel = request.channel;
         return {
           _: "messages.messages",

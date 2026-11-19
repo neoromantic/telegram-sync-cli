@@ -222,7 +222,7 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
       );
       expect(result.json).toMatchObject({
         success: true,
-        data: { messageIds: [messageId], deletedCount: 1, forEveryone: false },
+        data: { messageIds: [messageId], deletedIds: [messageId], forEveryone: false },
       });
 
       const raw = await runCliSuccess(

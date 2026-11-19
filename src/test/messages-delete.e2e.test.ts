@@ -19,6 +19,7 @@ import {
   FAKE_GONE_MESSAGE,
   FAKE_KEPT_MESSAGE,
   FAKE_SELF_ID,
+  FAKE_UNCHECKABLE_MESSAGE,
   FAKE_UNDELETABLE_MESSAGE,
 } from "./fake-client-cli.test-utils";
 import { createTestEnvironment, type TestEnvironment } from "./e2e-setup.test-utils";
@@ -185,6 +186,8 @@ describe("E2E: messages delete", () => {
       chatId: ALICE_ID,
       messageIds: [12],
       deletedCount: 1,
+      deletedIds: [12],
+      unverifiedIds: [],
       forEveryone: false,
     });
   });
@@ -263,12 +266,16 @@ describe("E2E: messages delete", () => {
     const result = await remove("@teamchat", [25]);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).not.toContain(".getMessages");
     expect(deleteCalls(result.stderr)).toEqual([{ method: "channels.deleteMessages", id: [25] }]);
+    expect(result.stderr).toContain(
+      `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: "channels.getMessages", id: [25] })}`,
+    );
     expect((result.json as { data: DeleteMessagesResult }).data).toEqual({
       chatId: TEAM_ID,
       messageIds: [25],
       deletedCount: 1,
+      deletedIds: [25],
+      unverifiedIds: [],
       forEveryone: true,
     });
     expect(await searched("green")).toEqual([]);
@@ -283,6 +290,8 @@ describe("E2E: messages delete", () => {
       chatId: TEAM_ID,
       messageIds: ids,
       deletedCount: 1,
+      deletedIds: [25, FAKE_GONE_MESSAGE],
+      unverifiedIds: [],
       forEveryone: true,
     });
     expect(result.stderr).toContain(
@@ -291,6 +300,23 @@ describe("E2E: messages delete", () => {
     expect(await searched("green")).toEqual([]);
     expect(await searched("Deploying")).toEqual([]);
     expect(await searched("finished")).toEqual([FAKE_KEPT_MESSAGE]);
+  });
+
+  it("succeeds with the IDs unverified and the cache unchanged when the check after the delete fails", async () => {
+    const ids = [25, FAKE_UNCHECKABLE_MESSAGE];
+    const result = await remove("@teamchat", ids);
+
+    expect(result.exitCode).toBe(0);
+    expect(deleteCalls(result.stderr)).toEqual([{ method: "channels.deleteMessages", id: ids }]);
+    expect((result.json as { data: DeleteMessagesResult }).data).toEqual({
+      chatId: TEAM_ID,
+      messageIds: ids,
+      deletedCount: 2,
+      deletedIds: [],
+      unverifiedIds: ids,
+      forEveryone: true,
+    });
+    expect(await searched("green")).toEqual([25]);
   });
 
   it.each([
@@ -304,6 +330,7 @@ describe("E2E: messages delete", () => {
       chatId,
       messageIds: [id],
       deletedCount: 1,
+      deletedIds: [id],
     });
     expect(await searched(word)).toEqual([]);
   });
