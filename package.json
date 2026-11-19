@@ -2,73 +2,61 @@
   "name": "@goodit/telegram-sync-cli",
   "version": "0.14.0",
   "description": "Agent-friendly Telegram sync CLI with full API support",
-  "type": "module",
+  "keywords": [
+    "agent",
+    "automation",
+    "cli",
+    "mtproto",
+    "telegram",
+    "telegram-api"
+  ],
+  "homepage": "https://tg.sergeybaus.com",
+  "bugs": {
+    "url": "https://github.com/neoromantic/telegram-sync-cli/issues"
+  },
+  "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neoromantic/telegram-sync-cli.git"
+  },
   "bin": {
     "tg": "bin/tg.js"
   },
   "files": [
     "bin/tg.js",
     "src/**/*.ts",
-    "!src/__tests__/**",
-    "!src/__e2e__/**",
-    "!src/__integration__/**",
+    "!src/**/*.test.ts",
+    "!src/**/*.test-utils.ts",
+    "!src/test/**",
     "CHANGELOG.md"
   ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
     "build": "bun build ./src/index.ts --compile --outfile dist/tg",
     "build:minify": "bun build ./src/index.ts --compile --minify --sourcemap --outfile dist/tg",
     "build:all": "bun run scripts/build-all.ts",
-    "check": "bun run lint && bun run typecheck && bun run check:knip",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun run check:knip",
     "check:knip": "knip",
     "typecheck": "tsc --noEmit",
-    "test": "bun test --isolate src/__tests__",
-    "test:e2e": "bun test --timeout 30000 src/__e2e__",
-    "test:integration": "bun test src/__integration__",
+    "test": "bun test --parallel --timings=test-timings.json --path-ignore-patterns='**/*.e2e.test.ts' --path-ignore-patterns='**/*.integration.test.ts'",
+    "test:e2e": "bun test --parallel --timings=test-timings.json --timeout 30000 .e2e.test.ts",
+    "test:integration": "bun test .integration.test.ts",
     "test:all": "bun test --isolate",
     "test:coverage": "bun test --isolate --coverage",
     "test:build": "bun run scripts/test-build.ts",
     "test:install": "bun run scripts/test-install.ts",
     "bench:storage": "bun run scripts/bench-storage.ts",
     "docs:outputs": "bun run scripts/docs-outputs.ts",
-    "lint": "biome check .",
-    "lint:fix": "biome check --write .",
-    "format": "biome format --write .",
+    "lint": "oxlint --deny-warnings",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "prepare": "bunx lefthook install"
-  },
-  "keywords": [
-    "telegram",
-    "cli",
-    "mtproto",
-    "telegram-api",
-    "agent",
-    "automation"
-  ],
-  "author": "",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/neoromantic/telegram-sync-cli.git"
-  },
-  "bugs": {
-    "url": "https://github.com/neoromantic/telegram-sync-cli/issues"
-  },
-  "homepage": "https://tg.sergeybaus.com",
-  "publishConfig": {
-    "access": "public"
-  },
-  "engines": {
-    "bun": ">=1.4.0"
-  },
-  "packageManager": "bun@1.4.3",
-  "devDependencies": {
-    "@biomejs/biome": "2.5.15",
-    "@types/bun": "1.4.3",
-    "knip": "6.45.1",
-    "lefthook": "^2.2.2",
-    "typescript": "^7.0.2",
-    "zod": "^4.6.7"
   },
   "dependencies": {
     "@mtcute/bun": "^0.32.6",
@@ -76,5 +64,19 @@
     "citty": "^0.2.2",
     "long": "^5.3.2",
     "uqr": "^0.1.3"
-  }
+  },
+  "devDependencies": {
+    "@interfere/landmines": "0.1.0",
+    "@types/bun": "1.4.3",
+    "knip": "6.45.1",
+    "lefthook": "^2.2.2",
+    "oxfmt": "0.79.0",
+    "oxlint": "1.94.0",
+    "typescript": "^7.0.2",
+    "zod": "^4.6.7"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "packageManager": "bun@1.4.3"
 }

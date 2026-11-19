@@ -1,27 +1,18 @@
-/**
- * Database maintenance commands
- *
- * Usage:
- *   tg db vacuum [--account <selector>]   Prune and compact an account's cache
- *   tg db migrate [--account <selector>]  Finish an account's background migrations
- */
-
-import type { Database } from 'bun:sqlite'
-import { join } from 'node:path'
-import { type ArgsDef, defineCommand } from 'citty'
-import { ConfigError, ConfigReadError, getResolvedCacheConfig } from '../config'
-import { createPidFile } from '../daemon/pid-file'
+import { join } from "node:path";
+import { type ArgsDef, defineCommand } from "citty";
+import { ConfigError, ConfigReadError, getResolvedCacheConfig } from "../config";
+import { createPidFile } from "../daemon/pid-file";
 import {
   ensureCacheLayout,
   getAccountCachePath,
   getDataDir,
   openExistingAccountCacheDb,
-} from '../db'
+} from "../db";
 import {
   foregroundPacing,
   readMigrationStatus,
   runPendingMigrations,
-} from '../db/background-migrations'
+} from "../db/background-migrations";
 import {
   checkVacuumDisk,
   type PruneResult,
@@ -29,46 +20,42 @@ import {
   readAutoVacuum,
   VacuumNeedsStoppedDaemonError,
   vacuumCache,
-} from '../db/cache-maintenance'
-import { reportLocalError } from '../telemetry'
-import { ErrorCodes } from '../types'
-import { reportCacheError } from '../utils/account-cache'
-import {
-  ACCOUNT_SELECTOR_DESCRIPTION,
-  resolveAccount,
-} from '../utils/account-selector'
-import { formatBytes } from '../utils/formatting'
-import { error, getOutputFormat, success } from '../utils/output'
+} from "../db/cache-maintenance";
+import { reportLocalError } from "../telemetry";
+import { ErrorCodes } from "../types";
+import { reportCacheError } from "../utils/account-cache";
+import { ACCOUNT_SELECTOR_DESCRIPTION, resolveAccount } from "../utils/account-selector";
+import { formatBytes } from "../utils/formatting";
+import { error, getOutputFormat, success } from "../utils/output";
 
-function sqliteCode(err: unknown): string {
-  const code = (err as { code?: unknown } | null)?.code
-  return typeof code === 'string' ? code : ''
+function sqliteCode(err: unknown) {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : "";
 }
 
-/** The retention the other commands use; a bad config.json fails as there */
 async function loadRetention() {
   try {
-    return (await getResolvedCacheConfig()).retention
+    return (await getResolvedCacheConfig()).retention;
   } catch (err) {
     if (err instanceof ConfigError || err instanceof ConfigReadError) {
-      reportLocalError(err)
+      reportLocalError(err);
     }
     if (err instanceof ConfigError) {
-      error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+      error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues });
     }
     if (err instanceof ConfigReadError) {
-      error(ErrorCodes.GENERAL_ERROR, err.message, { path: err.path })
+      error(ErrorCodes.GENERAL_ERROR, err.message, { path: err.path });
     }
-    throw err
+    throw err;
   }
 }
 
-function openCache(accountId: number): Database | null {
+function openCache(accountId: number) {
   try {
-    ensureCacheLayout({ mode: 'strict' })
-    return openExistingAccountCacheDb(accountId)
+    ensureCacheLayout({ mode: "strict" });
+    return openExistingAccountCacheDb(accountId);
   } catch (err) {
-    reportCacheError(err, accountId)
+    reportCacheError(err, accountId);
   }
 }
 
@@ -76,41 +63,38 @@ function needsStoppedDaemon(accountId: number): never {
   error(
     ErrorCodes.DAEMON_ALREADY_RUNNING,
     `The cache of account ${accountId} has no incremental auto_vacuum yet: only a full VACUUM can compact it, and that needs the daemon stopped`,
-    { account_id: accountId, auto_vacuum: 'none' },
+    { account_id: accountId, auto_vacuum: "none" },
     `tg daemon stop && tg db vacuum --account ${accountId} && tg daemon start`,
-  )
+  );
 }
 
 const vacuumCommand = defineCommand({
   meta: {
-    name: 'vacuum',
-    description:
-      "Prune an account's cache and give its free space back to the disk",
+    name: "vacuum",
+    description: "Prune an account's cache and give its free space back to the disk",
   },
   args: {
     account: {
-      type: 'string',
+      type: "string",
       description: ACCOUNT_SELECTOR_DESCRIPTION,
     },
   },
   async run({ args }) {
-    const account = resolveAccount(args.account)
-    const retention = await loadRetention()
-    const daemonRunning = createPidFile(
-      join(getDataDir(), 'daemon.pid'),
-    ).isRunning()
+    const account = resolveAccount(args.account);
+    const retention = await loadRetention();
+    const daemonRunning = createPidFile(join(getDataDir(), "daemon.pid")).isRunning();
 
-    const db = openCache(account.id)
+    const db = openCache(account.id);
     const empty: PruneResult = {
       api_activity: 0,
       rate_limits: 0,
       completed_jobs: 0,
       failed_jobs: 0,
-    }
+    };
     if (!db) {
       success({
         account_id: account.id,
-        mode: 'skipped',
+        mode: "skipped",
         bytes_before: 0,
         bytes_after: 0,
         freed_bytes: 0,
@@ -118,43 +102,41 @@ const vacuumCommand = defineCommand({
         auto_vacuum: null,
         pruned: empty,
         checkpointed: false,
-      })
-      return
+      });
+      return;
     }
 
-    // Refuse before writing anything
-    const autoVacuum = readAutoVacuum(db)
-    if (daemonRunning && autoVacuum === 'none') {
-      needsStoppedDaemon(account.id)
+    const autoVacuum = readAutoVacuum(db);
+    if (daemonRunning && autoVacuum === "none") {
+      needsStoppedDaemon(account.id);
     }
-    const path = getAccountCachePath(account.id)
+    const path = getAccountCachePath(account.id);
     if (!daemonRunning) {
-      const disk = checkVacuumDisk(path)
+      const disk = checkVacuumDisk(path);
       if (!disk.enough) {
-        const vacuum = `tg db vacuum --account ${account.id}`
+        const vacuum = `tg db vacuum --account ${account.id}`;
         error(
           ErrorCodes.GENERAL_ERROR,
           `Not enough disk space to vacuum the cache of account ${account.id}: a full VACUUM needs about ${formatBytes(disk.needed_bytes)} of free disk and only ${formatBytes(disk.free_bytes)} is free. Nothing was changed.`,
           {
             account_id: account.id,
-            reason: 'disk_full',
+            reason: "disk_full",
             needed_bytes: disk.needed_bytes,
             free_bytes: disk.free_bytes,
           },
-          autoVacuum === 'incremental'
+          autoVacuum === "incremental"
             ? `Free some disk space, or start the daemon (tg daemon start) and run ${vacuum} again: then it releases the free pages in place, without a copy`
             : `Free some disk space, then run ${vacuum} again`,
-        )
+        );
       }
     }
 
-    // Each prune batch commits on its own, so a later failure keeps it
-    let pruned: PruneResult | null = null
+    let pruned: PruneResult | null = null;
     try {
-      pruned = pruneCache(db, retention)
+      pruned = pruneCache(db, retention);
       const result = vacuumCache(db, path, {
         daemonRunning,
-      })
+      });
       success({
         account_id: account.id,
         mode: result.mode,
@@ -165,122 +147,120 @@ const vacuumCommand = defineCommand({
         auto_vacuum: result.auto_vacuum,
         pruned,
         checkpointed: result.checkpointed,
-      })
+      });
     } catch (err) {
       if (err instanceof VacuumNeedsStoppedDaemonError) {
-        needsStoppedDaemon(account.id)
+        needsStoppedDaemon(account.id);
       }
-      reportLocalError(err)
-      const code = sqliteCode(err)
-      const message = err instanceof Error ? err.message : String(err)
-      if (code.startsWith('SQLITE_BUSY')) {
+      reportLocalError(err);
+      const code = sqliteCode(err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (code.startsWith("SQLITE_BUSY")) {
         error(
           ErrorCodes.GENERAL_ERROR,
           `The cache of account ${account.id} is busy: ${message}`,
-          { account_id: account.id, reason: 'cache_busy', pruned },
-          'Another tg process holds the cache; try again in a moment',
-        )
+          { account_id: account.id, reason: "cache_busy", pruned },
+          "Another tg process holds the cache; try again in a moment",
+        );
       }
-      if (code.startsWith('SQLITE_FULL')) {
+      if (code.startsWith("SQLITE_FULL")) {
         error(
           ErrorCodes.GENERAL_ERROR,
           `Not enough disk space to vacuum the cache of account ${account.id}: a full VACUUM needs free space of about twice the cache. The VACUUM was rolled back and the messages are intact; rows past their retention may already be pruned.`,
-          { account_id: account.id, reason: 'disk_full', pruned },
-          'Free some disk space, then run tg db vacuum again',
-        )
+          { account_id: account.id, reason: "disk_full", pruned },
+          "Free some disk space, then run tg db vacuum again",
+        );
       }
       error(
         ErrorCodes.GENERAL_ERROR,
         `Failed to vacuum the cache of account ${account.id}: ${message}`,
         { account_id: account.id, pruned },
-      )
+      );
     }
   },
-})
+});
 
-/**
- * A line on stderr per batch, `messages_raw_json_v2 42% 12000 / 28571 rows`,
- * for a person at a terminal; undefined when nobody watches
- */
-function migrationProgress():
-  | ((name: string, done: number, total: number | null) => void)
-  | undefined {
-  const stream = process.stderr
-  if (!stream.isTTY || getOutputFormat() === 'quiet') return undefined
-  return (name, done, total) => {
-    const share =
-      total && total > 0
-        ? ` ${Math.floor((Math.min(done, total) / total) * 100)}%`
-        : ''
-    stream.write(`\r${name}${share} ${done} / ${total ?? '?'} rows\x1b[K`)
-    if (total !== null && done >= total) stream.write('\n')
+function migrationProgress() {
+  const stream = process.stderr;
+  if (!stream.isTTY || getOutputFormat() === "quiet") {
+    const result: ((name: string, done: number, total: number | null) => void) | undefined =
+      undefined;
+    return result;
   }
+  const result: ((name: string, done: number, total: number | null) => void) | undefined = (
+    name,
+    done,
+    total,
+  ) => {
+    const share =
+      total && total > 0 ? ` ${Math.floor((Math.min(done, total) / total) * 100)}%` : "";
+    stream.write(`\r${name}${share} ${done} / ${total ?? "?"} rows\x1b[K`);
+    if (total !== null && done >= total) stream.write("\n");
+  };
+  return result;
 }
 
 export const migrateArgs = {
   account: {
-    type: 'string',
+    type: "string",
     description: ACCOUNT_SELECTOR_DESCRIPTION,
   },
-} satisfies ArgsDef
+} satisfies ArgsDef;
 
 const migrateCommand = defineCommand({
   meta: {
-    name: 'migrate',
+    name: "migrate",
     description:
       "Finish an account's background migrations now, in the foreground (the daemon runs them on its own)",
   },
   args: migrateArgs,
   async run({ args }) {
-    const account = resolveAccount(args.account)
-    const daemonRunning = createPidFile(
-      join(getDataDir(), 'daemon.pid'),
-    ).isRunning()
-    const db = openCache(account.id)
+    const account = resolveAccount(args.account);
+    const daemonRunning = createPidFile(join(getDataDir(), "daemon.pid")).isRunning();
+    const db = openCache(account.id);
     if (!db) {
-      success({ account_id: account.id, rows: 0, migrations: [] })
-      return
+      success({ account_id: account.id, rows: 0, migrations: [] });
+      return;
     }
 
-    const progress = migrationProgress()
+    const progress = migrationProgress();
     try {
       const rows = await runPendingMigrations(db, {
         ...foregroundPacing(daemonRunning),
-        onBatch: (migration, status) =>
-          progress?.(migration.name, status.done, status.total),
-      })
+        onBatch: (migration, status) => progress?.(migration.name, status.done, status.total),
+      });
       success({
         account_id: account.id,
         rows,
         migrations: readMigrationStatus(db),
-      })
+      });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      if (sqliteCode(err).startsWith('SQLITE_BUSY')) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (sqliteCode(err).startsWith("SQLITE_BUSY")) {
         error(
           ErrorCodes.GENERAL_ERROR,
           `The cache of account ${account.id} is busy: ${message}`,
-          { account_id: account.id, reason: 'cache_busy' },
-          'Another tg process holds the cache; run tg db migrate again, it resumes where it stopped',
-        )
+          { account_id: account.id, reason: "cache_busy" },
+          "Another tg process holds the cache; run tg db migrate again, it resumes where it stopped",
+        );
       }
       error(
         ErrorCodes.GENERAL_ERROR,
         `A background migration of account ${account.id} failed: ${message}`,
         { account_id: account.id, migrations: readMigrationStatus(db) },
-        'Run tg db migrate again; it resumes where it stopped',
-      )
+        "Run tg db migrate again; it resumes where it stopped",
+      );
     }
   },
-})
+});
 
 export const dbCommand = defineCommand({
   meta: {
-    name: 'db',
-    description: 'Maintain the account caches',
+    name: "db",
+    description: "Maintain the account caches",
   },
   subCommands: {
     vacuum: vacuumCommand,
     migrate: migrateCommand,
   },
-})
+});

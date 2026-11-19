@@ -1,20 +1,20 @@
-import { defineCommand } from 'citty'
+import { defineCommand } from "citty";
 
-import { getMessageCommand } from './messages/get'
-import { listMessagesCommand } from './messages/list'
-import { readMessagesCommand } from './messages/read'
-import { searchMessagesCommand } from './messages/search'
-import { unreadMessagesCommand } from './messages/unread'
-import { waitMessagesCommand, watchMessagesCommand } from './messages/wait'
+import { getMessageCommand } from "./messages/get";
+import { listMessagesCommand } from "./messages/list";
+import { readMessagesCommand } from "./messages/read";
+import { searchMessagesCommand } from "./messages/search";
+import { unreadMessagesCommand } from "./messages/unread";
+import { waitMessagesCommand, watchMessagesCommand } from "./messages/wait";
 
 /**
  * Messages subcommand group
  */
 export const messagesCommand = defineCommand({
   meta: {
-    name: 'messages',
+    name: "messages",
     description:
-      'Read chat history, search cached messages, wait for new ones, list unread ones and mark them read',
+      "Read chat history, search cached messages, wait for new ones, list unread ones and mark them read",
   },
   subCommands: {
     list: listMessagesCommand,
@@ -25,7 +25,7 @@ export const messagesCommand = defineCommand({
     unread: unreadMessagesCommand,
     read: readMessagesCommand,
   },
-})
+});
 
 export {
   getMessageCommand,
@@ -35,4 +35,4 @@ export {
   unreadMessagesCommand,
   waitMessagesCommand,
   watchMessagesCommand,
-}
+};

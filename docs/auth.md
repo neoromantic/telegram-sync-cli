@@ -21,6 +21,7 @@ tg auth login --phone +15551234567 --label "Work"
 ```
 
 Flow:
+
 1. Create or reuse an account record in `data.db`.
 2. Start mtcute auth flow (phone → code → optional 2FA password).
 3. Persist session to `session_<id>.db`.
@@ -38,6 +39,7 @@ tg auth login-qr --name "Personal"
 ```
 
 Flow:
+
 1. Print a login QR code, black on white, so it scans in dark and light terminal themes.
    The code and its status lines go to stderr; the JSON result goes to stdout.
 2. Scan with Telegram mobile app: **Settings → Devices → Link Desktop Device**.
@@ -60,6 +62,7 @@ tg auth status
 ```
 
 Checks whether the active account session is valid and returns:
+
 - account info
 - authentication status
 - a message if re-login is required

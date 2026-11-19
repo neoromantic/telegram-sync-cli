@@ -1,4 +1,3 @@
-import type { Database } from 'bun:sqlite'
 import {
   type AccountsDbInterface,
   type CacheLayoutResult,
@@ -8,33 +7,31 @@ import {
   getAccountCacheDb,
   getLegacyCachePath,
   isCacheUnavailableError,
-} from '../db'
-import type { CacheUnavailableReason } from '../db/cache-layout'
-import { reportLocalError } from '../telemetry'
-import { type Account, ErrorCodes } from '../types'
-import { resolveAccount } from './account-selector'
-import { error } from './output'
+} from "../db";
+import type { CacheUnavailableReason } from "../db/cache-layout";
+import { reportLocalError } from "../telemetry";
+import { ErrorCodes } from "../types";
+import { resolveAccount } from "./account-selector";
+import { error } from "./output";
 
 const CACHE_UNAVAILABLE_SUGGESTIONS: Record<CacheUnavailableReason, string> = {
-  shared_cache_in_use: 'Stop older tg processes (tg daemon stop), then retry',
-  move_failed:
-    'Check that the data directory is writable, stop older tg processes, then retry',
+  shared_cache_in_use: "Stop older tg processes (tg daemon stop), then retry",
+  move_failed: "Check that the data directory is writable, stop older tg processes, then retry",
   owner_mismatch:
-    'Move the account directory away (tg starts a new cache), or put it under an account of the Telegram user it belongs to',
-}
+    "Move the account directory away (tg starts a new cache), or put it under an account of the Telegram user it belongs to",
+};
 
 /** What to do about a cache that can't be opened */
-export function cacheUnavailableSuggestion(reason: string): string {
+export function cacheUnavailableSuggestion(reason: string) {
   return (
     CACHE_UNAVAILABLE_SUGGESTIONS[reason as CacheUnavailableReason] ??
     CACHE_UNAVAILABLE_SUGGESTIONS.move_failed
-  )
+  );
 }
 
 /** Report a cache that can't be opened, or rethrow another error */
 export function reportCacheError(err: unknown, accountId?: number): never {
-  // A file or database error: its type and scrubbed message go to usage stats
-  reportLocalError(err)
+  reportLocalError(err);
   if (isCacheUnavailableError(err)) {
     error(
       ErrorCodes.CACHE_UNAVAILABLE,
@@ -45,13 +42,13 @@ export function reportCacheError(err: unknown, accountId?: number): never {
         ...(accountId !== undefined && { account_id: accountId }),
       },
       cacheUnavailableSuggestion(err.reason),
-    )
+    );
   }
-  const message = err instanceof Error ? err.message : String(err)
+  const message = err instanceof Error ? err.message : String(err);
   error(
     ErrorCodes.GENERAL_ERROR,
-    `Failed to open the cache${accountId !== undefined ? ` of account ${accountId}` : ''}: ${message}`,
-  )
+    `Failed to open the cache${accountId !== undefined ? ` of account ${accountId}` : ""}: ${message}`,
+  );
 }
 
 /**
@@ -62,12 +59,12 @@ export function reportCacheError(err: unknown, accountId?: number): never {
 export function openAccountCache(
   selector: string | undefined,
   accountsDb: AccountsDbInterface = defaultAccountsDb,
-): { account: Account; db: Database } {
-  const account = resolveAccount(selector, accountsDb)
+) {
+  const account = resolveAccount(selector, accountsDb);
   try {
-    return { account, db: getAccountCacheDb(account.id) }
+    return { account, db: getAccountCacheDb(account.id) };
   } catch (err) {
-    reportCacheError(err, account.id)
+    reportCacheError(err, account.id);
   }
 }
 
@@ -81,19 +78,19 @@ export function openAccountCache(
  * file that other accounts wrote. So no account changes while an older tg
  * holds the file or the move fails, whatever the count.
  */
-export function settleCacheLayoutBeforeAccountChange(): void {
-  let result: CacheLayoutResult
+export function settleCacheLayoutBeforeAccountChange() {
+  let result: CacheLayoutResult;
   try {
-    result = ensureCacheLayout({ mode: 'report' })
+    result = ensureCacheLayout({ mode: "report" });
   } catch (err) {
-    reportCacheError(err)
+    reportCacheError(err);
   }
-  if (result.state === 'deferred' || result.state === 'blocked') {
+  if (result.state === "deferred" || result.state === "blocked") {
     reportCacheError(
       new CacheUnavailableError(
-        result.reason ?? 'shared_cache_in_use',
+        result.reason ?? "shared_cache_in_use",
         result.path ?? getLegacyCachePath(),
       ),
-    )
+    );
   }
 }

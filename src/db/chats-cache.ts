@@ -1,17 +1,13 @@
-/**
- * Chats cache service for caching Telegram chats/dialogs
- * Uses bun:sqlite with prepared statements for typed queries
- */
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 
-import { legacyChatIdCandidates } from '../utils/telegram-peer-ids'
-import { ChatCacheRow } from './schema'
-import type { ChatType } from './types'
+import { legacyChatIdCandidates } from "../utils/telegram-peer-ids";
+import { ChatCacheRow } from "./schema";
+import type { ChatType } from "./types";
 
 /**
  * Cached chat data structure (matches database row)
  */
-export type CachedChat = ChatCacheRow
+export type CachedChat = ChatCacheRow;
 
 /**
  * A chats_cache row to write. Only a dialog carries the unread state, so
@@ -19,45 +15,42 @@ export type CachedChat = ChatCacheRow
  */
 export type CachedChatInput = Omit<
   CachedChat,
-  'created_at' | 'updated_at' | 'unread_count' | 'read_inbox_max_id'
+  "created_at" | "updated_at" | "unread_count" | "read_inbox_max_id"
 > &
-  Partial<Pick<CachedChat, 'unread_count' | 'read_inbox_max_id'>>
+  Partial<Pick<CachedChat, "unread_count" | "read_inbox_max_id">>;
 
 /**
  * Options for listing chats
  */
 export interface ListChatsOptions {
-  limit?: number
-  offset?: number
-  type?: ChatType
-  orderBy?: 'last_message_at' | 'title'
+  limit?: number;
+  offset?: number;
+  type?: ChatType;
+  orderBy?: "last_message_at" | "title";
   /** Only chats with unread messages */
-  unread?: boolean
+  unread?: boolean;
 }
 
 /**
  * Chats cache service class
  */
 export class ChatsCache {
-  private getByIdStmt
-  private getByUsernameStmt
-  private upsertStmt
-  private countAllStmt
-  private countByTypeStmt
-  private noteLiveMessageStmt
-  private setReadInboxStmt
+  private getByIdStmt;
+  private getByUsernameStmt;
+  private upsertStmt;
+  private countAllStmt;
+  private countByTypeStmt;
+  private noteLiveMessageStmt;
+  private setReadInboxStmt;
 
   constructor(private db: Database) {
-    // Create prepared statements
     this.getByIdStmt = db
-      .query('SELECT * FROM chats_cache WHERE chat_id = $chat_id')
-      .as(ChatCacheRow)
+      .query("SELECT * FROM chats_cache WHERE chat_id = $chat_id")
+      .as(ChatCacheRow);
 
     this.getByUsernameStmt = db
-      .query(
-        'SELECT * FROM chats_cache WHERE username = $username COLLATE NOCASE',
-      )
-      .as(ChatCacheRow)
+      .query("SELECT * FROM chats_cache WHERE username = $username COLLATE NOCASE")
+      .as(ChatCacheRow);
 
     this.upsertStmt = db.query(`
       INSERT INTO chats_cache (
@@ -88,16 +81,12 @@ export class ChatsCache {
         read_inbox_max_id = COALESCE(
           excluded.read_inbox_max_id, read_inbox_max_id
         )
-    `)
+    `);
 
-    this.countAllStmt = db.query('SELECT COUNT(*) as count FROM chats_cache')
+    this.countAllStmt = db.query("SELECT COUNT(*) as count FROM chats_cache");
 
-    this.countByTypeStmt = db.query(
-      'SELECT COUNT(*) as count FROM chats_cache WHERE type = $type',
-    )
+    this.countByTypeStmt = db.query("SELECT COUNT(*) as count FROM chats_cache WHERE type = $type");
 
-    // A message above the newest one known and above the read boundary is
-    // a new unread one. An unknown count or boundary stays unknown.
     this.noteLiveMessageStmt = db.query(`
       UPDATE chats_cache SET
         unread_count = CASE
@@ -111,7 +100,7 @@ export class ChatsCache {
         last_message_at = MAX(COALESCE(last_message_at, 0), $date),
         updated_at = $now
       WHERE chat_id = $chat_id
-    `)
+    `);
 
     this.setReadInboxStmt = db.query(`
       UPDATE chats_cache SET
@@ -119,14 +108,14 @@ export class ChatsCache {
         read_inbox_max_id = $max_id,
         updated_at = $now
       WHERE chat_id = $chat_id
-    `)
+    `);
   }
 
   /**
    * Get chat by ID
    */
-  getById(chatId: string): CachedChat | null {
-    return this.getByIdStmt.get({ $chat_id: chatId })
+  getById(chatId: string) {
+    return this.getByIdStmt.get({ $chat_id: chatId });
   }
 
   /**
@@ -134,28 +123,25 @@ export class ChatsCache {
    * basic group N (-N) and channel N (-100…N). Cache-only; usually none or
    * one, two only when both are cached.
    */
-  getByLegacyId(bareId: number): CachedChat[] {
+  getByLegacyId(bareId: number) {
     return legacyChatIdCandidates(bareId)
       .map((peerId) => this.getById(String(peerId)))
-      .filter((chat): chat is CachedChat => chat !== null)
+      .filter((chat): chat is CachedChat => chat !== null);
   }
 
   /**
    * Get chat by username (without @)
    */
-  getByUsername(username: string): CachedChat | null {
-    // Strip @ if present
-    const cleanUsername = username.startsWith('@')
-      ? username.slice(1)
-      : username
-    return this.getByUsernameStmt.get({ $username: cleanUsername })
+  getByUsername(username: string) {
+    const cleanUsername = username.startsWith("@") ? username.slice(1) : username;
+    return this.getByUsernameStmt.get({ $username: cleanUsername });
   }
 
   /**
    * Insert or update chat
    */
-  upsert(chat: CachedChatInput): void {
-    const now = Date.now()
+  upsert(chat: CachedChatInput) {
+    const now = Date.now();
     this.upsertStmt.run({
       $chat_id: chat.chat_id,
       $type: chat.type,
@@ -172,7 +158,7 @@ export class ChatsCache {
       $now: now,
       $unread_count: chat.unread_count ?? null,
       $read_inbox_max_id: chat.read_inbox_max_id ?? null,
-    })
+    });
   }
 
   /**
@@ -180,82 +166,71 @@ export class ChatsCache {
    * incoming one past both the newest message and the read boundary, the
    * unread count. `date` is in milliseconds. No row, no change.
    */
-  noteLiveMessage(
-    chatId: string,
-    message: { id: number; date: number; incoming: boolean },
-  ): void {
+  noteLiveMessage(chatId: string, message: { id: number; date: number; incoming: boolean }) {
     this.noteLiveMessageStmt.run({
       $chat_id: chatId,
       $message_id: message.id,
       $date: message.date,
       $incoming: message.incoming ? 1 : 0,
       $now: Date.now(),
-    })
+    });
   }
 
   /**
    * The chat's unread state as Telegram reported it: a read update or the
    * dialog after `tg messages read`. False when the chat has no row.
    */
-  setReadInbox(chatId: string, maxId: number, unreadCount: number): boolean {
+  setReadInbox(chatId: string, maxId: number, unreadCount: number) {
     const result = this.setReadInboxStmt.run({
       $chat_id: chatId,
       $max_id: maxId,
       $unread_count: unreadCount,
       $now: Date.now(),
-    })
-    return result.changes > 0
+    });
+    return result.changes > 0;
   }
 
   /**
    * Bulk upsert multiple chats
    */
-  upsertMany(chats: CachedChatInput[]): void {
-    if (chats.length === 0) return
+  upsertMany(chats: CachedChatInput[]) {
+    if (chats.length === 0) return;
 
-    // Use transaction for bulk insert
     this.db.transaction(() => {
       for (const chat of chats) {
-        this.upsert(chat)
+        this.upsert(chat);
       }
-    })()
+    })();
   }
 
   /**
    * List chats with filtering and pagination
    */
-  list(opts: ListChatsOptions = {}): CachedChat[] {
-    const {
-      limit = 50,
-      offset = 0,
-      type,
-      orderBy = 'last_message_at',
-      unread = false,
-    } = opts
+  list(opts: ListChatsOptions = {}) {
+    const { limit = 50, offset = 0, type, orderBy = "last_message_at", unread = false } = opts;
 
-    // Determine order clause
     const orderClause =
-      orderBy === 'title'
-        ? 'ORDER BY title COLLATE NOCASE ASC'
-        : 'ORDER BY last_message_at DESC NULLS LAST'
+      orderBy === "title"
+        ? "ORDER BY title COLLATE NOCASE ASC"
+        : "ORDER BY last_message_at DESC NULLS LAST";
 
     return this.db
       .query(`
         SELECT * FROM chats_cache
         WHERE ($type IS NULL OR type = $type)
-          ${unread ? 'AND unread_count > 0' : ''}
+          ${unread ? "AND unread_count > 0" : ""}
         ${orderClause}
         LIMIT $limit OFFSET $offset
       `)
       .as(ChatCacheRow)
-      .all({ $type: type || null, $limit: limit, $offset: offset })
+      .all({ $type: type || null, $limit: limit, $offset: offset });
   }
 
   /**
    * Search chats by title or username
    */
-  search(query: string, limit = 20): CachedChat[] {
-    const searchPattern = `%${query}%`
+  search(query: string, limit = 20) {
+    const searchPattern = `%${query}%`;
 
     const sql = `
       SELECT * FROM chats_cache
@@ -269,44 +244,41 @@ export class ChatsCache {
         END,
         last_message_at DESC NULLS LAST
       LIMIT $limit
-    `
+    `;
 
     return this.db.query(sql).as(ChatCacheRow).all({
       $pattern: searchPattern,
       $exact: query,
       $limit: limit,
-    })
+    });
   }
 
   /**
    * Count total cached chats
    */
-  count(type?: ChatType): number {
+  count(type?: ChatType) {
     if (type) {
       const result = this.countByTypeStmt.get({ $type: type }) as {
-        count: number
-      } | null
-      return result?.count ?? 0
+        count: number;
+      } | null;
+      return result?.count ?? 0;
     }
-    const result = this.countAllStmt.get() as { count: number } | null
-    return result?.count ?? 0
+    const result = this.countAllStmt.get() as { count: number } | null;
+    return result?.count ?? 0;
   }
 
   /** Whether a dialog list or an update gave any chat its unread state */
-  hasUnreadState(): boolean {
+  hasUnreadState() {
     return (
-      this.db
-        .query(
-          'SELECT 1 FROM chats_cache WHERE unread_count IS NOT NULL LIMIT 1',
-        )
-        .get() !== null
-    )
+      this.db.query("SELECT 1 FROM chats_cache WHERE unread_count IS NOT NULL LIMIT 1").get() !==
+      null
+    );
   }
 }
 
 /**
  * Factory function to create a ChatsCache instance
  */
-export function createChatsCache(db: Database): ChatsCache {
-  return new ChatsCache(db)
+export function createChatsCache(db: Database) {
+  return new ChatsCache(db);
 }

@@ -28,6 +28,7 @@ bun run build:all
 ```
 
 Output:
+
 - Current platform binary: `dist/tg` (built locally)
 - Cross-build outputs: `dist/tg-<platform>` from `scripts/build-all.ts`
 

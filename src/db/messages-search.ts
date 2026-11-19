@@ -1,27 +1,17 @@
-/**
- * Messages search service using FTS5
- */
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 
-import { ATTACHMENT_KIND_FILTERS } from '../utils/message-type'
+import { ATTACHMENT_KIND_FILTERS } from "../utils/message-type";
 
-/**
- * What makes a query FTS5 syntax rather than plain words: `"`, `*`, `:`,
- * parentheses, `^` at the start of a word, `+` standing between phrases, or
- * an operator in capitals. A `+` or `^` inside a word (`C++`, `2^10`) is
- * punctuation.
- */
 const FTS5_SYNTAX =
-  /["*:()]|(?<!\S)\^(?=\S)|(?<![^\s"])\+(?![^\s"])|(?<![\p{L}\p{N}_])(?:AND|OR|NOT|NEAR)(?![\p{L}\p{N}_])/u
+  /["*:()]|(?<!\S)\^(?=\S)|(?<![^\s"])\+(?![^\s"])|(?<![\p{L}\p{N}_])(?:AND|OR|NOT|NEAR)(?![\p{L}\p{N}_])/u;
 
 /** Whether a query uses FTS5 syntax: phrases, operators, prefixes or column filters */
-export function hasFts5Syntax(query: string): boolean {
-  return FTS5_SYNTAX.test(query)
+export function hasFts5Syntax(query: string) {
+  return FTS5_SYNTAX.test(query);
 }
 
-/** A string as one FTS5 phrase, inner double quotes doubled */
-function quotePhrase(text: string): string {
-  return `"${text.replace(/"/g, '""')}"`
+function quotePhrase(text: string) {
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 /**
@@ -30,13 +20,10 @@ function quotePhrase(text: string): string {
  * is never syntax. A query with FTS5 syntax goes to FTS5 as written, and
  * `phrase` makes the whole query one phrase.
  */
-export function toFts5Query(
-  query: string,
-  options: { phrase?: boolean } = {},
-): string {
-  if (options.phrase) return quotePhrase(query)
-  if (hasFts5Syntax(query)) return query
-  return query.split(/\s+/).filter(Boolean).map(quotePhrase).join(' ')
+export function toFts5Query(query: string, options: { phrase?: boolean } = {}) {
+  if (options.phrase) return quotePhrase(query);
+  if (hasFts5Syntax(query)) return query;
+  return query.split(/\s+/).filter(Boolean).map(quotePhrase).join(" ");
 }
 
 /**
@@ -44,11 +31,9 @@ export function toFts5Query(
  * column filter (`foo:bar`, `10:30`) or an unclosed quote. The search's own
  * SQL never changes, so these come from the query.
  */
-export function isFts5QueryError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err)
-  return /^fts5:|no such column|unterminated string|unknown special query/i.test(
-    message,
-  )
+export function isFts5QueryError(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  return /^fts5:|no such column|unterminated string|unknown special query/i.test(message);
 }
 
 /**
@@ -79,15 +64,15 @@ export const MESSAGE_ROW_COLUMNS = `
   c.type as chat_type,
   u.username as sender_username,
   u.first_name as sender_first_name,
-  u.last_name as sender_last_name`
+  u.last_name as sender_last_name`;
 
 const CHAT_JOIN = `
-  LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT)`
+  LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT)`;
 const SENDER_JOIN = `
-  LEFT JOIN users_cache u ON u.user_id = CAST(m.from_id AS TEXT)`
+  LEFT JOIN users_cache u ON u.user_id = CAST(m.from_id AS TEXT)`;
 
 /** The chat and sender joins that `MESSAGE_ROW_COLUMNS` reads from */
-export const MESSAGE_ROW_JOINS = CHAT_JOIN + SENDER_JOIN
+export const MESSAGE_ROW_JOINS = CHAT_JOIN + SENDER_JOIN;
 
 /**
  * The view message_search_text: the search index joined with each message,
@@ -98,13 +83,11 @@ export const MESSAGE_ROW_JOINS = CHAT_JOIN + SENDER_JOIN
  * is back, so a rebuilt index needs no new view. Created once, so opening a
  * cache that has it never waits for the write lock.
  */
-export function createMessageSearchTextView(db: Database): void {
+export function createMessageSearchTextView(db: Database) {
   const exists = db
-    .query(
-      `SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = 'message_search_text'`,
-    )
-    .get()
-  if (exists) return
+    .query(`SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = 'message_search_text'`)
+    .get();
+  if (exists) return;
 
   db.run(`
     CREATE VIEW IF NOT EXISTS message_search_text AS
@@ -114,68 +97,68 @@ export function createMessageSearchTextView(db: Database): void {
       m.rowid AS rowid,${MESSAGE_ROW_COLUMNS}
     FROM message_search
     JOIN messages_cache m ON m.rowid = message_search.rowid${MESSAGE_ROW_JOINS}
-  `)
+  `);
 }
 
 export interface MessageSearchOptions {
-  limit?: number
-  offset?: number
-  chatId?: number
+  limit?: number;
+  offset?: number;
+  chatId?: number;
   /** Only messages of these chats (allowedChats) */
-  chatIds?: number[]
-  chatUsername?: string
-  senderId?: number
-  senderUsername?: string
-  includeDeleted?: boolean
+  chatIds?: number[];
+  chatUsername?: string;
+  senderId?: number;
+  senderUsername?: string;
+  includeDeleted?: boolean;
   /** Match the whole query as one phrase */
-  phrase?: boolean
+  phrase?: boolean;
   /** Messages sent at or after this Unix time, in seconds */
-  since?: number
+  since?: number;
   /** Messages sent before this Unix time, in seconds */
-  until?: number
+  until?: number;
   /** Only messages of these types (MESSAGE_TYPE_FILTERS) */
-  types?: readonly string[]
+  types?: readonly string[];
   /** Newest first (default), or best match first by FTS5 bm25 */
-  sort?: MessageSearchSort
+  sort?: MessageSearchSort;
 }
 
-export const MESSAGE_SEARCH_SORTS = ['date', 'relevance'] as const
-export type MessageSearchSort = (typeof MESSAGE_SEARCH_SORTS)[number]
+export const MESSAGE_SEARCH_SORTS = ["date", "relevance"] as const;
+export type MessageSearchSort = (typeof MESSAGE_SEARCH_SORTS)[number];
 
 export interface MessageSearchRow {
-  chat_id: number
-  message_id: number
-  from_id: number | null
-  text: string | null
-  message_type: string
-  has_media: number
-  media_path: string | null
-  is_outgoing: number
-  is_edited: number
-  is_pinned: number
-  is_deleted: number
-  reply_to_id: number | null
-  forward_from_id: number | null
-  edit_date: number | null
-  date: number
-  fetched_at: number
-  chat_title: string | null
-  chat_username: string | null
-  chat_type: string | null
-  sender_username: string | null
-  sender_first_name: string | null
-  sender_last_name: string | null
+  chat_id: number;
+  message_id: number;
+  from_id: number | null;
+  text: string | null;
+  message_type: string;
+  has_media: number;
+  media_path: string | null;
+  is_outgoing: number;
+  is_edited: number;
+  is_pinned: number;
+  is_deleted: number;
+  reply_to_id: number | null;
+  forward_from_id: number | null;
+  edit_date: number | null;
+  date: number;
+  fetched_at: number;
+  chat_title: string | null;
+  chat_username: string | null;
+  chat_type: string | null;
+  sender_username: string | null;
+  sender_first_name: string | null;
+  sender_last_name: string | null;
 }
 
 export interface MessagesSearchService {
-  search(query: string, options?: MessageSearchOptions): MessageSearchRow[]
+  search(query: string, options?: MessageSearchOptions): MessageSearchRow[];
   /** How many messages match, with the same filters and no page */
-  count(query: string, options?: MessageSearchOptions): number
+  count(query: string, options?: MessageSearchOptions): number;
   /**
    * Whether a message that matches the query and the filters other than
    * `types` has no type to filter on yet (AWAITING_RAW_MESSAGE)
    */
-  hasUntypedMatch(query: string, options?: MessageSearchOptions): boolean
+  hasUntypedMatch(query: string, options?: MessageSearchOptions): boolean;
 }
 
 /**
@@ -183,175 +166,129 @@ export interface MessagesSearchService {
  * no attachment row, and possibly the `document` type older versions gave
  * videos and voices, until a refetch brings the raw message
  */
-export const AWAITING_RAW_MESSAGE = "m.has_media = 1 AND m.raw_json = '{}'"
+export const AWAITING_RAW_MESSAGE = "m.has_media = 1 AND m.raw_json = '{}'";
 
 /**
  * The condition that keeps messages of these `--type` values, over
  * `messages_cache m`: a message_type, or for `round` and `animation` the
  * kind of the message's own attachment
  */
-export function messageTypeCondition(types: readonly string[]): {
-  condition: string
-  params: string[]
-} {
-  const kinds = types.filter((type) => ATTACHMENT_KIND_FILTERS.includes(type))
-  const messageTypes = types.filter((type) => !kinds.includes(type))
-  const marks = (values: string[]) => values.map(() => '?').join(', ')
-  const parts: string[] = []
+export function messageTypeCondition(types: readonly string[]) {
+  const kinds = types.filter((type) => ATTACHMENT_KIND_FILTERS.includes(type));
+  const messageTypes = types.filter((type) => !kinds.includes(type));
+  const marks = (values: string[]) => values.map(() => "?").join(", ");
+  const parts: string[] = [];
   if (messageTypes.length > 0) {
-    parts.push(`m.message_type IN (${marks(messageTypes)})`)
+    parts.push(`m.message_type IN (${marks(messageTypes)})`);
   }
   if (kinds.length > 0) {
     parts.push(`EXISTS (
       SELECT 1 FROM message_attachments a
       WHERE a.chat_id = m.chat_id AND a.message_id = m.message_id
         AND a.source = 'message' AND a.kind IN (${marks(kinds)})
-    )`)
+    )`);
   }
   return {
-    condition: `(${parts.join(' OR ')})`,
+    condition: `(${parts.join(" OR ")})`,
     params: [...messageTypes, ...kinds],
-  }
+  };
 }
 
-/** The WHERE conditions of a search besides the match, and their parameters */
-function searchFilter(options: MessageSearchOptions): {
-  conditions: string[]
-  params: Array<string | number>
-} {
-  const conditions: string[] = []
-  const params: Array<string | number> = []
+function searchFilter(options: MessageSearchOptions) {
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
 
   if (!(options.includeDeleted ?? false)) {
-    conditions.push('m.is_deleted = 0')
+    conditions.push("m.is_deleted = 0");
   }
 
   if (options.chatId !== undefined) {
-    conditions.push('m.chat_id = ?')
-    params.push(options.chatId)
+    conditions.push("m.chat_id = ?");
+    params.push(options.chatId);
   }
 
   if (options.chatIds !== undefined) {
-    conditions.push(
-      `m.chat_id IN (${options.chatIds.map(() => '?').join(', ')})`,
-    )
-    params.push(...options.chatIds)
+    conditions.push(`m.chat_id IN (${options.chatIds.map(() => "?").join(", ")})`);
+    params.push(...options.chatIds);
   }
 
   if (options.chatUsername) {
-    conditions.push('c.username = ? COLLATE NOCASE')
-    params.push(options.chatUsername)
+    conditions.push("c.username = ? COLLATE NOCASE");
+    params.push(options.chatUsername);
   }
 
   if (options.senderId !== undefined) {
-    conditions.push('m.from_id = ?')
-    params.push(options.senderId)
+    conditions.push("m.from_id = ?");
+    params.push(options.senderId);
   }
 
   if (options.senderUsername) {
-    conditions.push('u.username = ? COLLATE NOCASE')
-    params.push(options.senderUsername)
+    conditions.push("u.username = ? COLLATE NOCASE");
+    params.push(options.senderUsername);
   }
 
   if (options.since !== undefined) {
-    conditions.push('m.date >= ?')
-    params.push(options.since)
+    conditions.push("m.date >= ?");
+    params.push(options.since);
   }
 
   if (options.until !== undefined) {
-    conditions.push('m.date < ?')
-    params.push(options.until)
+    conditions.push("m.date < ?");
+    params.push(options.until);
   }
 
   if (options.types !== undefined) {
-    const { condition, params: typeParams } = messageTypeCondition(
-      options.types,
-    )
-    conditions.push(condition)
-    params.push(...typeParams)
+    const { condition, params: typeParams } = messageTypeCondition(options.types);
+    conditions.push(condition);
+    params.push(...typeParams);
   }
 
-  return { conditions, params }
+  return { conditions, params };
 }
 
-/**
- * The walk below runs when a query has at least T = sqrt(WALK_THRESHOLD * P
- * * N) matches, for a page of P (limit + offset) of N messages, and goes
- * through at most P * N / T messages, as many as a page needs at that share
- * of matches. Sorting costs about 1 µs a match and the walk a few µs a
- * message (made-up caches of 1M messages, #149), so a walk through the
- * whole window costs about a fifth of the least the sort can cost
- * (docs/search.md).
- */
-const WALK_THRESHOLD = 20
+const WALK_THRESHOLD = 20;
 
-/**
- * The walk stops and sorts once it has taken this share of the least the
- * sort can take: about 1 µs for each of at least T matches. So a walk that
- * finds too few matches adds at most about a quarter to the sort, even on
- * an index that still holds many deleted entries, which answers in
- * milliseconds instead of microseconds.
- */
-const WALK_BUDGET_US_PER_MATCH = 0.25
+const WALK_BUDGET_US_PER_MATCH = 0.25;
 
-/** Messages in the walk's first chunk; later chunks are what the budget left pays for */
-const FIRST_CHUNK = 4
+const FIRST_CHUNK = 4;
 
-/**
- * One question to the index covers a run of rowids at most this far apart:
- * it costs as much as reading tens of entries of a word. History pages give
- * a chat's newest messages nearby rowids, and live messages too
- */
-const ROWID_RUN_GAP = 32
+const ROWID_RUN_GAP = 32;
 
 /** Lower WALK_THRESHOLD, and the clock of the walk's budget, for tests */
 export interface NewestFirstTuning {
-  walkThreshold?: number
-  now?: () => number
+  walkThreshold?: number;
+  now?: () => number;
 }
 
-/** Newest first; messages sent in the same second in the order they were cached */
-const NEWEST_FIRST = 'm.date DESC, m.rowid'
+const NEWEST_FIRST = "m.date DESC, m.rowid";
 
-/** The FROM of a search of the messages with the rowids of a JSON array */
-const ROWIDS_FROM =
-  'FROM json_each(?) AS j CROSS JOIN messages_cache m ON m.rowid = j.value'
+const ROWIDS_FROM = "FROM json_each(?) AS j CROSS JOIN messages_cache m ON m.rowid = j.value";
 
-/** The FROM of a search that reads every match from the index */
 const MATCHES_FROM =
-  'FROM message_search JOIN messages_cache m ON message_search MATCH ? AND m.rowid = message_search.rowid'
+  "FROM message_search JOIN messages_cache m ON message_search MATCH ? AND m.rowid = message_search.rowid";
 
-/**
- * One page of the messages that `from` joins as `m`, with the filters,
- * sorted by `order`
- */
 function sortedPage(
   db: Database,
   from: string,
   fromParam: string,
   options: MessageSearchOptions,
   order: string,
-): MessageSearchRow[] {
-  const { conditions, params } = searchFilter(options)
+) {
+  const { conditions, params } = searchFilter(options);
   return db
     .query(
       `SELECT ${MESSAGE_ROW_COLUMNS}
        ${from}
        ${MESSAGE_ROW_JOINS}
-       ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
+       ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
        ORDER BY ${order}
        LIMIT ? OFFSET ?`,
     )
-    .all(
-      fromParam,
-      ...params,
-      options.limit ?? 50,
-      options.offset ?? 0,
-    ) as MessageSearchRow[]
+    .all(fromParam, ...params, options.limit ?? 50, options.offset ?? 0) as MessageSearchRow[];
 }
 
 /** How the newest page was found: by going through the newest messages, or by sorting every match */
-export type NewestFirstWay = 'messages' | 'sort'
+export type NewestFirstWay = "messages" | "sort";
 
 /**
  * The newest page of a search. Sorting every match reads each one's
@@ -369,114 +306,96 @@ export function searchNewestFirst(
   query: string,
   options: MessageSearchOptions = {},
   tuning: NewestFirstTuning = {},
-): { rows: MessageSearchRow[]; way: NewestFirstWay } {
-  const now = tuning.now ?? (() => performance.now())
-  const limit = options.limit ?? 50
-  const offset = options.offset ?? 0
-  const match = toFts5Query(query, { phrase: options.phrase })
+) {
+  const now = tuning.now ?? (() => performance.now());
+  const limit = options.limit ?? 50;
+  const offset = options.offset ?? 0;
+  const match = toFts5Query(query, { phrase: options.phrase });
   const sorted = () => ({
     rows: sortedPage(db, MATCHES_FROM, match, options, NEWEST_FIRST),
-    way: 'sort' as const,
-  })
-  // A prefix stands for every word it starts, so asking the index about a
-  // few messages reads all of them
-  if (match.includes('*')) return sorted()
+    way: "sort" as const,
+  });
+  if (match.includes("*")) return sorted();
 
-  // max(rowid) is about the number of messages, and instant
-  const { maxRowid } = db
-    .query('SELECT max(rowid) AS maxRowid FROM messages_cache')
-    .get() as { maxRowid: number | null }
-  const pageTimesMessages = (limit + offset) * (maxRowid ?? 0)
+  const { maxRowid } = db.query("SELECT max(rowid) AS maxRowid FROM messages_cache").get() as {
+    maxRowid: number | null;
+  };
+  const pageTimesMessages = (limit + offset) * (maxRowid ?? 0);
   const enough = Math.max(
     1,
-    Math.ceil(
-      Math.sqrt((tuning.walkThreshold ?? WALK_THRESHOLD) * pageTimesMessages),
-    ),
-  )
+    Math.ceil(Math.sqrt((tuning.walkThreshold ?? WALK_THRESHOLD) * pageTimesMessages)),
+  );
 
-  // Reading matches from the index alone costs a fraction of sorting them,
-  // and fewer than enough are all of them. The sort asks the index again,
-  // which for one word costs about as much as counting; for a phrase or
-  // several words it costs more than handing the sort the rowids read here
-  const oneWord = /^"[^"\s]+"$/.test(match)
+  const oneWord = /^"[^"\s]+"$/.test(match);
   const { matches, rowids } = db
     .query(
       `SELECT count(*) AS matches,
-         ${oneWord ? 'NULL' : 'json_group_array(rowid)'} AS rowids
+         ${oneWord ? "NULL" : "json_group_array(rowid)"} AS rowids
        FROM (SELECT rowid FROM message_search WHERE message_search MATCH ? LIMIT ?)`,
     )
-    .get(match, enough) as { matches: number; rowids: string | null }
+    .get(match, enough) as { matches: number; rowids: string | null };
   if (matches < enough) {
-    if (rowids === null) return sorted()
-    const rows = sortedPage(db, ROWIDS_FROM, rowids, options, NEWEST_FIRST)
-    return { rows, way: 'sort' }
+    if (rowids === null) return sorted();
+    const rows = sortedPage(db, ROWIDS_FROM, rowids, options, NEWEST_FIRST);
+    return { rows, way: "sort" as const };
   }
 
-  const window = Math.ceil(pageTimesMessages / enough)
-  const budgetMs = (enough * WALK_BUDGET_US_PER_MATCH) / 1000
+  const window = Math.ceil(pageTimesMessages / enough);
+  const budgetMs = (enough * WALK_BUDGET_US_PER_MATCH) / 1000;
   const index =
-    options.chatId === undefined
-      ? 'idx_messages_cache_newest'
-      : 'idx_messages_cache_date'
-  const range: string[] = []
-  const rangeParams: number[] = []
+    options.chatId === undefined ? "idx_messages_cache_newest" : "idx_messages_cache_date";
+  const range: string[] = [];
+  const rangeParams: number[] = [];
   if (options.chatId !== undefined) {
-    range.push('chat_id = ?')
-    rangeParams.push(options.chatId)
+    range.push("chat_id = ?");
+    rangeParams.push(options.chatId);
   }
   if (options.since !== undefined) {
-    range.push('date >= ?')
-    rangeParams.push(options.since)
+    range.push("date >= ?");
+    rangeParams.push(options.since);
   }
   if (options.until !== undefined) {
-    range.push('date < ?')
-    rangeParams.push(options.until)
+    range.push("date < ?");
+    rangeParams.push(options.until);
   }
-  const where = range.length ? `WHERE ${range.join(' AND ')}` : ''
+  const where = range.length ? `WHERE ${range.join(" AND ")}` : "";
 
-  // A chunk: the messages from `walked` on in the order of an index that,
-  // scanned forward, gives them newest first and, within a second, in rowid
-  // order. The chunks one after another are a prefix of the order of the
-  // page, even when one ends inside a second, so a full page found there is
-  // the right one
   const chunkRowids = db.query(
     `SELECT rowid FROM messages_cache INDEXED BY ${index} ${where}
      ORDER BY date DESC, rowid LIMIT ? OFFSET ?`,
-  )
+  );
   const matchesBetween = db.query(
-    'SELECT rowid FROM message_search WHERE message_search MATCH ? AND rowid BETWEEN ? AND ?',
-  )
-  /** The rowids among `rowids` that match, one question to the index per run of nearby rowids */
-  const matching = (rowids: number[]): Set<number> => {
-    const runs: Array<[number, number]> = []
+    "SELECT rowid FROM message_search WHERE message_search MATCH ? AND rowid BETWEEN ? AND ?",
+  );
+  const matching = (rowids: number[]) => {
+    const runs: Array<[number, number]> = [];
     for (const rowid of [...rowids].sort((a, b) => a - b)) {
-      const run = runs.at(-1)
-      if (run && rowid - run[1] <= ROWID_RUN_GAP) run[1] = rowid
-      else runs.push([rowid, rowid])
+      const run = runs.at(-1);
+      if (run && rowid - run[1] <= ROWID_RUN_GAP) run[1] = rowid;
+      else runs.push([rowid, rowid]);
     }
-    const hits = new Set<number>()
+    const hits = new Set<number>();
     for (const [low, high] of runs) {
       for (const [rowid] of matchesBetween.values(match, low, high)) {
-        hits.add(rowid as number)
+        hits.add(rowid as number);
       }
     }
-    return hits
-  }
+    return hits;
+  };
 
-  const wanted = limit + offset
-  const found: MessageSearchRow[] = []
-  const started = now()
-  let walked = 0
-  let chunk = FIRST_CHUNK
+  const wanted = limit + offset;
+  const found: MessageSearchRow[] = [];
+  const started = now();
+  let walked = 0;
+  let chunk = FIRST_CHUNK;
   while (walked < window) {
-    const size = Math.min(chunk, window - walked)
+    const size = Math.min(chunk, window - walked);
     const rowids = chunkRowids
       .values(...rangeParams, size, walked)
-      .map(([rowid]) => rowid as number)
-    walked += size
-    const hits = matching(rowids)
-    const matched = rowids.filter((rowid) => hits.has(rowid))
-    // The matches in the order of the chunk, which sorting keeps
+      .map(([rowid]) => rowid as number);
+    walked += size;
+    const hits = matching(rowids);
+    const matched = rowids.filter((rowid) => hits.has(rowid));
     if (matched.length > 0) {
       found.push(
         ...sortedPage(
@@ -486,71 +405,65 @@ export function searchNewestFirst(
           { ...options, limit: wanted - found.length, offset: 0 },
           NEWEST_FIRST,
         ),
-      )
+      );
     }
-    // A range shorter than the window was gone through whole
     if (found.length === wanted || rowids.length < size) {
-      return { rows: found.slice(offset), way: 'messages' }
+      return { rows: found.slice(offset), way: "messages" as const };
     }
-    const spent = now() - started
-    if (spent >= budgetMs) return sorted()
+    const spent = now() - started;
+    if (spent >= budgetMs) return sorted();
     chunk = Math.max(
       FIRST_CHUNK,
       spent > 0 ? Math.floor(((budgetMs - spent) * walked) / spent) : walked,
-    )
+    );
   }
-  return sorted()
+  return sorted();
 }
 
-export function createMessagesSearch(db: Database): MessagesSearchService {
-  /** Matches of the query and filters, plus `extra`, counted up to `cap` */
+export function createMessagesSearch(db: Database) {
   const countMatches = (
     query: string,
     options: MessageSearchOptions,
     extra?: string,
     cap?: number,
-  ): number => {
-    const { conditions, params } = searchFilter(options)
-    if (extra) conditions.push(extra)
-    // Only the joins a filter reads: each message has one chat and one sender
+  ) => {
+    const { conditions, params } = searchFilter(options);
+    if (extra) conditions.push(extra);
     const matches = `SELECT 1
       ${MATCHES_FROM}
-      ${options.chatUsername ? CHAT_JOIN : ''}${options.senderUsername ? SENDER_JOIN : ''}
-      ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
-      ${cap === undefined ? '' : `LIMIT ${cap}`}`
+      ${options.chatUsername ? CHAT_JOIN : ""}${options.senderUsername ? SENDER_JOIN : ""}
+      ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
+      ${cap === undefined ? "" : `LIMIT ${cap}`}`;
     const row = db
       .query(`SELECT COUNT(*) AS n FROM (${matches})`)
       .get(toFts5Query(query, { phrase: options.phrase }), ...params) as {
-      n: number
-    }
-    return row.n
-  }
+      n: number;
+    };
+    return row.n;
+  };
 
-  return {
-    search(
-      query: string,
-      options: MessageSearchOptions = {},
-    ): MessageSearchRow[] {
-      if (options.sort !== 'relevance') {
-        return searchNewestFirst(db, query, options).rows
+  const result: MessagesSearchService = {
+    search(query: string, options: MessageSearchOptions = {}) {
+      if (options.sort !== "relevance") {
+        return searchNewestFirst(db, query, options).rows;
       }
-      // bm25 rank: lower is a better match
       return sortedPage(
         db,
         MATCHES_FROM,
         toFts5Query(query, { phrase: options.phrase }),
         options,
         `message_search.rank, ${NEWEST_FIRST}`,
-      )
+      );
     },
 
-    count(query: string, options: MessageSearchOptions = {}): number {
-      return countMatches(query, options)
+    count(query: string, options: MessageSearchOptions = {}) {
+      return countMatches(query, options);
     },
 
     hasUntypedMatch(query, options = {}) {
-      const untyped = { ...options, types: undefined }
-      return countMatches(query, untyped, AWAITING_RAW_MESSAGE, 1) > 0
+      const untyped = { ...options, types: undefined };
+      return countMatches(query, untyped, AWAITING_RAW_MESSAGE, 1) > 0;
     },
-  }
+  };
+  return result;
 }
