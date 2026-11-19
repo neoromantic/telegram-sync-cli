@@ -172,13 +172,13 @@ function saveLoggedInUser(
 ) {
   const existing = accountsDb.getByUserId(user.id);
   const finalAccount = existing && existing.id !== account.id ? existing : account;
+  if (finalAccount !== account) accountsDb.delete(account.id);
   accountsDb.update(finalAccount.id, {
     ...fields,
     user_id: user.id,
     name: `${user.firstName}${user.lastName ? ` ${user.lastName}` : ""}`,
     username: user.username ?? null,
   });
-  if (finalAccount !== account) accountsDb.delete(account.id);
   return finalAccount;
 }
 
