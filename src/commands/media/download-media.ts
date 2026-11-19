@@ -55,6 +55,7 @@ import {
   checkCachedProtection,
   checkOnlineProtection,
   knownChatProtection,
+  privateChatProtection,
   type ProtectionReason,
 } from "./protection";
 
@@ -83,6 +84,7 @@ export interface DownloadDeps {
   /** Resolves --chat, offline for cached peers (openHistory()) */
   history: ResolveHistoryChatDeps & { client: HistoryClient };
   now?: () => number;
+  checkPrivate?: ReturnType<typeof privateChatProtection>;
   stallTimeoutMs?: number;
   /** Aborted on SIGINT/SIGTERM: the partial download is kept */
   signal?: AbortSignal;
@@ -503,27 +505,24 @@ export async function downloadOnline(
     }
     const thumb = request.thumb ? pickThumb(message) : null;
 
-    const verdict = await checkOnlineProtection(client, chat, message, chats, deps.signal);
-    const superseded = (protection.get(chatId)?.fetched_at ?? -Infinity) > fetchedAt;
-    const chatVerdict = superseded ? null : verdict.chat;
-    if (chatVerdict) protection.record(chatId, chatVerdict, fetchedAt);
+    const verdict = await checkOnlineProtection(
+      deps.checkPrivate ?? privateChatProtection(client, deps.signal, now),
+      chat,
+      message,
+      chats,
+      fetchedAt,
+    );
+    if (verdict.chat) protection.record(chatId, verdict.chat, verdict.chat.fetchedAt);
     cacheFetchedMessage(deps.cacheDb, chatId, message, users);
     if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
     if (verdict.message.protected) {
       throw contentProtected(chatId, messageId, verdict.message.reason);
     }
-    if (chatVerdict?.protected && chatVerdict.reason) {
-      throw contentProtected(chatId, messageId, chatVerdict.reason);
-    }
-    if (!chatVerdict) {
-      const known = knownChatProtection(
-        deps.history.chatsCache.getById(String(chatId)),
-        protection.get(chatId),
-      );
-      if (known.protected) {
-        throw contentProtected(chatId, messageId, known.reason);
-      }
-    }
+    const known = knownChatProtection(
+      deps.history.chatsCache.getById(String(chatId)),
+      protection.get(chatId),
+    );
+    if (known.protected) throw contentProtected(chatId, messageId, known.reason);
 
     const target = downloadTarget(deps.mediaDir, info, thumb);
     const ref = { chatId, messageId, date: message.date, groupedId: info.groupedId };

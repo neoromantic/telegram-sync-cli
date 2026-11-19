@@ -13,6 +13,7 @@ import {
   readFromCache,
 } from "./download-media";
 import { checkDownloadInterrupted, MediaError } from "./errors";
+import { privateChatProtection } from "./protection";
 import { type FetchedMessage, fetchMessagesById, messageNotFound } from "./fetch";
 
 /**
@@ -89,7 +90,6 @@ function batchTransfers(client: TelegramClient, signal?: AbortSignal) {
   let until = 0;
   const paused = new Error("Batch paused");
   const facade = Object.create(client) as TelegramClient;
-  let fullUser: Promise<unknown> | undefined;
   class ObservedWait extends Error {}
   function pause(err: unknown) {
     const wait = rateLimitWait(err);
@@ -104,17 +104,10 @@ function batchTransfers(client: TelegramClient, signal?: AbortSignal) {
   facade.call = (async (request, options) => {
     signal?.throwIfAborted();
     if (Date.now() < until) throw paused;
-    const call = () =>
-      client.call(request, { ...options, floodSleepThreshold: 0 }).catch((err) => {
-        if (pause(err)) throw new ObservedWait("Flood wait", { cause: err });
-        throw err;
-      });
-    if (request._ !== "users.getFullUser") return call();
-    fullUser ??= call().catch((err) => {
-      fullUser = undefined;
+    return client.call(request, { ...options, floodSleepThreshold: 0 }).catch((err) => {
+      if (pause(err)) throw new ObservedWait("Flood wait", { cause: err });
       throw err;
     });
-    return fullUser;
   }) as TelegramClient["call"];
 
   async function retry<T>(action: () => Promise<T>, parts: () => number = () => 0) {
@@ -174,7 +167,11 @@ export async function downloadBatch(
   if (!online.length) return failures;
 
   const { client, retry } = batchTransfers(deps.getClient(), deps.signal);
-  const fileDeps = { ...deps, getClient: () => client };
+  const fileDeps = {
+    ...deps,
+    getClient: () => client,
+    checkPrivate: privateChatProtection(client, deps.signal, deps.now),
+  };
   for (let at = 0; at < online.length; at += IDS_PER_FETCH) {
     const ids = online.slice(at, at + IDS_PER_FETCH);
     let page: Map<number, FetchedMessage>;

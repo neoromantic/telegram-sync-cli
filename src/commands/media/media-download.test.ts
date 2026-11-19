@@ -785,7 +785,7 @@ describe("downloadMedia: protection found online, then offline", () => {
         ...testCase.telegram(false),
       });
       const fresh = await downloadMedia(
-        deps({ getClient: () => openTelegram.client }),
+        deps({ getClient: () => openTelegram.client, now: () => NOW + 1 }),
         request(testCase.chat, 8, { fresh: true }),
       );
       expect(fresh.cached).toBe(true);
@@ -1265,6 +1265,22 @@ describe("batch download", () => {
     const result = await batch({ getClient: () => tg.client }, [1, 2], String(ALICE_ID));
     expect(result.failed).toContainEqual([1, "CONTENT_PROTECTED"]);
     expect(tg.methods()).toContain("users.getFullUser");
+  });
+
+  it("dates the shared private-chat check once across pages", async () => {
+    let page = 0;
+    const tg = fakeTelegram({
+      message: () => photoMessage(ALICE, ++page === 1 ? 1 : 101),
+      fullUser: { noforwardsPeerEnabled: true },
+    });
+    const result = await batch(
+      { getClient: () => tg.client, now: () => NOW + page },
+      Array.from({ length: 101 }, (_, i) => i + 1),
+      String(ALICE_ID),
+    );
+    expect(result.failed).toContainEqual([101, "CONTENT_PROTECTED"]);
+    expect(tg.methods().filter((method) => method === "users.getFullUser")).toHaveLength(1);
+    expect(createChatProtectionStore(db).get(ALICE_ID)?.fetched_at).toBe(NOW + 1);
   });
 
   it("only resolves the username once", async () => {
