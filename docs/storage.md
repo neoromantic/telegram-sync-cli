@@ -498,7 +498,9 @@ most 0.05, else as the fallback if that passes.
 
 **Numbers** (public and made-up data; quality is seeded and the same in every run). Recall and
 precision of all matches, single words in the dictionary form, and pairs; the gain's 95%
-interval in brackets:
+interval in brackets. The judge counts a match as right when any lemma of the found word is the
+query word's lemma, without its context (`Они стали` counts for `сталь`), so real precision on
+ambiguous words is somewhat lower:
 
 | Candidate   | Russian recall             | Russian precision | Russian pairs recall | English recall | English precision |
 | ----------- | -------------------------- | ----------------: | -------------------: | -------------- | ----------------: |
