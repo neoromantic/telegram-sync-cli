@@ -97,9 +97,22 @@ describe("pinMessage", () => {
       }),
     ).rejects.toThrow("tg chats list --fresh");
     await expect(
-      pinMessage(refusing(400, "CHAT_NOT_MODIFIED"), createAccountCacheDb(), ALICE, 12, {
-        pin: true,
-      }),
+      pinMessage(refusing(500, "INTERNAL"), createAccountCacheDb(), ALICE, 12, { pin: true }),
     ).rejects.not.toBeInstanceOf(PinRefusedError);
   });
+
+  it.each([true, false])(
+    "counts a state Telegram says is unchanged as done (pin: %s)",
+    async (pin) => {
+      const result = await pinMessage(
+        refusing(400, "CHAT_NOT_MODIFIED"),
+        createAccountCacheDb(),
+        ALICE,
+        12,
+        { pin },
+      );
+
+      expect(result).toEqual({ chatId: 10, messageId: 12, pinned: pin, message: null });
+    },
+  );
 });

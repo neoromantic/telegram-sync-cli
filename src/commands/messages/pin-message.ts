@@ -61,11 +61,11 @@ function cachePinChange(
   chatId: number,
   messageId: number,
   pinned: boolean,
-  result: tl.TypeUpdates,
+  result: tl.TypeUpdates | null,
 ) {
   try {
     const messagesCache = createMessagesCache(cacheDb);
-    const serviceMessages = "updates" in result ? newMessageInputs(result.updates) : [];
+    const serviceMessages = result && "updates" in result ? newMessageInputs(result.updates) : [];
     cacheDb.transaction(() => {
       messagesCache.setPinned(chatId, [messageId], pinned);
       messagesCache.upsertBatch(serviceMessages);
@@ -98,17 +98,17 @@ export async function pinMessage(
   messageId: number,
   change: PinChange,
 ) {
-  let result: tl.TypeUpdates;
+  let result: tl.TypeUpdates | null = null;
   try {
     result = await client.call(updatePinnedMessageRequest(chat.inputPeer, messageId, change));
   } catch (err) {
-    if (tl.RpcError.is(err)) {
+    if (!tl.RpcError.is(err)) throw withPeerHint(err);
+    if (err.text !== "CHAT_NOT_MODIFIED") {
       const refusal = REFUSALS[err.text];
-      if (refusal) {
-        throw new PinRefusedError(refusal(messageId, change.pin), chat.chatId, messageId, err.text);
-      }
+      throw refusal
+        ? new PinRefusedError(refusal(messageId, change.pin), chat.chatId, messageId, err.text)
+        : withPeerHint(err);
     }
-    throw withPeerHint(err);
   }
   return {
     chatId: chat.chatId,

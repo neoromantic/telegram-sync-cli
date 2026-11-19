@@ -440,9 +440,9 @@ mutation, so it needs credentials and a connection; the daemon never marks anyth
 
 `tg messages pin --chat <peer> --id <id> [--silent]` pins a message and
 `tg messages unpin --chat <peer> --id <id>` unpins it, through `messages.updatePinnedMessage`.
-A pin is visible to everyone in the chat. Without `--silent`, Telegram notifies the chat's
-members of a pin, as its apps do by default; an unpin never notifies, so `unpin` has no
-`--silent`. Once Telegram confirms, the command sets the cached message's pinned flag and
+A pin is visible to everyone in the chat. In a group, Telegram notifies the members of a pin
+unless you pass `--silent`, as its apps do by default; an unpin never notifies, so `unpin` has
+no `--silent`. Once Telegram confirms, the command sets the cached message's pinned flag and
 stores the service message ("pinned a message") Telegram returns, as `tg send` stores a sent
 message. It prints the message as `tg messages get` prints it, read back from the cache:
 
