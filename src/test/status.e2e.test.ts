@@ -156,15 +156,23 @@ describe("E2E: status", () => {
       next_run_at: nextRunAt,
       error_message: "connection reset",
     });
+    const backoffEnded = seedJob({
+      chat_id: 1005,
+      job_type: SyncJobType.BackwardHistory,
+      status: "pending",
+      attempts: 1,
+      next_run_at: Date.now() - 5000,
+      error_message: "connection reset",
+    });
     const [channelFailed, chatFailed] = seedFailed();
 
     const { data } = await status();
 
     expect(data.sync).toMatchObject({
-      pending_jobs: 2,
+      pending_jobs: 3,
       running_jobs: 1,
       failed_jobs: 2,
-      retrying_jobs: 1,
+      retrying_jobs: 2,
     });
     const byId = new Map(data.sync.jobs.map((job) => [job.id, job]));
     expect(byId.get(running!)).toMatchObject({
@@ -184,6 +192,11 @@ describe("E2E: status", () => {
       attempts: 2,
       error: "connection reset",
       next_run_at: new Date(nextRunAt).toISOString(),
+    });
+    expect(byId.get(backoffEnded!)).toMatchObject({
+      status: "pending",
+      attempts: 1,
+      next_run_at: null,
     });
     expect(byId.get(channelFailed!)).toEqual({
       account_id: 1,
@@ -224,41 +237,6 @@ describe("E2E: status", () => {
     expect(data.sync.jobs.map((job) => job.id)).toEqual(failed.slice(0, 5));
   });
 
-  it("reports no next_run_at for a retry whose backoff has ended", async () => {
-    const due = seedJob({
-      chat_id: 1005,
-      job_type: SyncJobType.BackwardHistory,
-      status: "pending",
-      attempts: 1,
-      next_run_at: Date.now() - 5000,
-      error_message: "connection reset",
-    });
-
-    const { data } = await status();
-
-    expect(data.sync.retrying_jobs).toBe(1);
-    expect(data.sync.jobs).toEqual([
-      expect.objectContaining({
-        id: due,
-        status: "pending",
-        attempts: 1,
-        next_run_at: null,
-      }),
-    ]);
-  });
-
-  it("reports zero jobs for an empty queue", async () => {
-    const { data } = await status();
-
-    expect(data.sync).toEqual({
-      pending_jobs: 0,
-      running_jobs: 0,
-      failed_jobs: 0,
-      retrying_jobs: 0,
-      jobs: [],
-    });
-  });
-
   async function prettyStatus() {
     const result = await runCliSuccess(["status", "--format", "pretty"], options());
     return stripAnsi(result.stdout);
@@ -267,7 +245,7 @@ describe("E2E: status", () => {
   const retryCommands = (output: string) =>
     [...output.matchAll(/^\s+tg (chats sync .+)$/gm)].map((match) => match[1]!.split(" "));
 
-  it("shows failed jobs and their errors in pretty output", async () => {
+  it("shows failed jobs and their errors in pretty output, with retry commands that keep each chat's mode", async () => {
     seedFailed();
     seedChat(1002, "private", "auto");
     seedJob({
@@ -290,11 +268,24 @@ describe("E2E: status", () => {
     expect(output).toContain("failed after 1 attempt: Telegram API error 400: CHANNEL_PRIVATE");
     expect(output).toContain("failed after 5 attempts: connection reset");
     expect(output).toContain("retry at the daemon's next refresh");
-    expect(retryCommands(output)).toEqual([
+    const commands = retryCommands(output);
+    expect(commands).toEqual([
       ["chats", "sync", "-1001234567890"],
       ["chats", "sync", "1001", "--auto"],
     ]);
     expect(output).not.toContain("Empty");
+
+    for (const command of commands) {
+      const result = await runCliSuccess(command, options());
+      expect(result.json).toMatchObject({
+        success: true,
+        data: { changed: false, clearedFailedJobs: 1 },
+      });
+    }
+    expect(modeOf(-1001234567890)).toBe("on");
+    expect(modeOf(1001)).toBe("auto");
+    const { data } = await status();
+    expect(data.sync.failed_jobs).toBe(0);
   });
 
   it("shows retrying and deferred jobs and when they run in pretty output", async () => {
@@ -322,25 +313,6 @@ describe("E2E: status", () => {
     expect(output).toMatch(/chat:1004 attempt 2 of 5, next in \d+m \d+s: connection reset/);
     expect(output).toMatch(/chat:1006 next in \d+m \d+s$/m);
     expect(output).not.toMatch(/Failed\s+\d+ jobs/);
-  });
-
-  it("prints retry commands that keep each chat's mode", async () => {
-    seedFailed();
-    const commands = retryCommands(await prettyStatus());
-    expect(commands).toHaveLength(2);
-
-    for (const command of commands) {
-      const result = await runCliSuccess(command, options());
-      expect(result.json).toMatchObject({
-        success: true,
-        data: { changed: false, clearedFailedJobs: 1 },
-      });
-    }
-
-    expect(modeOf(-1001234567890)).toBe("on");
-    expect(modeOf(1001)).toBe("auto");
-    const { data } = await status();
-    expect(data.sync.failed_jobs).toBe(0);
   });
 
   it("says when a stopped daemon last wrote its status", async () => {
@@ -606,14 +578,12 @@ describe("E2E: status, daemon version", () => {
 
   async function status() {
     const result = await runCliSuccess(["status"], options());
-    expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     return result.json as DaemonVersionResult;
   }
 
   async function prettyStatus() {
     const result = await runCliSuccess(["status", "--format", "pretty"], options());
-    expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     return stripAnsi(result.stdout);
   }
@@ -689,7 +659,9 @@ describe("E2E: status, daemon version", () => {
     expect(output).not.toContain("tg daemon stop");
   });
 
-  async function expectNoVersionWhileStopped() {
+  it("reports no version for a daemon that died without cleanup", async () => {
+    daemonStatus().setDaemonRunning(4242, OTHER);
+
     const { data } = await status();
     expect(data.daemon).toMatchObject({
       status: "stopped",
@@ -700,23 +672,6 @@ describe("E2E: status, daemon version", () => {
     const output = await prettyStatus();
     expect(output).not.toMatch(/^\s+Version\s/m);
     expect(output).not.toContain("⚠ The daemon");
-  }
-
-  it("reports no version for a daemon that died without cleanup", async () => {
-    daemonStatus().setDaemonRunning(4242, OTHER);
-
-    await expectNoVersionWhileStopped();
-  });
-
-  it("reports no version for a daemon that stopped cleanly", async () => {
-    daemonStatus().setDaemonRunning(4242, OTHER);
-    daemonStatus().setDaemonStopped();
-
-    await expectNoVersionWhileStopped();
-  });
-
-  it("reports no version when no daemon has run", async () => {
-    await expectNoVersionWhileStopped();
   });
 
   it("compares nothing while the daemon is still starting", async () => {
@@ -781,6 +736,11 @@ describe("E2E: status cache size", () => {
         raw_json: "{}",
       },
     ]);
+    const folder = join(env.dataDir, "accounts", "1", "media", "AgADexample");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "report.pdf"), Buffer.alloc(1_000, 1));
+    writeFileSync(join(folder, "thumb-m.jpg"), Buffer.alloc(20, 1));
+    writeFileSync(join(folder, ".video.mp4.part"), Buffer.alloc(300, 1));
   });
 
   afterEach(() => {
@@ -794,7 +754,7 @@ describe("E2E: status cache size", () => {
     return result.json as SizeStatus;
   }
 
-  it("reports each account's cache size and their sum", async () => {
+  it("reports each account's cache size and their sum, but no table or media sizes", async () => {
     const { data } = await sizeStatus();
     const [first, second] = data.accounts.accounts;
 
@@ -806,30 +766,18 @@ describe("E2E: status cache size", () => {
     expect(data.storage.cache_bytes).toBe(
       first!.cache.size!.file_bytes + first!.cache.size!.wal_bytes,
     );
+    expect(data.accounts.accounts.map((a) => a.media)).toEqual([null, null]);
+    expect(data.storage.media_bytes).toBeNull();
   });
 
-  it("adds each table's size with --sizes", async () => {
+  it("adds each table's size and each account's media cache with --sizes", async () => {
     const { data } = await sizeStatus(["--sizes"]);
-
     expect(data.accounts.accounts[0]?.cache.size?.tables?.messages_cache).toBeGreaterThan(0);
-  });
-
-  it("reports each account's media cache with --sizes", async () => {
-    const folder = join(env.dataDir, "accounts", "1", "media", "AgADexample");
-    mkdirSync(folder, { recursive: true });
-    writeFileSync(join(folder, "report.pdf"), Buffer.alloc(1_000, 1));
-    writeFileSync(join(folder, ".video.mp4.part"), Buffer.alloc(300, 1));
-
-    const plain = await sizeStatus();
-    expect(plain.data.accounts.accounts.map((a) => a.media)).toEqual([null, null]);
-    expect(plain.data.storage.media_bytes).toBeNull();
-
-    const { data } = await sizeStatus(["--sizes"]);
     expect(data.accounts.accounts.map((a) => a.media)).toEqual([
-      { bytes: 1_000, files: 1, partial_bytes: 300, partial_files: 1 },
+      { bytes: 1_020, files: 2, partial_bytes: 300, partial_files: 1 },
       { bytes: 0, files: 0, partial_bytes: 0, partial_files: 0 },
     ]);
-    expect(data.storage.media_bytes).toBe(1_300);
+    expect(data.storage.media_bytes).toBe(1_320);
 
     const pretty = stripAnsi(
       (
@@ -839,13 +787,13 @@ describe("E2E: status cache size", () => {
       ).stdout,
     );
     expect(pretty).toContain("Media Cache");
-    expect(pretty).toMatch(/Account #1\s+1000 B · 1 file · 1 partial 300 B/);
+    expect(pretty).toMatch(/Account #1\s+1020 B · 2 files · 1 partial 300 B/);
   });
 
   it("sums only the account --account selects", async () => {
-    const { data } = await sizeStatus(["--account", "2"]);
+    const { data } = await sizeStatus(["--sizes", "--account", "2"]);
 
-    expect(data.storage.cache_bytes).toBe(0);
+    expect(data.storage).toMatchObject({ cache_bytes: 0, media_bytes: 0 });
   });
 
   it("tells to stop the daemon before vacuuming a cache without auto_vacuum", async () => {

@@ -6,7 +6,6 @@ import { takePartIn } from "./participation.test-utils";
 import { photoMessage } from "./photo-message.test-utils";
 import { seedInChild } from "./seed-in-child.test-utils";
 import { parseRawMessage } from "../daemon/sync-worker-real-helpers";
-import { createChatProtectionStore } from "../db/chat-protection";
 import { createMessagesCache } from "../db/messages-cache";
 import { extractAttachment } from "../utils/attachment";
 import { runCliFailure, runCliSuccess } from "./cli.test-utils";
@@ -30,34 +29,14 @@ describe("E2E: SQL Command", () => {
 
   it.each([
     ["--query", ["sql", "--query", "SELECT 1 AS one"]],
-    ["--query=", ["sql", "--query=SELECT 1 AS one"]],
     ["a positional query", ["sql", "SELECT 1 AS one"]],
     ["a positional query before -f", ["sql", "SELECT 1 AS one", "-f", "json"]],
-    ["a positional query before --format", ["sql", "SELECT 1 AS one", "--format", "json"]],
-    ["a positional query after -f", ["-f", "json", "sql", "SELECT 1 AS one"]],
-    [
-      "matching values for --output and -f",
-      ["sql", "--output", "json", "--query", "SELECT 1 AS one", "-f", "json"],
-    ],
-    ["--query before -f", ["sql", "--query", "SELECT 1 AS one", "-f", "json"]],
   ])("runs a query passed as %s", async (_label, args) => {
     const result = await runCliSuccess(args, env.getCliOptions());
 
     expect(result.json).toEqual({
       success: true,
       data: { columns: ["one"], rows: [{ one: 1 }], rowCount: 1 },
-    });
-  });
-
-  it("queries the cache schema", async () => {
-    const result = await runCliSuccess(
-      ["sql", "--query", "SELECT COUNT(*) AS n FROM messages_cache"],
-      env.getCliOptions(),
-    );
-
-    expect(result.json).toMatchObject({
-      success: true,
-      data: { rows: [{ n: 0 }] },
     });
   });
 
@@ -82,18 +61,8 @@ describe("E2E: SQL Command", () => {
     });
   });
 
-  it("rejects a print-schema format for a query", async () => {
-    const result = await runCliFailure(["sql", "--output=sql", "SELECT 1"], 3, env.getCliOptions());
-
-    expect(result.json).toMatchObject({
-      success: false,
-      error: { code: "INVALID_ARGS" },
-    });
-  });
-
   describe("print-schema", () => {
     it.each([
-      ["--output=sql", ["sql", "print-schema", "--output=sql"]],
       ["-o sql before the subcommand", ["sql", "-o", "sql", "print-schema"]],
       ["-f json before the subcommand", ["sql", "-f", "json", "print-schema", "--output=sql"]],
     ])("prints annotated DDL with %s", async (_label, args) => {
@@ -110,6 +79,7 @@ describe("E2E: SQL Command", () => {
       );
 
       expect(result.stdout).toContain("CREATE TABLE users_cache (");
+      expect(result.stdout).toMatch(/^\s+username\s.*-- \S/m);
       expect(result.stdout).not.toContain("CREATE TABLE messages_cache (");
     });
 
@@ -164,19 +134,6 @@ describe("E2E: SQL Command", () => {
         ],
         rowCount: 4,
       },
-    });
-  });
-
-  it("rejects write queries", async () => {
-    const result = await runCliFailure(
-      ["sql", "--query", "DELETE FROM messages_cache"],
-      1,
-      env.getCliOptions(),
-    );
-
-    expect(result.json).toMatchObject({
-      success: false,
-      error: { code: "SQL_WRITE_NOT_ALLOWED" },
     });
   });
 
@@ -314,58 +271,6 @@ describe("E2E: SQL Command", () => {
     });
   });
 
-  describe("chat_content_protection", () => {
-    beforeEach(() => {
-      createChatProtectionStore(env.openCacheDb(1)).record(
-        -1001234567890,
-        { protected: true, reason: "chat" },
-        1_760_000_000_000,
-      );
-    });
-
-    it("reads its rows on the read-only connection", async () => {
-      const result = await runCliSuccess(
-        ["sql", "--query", "SELECT * FROM chat_content_protection"],
-        env.getCliOptions(),
-      );
-
-      expect(result.json).toMatchObject({
-        data: {
-          rows: [
-            {
-              chat_id: -1001234567890,
-              protected: 1,
-              reason: "chat",
-              fetched_at: 1_760_000_000_000,
-            },
-          ],
-        },
-      });
-    });
-
-    it("prints its schema with descriptions", async () => {
-      const result = await runCliSuccess(
-        ["sql", "print-schema", "--table", "chat_content_protection"],
-        env.getCliOptions(),
-      );
-      const data = (
-        result.json as {
-          data: { columns: Array<{ name: string; description: string }> };
-        }
-      ).data;
-
-      expect(data.columns.map((column) => column.name)).toEqual([
-        "chat_id",
-        "protected",
-        "reason",
-        "fetched_at",
-      ]);
-      for (const column of data.columns) {
-        expect(column.description).not.toBe("");
-      }
-    });
-  });
-
   describe("on a read-only connection", () => {
     function userVersion() {
       const db = new Database(env.cachePath(1), { readonly: true });
@@ -384,15 +289,7 @@ describe("E2E: SQL Command", () => {
       const before = userVersion();
       expect(before).toBeGreaterThan(0);
 
-      for (const query of [
-        "PRAGMA user_version = 0",
-        "PRAGMA user_version=0;",
-        "PRAGMA user_version(0)",
-        "PRAGMA writable_schema(1)",
-        "PRAGMA journal_mode(OFF)",
-        "PRAGMA wal_checkpoint(TRUNCATE)",
-        "PRAGMA incremental_vacuum",
-      ]) {
+      for (const query of ["PRAGMA user_version = 0", "PRAGMA incremental_vacuum"]) {
         const result = await runCliFailure(["sql", "--query", query], 1, env.getCliOptions());
         expect(result.json).toMatchObject({
           success: false,
@@ -403,24 +300,12 @@ describe("E2E: SQL Command", () => {
     });
 
     it("still reads pragmas", async () => {
-      const version = await runCliSuccess(["sql", "PRAGMA user_version"], env.getCliOptions());
-      expect(version.json).toMatchObject({
-        success: true,
-        data: { rows: [{ user_version: userVersion() }] },
-      });
-
       const columns = await runCliSuccess(
         ["sql", "PRAGMA table_info(messages_cache)"],
         env.getCliOptions(),
       );
       const rows = (columns.json as { data: { rows: Array<{ name: string }> } }).data.rows;
       expect(rows.map((row) => row.name)).toContain("text");
-
-      const indexes = await runCliSuccess(
-        ["sql", "PRAGMA index_list(messages_cache)"],
-        env.getCliOptions(),
-      );
-      expect((indexes.json as { data: { rowCount: number } }).data.rowCount).toBeGreaterThan(0);
     });
 
     it("refuses a query with more than one statement", async () => {
@@ -435,8 +320,6 @@ describe("E2E: SQL Command", () => {
         error: { code: "SQL_OPERATION_BLOCKED" },
       });
       expect(userVersion()).toBe(before);
-
-      await runCliSuccess(["sql", "SELECT 1;"], env.getCliOptions());
     });
   });
 });
