@@ -130,7 +130,7 @@ describe("E2E: Config Commands", () => {
   it("runs tg skill with an invalid config.json under -f json", async () => {
     writeFileSync(join(env.dataDir, "config.json"), '{"activeAccount":"one"}');
 
-    const result = await runCliSuccess(["-f", "json", "skill", "manifest"], env.getCliOptions());
+    const result = await runCliSuccess(["-f", "json", "skill", "validate"], env.getCliOptions());
 
     expect((result.json as { success: boolean }).success).toBe(true);
   });

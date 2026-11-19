@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { type TelegramClient, tl } from "@mtcute/bun";
+import type { TelegramClient } from "@mtcute/bun";
 import { ConfigError } from "../config";
 import { getErrorMessage } from "../daemon/daemon-utils";
 import { getAccountCacheDb } from "../db";
@@ -86,12 +86,14 @@ function extractFloodWaitSeconds(error: unknown) {
   return null;
 }
 
-function isFloodWait(error: unknown) {
+async function isFloodWait(error: unknown) {
+  const { tl } = await import("@mtcute/bun");
   if (tl.RpcError.is(error)) return error.code === tl.RpcError.FLOOD;
   return error instanceof Error && /FLOOD_WAIT_\d+/.test(error.message);
 }
 
-function apiErrorCode(error: unknown) {
+async function apiErrorCode(error: unknown) {
+  const { tl } = await import("@mtcute/bun");
   if (tl.RpcError.is(error)) return error.code;
   return extractFloodWaitSeconds(error) ? tl.RpcError.FLOOD : null;
 }
@@ -136,7 +138,7 @@ export async function trackApiCall<T>(
       timestamp: start,
       method,
       success: 0,
-      error_code: apiErrorCode(err),
+      error_code: await apiErrorCode(err),
       response_ms: rateLimits.now() - start,
       context: getErrorMessage(err),
     });
@@ -171,7 +173,7 @@ async function callWithRateLimits<T>({
     return await trackApiCall(rateLimits, method, call, context);
   } catch (err) {
     const waitSeconds = extractFloodWaitSeconds(err);
-    if (waitSeconds && isFloodWait(err)) {
+    if (waitSeconds && (await isFloodWait(err))) {
       throw new RateLimitError(method, waitSeconds, { cause: err });
     }
     throw err;

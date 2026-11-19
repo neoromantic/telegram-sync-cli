@@ -43,7 +43,7 @@ describe("createDefaultClientFactory", () => {
       onBeforeWait: () => {},
     };
 
-    const factory = createDefaultClientFactory(
+    const factory = await createDefaultClientFactory(
       { apiId: 123, apiHash: "hash", logLevel: 3, floodWaiter },
       "/tmp/data",
     );
@@ -68,7 +68,7 @@ describe("createDefaultClientFactory", () => {
   it("uses default flood waiter options when none provided", async () => {
     const { createDefaultClientFactory } = await import("./telegram");
 
-    const factory = createDefaultClientFactory({
+    const factory = await createDefaultClientFactory({
       apiId: 123,
       apiHash: "hash",
       logLevel: 2,
@@ -85,12 +85,14 @@ describe("createDefaultClientFactory", () => {
   it("passes the configured proxy transport to the client", async () => {
     const { createDefaultClientFactory } = await import("./telegram");
     const transport = mtcute.proxyTransportFromUrl("socks5://127.0.0.1:1080");
-    createDefaultClientFactory({
-      apiId: 123,
-      apiHash: "hash",
-      logLevel: 2,
-      transport,
-    }).create(1);
+    (
+      await createDefaultClientFactory({
+        apiId: 123,
+        apiHash: "hash",
+        logLevel: 2,
+        transport,
+      })
+    ).create(1);
     expect(lastClientOptions?.transport).toBe(transport);
   });
 });
@@ -99,10 +101,10 @@ describe("getClientForAccount", () => {
   it("keeps one client per account", async () => {
     const { getClientForAccount } = await import("./telegram");
 
-    const first = getClientForAccount(1);
+    const first = await getClientForAccount(1);
 
-    expect(getClientForAccount(1)).toBe(first);
-    expect(getClientForAccount(2)).not.toBe(first);
+    expect(await getClientForAccount(1)).toBe(first);
+    expect(await getClientForAccount(2)).not.toBe(first);
     expect(first).toBeInstanceOf(MockTelegramClient);
   });
 });

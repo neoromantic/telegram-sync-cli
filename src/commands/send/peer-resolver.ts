@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { type TelegramClient, tl } from "@mtcute/bun";
+import type { TelegramClient, tl } from "@mtcute/bun";
 
 import { getErrorMessage } from "../../daemon/daemon-utils";
 import { type ChatSyncStateService, createChatSyncStateService } from "../../db/chat-sync-state";
@@ -232,7 +232,8 @@ async function resolveByPhone(
     const resolved = await client.call(request);
     resolvedUser = resolved.users?.find((user): user is tl.RawUser => user._ === "user") ?? null;
   } catch (err) {
-    if (!tl.RpcError.is(err) || err.code === tl.RpcError.FLOOD) throw err;
+    const { RpcError } = (await import("@mtcute/bun")).tl;
+    if (!RpcError.is(err) || err.code === RpcError.FLOOD) throw err;
     resolvedUser = null;
   }
 

@@ -147,6 +147,10 @@ Steps: [docs/releasing.md](docs/releasing.md).
 - **Credentials are read lazily.** `--help`, `--version` and cache-only commands must work
   without `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`. Only commands that connect call
   `requireDefaultConfig()` in `src/services/telegram.ts`.
+- **mtcute loads only when a command calls Telegram.** Importing `@mtcute/bun` was about 0.3 s of
+  a 0.4 s start. Outside the daemon runtime, import its types with `import type` and its values
+  with `await import()` where the code talks to Telegram; `getClientForAccount()` is async, and
+  `tg daemon start` loads the daemon. `src/cli.test.ts` fails when the command tree loads it.
 - **Usage stats never carry user content.** `src/telemetry/client.ts` is devkit's client
   (managed, never edited here); `src/telemetry/index.ts` decides what tg passes to it. Features
   are command paths from the dispatcher, never arguments. `error()` reports only its code or

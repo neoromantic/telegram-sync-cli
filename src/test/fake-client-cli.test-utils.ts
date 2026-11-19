@@ -62,6 +62,14 @@ if (import.meta.main) {
   const client = {
     async call(request: { _: string; maxId?: number; username?: string }) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
+      if (request._ === "messages.getHistory") {
+        return {
+          _: "messages.messages",
+          messages: [],
+          chats: [],
+          users: [],
+        };
+      }
       const owner = FAKE_USERNAMES[request.username ?? ""];
       if (request._ === "contacts.resolveUsername" && owner) {
         return { _: "contacts.resolvedPeer", ...owner };
