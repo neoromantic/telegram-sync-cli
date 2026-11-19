@@ -38,10 +38,11 @@ export function parseTypeArg(rawArgs: string[], defs: ArgsDef) {
   return types;
 }
 
-function parseBound(value: string | undefined, name: "since" | "until", now: number) {
+function parseBound(value: unknown, name: "since" | "until", now: number) {
   if (value === undefined) return undefined;
-  const seconds = parseTimeBound(value, { now, end: name === "until" });
-  if (seconds === null) {
+  const seconds =
+    typeof value === "string" ? parseTimeBound(value, { now, end: name === "until" }) : null;
+  if (seconds === null || Number.isNaN(new Date(seconds * 1000).getTime())) {
     error(
       ErrorCodes.INVALID_ARGS,
       `Invalid --${name}: ${value}`,
@@ -62,7 +63,7 @@ export function formatTimeBound(seconds: number | undefined) {
 }
 
 /** --since and --until as Unix seconds; INVALID_ARGS unless since < until */
-export function parseTimeWindow(args: { since?: string; until?: string }, now = Date.now()) {
+export function parseTimeWindow(args: { since?: unknown; until?: unknown }, now = Date.now()) {
   const since = parseBound(args.since, "since", now);
   const until = parseBound(args.until, "until", now);
   if (since !== undefined && until !== undefined && since >= until) {

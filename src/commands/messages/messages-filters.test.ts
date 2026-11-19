@@ -72,6 +72,11 @@ describe("parseTimeWindow", () => {
     expect(codeOf(() => parseTimeWindow({ since: "monday" }, NOW))).toBe("INVALID_ARGS");
   });
 
+  it("rejects --no-since and a bound no date can hold", () => {
+    expect(codeOf(() => parseTimeWindow({ since: false }, NOW))).toBe("INVALID_ARGS");
+    expect(codeOf(() => parseTimeWindow({ until: "1000000000d" }, NOW))).toBe("INVALID_ARGS");
+  });
+
   it("rejects --since that is not earlier than --until", () => {
     expect(codeOf(() => parseTimeWindow({ since: "1d", until: "2d" }, NOW))).toBe("INVALID_ARGS");
   });
