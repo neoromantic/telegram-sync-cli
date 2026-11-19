@@ -106,7 +106,7 @@ describe("search newest first (#118)", () => {
 
   function sortedMatches(query: string, options: MessageSearchOptions) {
     const conditions = ["message_search MATCH ?"];
-    const params: Array<string | number> = [toFts5Query(query, { phrase: options.phrase })];
+    const params: Array<string | number> = [toFts5Query(query, options)];
     if (!options.includeDeleted) conditions.push("m.is_deleted = 0");
     if (options.chatId !== undefined) {
       conditions.push("m.chat_id = ?");
@@ -209,6 +209,32 @@ describe("search newest first (#118)", () => {
     expect(searchNewestFirst(db, "rare", {}, WALK).way).toBe("sort");
     expect(searchNewestFirst(db, "nothing", {}, WALK).rows).toEqual([]);
     expect(searchNewestFirst(db, "comm*", {}, WALK).way).toBe("sort");
+  });
+
+  it("returns the same page for a word with several forms, walking and sorting", () => {
+    const forms = new Map([
+      ["common", { words: ["common", "often"], cut: false }],
+      ["rare", { words: ["rare", "ancient"], cut: false }],
+    ]);
+    const search = createMessagesSearch(db);
+    for (const [query, way] of [
+      ["common", "messages"],
+      ["rare", "sort"],
+      ["common rare", "sort"],
+    ] as const) {
+      for (const options of [{ forms }, { forms, chatId: CHATS[1], offset: 20 }]) {
+        const all = sortedMatches(query, options);
+        const offset = options.offset ?? 0;
+        const walked = searchNewestFirst(db, query, options, WALK);
+        expect(walked.way).toBe(way);
+        expect(keys(walked.rows)).toEqual(all.slice(offset, offset + 50));
+        expect(keys(search.search(query, options))).toEqual(all.slice(offset, offset + 50));
+        expect(search.count(query, options)).toBe(all.length);
+      }
+    }
+    expect(sortedMatches("common", { forms }).length).toBeGreaterThan(
+      sortedMatches("common", {}).length,
+    );
   });
 
   it("finds the page inside a second with more messages than the window", () => {

@@ -4,15 +4,8 @@ import { arch, cpus, release, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import {
-  isCyrillic,
-  isLatin,
-  light,
-  snowball,
-  type Stemmer,
-  stemText,
-  tokens,
-} from "./bench-search-stem";
+import { isCyrillic, isLatin, lightStem } from "../src/utils/word-stems";
+import { snowball, type Stemmer, stemText, tokens } from "./bench-search-stem";
 import { buildDataset, generateMessage, rng } from "./bench-storage-data";
 
 const { values: args } = parseArgs({
@@ -62,7 +55,8 @@ process.env.TELEGRAM_SYNC_CLI_TELEMETRY = "0";
 
 const { enableWal, initCacheSchema } = await import("../src/db/schema");
 const { initSyncSchema } = await import("../src/db/sync-schema");
-const { searchNewestFirst } = await import("../src/db/messages-search");
+const { searchNewestFirst, toFts5Query } = await import("../src/db/messages-search");
+const { findQueryForms } = await import("../src/db/word-forms");
 
 function log(message: string) {
   console.error(`[bench:search] ${message}`);
@@ -250,7 +244,7 @@ const START_DATE = 1_700_000_000;
 function registerStemFunctions(db: Database) {
   const fdb = db as unknown as FunctionDatabase;
   fdb.function("tg_snowball", { deterministic: true }, (text) => stemText(text, snowball));
-  fdb.function("tg_light", { deterministic: true }, (text) => stemText(text, light));
+  fdb.function("tg_light", { deterministic: true }, (text) => stemText(text, lightStem));
 }
 
 function ftsSize(db: Database) {
@@ -377,6 +371,7 @@ function vocabulary(db: Database) {
     "CREATE VIRTUAL TABLE IF NOT EXISTS temp.bench_vocab USING fts5vocab(main, message_search, row)",
   );
   return {
+    db,
     range: db.query("SELECT term FROM temp.bench_vocab WHERE term >= ? AND term < ?"),
     all: db.query("SELECT term FROM temp.bench_vocab"),
     counts: db.query("SELECT term, doc FROM temp.bench_vocab"),
@@ -485,8 +480,8 @@ const CANDIDATES: Candidate[] = [
     name: "D2",
     index: "LIGHT",
     description: "light stemmers in index and query",
-    rewrite: (ws) => ws.map((w) => quote(light(w))).join(" "),
-    phrase: (ws) => quote(ws.map(light).join(" ")),
+    rewrite: (ws) => ws.map((w) => quote(lightStem(w))).join(" "),
+    phrase: (ws) => quote(ws.map(lightStem).join(" ")),
     complexity: 3,
   },
   {
@@ -499,8 +494,11 @@ const CANDIDATES: Candidate[] = [
   {
     name: "E2",
     index: "A",
-    description: "query words expanded with the light stemmers",
-    rewrite: (ws, v) => expandAll(ws, v, light),
+    description: "query words expanded with the light stemmers, as tg messages search --forms does",
+    rewrite: (ws, v) => {
+      const query = ws.join(" ");
+      return toFts5Query(query, { forms: findQueryForms(v.db, query) });
+    },
     complexity: 1,
   },
 ];

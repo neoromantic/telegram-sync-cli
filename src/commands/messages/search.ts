@@ -2,10 +2,12 @@ import { type ArgsDef, defineCommand } from "citty";
 
 import {
   createMessagesSearch,
+  hasFts5Syntax,
   isFts5QueryError,
   MESSAGE_SEARCH_SORTS,
   type MessageSearchSort,
 } from "../../db/messages-search";
+import { findQueryForms } from "../../db/word-forms";
 import { ErrorCodes } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
@@ -71,6 +73,12 @@ const searchArgs = {
   phrase: {
     type: "boolean",
     description: "Match the whole query as one exact phrase",
+    default: false,
+  },
+  forms: {
+    type: "boolean",
+    description:
+      "Also match other forms of each plain word that occur in the cache (квартира: квартиру, квартирой; meeting: meetings), ё read as е",
     default: false,
   },
   limit: {
@@ -141,6 +149,17 @@ export const searchMessagesCommand = defineCommand({
       error(ErrorCodes.INVALID_ARGS, "Search query is required");
     }
 
+    if (args.forms && (args.phrase || hasFts5Syntax(query))) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        args.phrase
+          ? "--forms can't be combined with --phrase"
+          : "--forms works on plain words only, and this query has FTS5 syntax",
+        { query },
+        "Drop --forms to run the query as written, or write the forms into it yourself (квартир*)",
+      );
+    }
+
     const limit = Number.parseInt(args.limit ?? "50", 10);
     const offset = Number.parseInt(args.offset ?? "0", 10);
 
@@ -174,8 +193,10 @@ export const searchMessagesCommand = defineCommand({
 
     try {
       const search = createMessagesSearch(cacheDb);
+      const forms = args.forms ? findQueryForms(cacheDb, query) : undefined;
 
       const options = {
+        forms,
         includeDeleted: args.includeDeleted ?? false,
         phrase: args.phrase ?? false,
         chatId: chatFilter?.id,
@@ -205,7 +226,14 @@ export const searchMessagesCommand = defineCommand({
             ]
           : [];
       const count = args.count ? search.count(query, options) : null;
-      const terms = args.snippet ? snippetTerms(query, { phrase: options.phrase }) : [];
+      const terms = args.snippet
+        ? [
+            ...snippetTerms(query, { phrase: options.phrase }),
+            ...[...(forms?.values() ?? [])].flatMap((found) =>
+              found.words.map((text) => ({ text, prefix: false })),
+            ),
+          ]
+        : [];
       const toItem = messageItemReader(cacheDb);
 
       success(
@@ -216,10 +244,12 @@ export const searchMessagesCommand = defineCommand({
             sender: args.sender ?? null,
             includeDeleted: args.includeDeleted ?? false,
             phrase: args.phrase ?? false,
+            forms: args.forms ?? false,
             since: args.since ?? null,
             until: args.until ?? null,
           },
           sort,
+          forms: forms ? Object.fromEntries(forms) : null,
           results: results.map((row) => {
             const item = toItem(row);
             return args.snippet ? { ...item, snippet: buildSnippet(item.text, terms) } : item;
