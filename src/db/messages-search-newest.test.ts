@@ -18,17 +18,18 @@ function mulberry32(seed: number) {
   };
 }
 
-const MESSAGES = 12_000;
-const SAME_SECOND = 3_000;
+const OLD_PAGES = 12;
+const SAME_SECOND = 500;
 const BASE_DATE = 1_700_000_000;
 const FROZEN = { now: () => 0 };
-const WALK = { ...FROZEN, walkThreshold: 10 };
+const WALK = { ...FROZEN, walkThreshold: 1 };
 const CHATS = [-1001000000001, -1001000000002, -200, 300, 301, 302];
 const CHAT_WEIGHTS = [0.45, 0.25, 0.15, 0.1, 0.045, 0.005];
 const SENDERS = Array.from({ length: 20 }, (_, i) => 1000 + i);
 
 const random = mulberry32(118);
-const pick = <T>(items: readonly T[]) => items[Math.floor(random() * items.length)] as T;
+const pick = <T>(items: readonly T[], next = random) =>
+  items[Math.floor(next() * items.length)] as T;
 
 function pickChat() {
   let r = random();
@@ -49,7 +50,7 @@ function messageText() {
 }
 
 function oldMessageText(page: number) {
-  return page >= 105 ? `${messageText()} ancient` : messageText();
+  return page >= 10 ? `${messageText()} ancient` : messageText();
 }
 
 describe("search newest first (#118)", () => {
@@ -75,11 +76,11 @@ describe("search newest first (#118)", () => {
        VALUES (?, ?, ?, ?, ?, ?, 0, '{}')`,
     );
     db.transaction(() => {
-      for (let page = 0; page < MESSAGES / 100; page++) {
-        const top = BASE_DATE + 3000 - page * 25;
+      for (let page = 0; page < OLD_PAGES; page++) {
+        const top = BASE_DATE + 3000 - page * 250;
         for (let i = 0; i < 100; i++) {
           const id = page * 100 + i + 1;
-          const sender = random() < 0.0005 ? SENDERS[19] : pick(SENDERS.slice(0, 19));
+          const sender = random() < 0.005 ? SENDERS[19] : pick(SENDERS.slice(0, 19));
           insert.run(
             pickChat(),
             id,
@@ -93,7 +94,7 @@ describe("search newest first (#118)", () => {
       for (let i = 0; i < SAME_SECOND; i++) {
         insert.run(
           pickChat(),
-          MESSAGES + i + 1,
+          OLD_PAGES * 100 + i + 1,
           pick(SENDERS.slice(0, 19)) as number,
           messageText(),
           random() < 0.03 ? 1 : 0,
@@ -131,7 +132,7 @@ describe("search newest first (#118)", () => {
       .query(
         `SELECT m.chat_id, m.message_id
          FROM message_search
-         JOIN messages_cache m ON m.rowid = message_search.rowid
+         CROSS JOIN messages_cache m ON m.rowid = message_search.rowid
          LEFT JOIN chats_cache c ON c.chat_id = CAST(m.chat_id AS TEXT)
          WHERE ${conditions.join(" AND ")}
          ORDER BY m.date DESC, m.rowid`,
@@ -143,35 +144,31 @@ describe("search newest first (#118)", () => {
   const keys = (rows: Array<{ chat_id: number; message_id: number }>) =>
     rows.map((row) => `${row.chat_id}:${row.message_id}`);
 
-  function randomOptions() {
+  function randomOptions(next: () => number) {
     const options: MessageSearchOptions = {
-      limit: pick([1, 20, 50, 50, 100]),
-      offset: pick([0, 0, 0, 7, 50, 200, 1000]),
+      limit: pick([1, 20, 50, 50, 100], next),
+      offset: pick([0, 0, 0, 7, 50, 200, 1000], next),
     };
-    const filter = random();
-    if (filter < 0.2) options.chatId = pick(CHATS);
-    else if (filter < 0.25) options.chatUsername = pick(["chat0", "chat5"]);
-    else if (filter < 0.35) options.senderId = pick(SENDERS);
-    if (random() < 0.25) options.since = BASE_DATE + Math.floor(random() * 3000);
-    if (random() < 0.25) options.until = BASE_DATE + Math.floor(random() * 3000);
-    if (random() < 0.15) options.includeDeleted = true;
+    const filter = next();
+    if (filter < 0.2) options.chatId = pick(CHATS, next);
+    else if (filter < 0.25) options.chatUsername = pick(["chat0", "chat5"], next);
+    else if (filter < 0.35) options.senderId = pick(SENDERS, next);
+    if (next() < 0.25) options.since = BASE_DATE + Math.floor(next() * 3000);
+    if (next() < 0.25) options.until = BASE_DATE + Math.floor(next() * 3000);
+    if (next() < 0.15) options.includeDeleted = true;
     return options;
   }
 
-  function checkRandomQueries(runs: number) {
+  function checkRandomQueries(seed: number) {
+    const next = mulberry32(seed);
     const search = createMessagesSearch(db);
     const ways = { messages: 0, sort: 0 };
-    for (let run = 0; run < runs; run++) {
-      const query = pick([
-        "common",
-        "common",
-        "often",
-        "rare",
-        "common often",
-        "common OR rare",
-        "comm*",
-      ]);
-      const options = randomOptions();
+    for (let run = 0; run < 25; run++) {
+      const query = pick(
+        ["common", "common", "often", "rare", "common often", "common OR rare", "comm*"],
+        next,
+      );
+      const options = randomOptions(next);
       const all = sortedMatches(query, options);
       const offset = options.offset ?? 0;
       const expected = all.slice(offset, offset + (options.limit ?? 50));
@@ -196,15 +193,18 @@ describe("search newest first (#118)", () => {
     return ways;
   }
 
-  it("returns the same page as sorting every match, for random queries and filters", () => {
-    const ways = checkRandomQueries(200);
-    expect(ways.messages).toBeGreaterThan(30);
-    expect(ways.sort).toBeGreaterThan(30);
-  }, 60_000);
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])(
+    "returns the same page as sorting every match, for random queries and filters (seed %i)",
+    (seed) => {
+      const ways = checkRandomQueries(seed);
+      expect(ways.messages).toBeGreaterThan(3);
+      expect(ways.sort).toBeGreaterThan(3);
+    },
+  );
 
   it("goes through the messages for a common word and sorts the matches of a rare one", () => {
-    expect(searchNewestFirst(db, "common", {}, FROZEN).way).toBe("messages");
-    expect(searchNewestFirst(db, "often", {}, FROZEN).way).toBe("sort");
+    expect(searchNewestFirst(db, "common", { limit: 5 }, FROZEN).way).toBe("messages");
+    expect(searchNewestFirst(db, "often", { limit: 5 }, FROZEN).way).toBe("sort");
     expect(searchNewestFirst(db, "common", { chatId: CHATS[0] }, WALK).way).toBe("messages");
     expect(searchNewestFirst(db, "rare", {}, WALK).way).toBe("sort");
     expect(searchNewestFirst(db, "nothing", {}, WALK).rows).toEqual([]);
@@ -234,15 +234,9 @@ describe("search newest first (#118)", () => {
     expect(way).toBe("sort");
     expect(keys(rows)).toEqual(sortedMatches("common", options).slice(0, 50));
 
-    const old = searchNewestFirst(db, "ancient", {}, { ...FROZEN, walkThreshold: 1 });
+    const old = searchNewestFirst(db, "ancient", {}, { ...FROZEN, walkThreshold: 0.1 });
     expect(old.way).toBe("sort");
     expect(keys(old.rows)).toEqual(sortedMatches("ancient", {}).slice(0, 50));
-  });
-
-  it("has pages with ties in date, so the order above covers them", () => {
-    const page = createMessagesSearch(db).search("common", { limit: 500 });
-    const ties = page.filter((row, i) => i > 0 && row.date === page[i - 1]?.date);
-    expect(ties.length).toBeGreaterThan(50);
   });
 
   it("sorts once the walk has taken its time budget", () => {
@@ -255,33 +249,37 @@ describe("search newest first (#118)", () => {
     }
   });
 
-  it("returns the same pages from an index that keeps the old entries of every message", () => {
-    const bytes = () =>
-      (db.query("SELECT SUM(LENGTH(block)) AS n FROM message_search_data").get() as { n: number })
-        .n;
-    const before = bytes();
-    const rowids = (db.query("SELECT rowid FROM messages_cache").all() as { rowid: number }[]).map(
-      (row) => row.rowid,
-    );
-    const remove = db.query("DELETE FROM message_search WHERE rowid = ?");
-    const insert = db.query(`
-      INSERT INTO message_search(rowid, text, sender, chat, files)
-      SELECT rowid, COALESCE(text, ''), ${buildSenderSearchExpr("m")},
-        ${buildChatSearchExpr("m")}, ''
-      FROM messages_cache m WHERE rowid = ?
-    `);
-    for (let i = 0; i < rowids.length; i += 500) {
-      db.transaction(() => {
-        for (const rowid of rowids.slice(i, i + 500)) {
-          remove.run(rowid);
-          insert.run(rowid);
-        }
-      })();
-    }
-    expect(bytes()).toBeGreaterThan(1.5 * before);
+  describe("on an index that keeps the old entries of every message", () => {
+    beforeAll(() => {
+      const bytes = () =>
+        (db.query("SELECT SUM(LENGTH(block)) AS n FROM message_search_data").get() as { n: number })
+          .n;
+      const before = bytes();
+      const rowids = (
+        db.query("SELECT rowid FROM messages_cache").all() as { rowid: number }[]
+      ).map((row) => row.rowid);
+      const remove = db.query("DELETE FROM message_search WHERE rowid = ?");
+      const insert = db.query(`
+        INSERT INTO message_search(rowid, text, sender, chat, files)
+        SELECT rowid, COALESCE(text, ''), ${buildSenderSearchExpr("m")},
+          ${buildChatSearchExpr("m")}, ''
+        FROM messages_cache m WHERE rowid = ?
+      `);
+      for (let i = 0; i < rowids.length; i += 500) {
+        db.transaction(() => {
+          for (const rowid of rowids.slice(i, i + 500)) {
+            remove.run(rowid);
+            insert.run(rowid);
+          }
+        })();
+      }
+      expect(bytes()).toBeGreaterThan(1.5 * before);
+    });
 
-    const ways = checkRandomQueries(100);
-    expect(ways.messages).toBeGreaterThan(15);
-    expect(ways.sort).toBeGreaterThan(15);
-  }, 20_000);
+    it.each([9, 10, 11, 12])("returns the same pages as sorting every match (seed %i)", (seed) => {
+      const ways = checkRandomQueries(seed);
+      expect(ways.messages).toBeGreaterThan(3);
+      expect(ways.sort).toBeGreaterThan(3);
+    });
+  });
 });

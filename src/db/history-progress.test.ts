@@ -126,7 +126,7 @@ describe("readHistoryProgress", () => {
     expect(largest_pending.map((chat) => chat.chat_id)).toEqual([207, 206, 205, 204, 203]);
   });
 
-  it("measures the pace of the last history pages and the time left at it", () => {
+  it("measures the pace of the last history pages and the time left at it, if two are recent", () => {
     seedChat(101, { total: 2100, cached: 100 });
     seedPage(NOW - 10 * MINUTE, 100);
     seedPage(NOW - 6 * MINUTE, 100);
@@ -138,16 +138,10 @@ describe("readHistoryProgress", () => {
 
     expect(progress.messages_per_minute).toBe(20);
     expect(progress.eta_seconds).toBe(2000 * 3);
-  });
-
-  it("gives no pace or time left without two recent pages", () => {
-    seedChat(101, { total: 2100, cached: 100 });
-    seedPage(NOW - 2 * MINUTE, 100);
-
-    const progress = readHistoryProgress(db, { now: NOW });
-
-    expect(progress.messages_per_minute).toBeNull();
-    expect(progress.eta_seconds).toBeNull();
+    expect(readHistoryProgress(db, { now: NOW + 12 * MINUTE })).toMatchObject({
+      messages_per_minute: null,
+      eta_seconds: null,
+    });
   });
 
   it("gives no time left when nothing is left", () => {
@@ -161,7 +155,7 @@ describe("readHistoryProgress", () => {
     expect(progress.eta_seconds).toBeNull();
   });
 
-  it("measures the getHistory calls per second of the last 5 minutes (#133)", () => {
+  it("measures the getHistory calls per second of the last 5 minutes, if two are recent (#133)", () => {
     const call = (timestamp: number, method = "messages.getHistory") =>
       db.run(
         `INSERT INTO api_activity (timestamp, method, success, response_ms)
@@ -172,18 +166,7 @@ describe("readHistoryProgress", () => {
     call(NOW - 30_000, "messages.getDialogs");
     call(NOW - 6 * MINUTE);
 
-    const progress = readHistoryProgress(db, { now: NOW });
-
-    expect(progress.calls_per_second).toBe(0.98);
-  });
-
-  it("gives no call rate without two recent calls", () => {
-    db.run(
-      `INSERT INTO api_activity (timestamp, method, success, response_ms)
-       VALUES (?, 'messages.getHistory', 1, 200)`,
-      [NOW - MINUTE],
-    );
-
-    expect(readHistoryProgress(db, { now: NOW }).calls_per_second).toBeNull();
+    expect(readHistoryProgress(db, { now: NOW }).calls_per_second).toBe(0.98);
+    expect(readHistoryProgress(db, { now: NOW + 5 * MINUTE - 1000 }).calls_per_second).toBeNull();
   });
 });

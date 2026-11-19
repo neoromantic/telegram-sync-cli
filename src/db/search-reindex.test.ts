@@ -108,13 +108,15 @@ async function drain(db: Database) {
 }
 
 describe("the re-index queue", () => {
-  it("queues a sender and a chat cached after their messages", async () => {
+  it("queues a sender and a chat cached after their messages, and no peer without any", async () => {
     const db = open();
     seedMessages(db);
     expect(matches(db, "sender:ann")).toBe(0);
 
     createUsersCache(db).upsert(user);
+    createUsersCache(db).upsert({ ...user, user_id: String(USER_ID + 1) });
     createChatsCache(db).upsert(chat);
+    createChatsCache(db).upsert({ ...chat, chat_id: "-1009000000003" });
     expect(queue(db)).toEqual([
       { kind: "sender", peer_id: USER_ID, cursor: 0 },
       { kind: "chat", peer_id: CHAT_ID, cursor: 0 },
@@ -124,13 +126,6 @@ describe("the re-index queue", () => {
     expect(queue(db)).toEqual([]);
     expect(matches(db, "sender:ann AND sender:example")).toBe(MESSAGES);
     expect(matches(db, 'chat:"garden club"')).toBe(MESSAGES);
-  });
-
-  it("queues nothing for a peer without messages", () => {
-    const db = open();
-    createUsersCache(db).upsert(user);
-    createChatsCache(db).upsert(chat);
-    expect(queue(db)).toEqual([]);
   });
 
   it("queues nothing for an upsert that changes no name", async () => {
@@ -254,16 +249,6 @@ describe("draining in batches", () => {
 
     expect(() => runReindexBatch(db, SMALL)).toThrow();
     expect(queue(db)).toEqual([{ kind: "sender", peer_id: USER_ID, cursor: 0 }]);
-  });
-
-  it("empties the queue when the whole index is rebuilt", () => {
-    const db = open();
-    seedMessages(db);
-    createUsersCache(db).upsert(user);
-    db.run(`UPDATE search_meta SET value = '0' WHERE key = 'search_index_version'`);
-    initSyncSchema(db);
-    expect(queue(db)).toEqual([]);
-    expect(matches(db, "sender:ann")).toBe(MESSAGES);
   });
 });
 

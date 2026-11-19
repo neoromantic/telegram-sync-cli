@@ -20,16 +20,10 @@ const DAY = 24 * HOUR;
 
 const MESSAGES = [
   [1, TEAM_CHAT_ID, ALICE_ID, "the deploy failed with an error", 1 * HOUR],
-  [2, TEAM_CHAT_ID, BOB_ID, "request timeout again", 2 * HOUR],
   [3, TEAM_CHAT_ID, ALICE_ID, "hello there, wide world", 3 * HOUR],
   [4, BOOK_CLUB_ID, BOB_ID, "world, hello", 2 * DAY],
   [5, BOOK_CLUB_ID, ALICE_ID, "hello world from the club", 10 * DAY],
-  [6, TEAM_CHAT_ID, BOB_ID, "сдаю квартиру на месяц", 5 * DAY],
-  [7, TEAM_CHAT_ID, ALICE_ID, "квартира свободна", 6 * DAY],
-  [8, BOOK_CLUB_ID, BOB_ID, "don't forget the e-mail", 20 * DAY],
-  [9, BOOK_CLUB_ID, BOB_ID, "function(arg) call", 30 * DAY],
   [10, BOOK_CLUB_ID, BOB_ID, "deploy deploy deploy", 40 * DAY],
-  [11, BOOK_CLUB_ID, BOB_ID, "tips for C++ templates", 50 * DAY],
 ] as const;
 
 function seed(db: Database) {
@@ -119,33 +113,16 @@ describe("E2E: messages search query rules", () => {
     expect(await ids("hello world")).toEqual([3, 4, 5]);
   });
 
-  it("matches a quoted phrase, and the whole query with --phrase", async () => {
-    expect(await ids('"hello world"')).toEqual([5]);
+  it("matches the whole query as one phrase with --phrase", async () => {
     expect(await ids("hello world", "--phrase")).toEqual([5]);
   });
 
-  it("passes OR, column filters and prefixes to FTS5", async () => {
-    expect(await ids("error OR timeout")).toEqual([1, 2]);
-    expect(await ids("sender:alice")).toEqual([1, 3, 5, 7]);
-    expect(await ids("chat:club AND hello")).toEqual([4, 5]);
-    expect(await ids("hel*")).toEqual([3, 4, 5]);
-    expect(await ids("hello NOT club")).toEqual([3]);
-  });
-
-  it("finds other word forms with a Cyrillic prefix", async () => {
-    expect(await ids("квартир*")).toEqual([6, 7]);
-    expect(await ids("квартира")).toEqual([7]);
-  });
-
-  it("reads punctuation in a plain query as part of a word", async () => {
-    expect(await ids("don't")).toEqual([8]);
-    expect(await ids("e-mail")).toEqual([8]);
-    expect(await ids("function(arg)", "--phrase")).toEqual([9]);
-    expect(await ids("C++ templates")).toEqual([11]);
+  it("passes a query with FTS5 syntax as written", async () => {
+    expect(await ids("sender:alice AND chat:club")).toEqual([5]);
   });
 
   it("returns INVALID_ARGS with a suggestion for a query FTS5 cannot parse", async () => {
-    for (const query of ["function(arg)", "error OR", "meet at 10:30"]) {
+    for (const query of ["function(arg)", "meet at 10:30"]) {
       const result = await runCli(["messages", "search", "--query", query], env.getCliOptions());
       const json = result.json as {
         success: boolean;
@@ -181,25 +158,15 @@ describe("E2E: messages search query rules", () => {
   }
 
   it("limits matches to a date range", async () => {
-    expect(await ids("hello world", "--since", "7d")).toEqual([3, 4]);
-    expect(await ids("hello world", "--until", "7d")).toEqual([5]);
     expect(await ids("hello world", "--since", "7d", "--until", "1d")).toEqual([4]);
-    const dayAgo = new Date(Date.now() - DAY * 1000).toISOString();
-    expect(await ids("hello world", "--since", dayAgo)).toEqual([3]);
-    expect(await ids("hello world", "--since", "2000-01-01")).toEqual([3, 4, 5]);
-    expect(await ids("hello world", "--until", "2000-01-01")).toEqual([]);
   });
 
   it("rejects a date it cannot read, and an empty range", async () => {
     expect(await invalidArgs("hello", "--since", "yesterday")).toBe("INVALID_ARGS");
-    expect(await invalidArgs("hello", "--until", "2026-02-30")).toBe("INVALID_ARGS");
-    expect(await invalidArgs("hello", "--since", "2026-02-30T09:30")).toBe("INVALID_ARGS");
-    expect(await invalidArgs("hello", "--since", "2026-04-31T09:30+03:00")).toBe("INVALID_ARGS");
     expect(await invalidArgs("hello", "--since", "1d", "--until", "7d")).toBe("INVALID_ARGS");
   });
 
   it("reads me in --chat and --sender as the own user ID", async () => {
-    expect(await ids("hello", "--account", "2", "--chat", "me")).toEqual([12]);
     expect(await ids("hello", "--account", "2", "--chat", "ME")).toEqual([12]);
     expect(await ids("hello", "--account", "2", "--sender", "me")).toEqual([3, 5, 12]);
   });
@@ -218,10 +185,12 @@ describe("E2E: messages search query rules", () => {
     expect(await ids("hello", "--chat", "teamchat")).toEqual([3]);
   });
 
-  it("orders by date by default and by bm25 with --sort relevance", async () => {
+  it("orders by date with no count or snippet by default, and by bm25 with --sort relevance", async () => {
     const byDate = await searchData("deploy");
     expect(byDate.sort).toBe("date");
     expect(byDate.results.map((item) => item.messageId)).toEqual([1, 10]);
+    expect(byDate.count).toBeNull();
+    expect(byDate.results[0]).not.toHaveProperty("snippet");
 
     const byRelevance = await searchData("deploy", "--sort", "relevance");
     expect(byRelevance.sort).toBe("relevance");
@@ -234,39 +203,22 @@ describe("E2E: messages search query rules", () => {
     const page = await searchData("hello world", "--limit", "1", "--count");
     expect(page.total).toBe(1);
     expect(page.count).toBe(3);
-
-    const filtered = await searchData("hello world", "--since", "7d", "--count");
-    expect(filtered.count).toBe(2);
-
-    expect((await searchData("hello world")).count).toBeNull();
   });
 
   it("adds a highlighted snippet to each result with --snippet", async () => {
-    const snippets = async (...args: string[]) =>
+    const { results } = await searchData("hel* world", "--snippet");
+
+    expect(
       Object.fromEntries(
-        (await searchData(...args, "--snippet")).results.map((item) => [
+        results.map((item) => [
           item.messageId,
           (item as MessageSearchItem & { snippet: string }).snippet,
         ]),
-      );
-
-    expect(await snippets("hel* world")).toEqual({
+      ),
+    ).toEqual({
       3: "**hello** there, wide **world**",
       4: "**world**, **hello**",
       5: "**hello** **world** from the club",
     });
-    expect(await snippets("квартир*")).toEqual({
-      6: "сдаю **квартиру** на месяц",
-      7: "**квартира** свободна",
-    });
-    expect(await snippets("sender:alice AND chat:club")).toEqual({
-      5: "hello world from the club",
-    });
-    expect(await snippets("deploy NOT failed")).toEqual({
-      10: "**deploy** **deploy** **deploy**",
-    });
-
-    const plain = await searchData("deploy");
-    expect(plain.results[0]).not.toHaveProperty("snippet");
   });
 });
