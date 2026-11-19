@@ -185,7 +185,8 @@ Every command in the skill's code blocks runs in `src/test/skill-examples.e2e.te
 an example can't go stale.
 
 `tg skill validate` checks what the skill needs, locally, without a network call or
-credentials, and works with an invalid `config.json` or a broken `data.db`:
+credentials, and works with an invalid `config.json` or a broken `data.db`, which it reads
+through a read-only connection and never changes:
 
 - `env`: the API credentials in the environment;
 - `data_dir`: that the data directory is writable;

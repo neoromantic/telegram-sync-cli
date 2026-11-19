@@ -177,8 +177,9 @@ describe("E2E: Skill Commands", () => {
 
   it("validate reads the accounts and the PID file of a read-only data directory", async () => {
     env = createTestEnvironment("skill-validate-read-only");
-    env.initDatabase();
+    const db = env.initDatabase();
     env.seedAccounts([{ phone: "+15550000001" }]);
+    db.close();
     writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));
     chmodSync(env.dataDir, 0o555);
 
@@ -230,6 +231,34 @@ describe("E2E: Skill Commands", () => {
     const dir = join(env.dataDir, "agent-skills");
     const install = await runCliSuccess(["skill", "install", "--dir", dir], env.getCliOptions());
     expect(install.json).toMatchObject({ success: true });
+  });
+
+  it("validate leaves data.db as it found it", async () => {
+    env = createTestEnvironment("skill-validate-no-writes");
+    const db = env.initDatabase();
+    env.seedAccounts([
+      { phone: "+15550000001", user_id: 2001, is_active: true },
+      { phone: "user:2001" },
+    ]);
+
+    const data = await validate();
+
+    expect(data).toMatchObject({ account: { id: 1 }, accounts_total: 2 });
+    expect(db.query("SELECT id, phone FROM accounts ORDER BY id").all()).toEqual([
+      { id: 1, phone: "+15550000001" },
+      { id: 2, phone: "user:2001" },
+    ]);
+  });
+
+  it("validate reports a data.db that is not a file", async () => {
+    env = createTestEnvironment("skill-validate-data-db-dir");
+    const dbPath = join(env.dataDir, "data.db");
+    mkdirSync(dbPath);
+
+    const data = await validate();
+
+    expect(data).toMatchObject({ valid: false, account: null, accounts_total: null });
+    expect(data.issues).toEqual([`Could not read the accounts in ${dbPath}: not a file`]);
   });
 
   it("validate reports the active account and a stopped daemon", async () => {

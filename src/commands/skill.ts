@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { constants } from "node:fs";
 import { access, lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -214,25 +215,34 @@ function accountStatus(account: Account) {
 }
 
 async function readAccounts(config: ConfigFile | null) {
-  const { accountsDb, getDatabasePath } = await import("../db");
-  if (!(await Bun.file(getDatabasePath()).exists())) {
-    return {
-      account: null,
-      accountsTotal: 0,
-      issues: ["No account: log in with tg auth login"],
-    };
+  const { createAccountsDb, getDatabasePath } = await import("../db");
+  const path = getDatabasePath();
+  const unreadable = (reason: string) => ({
+    account: null,
+    accountsTotal: null,
+    issues: [`Could not read the accounts in ${path}: ${reason}`],
+  });
+  const stat = await tryStat(path);
+  if (!stat.exists) {
+    return stat.error
+      ? unreadable(stat.error)
+      : { account: null, accountsTotal: 0, issues: ["No account: log in with tg auth login"] };
   }
+  if (stat.isDirectory) return unreadable("not a file");
   let found: ReturnType<typeof findDefaultAccount>;
   let configured: Account | null;
+  let db: Database | null = null;
   try {
-    found = findDefaultAccount(accountsDb);
-    configured = config ? configuredActiveAccount(config, accountsDb) : null;
+    db = new Database(path, { readonly: true });
+    db.run("PRAGMA busy_timeout = 5000");
+    db.run("PRAGMA query_only = ON");
+    const accounts = createAccountsDb(db);
+    found = findDefaultAccount(accounts);
+    configured = config ? configuredActiveAccount(config, accounts) : null;
   } catch (err) {
-    return {
-      account: null,
-      accountsTotal: null,
-      issues: [`Could not read the accounts in ${getDatabasePath()}: ${getErrorMessage(err)}`],
-    };
+    return unreadable(getErrorMessage(err));
+  } finally {
+    db?.close();
   }
   const total = found.accounts.length;
   if (total === 0) {
