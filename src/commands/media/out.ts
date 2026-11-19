@@ -90,13 +90,13 @@ function fileKey(path: string) {
 
 const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "ENOSYS", "EXDEV"]);
 
-function publishNew(tmp: string, target: string) {
-  try {
-    linkSync(tmp, target);
-    return;
-  } catch (err) {
-    if (!NO_HARD_LINKS.has((err as NodeJS.ErrnoException).code ?? "")) throw err;
-  }
+/** Whether a failed link() means the filesystem has no hard links (exFAT, FAT, some network shares) */
+export function lacksHardLinks(err: unknown) {
+  return NO_HARD_LINKS.has((err as NodeJS.ErrnoException).code ?? "");
+}
+
+/** Copy tmp to target unless target exists (EEXIST); not atomic, a reader can see the copy in progress */
+export function publishByCopy(tmp: string, target: string) {
   try {
     copyFileSync(tmp, target, constants.COPYFILE_EXCL);
   } catch (err) {
@@ -104,6 +104,15 @@ function publishNew(tmp: string, target: string) {
       rmSync(target, { force: true });
     }
     throw err;
+  }
+}
+
+function publishNew(tmp: string, target: string) {
+  try {
+    linkSync(tmp, target);
+  } catch (err) {
+    if (!lacksHardLinks(err)) throw err;
+    publishByCopy(tmp, target);
   }
 }
 

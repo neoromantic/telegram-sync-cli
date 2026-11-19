@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { DownloadResult } from "./download-media";
 import { MediaError } from "./errors";
-import { copyOut } from "./out";
+import { copyOut, lacksHardLinks, publishByCopy } from "./out";
 import { ErrorCodes } from "../../types";
 import { fakeBytes } from "../../test/photo-message.test-utils";
 
@@ -49,43 +49,37 @@ async function refusal(promise: Promise<unknown>) {
   return err as MediaError;
 }
 
-function parts() {
-  return fs.readdirSync(join(root, "out")).filter((n) => n.endsWith(".part"));
-}
+describe("publishing without hard links", () => {
+  it.each(["EPERM", "ENOTSUP", "ENOSYS", "EXDEV"])(
+    "treats %s from link as no hard links",
+    (code) => {
+      expect(lacksHardLinks(Object.assign(new Error(`${code}: link`), { code }))).toBe(true);
+    },
+  );
 
-describe("copyOut on a filesystem without hard links", () => {
-  for (const code of ["EPERM", "ENOTSUP", "ENOSYS", "EXDEV"]) {
-    it(`writes a new file when link fails with ${code}`, async () => {
-      const link = spyOn(fs, "linkSync").mockImplementation(() => {
-        throw Object.assign(new Error(`${code}: link`), { code });
-      });
-      try {
-        const bytes = fakeBytes(70_000);
-        const target = join(root, "out", "notes.txt");
-        expect(await copyOut(cached(bytes), target, false)).toBe(target);
-        expect(link).toHaveBeenCalled();
-        expect(Buffer.compare(fs.readFileSync(target), bytes)).toBe(0);
-        expect(parts()).toEqual([]);
-      } finally {
-        link.mockRestore();
-      }
-    });
-  }
+  it.each(["EEXIST", "EACCES", "ENOSPC"])("leaves %s from link as a failure", (code) => {
+    expect(lacksHardLinks(Object.assign(new Error(`${code}: link`), { code }))).toBe(false);
+  });
 
-  it("still refuses to replace a file that appears before the copy", async () => {
-    const target = join(root, "out", "notes.txt");
-    const link = spyOn(fs, "linkSync").mockImplementation(() => {
-      fs.writeFileSync(target, "edited copy");
-      throw Object.assign(new Error("EPERM: link"), { code: "EPERM" });
-    });
-    try {
-      const err = await refusal(copyOut(cached(fakeBytes(70_000)), target, false));
-      expect(err.code).toBe(ErrorCodes.FILE_EXISTS);
-      expect(fs.readFileSync(target, "utf-8")).toBe("edited copy");
-      expect(parts()).toEqual([]);
-    } finally {
-      link.mockRestore();
-    }
+  it("copies the file to a new target", () => {
+    const bytes = fakeBytes(70_000);
+    const tmp = join(root, "copy.part");
+    const target = join(root, "notes.txt");
+    fs.writeFileSync(tmp, bytes);
+
+    publishByCopy(tmp, target);
+
+    expect(Buffer.compare(fs.readFileSync(target), bytes)).toBe(0);
+  });
+
+  it("refuses to replace an existing target and leaves it as it was", () => {
+    const tmp = join(root, "copy.part");
+    const target = join(root, "notes.txt");
+    fs.writeFileSync(tmp, fakeBytes(70_000));
+    fs.writeFileSync(target, "edited copy");
+
+    expect(() => publishByCopy(tmp, target)).toThrow(expect.objectContaining({ code: "EEXIST" }));
+    expect(fs.readFileSync(target, "utf-8")).toBe("edited copy");
   });
 });
 
