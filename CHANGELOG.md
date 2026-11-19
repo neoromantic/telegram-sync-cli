@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files. A file fails on waits only after six in a row with no part downloaded between them,
   so a large download throttled by Telegram's speed limit completes. It prints one JSON line per file as each finishes, success or error, and exits 1 when
   any failed. Cached files need no network and partial files resume, as before. One `--id`
-  prints what it printed before.
+  prints what it printed before; a repeated `--id` still runs as a batch, downloading the ID once.
 - `--out` takes a name template such as `./media/{chat}/{date}_{id}_{name}` (placeholders
   `{chat}`, `{id}`, `{date}`, `{name}`, `{kind}`); each filled part is made a safe file name,
   and one that exists as a symlink fails that file instead of being followed.

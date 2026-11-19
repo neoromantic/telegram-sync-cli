@@ -126,6 +126,8 @@ tg media download --chat @examplegroup --id 1200 --id 1201 --id 1205 --out ./dow
   fetches the other messages together (one call per 100 IDs) and checks the chat's content
   protection once. Running one `tg media download` per message in parallel repeats all of
   that in every process, and their flood waits aren't shared.
+- Two or more `--id` always run as a batch, even when they repeat one ID; a repeated ID is
+  downloaded once.
 - Up to 5 files download at a time, of which up to 2 of 20 MiB or more: Telegram's own
   soft limits for parallel downloads from one data center
   ([client configuration](https://core.telegram.org/api/config)).

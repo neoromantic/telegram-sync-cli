@@ -117,14 +117,11 @@ export const downloadMediaCommand = defineCommand({
   },
   async run({ args, rawArgs }) {
     const ids = flagValues(rawArgs, "id");
+    const given = ids.length > 0 ? ids : [args.id];
     const messageIds = [
-      ...new Set(
-        (ids.length > 0 ? ids : [args.id]).map((id) =>
-          parseIntegerArg(id, "id", { min: 1, max: MAX_MESSAGE_ID }),
-        ),
-      ),
+      ...new Set(given.map((id) => parseIntegerArg(id, "id", { min: 1, max: MAX_MESSAGE_ID }))),
     ];
-    const batch = messageIds.length > 1;
+    const batch = given.length > 1;
     const out = args.out;
     if (out !== undefined && out.trim() === "") {
       error(ErrorCodes.INVALID_ARGS, "--out needs a directory, a file path or -", { out });

@@ -556,6 +556,28 @@ describe("E2E: media download of several messages", () => {
     });
   });
 
+  it("takes a repeated --id as a batch of one: --out is a directory", async () => {
+    cacheFile(ALICE_ID, mediaMessage(ALICE_ID, NOTES), mediaBytes(NOTES));
+    const out = join(env.dataDir, "exports");
+
+    const result = await run([
+      "--chat",
+      String(ALICE_ID),
+      "--id",
+      "13",
+      "--id",
+      "13",
+      "--out",
+      out,
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const [notes] = lines(result.stdout) as DownloadOutput[];
+    expect(notes!.data.path).toBe(join(out, "13_example-notes.txt"));
+    expect(Buffer.compare(readFileSync(notes!.data.path), mediaBytes(NOTES))).toBe(0);
+    expect(result.stderr).toContain("Downloaded 1 of 1 files");
+  });
+
   it("resumes a partial download from its last whole part", async () => {
     const big = { id: 14, size: 1_200_000, fileName: "example-talk.ogg" };
     const { part } = mediaPaths(mediaDir, extractAttachment(mediaMessage(ALICE_ID, big))!);
