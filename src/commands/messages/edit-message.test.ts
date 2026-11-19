@@ -149,11 +149,32 @@ describe("editMessage", () => {
     expect(methods).toEqual(["messages.getMessages", "messages.editMessage"]);
   });
 
-  it("reports the edit without a message when the response holds none", async () => {
+  it.each([
+    ["no message", []],
+    [
+      "the same ID in another chat",
+      [
+        {
+          _: "updateEditMessage",
+          message: {
+            _: "message",
+            id: 12,
+            out: true,
+            peerId: { _: "peerUser", userId: 11 },
+            date: 1_760_000_000,
+            editDate: 1_760_003_600,
+            message: "Not this chat.",
+          },
+          pts: 1,
+          ptsCount: 1,
+        },
+      ],
+    ],
+  ])("reports the edit without a message when the response holds %s", async (_what, updates) => {
     const db = createAccountCacheDb();
     const client = clientThat(async () => ({
       _: "updates",
-      updates: [],
+      updates,
       users: [],
       chats: [],
       date: 1_760_003_600,

@@ -81,12 +81,14 @@ export function editMessageRequest(
   } satisfies tl.messages.RawEditMessageRequest;
 }
 
-function editedMessage(result: tl.TypeUpdates, messageId: number) {
+function editedMessage(result: tl.TypeUpdates, chatId: number, messageId: number) {
   if (!("updates" in result)) return null;
   for (const update of result.updates) {
     if (
       (update._ === "updateEditMessage" || update._ === "updateEditChannelMessage") &&
-      update.message.id === messageId
+      update.message.id === messageId &&
+      update.message._ !== "messageEmpty" &&
+      toPeerIdFromRawPeer(update.message.peerId) === chatId
     ) {
       return update.message;
     }
@@ -101,7 +103,7 @@ function cacheEditedMessage(
   result: tl.TypeUpdates,
 ) {
   try {
-    const message = editedMessage(result, messageId);
+    const message = editedMessage(result, chatId, messageId);
     const input = message ? parseRawMessage(message, chatId) : null;
     if (!input) {
       verbose(`Edited message not cached: no message in ${result._}`);
