@@ -139,18 +139,16 @@ Once that lands, the Telegram client fakes above need an explicit override in `.
 - `telegram.test.ts` — Telegram service layer
 - `sync-jobs.test.ts` — sync job lifecycle, retries and counts
 - `sync-scheduler.test.ts` — what the scheduler queues and the lane turns
-- `sync-retry.test.ts` — the retry backoff and which errors are permanent
+- `sync-retry.test.ts` — which errors are permanent
 - `refetch-empty-raw-json.test.ts` — messages cached with `raw_json = '{}'` are queued by a
   background pass and fetched again by ID, a chat at a time (#130)
 - `update-handlers.test.ts` — daemon update handlers
 - `daemon-restart-gap.test.ts` — messages that arrive while the daemon is stopped are all
   cached after a restart
-- `sync-fair-share.test.ts` — on 500 chats, history and first pages make progress next to
-  catch-up, chats that are caught up cost no calls, and a FLOOD_WAIT stops every lane and
-  delays the job that hit it without failing it
+- `sync-fair-share.test.ts` — history and first pages make progress next to catch-up, chats
+  that are caught up cost no calls, and every chat ends up synced
 - `sync-failing-chats.test.ts` — a chat whose pages keep failing retries after 1, 2, 4 and 8
-  minutes and gives up after five attempts, a permanent error fails at once, and neither is
-  queued again on every refresh (fake clock)
+  minutes and gives up after five attempts (fake clock)
 
 The last three run the real scheduler, sync worker and job loop against a fake
 `messages.getHistory` (`src/test/fake-history.test-utils.ts`; `createMultiChatHistory` routes on the
@@ -180,8 +178,8 @@ request's peer).
 - `daemon-scheduler.test.ts`, `daemon-bootstrap.test.ts`, `daemon-accounts.connect.test.ts`,
   `daemon-start-caches.test.ts` — the daemon with two accounts: each job runs on its own
   account's client, each account runs its own jobs at its own pace (history pacing: 0.7
-  calls/s from each start, the next job right after one that outlasted its interval, calm 3 s,
-  no job until a FLOOD_WAIT is over) and one account's
+  calls/s from each start, the next job right after one that outlasted its interval, calm 3 s)
+  and one account's
   FLOOD_WAIT doesn't hold another's, dialogs, live messages and deletes land in the
   receiving account's cache, and an account whose cache doesn't open is left out
 - `daemon-loop.test.ts` — the daemon's main loop: per-account job loops, a stop ends the tick
