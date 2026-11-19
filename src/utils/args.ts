@@ -85,6 +85,55 @@ export function mergeArgs(cliArgs: Record<string, unknown>, jsonInput?: string) 
 
 const NEGATIVE_NUMBER = /^-\d+(\.\d+)?$/;
 
+interface ArgDef {
+  type?: string;
+  alias?: string | string[];
+}
+
+/**
+ * What in rawArgs the command would drop without a word, or null: a flag
+ * it doesn't declare (`--acount 2` would run on the active account), or a
+ * value it takes nowhere, such as the `false` of `--silent false`, which
+ * citty reads as `--silent`. A negative number is a value, not a flag
+ * (positionalChat).
+ */
+export function undeclaredArg(rawArgs: string[], defs: Record<string, ArgDef>) {
+  const flags = new Map<string, ArgDef>();
+  let positionals = 0;
+  for (const [name, def] of Object.entries(defs)) {
+    if (def.type === "positional") positionals++;
+    else for (const key of [name, def.alias ?? []].flat()) flags.set(key, def);
+  }
+  let boolean: string | null = null;
+  for (let i = 0; i < rawArgs.length; i++) {
+    const arg = rawArgs[i]!;
+    if (arg === "--") break;
+    if (!arg.startsWith("-") || NEGATIVE_NUMBER.test(arg)) {
+      if (--positionals < 0) {
+        return boolean
+          ? `${boolean} takes no value: pass ${boolean} or ${boolean.replace(/^--/, "--no-")}, not ${boolean} ${arg}`
+          : `Unexpected argument ${arg}`;
+      }
+      boolean = null;
+      continue;
+    }
+    const eq = arg.indexOf("=");
+    const flag = eq < 0 ? arg : arg.slice(0, eq);
+    const long = flag.startsWith("--");
+    let def: ArgDef | undefined;
+    for (const name of long ? [flag.slice(2)] : flag.slice(1).split("")) {
+      def = flags.get(name);
+      if (!def && name.startsWith("no-") && flags.get(name.slice(3))?.type === "boolean") {
+        def = flags.get(name.slice(3));
+      }
+      if (!def) return `Unknown option ${long ? "--" : "-"}${name}`;
+    }
+    boolean = def?.type === "boolean" && eq < 0 && long ? flag : null;
+    if (def?.type !== "boolean" && eq < 0) i++;
+  }
+  return null;
+}
+
 /**
  * Values of method arguments written as `--name value` after the method.
  * citty reads an undeclared `--name` without `=` as `true` and leaves the value as a positional.

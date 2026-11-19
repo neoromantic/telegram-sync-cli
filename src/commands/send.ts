@@ -18,6 +18,7 @@ import {
   reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from "../utils/telegram-rate-limits";
+import { checkedChat } from "./access";
 import { AmbiguousPeerError, createDmLookup, resolvePeer } from "./send/peer-resolver";
 import { sendFile, sentAttachment } from "./send/send-file";
 import { cacheSentMessage, resolveSelfId } from "./send/sent-message-cache";
@@ -294,13 +295,9 @@ export const sendCommand = defineCommand({
       });
 
       verbose(`Resolving recipient: ${recipient}`);
-      const { inputPeer, name } = await resolvePeer(
-        client,
-        recipient,
-        usersCache,
-        chatsCache,
-        createDmLookup(cacheDb),
-      );
+      const { inputPeer, name } =
+        checkedChat(args, "to") ??
+        (await resolvePeer(client, recipient, usersCache, chatsCache, createDmLookup(cacheDb)));
 
       const text = content.file === null ? content.text : content.caption;
       let result: tl.TypeUpdates;

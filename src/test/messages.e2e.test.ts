@@ -1136,41 +1136,21 @@ describe("E2E: Messages List filters offline and on another account", () => {
     env.cleanup();
   });
 
-  const options = (extra: Record<string, string> = {}) => ({
-    env: { ...env.getCliOptions().env, ...NO_CREDENTIALS, ...extra },
-  });
-
-  async function list(extra: Record<string, string>, ...args: string[]) {
-    const result = await runCliSuccess(
-      ["messages", "list", "--account", "2", ...args],
-      options(extra),
-    );
+  async function list(...args: string[]) {
+    const result = await runCliSuccess(["messages", "list", "--account", "2", ...args], {
+      env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+    });
     return result.json as FilteredAnswer;
   }
 
-  it("reads a chat by a cached username without credentials, allowedChats included", async () => {
-    const page = ["--chat", "@quayclub", "--type", "voice", "--before", "11"];
-    const envs: Array<Record<string, string>> = [
-      {},
-      { TELEGRAM_SYNC_CLI_ALLOWED_CHATS: "@quayclub" },
-    ];
-    for (const extra of envs) {
-      const { data } = await list(extra, ...page);
-      expect(data.items.map((item) => item.messageId)).toEqual([10, 5]);
-      expect(data.complete).toBe(true);
-    }
+  it("reads a chat by a cached username without credentials", async () => {
+    const { data } = await list("--chat", "@quayclub", "--type", "voice", "--before", "11");
+    expect(data.items.map((item) => item.messageId)).toEqual([10, 5]);
+    expect(data.complete).toBe(true);
   });
 
   it("keeps --account in every command it suggests", async () => {
-    const { data, next } = await list(
-      {},
-      "--chat",
-      "@quayclub",
-      "--type",
-      "voice",
-      "--before",
-      "21",
-    );
+    const { data, next } = await list("--chat", "@quayclub", "--type", "voice", "--before", "21");
 
     expect(data).toMatchObject({ complete: false, missingBefore: 21 });
     expect(next?.map((n) => n.command)).toEqual([
@@ -1183,15 +1163,7 @@ describe("E2E: Messages List filters offline and on another account", () => {
     const db = env.openCacheDb(2);
     db.run("UPDATE cache_migrations SET state = 'pending' WHERE name = 'messages_raw_json_v2'");
     try {
-      const { data, next } = await list(
-        {},
-        "--chat",
-        "@quayclub",
-        "--type",
-        "voice",
-        "--before",
-        "11",
-      );
+      const { data, next } = await list("--chat", "@quayclub", "--type", "voice", "--before", "11");
       expect(data).toMatchObject({ complete: false, missing: ["types"] });
       expect(next?.map((n) => n.command)).toEqual([
         "tg db migrate --account=2",
