@@ -4,6 +4,7 @@ import { ErrorCodes } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { error, success } from "../../utils/output";
+import { readRichFormat } from "../send/rich-message";
 import { EditRefusedError, editMessage } from "./edit-message";
 import {
   CHAT_ARG_DESCRIPTION,
@@ -18,7 +19,7 @@ export const editMessageCommand = defineCommand({
   meta: {
     name: "edit",
     description:
-      "Replace the text of a message you sent, or the caption of a file, with plain text, and print the edited message",
+      "Replace the text of a message you sent, or the caption of a file, with plain text or, with --markdown or --html, a rich message, and print the edited message",
   },
   args: {
     chat: {
@@ -37,6 +38,17 @@ export const editMessageCommand = defineCommand({
       description: "The new text",
       required: true,
     },
+    markdown: {
+      type: "boolean",
+      default: false,
+      description:
+        "Make it a rich message written in Markdown: headings, tables, lists, quotes, code, formulas",
+    },
+    html: {
+      type: "boolean",
+      default: false,
+      description: "Make it a rich message written in HTML",
+    },
     account: {
       type: "string",
       description: ACCOUNT_SELECTOR_DESCRIPTION,
@@ -50,15 +62,16 @@ export const editMessageCommand = defineCommand({
     if (args.message.trim() === "") {
       error(ErrorCodes.INVALID_ARGS, "Message text cannot be empty");
     }
+    const format = readRichFormat(args);
     const { account } = openAccountCache(args.account);
 
     try {
       const deps = openHistory(account.id, "cli:messages.edit");
       const chat = await resolveHistoryChat(deps.client, args.chat, deps);
-      success(await editMessage(deps.client, deps.cacheDb, chat, messageId, args.message));
+      success(await editMessage(deps.client, deps.cacheDb, chat, messageId, args.message, format));
     } catch (err) {
       if (err instanceof EditRefusedError) {
-        error(ErrorCodes.TELEGRAM_ERROR, err.message, err.details);
+        error(ErrorCodes.TELEGRAM_ERROR, err.message, err.details, err.suggestion);
       }
       reportHistoryError(err, "edit the message");
     }

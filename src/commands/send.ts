@@ -19,6 +19,7 @@ import {
   wrapClientCallWithRateLimits,
 } from "../utils/telegram-rate-limits";
 import { AmbiguousPeerError, createDmLookup, resolvePeer } from "./send/peer-resolver";
+import { readRichFormat, type RichFormat, richErrorHints, richMessage } from "./send/rich-message";
 import { sendFile, sentAttachment } from "./send/send-file";
 import { cacheSentMessage, resolveSelfId } from "./send/sent-message-cache";
 
@@ -52,16 +53,6 @@ function extractMessageInfo(result: tl.TypeUpdates) {
   return { messageId: null, timestamp: null };
 }
 
-const richErrorHints: Record<string, string> = {
-  RICH_MESSAGE_UNSUPPORTED:
-    "Rich sending is unavailable for this account or chat. Omit the formatting flag to send plain text.",
-  RICH_MESSAGE_EMPTY: "Add visible content to the rich message.",
-  RICH_MESSAGE_TEXT_TOO_LONG: "Shorten the rich message text to 32768 characters or fewer.",
-  RICH_MESSAGE_BLOCKS_TOO_MANY: "Use at most 500 blocks.",
-  RICH_MESSAGE_MEDIA_TOO_MANY: "Use at most 50 media attachments.",
-  RICH_MESSAGE_TABLE_COLS_TOO_MANY: "Use at most 20 table columns.",
-};
-
 function handleSendError(recipient: string, err: unknown, rich: boolean): never {
   if (rich && tl.RpcError.is(err) && err.text.startsWith("RICH_MESSAGE_")) {
     error(
@@ -91,16 +82,6 @@ function handleSendError(recipient: string, err: unknown, rich: boolean): never 
   }
 
   error(ErrorCodes.TELEGRAM_ERROR, `Failed to send message: ${message}`);
-}
-
-type RichFormat = "markdown" | "html";
-
-function richMessage(text: string, format: RichFormat) {
-  const result: tl.TypeInputRichMessage =
-    format === "markdown"
-      ? { _: "inputRichMessageMarkdown", markdown: text }
-      : { _: "inputRichMessageHTML", html: text };
-  return result;
 }
 
 function sendMessageRequest(
@@ -162,10 +143,7 @@ function readSendContent(
   },
   rawArgs: string[],
 ) {
-  if (args.markdown && args.html) {
-    error(ErrorCodes.INVALID_ARGS, "Use --markdown or --html, not both");
-  }
-  const format = args.markdown ? "markdown" : args.html ? "html" : null;
+  const format = readRichFormat(args);
 
   const files = flagValues(rawArgs, "file");
   if (files.length > 1) {

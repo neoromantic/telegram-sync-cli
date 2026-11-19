@@ -70,12 +70,13 @@ if (import.meta.main) {
       maxId?: number;
       id?: number;
       message?: string;
+      richMessage?: { _: string; markdown?: string; html?: string };
       peer?: FakeInputPeer;
     }) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
       if (request._ === "messages.editMessage") {
         console.error(
-          `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: request.id, message: request.message })}`,
+          `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: request.id, message: request.message, rich: request.richMessage?._ })}`,
         );
         if (request.id === FAKE_FOREIGN_MESSAGE) {
           throw tl.RpcError.fromTl({
@@ -98,7 +99,8 @@ if (import.meta.main) {
                 fromId: { _: "peerUser", userId: FAKE_SELF_ID },
                 date: FAKE_MESSAGE_DATE,
                 editDate: FAKE_EDIT_DATE,
-                message: request.message,
+                message:
+                  request.message ?? request.richMessage?.markdown ?? request.richMessage?.html,
               },
               pts: 1,
               ptsCount: 1,

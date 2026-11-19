@@ -212,6 +212,31 @@ describe("E2E: messages edit", () => {
     });
   });
 
+  it("replaces the message with a rich one for --markdown", async () => {
+    const result = await runCli(
+      ["messages", "edit", "--chat", "@alice", "--id", "12", "-m", "# Plan", "--markdown"],
+      fake(),
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain(
+      `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: "messages.editMessage", id: 12, rich: "inputRichMessageMarkdown" })}`,
+    );
+    expect((result.json as { data: EditMessageResult }).data).toMatchObject({
+      messageId: 12,
+      format: "markdown",
+    });
+  });
+
+  it("refuses --markdown with --html before it needs Telegram", async () => {
+    const result = await runCli(
+      ["messages", "edit", "--chat", "@alice", "--id", "12", "-m", "Hi.", "--markdown", "--html"],
+      offline(),
+    );
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).toContain("Use --markdown or --html, not both");
+  });
+
   it("refuses an empty text and a bad --id before it needs Telegram", async () => {
     const empty = await edit("@alice", 12, "  ", offline());
     expect(empty.exitCode).toBe(3);

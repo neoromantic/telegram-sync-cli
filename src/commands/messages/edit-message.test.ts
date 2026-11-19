@@ -35,6 +35,18 @@ describe("editMessageRequest", () => {
       message: "See you at ten.",
     });
   });
+
+  it.each([
+    ["markdown", { _: "inputRichMessageMarkdown", markdown: "# Plan" }],
+    ["html", { _: "inputRichMessageHTML", html: "# Plan" }],
+  ] as const)("sends %s as a rich message in place of the text", (format, richMessage) => {
+    expect(editMessageRequest(ALICE.inputPeer, 12, "# Plan", format)).toEqual({
+      _: "messages.editMessage",
+      peer: ALICE.inputPeer,
+      id: 12,
+      richMessage,
+    });
+  });
 });
 
 describe("editMessage", () => {
@@ -73,6 +85,24 @@ describe("editMessage", () => {
     ).rejects.not.toBeInstanceOf(EditRefusedError);
   });
 
+  it("turns a refused rich message into a refusal with what to change", async () => {
+    const attempt = editMessage(
+      refusing(400, "RICH_MESSAGE_TABLE_COLS_TOO_MANY"),
+      createAccountCacheDb(),
+      ALICE,
+      12,
+      "| a |",
+      "markdown",
+    );
+
+    const err = await attempt.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EditRefusedError);
+    expect((err as EditRefusedError).details.telegramError).toBe(
+      "RICH_MESSAGE_TABLE_COLS_TOO_MANY",
+    );
+    expect((err as EditRefusedError).suggestion).toBe("Use at most 20 table columns.");
+  });
+
   it("reports the edit without a message when the response holds none", async () => {
     const db = createAccountCacheDb();
     const client = clientThat(async () => ({
@@ -88,6 +118,7 @@ describe("editMessage", () => {
       chatId: 10,
       messageId: 12,
       edited: true,
+      format: null,
       message: null,
     });
     expect(createMessagesHistory(db).get(10, 12)).toBeNull();

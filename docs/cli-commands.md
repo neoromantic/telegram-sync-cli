@@ -227,6 +227,7 @@ tg messages unread --fresh                         # counts and missing messages
 tg messages read --chat @username                  # mark the whole chat read
 tg messages read --chat @username --max-id 1200    # only up to message 1200
 tg messages edit --chat @username --id 1200 --message "New text"   # replace a sent message's text
+tg messages edit --chat me --id 1200 --markdown -m "$(cat report.md)"   # make it a rich message
 ```
 
 `tg messages list` reads one chat, newest first. `--chat` takes the same forms as `tg send --to`:
@@ -439,13 +440,16 @@ mutation, so it needs credentials and a connection; the daemon never marks anyth
 
 `tg messages edit --chat <peer> --id <id> --message <text>` (`-m`) replaces the text of a message
 you sent, or the caption of a message with a file, through `messages.editMessage`. The new text
-is plain: formatting the message had is dropped, and its file stays. The command prints the
+is plain: formatting the message had is dropped, and its file stays. With `--markdown` or
+`--html` the new text becomes a rich message (headings, tables, lists), parsed by Telegram as
+`tg send` describes; both flags together give `INVALID_ARGS` (exit 3). `format` in the result is
+`markdown`, `html`, or `null` for plain text. The command prints the
 edited message as `tg messages get` prints it and writes it to the cache at once, as `tg send`
 does for a sent message. So `tg messages search` finds the new text, and no longer the old,
 without a daemon:
 
 ```json
-{ "chatId": 10, "messageId": 12, "edited": true,
+{ "chatId": 10, "messageId": 12, "edited": true, "format": null,
   "message": { "chatId": 10, "messageId": 12, "text": "See you at ten.", "isOutgoing": true,
                "isEdited": true, "editDate": 1760003600, "date": 1760000000, … } }
 ```
@@ -464,6 +468,7 @@ and `messageId`, and the cached message stays as it was:
 | `MESSAGE_EDIT_TIME_EXPIRED`                   | the message is too old to edit                          |
 | `MESSAGE_TOO_LONG`, `MEDIA_CAPTION_TOO_LONG`  | the text is too long for a message, or for a caption    |
 | `CHAT_WRITE_FORBIDDEN`, `CHAT_ADMIN_REQUIRED` | no permission to edit messages in this chat             |
+| `RICH_MESSAGE_…`                              | Telegram refused the rich message, as for `tg send`     |
 
 Any other failure is `Failed to edit the message: <Telegram's error>`. Deleting, forwarding and
 pinning still go through `tg api`

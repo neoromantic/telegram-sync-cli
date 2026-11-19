@@ -7,6 +7,7 @@ import { createMessagesCache } from "../../db/messages-cache";
 import { createMessagesHistory } from "../../db/messages-history";
 import type { MessageSearchItem } from "../../types";
 import { verbose } from "../../utils/output";
+import { type RichFormat, richErrorHints, richMessage } from "../send/rich-message";
 import { messageRowsToItems } from "./helpers";
 import { type HistoryChat, withPeerHint } from "./history";
 
@@ -27,21 +28,34 @@ const REFUSALS: Record<string, (messageId: number) => string> = {
 /** Telegram refused the edit for a reason the caller can act on */
 export class EditRefusedError extends Error {
   readonly details: { chatId: number; messageId: number; telegramError: string };
+  readonly suggestion?: string;
 
-  constructor(message: string, chatId: number, messageId: number, telegramError: string) {
+  constructor(
+    message: string,
+    chatId: number,
+    messageId: number,
+    telegramError: string,
+    suggestion?: string,
+  ) {
     super(message);
     this.name = "EditRefusedError";
     this.details = { chatId, messageId, telegramError };
+    this.suggestion = suggestion;
   }
 }
 
-/** Without entities the text is plain: Telegram drops the old formatting */
-export function editMessageRequest(inputPeer: tl.TypeInputPeer, messageId: number, text: string) {
+/** Plain text carries no entities, so Telegram drops the old formatting; a format replaces the message with a rich one */
+export function editMessageRequest(
+  inputPeer: tl.TypeInputPeer,
+  messageId: number,
+  text: string,
+  format: RichFormat | null = null,
+) {
   return {
     _: "messages.editMessage",
     peer: inputPeer,
     id: messageId,
-    message: text,
+    ...(format ? { richMessage: richMessage(text, format) } : { message: text }),
   } satisfies tl.messages.RawEditMessageRequest;
 }
 
@@ -84,6 +98,8 @@ export interface EditMessageResult {
   chatId: number;
   messageId: number;
   edited: true;
+  /** How the new text was sent: markdown or html for a rich message, null for plain text */
+  format: RichFormat | null;
   /**
    * The message after the edit, as `tg messages get` prints it; null when
    * it could not be stored in the cache
@@ -101,12 +117,22 @@ export async function editMessage(
   chat: HistoryChat,
   messageId: number,
   text: string,
+  format: RichFormat | null = null,
 ) {
   let result: tl.TypeUpdates;
   try {
-    result = await client.call(editMessageRequest(chat.inputPeer, messageId, text));
+    result = await client.call(editMessageRequest(chat.inputPeer, messageId, text, format));
   } catch (err) {
     if (tl.RpcError.is(err)) {
+      if (format && err.text.startsWith("RICH_MESSAGE_")) {
+        throw new EditRefusedError(
+          err.message,
+          chat.chatId,
+          messageId,
+          err.text,
+          richErrorHints[err.text],
+        );
+      }
       const refusal = REFUSALS[err.text];
       if (refusal) {
         throw new EditRefusedError(refusal(messageId), chat.chatId, messageId, err.text);
@@ -118,6 +144,7 @@ export async function editMessage(
     chatId: chat.chatId,
     messageId,
     edited: true,
+    format,
     message: cacheEditedMessage(cacheDb, chat.chatId, messageId, result),
   } satisfies EditMessageResult;
 }
