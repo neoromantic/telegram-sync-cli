@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { access, lstat, mkdir, rename, rm } from "node:fs/promises";
+import { access, lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineCommand } from "citty";
@@ -349,15 +349,24 @@ export async function installSkill(dir: string) {
     throw new SkillInstallRefused(`${path} is not a regular file`, path);
   }
   await mkdir(skillDir, { recursive: true });
-  const temp = join(skillDir, `.SKILL.md.${process.pid}.tmp`);
-  const bytes = await Bun.write(temp, SKILL_MARKDOWN);
+  const temp = join(skillDir, `.SKILL.md.${crypto.randomUUID()}.tmp`);
+  const file = await open(temp, "wx");
   try {
+    try {
+      await file.writeFile(SKILL_MARKDOWN);
+    } finally {
+      await file.close();
+    }
     await rename(temp, path);
   } catch (err) {
     await rm(temp, { force: true });
     throw err;
   }
-  const result: SkillInstallResult = { path, bytes, overwritten: existed };
+  const result: SkillInstallResult = {
+    path,
+    bytes: Buffer.byteLength(SKILL_MARKDOWN),
+    overwritten: existed,
+  };
   return result;
 }
 

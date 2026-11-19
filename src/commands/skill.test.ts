@@ -1,5 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -125,8 +134,30 @@ describe("Skill Command Helpers", () => {
 
       const second = await skillModule.installSkill(dir);
       expect(second.overwritten).toBe(true);
+      expect(readdirSync(join(dir, "telegram-sync-cli"))).toEqual(["SKILL.md"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never writes through a link at a staging path in the skill directory", async () => {
+    const dir = join(dataDir, "skills-planted");
+    const skillDir = join(dir, "telegram-sync-cli");
+    const outside = join(dataDir, "outside.txt");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(outside, "outside\n");
+    symlinkSync(outside, join(skillDir, `.SKILL.md.${process.pid}.tmp`));
+
+    try {
+      await skillModule.installSkill(dir);
+
+      expect(readFileSync(outside, "utf8")).toBe("outside\n");
+      const path = join(skillDir, "SKILL.md");
+      expect(lstatSync(path).isFile()).toBe(true);
+      expect(readFileSync(path, "utf8")).toBe(skillModule.SKILL_MARKDOWN);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { force: true });
     }
   });
 });
