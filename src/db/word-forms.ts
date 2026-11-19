@@ -53,11 +53,13 @@ function after(prefix: string) {
  * The forms of each plain word of a query: the index's words with the same
  * light stem, found by a range scan of the vocabulary on the stem without
  * its last letter (with е and ё both, as the stem reads ё as е), then
- * filtered by stem. A word that is several index words (`e-mail`) is left
- * out and matched as written.
+ * filtered by stem. A one-letter word, which no other word stems to, is
+ * only looked up as it is. A word that is several index words (`e-mail`)
+ * is left out and matched as written.
  */
 export function findQueryForms(db: Database, query: string) {
   const range = db.query("SELECT term, doc FROM message_search_vocab WHERE term >= ? AND term < ?");
+  const exact = db.query("SELECT term, doc FROM message_search_vocab WHERE term = ?");
   const forms: QueryForms = new Map();
   for (const piece of query.split(/\s+/).filter(Boolean)) {
     const tokens = tokenize(piece);
@@ -65,9 +67,13 @@ export function findQueryForms(db: Database, query: string) {
     const word = fold(tokens[0]!);
     const stem = lightStem(word);
     const found: Array<[string, number]> = [];
-    for (const prefix of scanPrefixes(stem)) {
-      for (const [term, doc] of range.values(prefix, after(prefix)) as Array<[string, number]>) {
-        if (lightStem(term) === stem) found.push([term, doc]);
+    if ([...word].length === 1) {
+      found.push(...(exact.values(word) as Array<[string, number]>));
+    } else {
+      for (const prefix of scanPrefixes(stem)) {
+        for (const [term, doc] of range.values(prefix, after(prefix)) as Array<[string, number]>) {
+          if (lightStem(term) === stem) found.push([term, doc]);
+        }
       }
     }
     found.sort(

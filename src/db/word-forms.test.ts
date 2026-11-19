@@ -77,6 +77,17 @@ describe("findQueryForms", () => {
     });
   });
 
+  it("matches a one-letter word as typed, and still finds the forms of a two-letter one", () => {
+    const db = cacheWith("a cat", "я тут", "it is", "its tail", "её дом", "ее кот");
+    expect(formsOf(db, "a я x it её")).toEqual({
+      a: { words: ["a"], cut: false },
+      я: { words: ["я"], cut: false },
+      x: { words: [], cut: false },
+      it: { words: ["it", "its"], cut: false },
+      её: { words: ["её", "ее"], cut: false },
+    });
+  });
+
   it("folds case and Latin diacritics as the index does, keyed by the word as typed", () => {
     const db = cacheWith("Café Meetings");
     expect(formsOf(db, "CAFÉ meeting")).toEqual({
