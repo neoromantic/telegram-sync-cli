@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
-  closeSync,
+  createReadStream,
+  createWriteStream,
+  fstatSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -10,11 +12,12 @@ import {
   statSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 
 import { ErrorCodes } from "../../types";
 import { sanitizeFileName } from "../../utils/media-cache";
 import type { DownloadResult } from "./download-media";
-import { checkDownloadInterrupted, DownloadInterruptedError, MediaError } from "./errors";
+import { checkDownloadInterrupted, MediaError } from "./errors";
 
 export const TEMPLATE_PLACEHOLDERS = ["chat", "id", "date", "name", "kind"] as const;
 
@@ -110,9 +113,15 @@ async function digest(path: string, signal?: AbortSignal) {
   return hasher.digest("hex");
 }
 
+export type PublishedFiles = Map<string, Promise<void> | undefined>;
+
+function inodeKey(st: { dev: bigint; ino: bigint }) {
+  return `${st.dev}:${st.ino}`;
+}
+
 function fileKey(path: string) {
   const st = statSync(path, { bigint: true, throwIfNoEntry: false });
-  return st && `${st.dev}:${st.ino}`;
+  return st && inodeKey(st);
 }
 
 const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "ENOSYS", "EXDEV"]);
@@ -123,46 +132,44 @@ export function lacksHardLinks(err: unknown) {
 }
 
 /** Copy tmp to target unless target exists (EEXIST); not atomic, a reader can see the copy in progress */
-export async function publishByCopy(tmp: string, target: string) {
+export async function publishByCopy(
+  tmp: string,
+  target: string,
+  published?: PublishedFiles,
+  signal?: AbortSignal,
+) {
   const fd = openSync(target, "wx");
-  try {
-    await Bun.write(Bun.file(fd), Bun.file(tmp));
-  } catch (err) {
-    closeSync(fd);
-    rmSync(target, { force: true });
-    throw err;
-  }
-  closeSync(fd);
-}
-
-async function publishNew(tmp: string, target: string) {
-  try {
-    linkSync(tmp, target);
-  } catch (err) {
-    if (!lacksHardLinks(err)) throw err;
-    await publishByCopy(tmp, target);
-  }
+  const writing = pipeline(createReadStream(tmp), createWriteStream(target, { fd }), { signal });
+  if (published) published.set(inodeKey(fstatSync(fd, { bigint: true })), writing);
+  await writing;
 }
 
 async function publishCopy(
   source: string,
   target: string,
   overwrite: boolean,
-  published?: Set<string>,
+  published?: PublishedFiles,
   signal?: AbortSignal,
 ) {
   const tmp = join(dirname(target), `.tg-${randomUUID()}.part`);
   try {
     await Bun.write(tmp, Bun.file(source));
     checkDownloadInterrupted(signal);
+    const key = published && fileKey(tmp);
     if (overwrite) {
       const previous = published && fileKey(target);
       if (previous && published?.has(previous)) return false;
       renameSync(tmp, target);
     } else {
-      await publishNew(tmp, target);
+      try {
+        linkSync(tmp, target);
+      } catch (err) {
+        if (!lacksHardLinks(err)) throw err;
+        await publishByCopy(tmp, target, published, signal);
+        return true;
+      }
     }
-    if (published) published.add(fileKey(target)!);
+    if (key) published?.set(key, undefined);
     return true;
   } catch (err) {
     if (!overwrite && (err as NodeJS.ErrnoException).code === "EEXIST") {
@@ -178,15 +185,18 @@ export async function copyOut(
   result: DownloadResult,
   target: string,
   overwrite: boolean,
-  published?: Set<string>,
+  published?: PublishedFiles,
   signal?: AbortSignal,
 ) {
   try {
     mkdirSync(dirname(target), { recursive: true });
     const exists = !overwrite && statSync(target, { throwIfNoEntry: false });
     if (!exists && (await publishCopy(result.path, target, overwrite, published, signal))) {
+      checkDownloadInterrupted(signal);
       return target;
     }
+    const key = published && fileKey(target);
+    if (key) await published?.get(key);
     const file = statSync(target, { throwIfNoEntry: false });
     if (
       published &&
@@ -198,7 +208,7 @@ export async function copyOut(
       return target;
     }
   } catch (err) {
-    if (err instanceof DownloadInterruptedError) throw err;
+    checkDownloadInterrupted(signal);
     const message = err instanceof Error ? err.message : String(err);
     throw new MediaError(ErrorCodes.GENERAL_ERROR, `Failed to write --out: ${message}`, {
       path: target,

@@ -338,12 +338,14 @@ Exit codes:
   target. A batch accepts identical bytes and rejects conflicting output from two IDs even
   with `--overwrite`.
 
-A download that stalls for 60 seconds or loses its connection is `NETWORK_ERROR` (exit 4) with
+A single download that stalls for 60 seconds or loses its connection is `NETWORK_ERROR` (exit 4) with
 `details.resumable: true`; a flood wait over 10 seconds is `RATE_LIMITED` (exit 5) with
 `details: { method: "upload.getFile", wait_seconds }`. Both are `retryable` and keep the partial
 download for the next run. A download that waits more than 10 minutes for another tg process
 downloading the same file is `GENERAL_ERROR`, also `retryable`. A download stopped with Ctrl-C
-or SIGTERM exits 130 and prints no JSON.
+or SIGTERM exits 130. A batch keeps the JSON lines already printed. It pauses for flood waits of
+up to 300 seconds and exits 1 if any file fails. The [batch download contract](media.md#several-messages)
+gives the retry limits.
 
 `DAEMON_NOT_RUNNING` (exit 1) is returned by `tg daemon stop` without a daemon, and by
 `tg messages wait` and `watch` when the daemon doesn't run for the account, with

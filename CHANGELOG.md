@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collision between different files in one batch returns `FILE_EXISTS` even with `--overwrite`.
   Without `--overwrite`, a new file is published with a hard link; on a filesystem without
   hard links (exFAT, FAT, some network shares) it is copied instead, never over an existing
-  file.
+  file. If the copy is interrupted, use `--overwrite` to replace a partial export.
 - `tg send --markdown` and `--html` send rich messages such as headings and tables on
   supported accounts. The result includes `format`. File captions stay plain text.
 

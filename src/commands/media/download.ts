@@ -23,6 +23,7 @@ import { DownloadInterruptedError, reportMediaError } from "./errors";
 import {
   BATCH_NAME_TEMPLATE,
   copyOut,
+  type PublishedFiles,
   expandTemplate,
   isTemplate,
   outTarget,
@@ -167,7 +168,7 @@ export const downloadMediaCommand = defineCommand({
     const overwrite = args.overwrite ?? false;
     const options = { thumb: args.thumb ?? false, fresh: args.fresh ?? false };
 
-    const published = batch ? new Set<string>() : undefined;
+    const published: PublishedFiles | undefined = batch ? new Map() : undefined;
     const copy = (result: DownloadResult) =>
       out === undefined
         ? result.path

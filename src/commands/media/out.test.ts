@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { DownloadResult } from "./download-media";
 import { MediaError } from "./errors";
-import { copyOut, lacksHardLinks, publishByCopy, templateTarget } from "./out";
+import { copyOut, lacksHardLinks, publishByCopy, type PublishedFiles, templateTarget } from "./out";
 import { ErrorCodes } from "../../types";
 import { fakeBytes } from "../../test/photo-message.test-utils";
 
@@ -68,7 +68,11 @@ describe("publishing without hard links", () => {
     const target = join(root, "notes.txt");
     fs.writeFileSync(tmp, bytes);
 
-    await publishByCopy(tmp, target);
+    const published: PublishedFiles = new Map();
+    const writing = publishByCopy(tmp, target, published);
+    const { dev, ino } = fs.statSync(target, { bigint: true });
+    expect(published.get(`${dev}:${ino}`)).toBeInstanceOf(Promise);
+    await writing;
 
     expect(Buffer.compare(fs.readFileSync(target), bytes)).toBe(0);
   });
@@ -83,17 +87,37 @@ describe("publishing without hard links", () => {
     expect(fs.readFileSync(target, "utf-8")).toBe("edited copy");
   });
 
-  it("removes only a target it created when the copy fails", async () => {
-    const missing = join(root, "missing.part");
-    const taken = join(root, "taken.txt");
-    const fresh = join(root, "fresh.txt");
-    fs.writeFileSync(taken, "another writer");
+  it("never unlinks the public name after an exclusive write fails", async () => {
+    const target = join(root, "notes.txt");
+    using remove = spyOn(fs, "rmSync");
+    await expect(publishByCopy(join(root, "missing.part"), target)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(remove.mock.calls.some(([path]) => path === target)).toBe(false);
+  });
 
-    await expect(publishByCopy(missing, taken)).rejects.toMatchObject({ code: "EEXIST" });
-    await expect(publishByCopy(missing, fresh)).rejects.toMatchObject({ code: "ENOENT" });
+  it("interrupts an exclusive copy once the public name exists", async () => {
+    const result = cached(fakeBytes(70_000));
+    const target = join(root, "notes.txt");
+    const controller = new AbortController();
+    const writing = publishByCopy(result.path, target, undefined, controller.signal);
+    controller.abort();
+    await expect(writing).rejects.toMatchObject({ name: "AbortError" });
+  });
 
-    expect(fs.readFileSync(taken, "utf-8")).toBe("another writer");
-    expect(fs.existsSync(fresh)).toBe(false);
+  it("waits for an identical export in the batch to finish copying", async () => {
+    const result = cached(fakeBytes(70_000));
+    const target = join(root, "notes.txt");
+    const published: PublishedFiles = new Map();
+    fs.writeFileSync(target, new Uint8Array());
+    const { dev, ino } = fs.statSync(target, { bigint: true });
+    const writer = Promise.withResolvers<void>();
+    published.set(`${dev}:${ino}`, writer.promise);
+    const second = copyOut(result, target, false, published);
+    fs.copyFileSync(result.path, target);
+    writer.resolve();
+    expect(await second).toBe(target);
+    expect(fs.readFileSync(target)).toEqual(fs.readFileSync(result.path));
   });
 });
 
@@ -102,7 +126,7 @@ describe("copyOut collisions in a batch", () => {
     const target = join(root, "out", "notes.txt");
     fs.mkdirSync(join(root, "out"));
     fs.writeFileSync(target, "edited copy");
-    const err = await refusal(copyOut(cached(fakeBytes(70_000)), target, false, new Set()));
+    const err = await refusal(copyOut(cached(fakeBytes(70_000)), target, false, new Map()));
     expect(err.code).toBe(ErrorCodes.FILE_EXISTS);
     expect(err.suggestion).toContain("--overwrite");
   });
@@ -111,7 +135,7 @@ describe("copyOut collisions in a batch", () => {
     "asks for distinct paths when another file of the batch took it (overwrite %s)",
     async (overwrite) => {
       const target = join(root, "out", "notes.txt");
-      const published = new Set<string>();
+      const published: PublishedFiles = new Map();
       await copyOut(cached(fakeBytes(70_000), 1), target, overwrite, published);
       const err = await refusal(
         copyOut(cached(fakeBytes(70_000, 3), 2), target, overwrite, published),
