@@ -18,13 +18,13 @@ The caching system prioritizes **responsiveness** over absolute freshness. Users
 
 ### Data Categories
 
-| Category | Staleness TTL | Rationale |
-|----------|--------------|-----------|
-| **Messages** | ETERNAL | Message history is immutable (edits tracked separately). |
-| **Users/Contacts** | 1 week (default) | Profile info changes infrequently. |
-| **Chats/Dialogs** | 1 week (default) | Chat metadata changes occasionally. |
-| **Dialog ordering** | 1 hour (default) | Ordering changes frequently. |
-| **Full info** | 1 week (default) | Extended info is relatively stable. |
+| Category            | Staleness TTL    | Rationale                                                |
+| ------------------- | ---------------- | -------------------------------------------------------- |
+| **Messages**        | ETERNAL          | Message history is immutable (edits tracked separately). |
+| **Users/Contacts**  | 1 week (default) | Profile info changes infrequently.                       |
+| **Chats/Dialogs**   | 1 week (default) | Chat metadata changes occasionally.                      |
+| **Dialog ordering** | 1 hour (default) | Ordering changes frequently.                             |
+| **Full info**       | 1 week (default) | Extended info is relatively stable.                      |
 
 ### Configuration
 
@@ -40,7 +40,7 @@ export function getDefaultCacheConfig(): CacheConfig {
     },
     backgroundRefresh: true,
     maxCacheAge: 30 * DAY,
-  }
+  };
 }
 ```
 
@@ -165,10 +165,12 @@ via `getAccountCacheDb(accountId)`. A command picks the account with `resolveAcc
 account's rows.
 
 **Primary cache tables:**
+
 - `users_cache`
 - `chats_cache`
 
 **Sync tables (also in the account's cache.db):**
+
 - `messages_cache`
 - `history_ranges`
 - `chat_sync_state`
@@ -182,6 +184,7 @@ For full schema definitions, see `docs/database-schema.md`.
 The caching system uses dedicated service classes:
 
 **UsersCache** (`src/db/users-cache.ts`):
+
 - `getById(userId)`
 - `getByUsername(username)`
 - `getByPhone(phone)`
@@ -189,6 +192,7 @@ The caching system uses dedicated service classes:
 - `search(query, limit)`
 
 **ChatsCache** (`src/db/chats-cache.ts`):
+
 - `getById(chatId)`
 - `getByUsername(username)`
 - `list(opts)`
@@ -202,35 +206,35 @@ Example from contacts command:
 ```typescript
 // From src/commands/contacts.ts
 if (!args.fresh) {
-  const cached = usersCache.getByUsername(identifier)
+  const cached = usersCache.getByUsername(identifier);
   if (cached) {
-    const stale = isCacheStale(cached.fetched_at, cacheConfig.staleness.peers)
+    const stale = isCacheStale(cached.fetched_at, cacheConfig.staleness.peers);
     success({
       ...cachedUserToContact(cached),
-      source: 'cache',
+      source: "cache",
       stale,
-    })
-    return
+    });
+    return;
   }
 }
 
 // Fetch from API if cache miss or --fresh
-const result = await client.call({ _: 'contacts.resolveUsername', username })
-usersCache.upsert(apiUserToCacheInput(result))
+const result = await client.call({ _: "contacts.resolveUsername", username });
+usersCache.upsert(apiUserToCacheInput(result));
 
-success({ ...freshData, source: 'api', stale: false })
+success({ ...freshData, source: "api", stale: false });
 ```
 
 ## Lazy Database Initialization
 
 ```typescript
 // From src/utils/account-cache.ts: called before a command's try block
-const { account, db: cacheDb } = openAccountCache(args.account)
+const { account, db: cacheDb } = openAccountCache(args.account);
 
 // src/db/index.ts keeps one connection per account: the first call moves a
 // shared cache from 0.3 if there is one, creates accounts/<id>/ (mode 0700),
 // runs the schema and its migrations, and checks the cache_meta owner stamp
-export function getAccountCacheDb(accountId: number): Database
+export function getAccountCacheDb(accountId: number): Database;
 ```
 
 `openAccountCache` reports a cache that can't be opened as `CACHE_UNAVAILABLE` (exit 1). A

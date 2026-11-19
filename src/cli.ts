@@ -1,122 +1,97 @@
-/**
- * The tg command tree, apart from src/index.ts so tests can walk it
- */
-import { defineCommand } from 'citty'
-import { accountsCommand } from './commands/accounts'
-import { apiCommand } from './commands/api'
-import { authCommand } from './commands/auth'
-import { chatsCommand } from './commands/chats'
-import { configCommand } from './commands/config'
-import { contactsCommand } from './commands/contacts'
-import { daemonCommand } from './commands/daemon'
-import { dbCommand } from './commands/db'
-import { mediaCommand } from './commands/media'
-import { messagesCommand } from './commands/messages'
-import { sendCommand } from './commands/send'
-import { skillCommand } from './commands/skill'
-import { sqlCommand } from './commands/sql'
-import { statusCommand } from './commands/status'
-import { telemetryCommand } from './commands/telemetry'
-import { meCommand, userCommand } from './commands/user'
-import {
-  ConfigError,
-  ConfigReadError,
-  syncActiveAccountFromConfig,
-} from './config'
-import {
-  endRun,
-  reportErrorType,
-  reportLocalError,
-  startTelemetry,
-} from './telemetry'
-import { ErrorCodes, type OutputFormat } from './types'
-import { outputFormatArg } from './utils/args'
-import { error, getOutputFormat, setOutputFormat } from './utils/output'
-import { VERSION } from './version'
+import { defineCommand } from "citty";
+import { accountsCommand } from "./commands/accounts";
+import { apiCommand } from "./commands/api";
+import { authCommand } from "./commands/auth";
+import { chatsCommand } from "./commands/chats";
+import { configCommand } from "./commands/config";
+import { contactsCommand } from "./commands/contacts";
+import { daemonCommand } from "./commands/daemon";
+import { dbCommand } from "./commands/db";
+import { mediaCommand } from "./commands/media";
+import { messagesCommand } from "./commands/messages";
+import { sendCommand } from "./commands/send";
+import { skillCommand } from "./commands/skill";
+import { sqlCommand } from "./commands/sql";
+import { statusCommand } from "./commands/status";
+import { telemetryCommand } from "./commands/telemetry";
+import { meCommand, userCommand } from "./commands/user";
+import { ConfigError, ConfigReadError, syncActiveAccountFromConfig } from "./config";
+import { endRun, reportErrorType, reportLocalError, startTelemetry } from "./telemetry";
+import { ErrorCodes, type OutputFormat } from "./types";
+import { outputFormatArg } from "./utils/args";
+import { error, getOutputFormat, setOutputFormat } from "./utils/output";
+import { VERSION } from "./version";
 
 export const main = defineCommand({
   meta: {
-    name: 'tg',
+    name: "tg",
     version: VERSION,
-    description: 'Telegram Sync CLI - Agent-friendly Telegram client',
+    description: "Telegram Sync CLI - Agent-friendly Telegram client",
   },
   args: {
     format: outputFormatArg,
     verbose: {
-      type: 'boolean',
-      alias: 'v',
-      description: 'Enable verbose output',
+      type: "boolean",
+      alias: "v",
+      description: "Enable verbose output",
       default: false,
     },
     quiet: {
-      type: 'boolean',
-      alias: 'q',
-      description: 'Minimal output (errors only)',
+      type: "boolean",
+      alias: "q",
+      description: "Minimal output (errors only)",
       default: false,
     },
   },
   async setup({ args, rawArgs }) {
-    // Set output format
-    const format = args.format as OutputFormat
-    if (format === 'json' || format === 'pretty' || format === 'quiet') {
-      setOutputFormat(format)
+    const format = args.format as OutputFormat;
+    if (format === "json" || format === "pretty" || format === "quiet") {
+      setOutputFormat(format);
     }
 
     if (args.quiet) {
-      setOutputFormat('quiet')
+      setOutputFormat("quiet");
     }
 
-    // Set verbose flag
     if (args.verbose) {
-      process.env.VERBOSE = '1'
+      process.env.VERBOSE = "1";
     }
 
-    // The usage stats notice once, then app_started and the command path
-    startTelemetry(rawArgs, { quiet: getOutputFormat() === 'quiet' })
+    startTelemetry(rawArgs, { quiet: getOutputFormat() === "quiet" });
 
-    // As citty does, skip the value of -f/--format: in `tg -f json skill`
-    // the subcommand is skill, not json
     const subCommand = rawArgs.find(
-      (arg, i) =>
-        !arg.startsWith('-') &&
-        rawArgs[i - 1] !== '-f' &&
-        rawArgs[i - 1] !== '--format',
-    )
-    // tg config has to repair an invalid file. tg skill and tg telemetry
-    // read no key, and tg daemon only cache.retention.*, leniently: a
-    // supervised daemon must not stop over a typo there, silently under its
-    // own -q (which sets ours)
+      (arg, i) => !arg.startsWith("-") && rawArgs[i - 1] !== "-f" && rawArgs[i - 1] !== "--format",
+    );
     if (
-      subCommand === 'config' ||
-      subCommand === 'skill' ||
-      subCommand === 'telemetry' ||
-      subCommand === 'daemon'
+      subCommand === "config" ||
+      subCommand === "skill" ||
+      subCommand === "telemetry" ||
+      subCommand === "daemon"
     ) {
-      return
+      return;
     }
 
     try {
-      await syncActiveAccountFromConfig()
+      await syncActiveAccountFromConfig();
     } catch (err) {
       if (err instanceof ConfigError || err instanceof ConfigReadError) {
-        reportLocalError(err)
+        reportLocalError(err);
       }
       if (err instanceof ConfigError) {
-        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues })
+        error(ErrorCodes.INVALID_ARGS, err.message, { issues: err.issues });
       }
       if (err instanceof ConfigReadError) {
         error(
           ErrorCodes.GENERAL_ERROR,
           err.message,
           { path: err.path },
-          'Make config.json readable or remove it',
-        )
+          "Make config.json readable or remove it",
+        );
       }
-      reportErrorType(err)
-      throw err
+      reportErrorType(err);
+      throw err;
     }
   },
-  // Waits for usage stats in flight before the exit
   cleanup: endRun,
   subCommands: {
     auth: authCommand,
@@ -137,4 +112,4 @@ export const main = defineCommand({
     sql: sqlCommand,
     telemetry: telemetryCommand,
   },
-})
+});

@@ -1,8 +1,4 @@
-/**
- * Sync jobs service
- * Manages the job queue for background synchronization
- */
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 import {
   CHAT_INDEPENDENT_JOB_TYPES_SQL,
   historyAllowedSql,
@@ -10,10 +6,8 @@ import {
   SyncJobStatus,
   SyncJobType,
   SyncPriority,
-} from './sync-schema'
+} from "./sync-schema";
 
-// The priority of a job's chat lane: an initial load of a fully synced chat
-// goes first. NULL when the chat has no sync state.
 const LANE_PRIORITY_SQL = `(
   SELECT CASE
     WHEN sync_jobs.job_type = 'initial_load' AND s.sync_mode = 'on' THEN 0
@@ -21,32 +15,31 @@ const LANE_PRIORITY_SQL = `(
   END
   FROM chat_sync_state s
   WHERE s.chat_id = sync_jobs.chat_id
-)`
+)`;
 
-// A refetch or a sender fetch runs whether its chat syncs or not
 const RUNS_FOR_CHAT_SQL = `(job_type IN ${CHAT_INDEPENDENT_JOB_TYPES_SQL} OR EXISTS (
   SELECT 1 FROM chat_sync_state s
   WHERE s.chat_id = sync_jobs.chat_id AND s.sync_enabled = 1
-))`
+))`;
 
 /**
  * Input for creating a sync job
  */
 export interface SyncJobInput {
-  chat_id: number
-  job_type: SyncJobType
-  priority: SyncPriority
-  cursor_start?: number
-  cursor_end?: number
+  chat_id: number;
+  job_type: SyncJobType;
+  priority: SyncPriority;
+  cursor_start?: number;
+  cursor_end?: number;
 }
 
 /**
  * Progress update for a sync job
  */
 export interface SyncJobProgress {
-  cursor_start?: number
-  cursor_end?: number
-  messages_fetched?: number
+  cursor_start?: number;
+  cursor_end?: number;
+  messages_fetched?: number;
 }
 
 /**
@@ -54,34 +47,34 @@ export interface SyncJobProgress {
  */
 export interface SyncJobRetry {
   /** The error, kept as the job's last error; null for none */
-  error: string | null
+  error: string | null;
   /** When the job may run again, in ms since the epoch */
-  runAt: number
+  runAt: number;
   /** Whether the try counts towards the attempts; a FLOOD_WAIT doesn't */
-  countAttempt: boolean
+  countAttempt: boolean;
 }
 
 /**
  * What `retryLater` did: the job is pending again, it was deleted because
  * its chat was turned off while it ran, or it wasn't running
  */
-export type SyncJobRetryResult = 'retrying' | 'cancelled' | 'not_running'
+export type SyncJobRetryResult = "retrying" | "cancelled" | "not_running";
 
 /**
  * What `failOrDrop` did: the job is failed, it was deleted because its chat
  * was turned off while it ran, or it wasn't running
  */
-export type SyncJobFailResult = 'failed' | 'cancelled' | 'not_running'
+export type SyncJobFailResult = "failed" | "cancelled" | "not_running";
 
 /**
  * Job counts by status. `pending` includes the jobs waiting for a retry;
  * `retrying` counts those that failed at least once.
  */
 export interface SyncJobCounts {
-  pending: number
-  running: number
-  failed: number
-  retrying: number
+  pending: number;
+  running: number;
+  failed: number;
+  retrying: number;
 }
 
 /**
@@ -89,81 +82,81 @@ export interface SyncJobCounts {
  */
 export interface SyncJobsService {
   /** Create a new sync job */
-  create(input: SyncJobInput): SyncJobRow
+  create(input: SyncJobInput): SyncJobRow;
   /** Get job by ID */
-  getById(id: number): SyncJobRow | null
+  getById(id: number): SyncJobRow | null;
   /** Get the next pending job that is due (highest priority, oldest first) */
-  getNextPending(): SyncJobRow | null
+  getNextPending(): SyncJobRow | null;
   /** Get the next due pending job of the given types (highest priority, oldest first) */
-  getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null
+  getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null;
   /** Get all pending jobs, including those waiting for a retry */
-  getPendingJobs(): SyncJobRow[]
+  getPendingJobs(): SyncJobRow[];
   /** Mark job as running */
-  markRunning(id: number): boolean
+  markRunning(id: number): boolean;
   /** Mark job as completed */
-  markCompleted(id: number): boolean
+  markCompleted(id: number): boolean;
   /** Mark job as failed, counting the attempt */
-  markFailed(id: number, errorMessage: string): boolean
+  markFailed(id: number, errorMessage: string): boolean;
   /**
    * Mark a running job failed, counting the attempt. If its chat was turned
    * off while it ran, delete it instead.
    */
-  failOrDrop(id: number, errorMessage: string): SyncJobFailResult
+  failOrDrop(id: number, errorMessage: string): SyncJobFailResult;
   /**
    * Make a running job pending again, due at `runAt`, at its chat's current
    * lane priority. If its chat was turned off while it ran, delete it instead.
    */
-  retryLater(id: number, retry: SyncJobRetry): SyncJobRetryResult
+  retryLater(id: number, retry: SyncJobRetry): SyncJobRetryResult;
   /** Update job progress */
-  updateProgress(id: number, progress: SyncJobProgress): void
+  updateProgress(id: number, progress: SyncJobProgress): void;
   /** Get all running jobs */
-  getRunningJobs(): SyncJobRow[]
+  getRunningJobs(): SyncJobRow[];
   /** Get jobs for a specific chat */
-  getJobsForChat(chatId: number): SyncJobRow[]
+  getJobsForChat(chatId: number): SyncJobRow[];
   /**
    * Check if chat has a pending, running or failed job of given type. A
    * failed job holds its chat's slot for that job type until it is deleted.
    */
-  hasActiveJobForChat(chatId: number, jobType: SyncJobType): boolean
+  hasActiveJobForChat(chatId: number, jobType: SyncJobType): boolean;
   /** Delete failed jobs of one chat, or of every chat, whatever their age */
-  deleteFailed(chatId?: number): number
+  deleteFailed(chatId?: number): number;
   /** The newest failed jobs */
-  getFailedJobs(limit: number): SyncJobRow[]
+  getFailedJobs(limit: number): SyncJobRow[];
   /** Count jobs by status */
-  countJobs(): SyncJobCounts
+  countJobs(): SyncJobCounts;
   /**
    * Cancel pending jobs for a chat, except a refetch or a sender fetch: they
    * don't depend on the mode
    */
-  cancelPendingForChat(chatId: number): number
+  cancelPendingForChat(chatId: number): number;
   /** Delete every pending job of a type */
-  deletePendingOfType(jobType: SyncJobType): number
+  deletePendingOfType(jobType: SyncJobType): number;
   /**
    * Delete pending jobs of chats that are disabled or have no sync state,
    * except refetches and sender fetches
    */
-  deletePendingForInactiveChats(): number
+  deletePendingForInactiveChats(): number;
   /**
    * Queue a refetch of the chat's messages cached with raw_json '{}' (#130),
    * unless one is pending. One that is running may have read its IDs
    * already, so it doesn't count. Returns whether it queued one.
    */
-  queueRefetch(chatId: number): boolean
+  queueRefetch(chatId: number): boolean;
   /**
    * Delete pending history jobs of chats the policy gives the newest page
    * only (bots and deleted accounts, unless turned on by hand)
    */
-  deletePendingHistoryOfFirstPageOnlyChats(): number
+  deletePendingHistoryOfFirstPageOnlyChats(): number;
   /** Set each pending job's priority to its chat's lane priority */
-  alignPendingPriorities(): number
+  alignPendingPriorities(): number;
   /** Recover jobs that were running when daemon crashed (reset to pending) */
-  recoverCrashedJobs(): number
+  recoverCrashedJobs(): number;
 }
 
 /**
  * Create a sync jobs service
  */
-export function createSyncJobsService(db: Database): SyncJobsService {
+export function createSyncJobsService(db: Database) {
   const stmts = {
     create: db.prepare(`
       INSERT INTO sync_jobs (chat_id, job_type, priority, status, cursor_start, cursor_end, created_at)
@@ -220,8 +213,6 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         AND ${RUNS_FOR_CHAT_SQL}
     `),
 
-    // The chat's mode may have changed while the job ran, so the retry takes
-    // the chat's lane priority now. A refetch or a sender fetch keeps its own.
     retryLater: db.prepare(`
       UPDATE sync_jobs
       SET status = $pending_status, attempts = attempts + $inc,
@@ -315,7 +306,7 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         AND job_type IN ($backward, $full)
         AND EXISTS (
           SELECT 1 FROM chat_sync_state s
-          WHERE s.chat_id = sync_jobs.chat_id AND NOT ${historyAllowedSql('s')}
+          WHERE s.chat_id = sync_jobs.chat_id AND NOT ${historyAllowedSql("s")}
         )
     `),
 
@@ -346,24 +337,19 @@ export function createSyncJobsService(db: Database): SyncJobsService {
     `),
 
     getLastInsertId: db.query(`SELECT last_insert_rowid() as id`),
-  }
+  };
 
-  /**
-   * Delete a running job whose chat was turned off. Each statement is atomic,
-   * and tg chats sync turns a chat off in an IMMEDIATE transaction, so the
-   * guarded update before this and the mode change can't interleave.
-   */
-  function dropRunning(id: number): 'cancelled' | 'not_running' {
+  function dropRunning(id: number) {
     const deleted = stmts.deleteRunning.run({
       $id: id,
       $running_status: SyncJobStatus.Running,
-    })
-    return deleted.changes === 1 ? 'cancelled' : 'not_running'
+    });
+    return deleted.changes === 1 ? "cancelled" : "not_running";
   }
 
   return {
-    create(input: SyncJobInput): SyncJobRow {
-      const now = Date.now()
+    create(input: SyncJobInput) {
+      const now = Date.now();
       stmts.create.run({
         $chat_id: input.chat_id,
         $job_type: input.job_type,
@@ -372,36 +358,35 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         $cursor_start: input.cursor_start ?? null,
         $cursor_end: input.cursor_end ?? null,
         $now: now,
-      })
+      });
 
-      const result = stmts.getLastInsertId.get() as { id: number }
-      return this.getById(result.id)!
+      const result = stmts.getLastInsertId.get() as { id: number };
+      return this.getById(result.id)!;
     },
 
-    getById(id: number): SyncJobRow | null {
-      return stmts.getById.get({ $id: id }) ?? null
+    getById(id: number) {
+      return stmts.getById.get({ $id: id }) ?? null;
     },
 
-    getNextPending(): SyncJobRow | null {
+    getNextPending() {
       return (
         stmts.getNextPending.get({
           $status: SyncJobStatus.Pending,
           $now: Date.now(),
         }) ?? null
-      )
+      );
     },
 
-    getNextPendingOfTypes(jobTypes: readonly SyncJobType[]): SyncJobRow | null {
-      if (jobTypes.length === 0) return null
-      const placeholders = jobTypes.map((_, i) => `$type${i}`).join(', ')
+    getNextPendingOfTypes(jobTypes: readonly SyncJobType[]) {
+      if (jobTypes.length === 0) return null;
+      const placeholders = jobTypes.map((_, i) => `$type${i}`).join(", ");
       const params: Record<string, string | number> = {
         $status: SyncJobStatus.Pending,
         $now: Date.now(),
-      }
+      };
       jobTypes.forEach((jobType, i) => {
-        params[`$type${i}`] = jobType
-      })
-      // query() caches the statement per SQL text, so each lane prepares once.
+        params[`$type${i}`] = jobType;
+      });
       return (
         db
           .query(`
@@ -413,56 +398,56 @@ export function createSyncJobsService(db: Database): SyncJobsService {
           `)
           .as(SyncJobRow)
           .get(params) ?? null
-      )
+      );
     },
 
-    getPendingJobs(): SyncJobRow[] {
-      return stmts.getPendingJobs.all({ $status: SyncJobStatus.Pending })
+    getPendingJobs() {
+      return stmts.getPendingJobs.all({ $status: SyncJobStatus.Pending });
     },
 
-    markRunning(id: number): boolean {
+    markRunning(id: number) {
       const result = stmts.markRunning.run({
         $id: id,
         $status: SyncJobStatus.Running,
         $expected_status: SyncJobStatus.Pending,
         $now: Date.now(),
-      })
-      return result.changes === 1
+      });
+      return result.changes === 1;
     },
 
-    markCompleted(id: number): boolean {
+    markCompleted(id: number) {
       const result = stmts.markCompleted.run({
         $id: id,
         $status: SyncJobStatus.Completed,
         $expected_status: SyncJobStatus.Running,
         $now: Date.now(),
-      })
-      return result.changes === 1
+      });
+      return result.changes === 1;
     },
 
-    markFailed(id: number, errorMessage: string): boolean {
+    markFailed(id: number, errorMessage: string) {
       const result = stmts.markFailed.run({
         $id: id,
         $status: SyncJobStatus.Failed,
         $expected_status: SyncJobStatus.Running,
         $error: errorMessage,
         $now: Date.now(),
-      })
-      return result.changes === 1
+      });
+      return result.changes === 1;
     },
 
-    failOrDrop(id: number, errorMessage: string): SyncJobFailResult {
+    failOrDrop(id: number, errorMessage: string) {
       const updated = stmts.failIfEnabled.run({
         $id: id,
         $status: SyncJobStatus.Failed,
         $expected_status: SyncJobStatus.Running,
         $error: errorMessage,
         $now: Date.now(),
-      })
-      return updated.changes === 1 ? 'failed' : dropRunning(id)
+      });
+      return updated.changes === 1 ? "failed" : dropRunning(id);
     },
 
-    retryLater(id: number, retry: SyncJobRetry): SyncJobRetryResult {
+    retryLater(id: number, retry: SyncJobRetry) {
       const updated = stmts.retryLater.run({
         $id: id,
         $pending_status: SyncJobStatus.Pending,
@@ -470,86 +455,86 @@ export function createSyncJobsService(db: Database): SyncJobsService {
         $inc: retry.countAttempt ? 1 : 0,
         $run_at: retry.runAt,
         $error: retry.error,
-      })
-      return updated.changes === 1 ? 'retrying' : dropRunning(id)
+      });
+      return updated.changes === 1 ? "retrying" : dropRunning(id);
     },
 
-    updateProgress(id: number, progress: SyncJobProgress): void {
+    updateProgress(id: number, progress: SyncJobProgress) {
       stmts.updateProgress.run({
         $id: id,
         $cursor_start: progress.cursor_start ?? null,
         $cursor_end: progress.cursor_end ?? null,
         $messages: progress.messages_fetched ?? null,
-      })
+      });
     },
 
-    getRunningJobs(): SyncJobRow[] {
-      return stmts.getRunningJobs.all({ $status: SyncJobStatus.Running })
+    getRunningJobs() {
+      return stmts.getRunningJobs.all({ $status: SyncJobStatus.Running });
     },
 
-    getJobsForChat(chatId: number): SyncJobRow[] {
-      return stmts.getJobsForChat.all({ $chat_id: chatId })
+    getJobsForChat(chatId: number) {
+      return stmts.getJobsForChat.all({ $chat_id: chatId });
     },
 
-    hasActiveJobForChat(chatId: number, jobType: SyncJobType): boolean {
+    hasActiveJobForChat(chatId: number, jobType: SyncJobType) {
       const result = stmts.hasActiveJobForChat.get({
         $chat_id: chatId,
         $job_type: jobType,
         $pending_status: SyncJobStatus.Pending,
         $running_status: SyncJobStatus.Running,
         $failed_status: SyncJobStatus.Failed,
-      })
-      return result !== null
+      });
+      return result !== null;
     },
 
-    deleteFailed(chatId?: number): number {
+    deleteFailed(chatId?: number) {
       if (chatId === undefined) {
-        return stmts.deleteFailed.run({ $status: SyncJobStatus.Failed }).changes
+        return stmts.deleteFailed.run({ $status: SyncJobStatus.Failed }).changes;
       }
       return stmts.deleteFailedForChat.run({
         $status: SyncJobStatus.Failed,
         $chat_id: chatId,
-      }).changes
+      }).changes;
     },
 
-    getFailedJobs(limit: number): SyncJobRow[] {
+    getFailedJobs(limit: number) {
       return stmts.getFailedJobs.all({
         $status: SyncJobStatus.Failed,
         $limit: limit,
-      })
+      });
     },
 
-    countJobs(): SyncJobCounts {
+    countJobs() {
       return stmts.countJobs.get({
         $pending_status: SyncJobStatus.Pending,
         $running_status: SyncJobStatus.Running,
         $failed_status: SyncJobStatus.Failed,
-      }) as SyncJobCounts
+      }) as SyncJobCounts;
     },
 
-    cancelPendingForChat(chatId: number): number {
+    cancelPendingForChat(chatId: number) {
       const result = stmts.cancelPendingForChat.run({
         $chat_id: chatId,
         $status: SyncJobStatus.Pending,
-      })
-      return result.changes
+      });
+      return result.changes;
     },
 
-    deletePendingOfType(jobType: SyncJobType): number {
+    deletePendingOfType(jobType: SyncJobType) {
       const result = stmts.deletePendingOfType.run({
         $job_type: jobType,
         $status: SyncJobStatus.Pending,
-      })
-      return result.changes
+      });
+      return result.changes;
     },
 
-    deletePendingForInactiveChats(): number {
+    deletePendingForInactiveChats() {
       return stmts.deletePendingForInactiveChats.run({
         $status: SyncJobStatus.Pending,
-      }).changes
+      }).changes;
     },
 
-    queueRefetch(chatId: number): boolean {
+    queueRefetch(chatId: number) {
       return (
         stmts.queueRefetch.run({
           $chat_id: chatId,
@@ -558,32 +543,32 @@ export function createSyncJobsService(db: Database): SyncJobsService {
           $pending_status: SyncJobStatus.Pending,
           $now: Date.now(),
         }).changes === 1
-      )
+      );
     },
 
-    deletePendingHistoryOfFirstPageOnlyChats(): number {
+    deletePendingHistoryOfFirstPageOnlyChats() {
       return stmts.deletePendingHistoryOfFirstPageOnlyChats.run({
         $status: SyncJobStatus.Pending,
         $backward: SyncJobType.BackwardHistory,
         $full: SyncJobType.FullSync,
-      }).changes
+      }).changes;
     },
 
-    alignPendingPriorities(): number {
+    alignPendingPriorities() {
       return stmts.alignPendingPriorities.run({
         $status: SyncJobStatus.Pending,
-      }).changes
+      }).changes;
     },
 
-    recoverCrashedJobs(): number {
+    recoverCrashedJobs() {
       const result = stmts.recoverCrashedJobs.run({
         $oldStatus: SyncJobStatus.Running,
         $newStatus: SyncJobStatus.Pending,
-        $error: 'Daemon crashed during execution',
-      })
-      return result.changes
+        $error: "Daemon crashed during execution",
+      });
+      return result.changes;
     },
-  }
+  };
 }
 
-export { SyncJobStatus, SyncJobType, SyncPriority }
+export { SyncJobStatus, SyncJobType, SyncPriority };

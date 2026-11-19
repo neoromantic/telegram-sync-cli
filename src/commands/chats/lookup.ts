@@ -1,12 +1,8 @@
-import type { Database } from 'bun:sqlite'
+import type { Database } from "bun:sqlite";
 
-import { type CachedChat, createChatsCache } from '../../db/chats-cache'
-import { createUsersCache } from '../../db/users-cache'
-import {
-  AmbiguousPeerError,
-  createDmLookup,
-  isKnownUserId,
-} from '../send/peer-resolver'
+import { createChatsCache } from "../../db/chats-cache";
+import { createUsersCache } from "../../db/users-cache";
+import { AmbiguousPeerError, createDmLookup, isKnownUserId } from "../send/peer-resolver";
 
 /**
  * The cached chat for a numeric ID, the one `tg send --to` and
@@ -21,26 +17,23 @@ import {
  *
  * Throws AmbiguousPeerError when that bare ID names two cached chats.
  */
-export function findCachedChatById(
-  db: Database,
-  input: string,
-): CachedChat | null {
-  if (!/^-?\d+$/.test(input)) return null
-  const id = Number(input)
-  if (!Number.isSafeInteger(id) || id === 0) return null
+export function findCachedChatById(db: Database, input: string) {
+  if (!/^-?\d+$/.test(input)) return null;
+  const id = Number(input);
+  if (!Number.isSafeInteger(id) || id === 0) return null;
 
-  const chatsCache = createChatsCache(db)
-  const exact = chatsCache.getById(String(id))
-  if (id < 0) return exact
-  if (exact?.type === 'private') return exact
-  if (isKnownUserId(createUsersCache(db), createDmLookup(db), id)) return null
+  const chatsCache = createChatsCache(db);
+  const exact = chatsCache.getById(String(id));
+  if (id < 0) return exact;
+  if (exact?.type === "private") return exact;
+  if (isKnownUserId(createUsersCache(db), createDmLookup(db), id)) return null;
 
-  const legacy = chatsCache.getByLegacyId(id)
+  const legacy = chatsCache.getByLegacyId(id);
   if (legacy.length > 1) {
     throw new AmbiguousPeerError(
       input,
       legacy.map((chat) => Number(chat.chat_id)),
-    )
+    );
   }
-  return legacy[0] ?? null
+  return legacy[0] ?? null;
 }

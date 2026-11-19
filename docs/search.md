@@ -59,12 +59,12 @@ message again, those cached in between too.
 
 ### Indexed Columns
 
-| Column | Purpose |
-|--------|---------|
-| `text` | Message text |
+| Column   | Purpose                                                                                                        |
+| -------- | -------------------------------------------------------------------------------------------------------------- |
+| `text`   | Message text                                                                                                   |
 | `sender` | Username + name + user_id search blob; a channel or group that posts as itself: its title + username + chat_id |
-| `chat` | Chat title + username + chat_id search blob (groups and channels too) |
-| `files` | Media path (when available) |
+| `chat`   | Chat title + username + chat_id search blob (groups and channels too)                                          |
+| `files`  | Media path (when available)                                                                                    |
 
 ## Triggered Indexing
 
@@ -242,15 +242,15 @@ entries that stay as it goes.
 
 Measured with `bun run bench:storage` on 1M made-up messages, 0.11.1 against now:
 
-| | 0.11.1 | Now |
-|---|---:|---:|
-| One-off re-index of names: longest write | 997 ms | 32 ms (merges between its batches: 90 ms) |
-| One-off re-index of names: time, merges included | 28.3 s | 28.4 s |
-| Index after it | 106 MB, or 202 MB with batches of 250 | 104 MB, 2 segments |
-| Asking the index whether one message has a common word | 3.8 ms after the 202 MB re-index | 9.6 µs |
-| Cleaning up the index 0.11.1 left (202 MB, 14 segments) | none comes | 2.6 s in 33 batches, longest 110 ms: 104 MB, 1 segment, 8.8 µs |
-| Live messages, one per write | 4,676/s | 6,849/s, longest 17 ms |
-| History pages of 100 | 7,062 messages/s | 7,879 messages/s, plus 19.6 s of merges after them |
+|                                                         |                                0.11.1 |                                                            Now |
+| ------------------------------------------------------- | ------------------------------------: | -------------------------------------------------------------: |
+| One-off re-index of names: longest write                |                                997 ms |                      32 ms (merges between its batches: 90 ms) |
+| One-off re-index of names: time, merges included        |                                28.3 s |                                                         28.4 s |
+| Index after it                                          | 106 MB, or 202 MB with batches of 250 |                                             104 MB, 2 segments |
+| Asking the index whether one message has a common word  |      3.8 ms after the 202 MB re-index |                                                         9.6 µs |
+| Cleaning up the index 0.11.1 left (202 MB, 14 segments) |                            none comes | 2.6 s in 33 batches, longest 110 ms: 104 MB, 1 segment, 8.8 µs |
+| Live messages, one per write                            |                               4,676/s |                                         6,849/s, longest 17 ms |
+| History pages of 100                                    |                      7,062 messages/s |             7,879 messages/s, plus 19.6 s of merges after them |
 
 0.11.1's re-index left 106 MB in the benchmark's batches of 500 messages, because its merges
 happened to reach the old entries; with batches of 250, as the daemon cuts them at 50 ms, it
@@ -353,17 +353,17 @@ same order. For a page of P (`--limit` plus `--offset`) of N messages:
 On the merged index of a 1M made-up cache, going through a message costs a few µs, so the walk
 pays from a few percent of matches on. The same cache file, 0.11.1 against now:
 
-| `tg messages search`, 1M messages | 0.11.1 | Now |
-|---|---:|---:|
-| A word in 30% of messages | 7.2 ms | 3.0 ms |
-| A word in 7% | 85 ms | 6.7 ms |
-| A word in 4.4% | 54 ms | 9.2 ms |
-| A word in 30%, `--offset 200` | 278 ms | 6.4 ms |
-| A word in 30%, `--chat`, the biggest chat | 7.5 ms | 1.1 ms |
-| Worst case: a word in 7%, `--sender` with no recent messages | 64 ms | 72 ms |
-| Worst case: a word in 4.4%, `--sender` with no recent messages | 41 ms | 49 ms |
+| `tg messages search`, 1M messages                                 | 0.11.1 |    Now |
+| ----------------------------------------------------------------- | -----: | -----: |
+| A word in 30% of messages                                         | 7.2 ms | 3.0 ms |
+| A word in 7%                                                      |  85 ms | 6.7 ms |
+| A word in 4.4%                                                    |  54 ms | 9.2 ms |
+| A word in 30%, `--offset 200`                                     | 278 ms | 6.4 ms |
+| A word in 30%, `--chat`, the biggest chat                         | 7.5 ms | 1.1 ms |
+| Worst case: a word in 7%, `--sender` with no recent messages      |  64 ms |  72 ms |
+| Worst case: a word in 4.4%, `--sender` with no recent messages    |  41 ms |  49 ms |
 | A word in 30%, on the index 0.11.1 left after its re-index (#149) | 488 ms | 363 ms |
-| A word in 4.4%, the same | 74 ms | 82 ms |
+| A word in 4.4%, the same                                          |  74 ms |  82 ms |
 
 In the worst cases the walk finds no match and the query above runs after it: 1.1 to 1.2 times
 as long as 0.11.1, which sorted at once.
@@ -398,17 +398,17 @@ A query with FTS5 syntax goes to FTS5 as written. FTS5 syntax is any of `"`, `*`
 `NOT`, `NEAR` in capitals. Lowercase `and` is a plain word, and so are `C++` and `2^10`: a `+`
 or `^` inside a word is punctuation:
 
-| Query | Finds |
-|-------|-------|
-| `hello world` | messages with both words, anywhere |
-| `"hello world"` | the exact phrase |
-| `error OR timeout` | either word |
-| `hello NOT club` | `hello` without `club` in the text, sender or chat |
-| `sender:alice` | messages whose sender's username, name or ID contains `alice` |
-| `chat:team` | messages in chats whose title, username or ID contains `team` |
-| `hel*` | words that start with `hel` |
-| `квартир*` | every form of a word: `квартира`, `квартиру`, `квартирой` |
-| `^hello` | messages whose text starts with `hello` |
+| Query              | Finds                                                         |
+| ------------------ | ------------------------------------------------------------- |
+| `hello world`      | messages with both words, anywhere                            |
+| `"hello world"`    | the exact phrase                                              |
+| `error OR timeout` | either word                                                   |
+| `hello NOT club`   | `hello` without `club` in the text, sender or chat            |
+| `sender:alice`     | messages whose sender's username, name or ID contains `alice` |
+| `chat:team`        | messages in chats whose title, username or ID contains `team` |
+| `hel*`             | words that start with `hel`                                   |
+| `квартир*`         | every form of a word: `квартира`, `квартиру`, `квартирой`     |
+| `^hello`           | messages whose text starts with `hello`                       |
 
 FTS5 doesn't stem words, so a prefix (`word*`) is the way to find other forms of a word, in
 Russian especially. Matching ignores case, and diacritics in Latin letters (`cafe` finds
@@ -431,6 +431,7 @@ name), returns `INVALID_ARGS` (exit 3) with a suggestion: quote the words with p
 `me` is the account's own user ID, which tg saves at login; search reads it without a Telegram
 call. If the account doesn't know it yet, `me` is `INVALID_ARGS` (exit 3): run `tg me` once.
 Any other value that is neither an ID nor a username is `INVALID_ARGS`, never an empty result.
+
 - `--includeDeleted` (alias: `--include-deleted`)
 - `--phrase`: the whole query as one phrase
 - `--since`, `--until`: the date range, on the date a message was sent (see below)
@@ -442,11 +443,11 @@ Any other value that is neither an ID nor a username is `INVALID_ARGS`, never an
 
 `--since` keeps messages sent at or after its time, `--until` those sent before it. Each takes:
 
-| Value | Means |
-|-------|-------|
-| `30m`, `24h`, `7d`, `2w` | that long before now |
-| `2026-10-01` | local midnight that day; for `--until`, the midnight after it, so the day counts |
-| `2026-10-01T09:30` | local time; add `Z` or an offset (`2026-10-01T09:30+03:00`) for another zone |
+| Value                    | Means                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| `30m`, `24h`, `7d`, `2w` | that long before now                                                             |
+| `2026-10-01`             | local midnight that day; for `--until`, the midnight after it, so the day counts |
+| `2026-10-01T09:30`       | local time; add `Z` or an offset (`2026-10-01T09:30+03:00`) for another zone     |
 
 A value in another form, or `--since` that isn't earlier than `--until`, is `INVALID_ARGS`.
 
@@ -492,7 +493,11 @@ Markdown viewer shows the words in bold. A text with long words or no spaces (a 
 is cut to at most 300 characters around the match, never inside an emoji:
 
 ```json
-{ "messageId": 1200, "text": "…", "snippet": "…after the release the **deploy** failed twice, so we rolled back and…" }
+{
+  "messageId": 1200,
+  "text": "…",
+  "snippet": "…after the release the **deploy** failed twice, so we rolled back and…"
+}
 ```
 
 The words come from the query's free text: column filters other than `text` (`sender:`,

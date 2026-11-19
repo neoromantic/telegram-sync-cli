@@ -1,44 +1,31 @@
-/**
- * Every API call of the daemon's clients goes to the account's rate window
- * and api_activity (#127): sync pages, contacts checks, dialog passes, the
- * joined-communities check, getMe at start, reconnect and health checks,
- * and mtcute's own calls (updates.getDifference and the like). A network
- * middleware sees each request mtcute sends, whichever method made it.
- */
-import type { Database } from 'bun:sqlite'
-import type { RpcCallMiddleware } from '@mtcute/bun'
-import {
-  createRateLimitsService,
-  type RateLimitsService,
-} from '../db/rate-limits'
-import { getErrorMessage } from './daemon-utils'
+import type { Database } from "bun:sqlite";
+import type { RpcCallMiddleware } from "@mtcute/bun";
+import { createRateLimitsService, type RateLimitsService } from "../db/rate-limits";
+import { getErrorMessage } from "./daemon-utils";
 
 /** What a call's activity row goes into, or null to log nothing */
-export type ActivityTarget = () => Database | null
+export type ActivityTarget = () => Database | null;
 
 /** Told of each FLOOD_WAIT Telegram answers, with its seconds */
-export type FloodWaitListener = (method: string, seconds: number) => void
+export type FloodWaitListener = (method: string, seconds: number) => void;
 
 /** The seconds of a FLOOD_WAIT_<n> or FLOOD_PREMIUM_WAIT_<n>, else null */
-export function floodWaitSecondsOf(errorMessage: string): number | null {
-  const match = /^FLOOD_(?:PREMIUM_)?WAIT_(\d+)$/.exec(errorMessage)
-  return match ? Number(match[1]) : null
+export function floodWaitSecondsOf(errorMessage: string) {
+  const match = /^FLOOD_(?:PREMIUM_)?WAIT_(\d+)$/.exec(errorMessage);
+  return match ? Number(match[1]) : null;
 }
 
-/** An RPC error mtcute's network layer returns instead of throwing */
-function rpcErrorOf(
-  result: unknown,
-): { errorCode: number; errorMessage: string } | null {
+function rpcErrorOf(result: unknown) {
   const value = result as {
-    _?: unknown
-    errorCode?: unknown
-    errorMessage?: unknown
-  } | null
-  if (value?._ !== 'mt_rpc_error') return null
+    _?: unknown;
+    errorCode?: unknown;
+    errorMessage?: unknown;
+  } | null;
+  if (value?._ !== "mt_rpc_error") return null;
   return {
     errorCode: Number(value.errorCode),
     errorMessage: String(value.errorMessage),
-  }
+  };
 }
 
 /**
@@ -51,46 +38,39 @@ function rpcErrorOf(
  */
 export function apiActivityMiddleware(
   target: ActivityTarget,
-  context = 'daemon',
+  context = "daemon",
   onFloodWait?: FloodWaitListener,
-): RpcCallMiddleware {
-  const services = new WeakMap<Database, RateLimitsService>()
+) {
+  const services = new WeakMap<Database, RateLimitsService>();
   const serviceFor = (db: Database) => {
-    let service = services.get(db)
+    let service = services.get(db);
     if (!service) {
-      service = createRateLimitsService(db)
-      services.set(db, service)
+      service = createRateLimitsService(db);
+      services.set(db, service);
     }
-    return service
-  }
+    return service;
+  };
 
   const notifyFloodWait = (method: string, errorMessage: string) => {
-    const seconds = floodWaitSecondsOf(errorMessage)
-    if (seconds === null || !onFloodWait) return
+    const seconds = floodWaitSecondsOf(errorMessage);
+    if (seconds === null || !onFloodWait) return;
     try {
-      onFloodWait(method, seconds)
-    } catch {
-      // Pacing never fails the request
-    }
-  }
+      onFloodWait(method, seconds);
+    } catch {}
+  };
 
-  return async (ctx, next) => {
-    const db = target()
-    let rateLimits: RateLimitsService
+  const value: RpcCallMiddleware = async (ctx, next) => {
+    const db = target();
+    let rateLimits: RateLimitsService;
     try {
-      if (!db) return next(ctx)
-      rateLimits = serviceFor(db)
+      if (!db) return next(ctx);
+      rateLimits = serviceFor(db);
     } catch {
-      // A cache that can't be written to still lets the request through
-      return next(ctx)
+      return next(ctx);
     }
-    const method = ctx.request._
-    const start = rateLimits.now()
-    const log = (
-      success: number,
-      errorCode: number | null,
-      message: string | null,
-    ) => {
+    const method = ctx.request._;
+    const start = rateLimits.now();
+    const log = (success: number, errorCode: number | null, message: string | null) => {
       try {
         rateLimits.logActivity({
           timestamp: start,
@@ -99,30 +79,27 @@ export function apiActivityMiddleware(
           error_code: errorCode,
           response_ms: rateLimits.now() - start,
           context: message ?? context,
-        })
-      } catch {
-        // The request's outcome matters more than its log line
-      }
-    }
+        });
+      } catch {}
+    };
     try {
-      rateLimits.recordCall(method)
-    } catch {
-      // Same as above
-    }
+      rateLimits.recordCall(method);
+    } catch {}
 
     try {
-      const result = await next(ctx)
-      const error = rpcErrorOf(result)
+      const result = await next(ctx);
+      const error = rpcErrorOf(result);
       if (error) {
-        log(0, error.errorCode, error.errorMessage)
-        notifyFloodWait(method, error.errorMessage)
+        log(0, error.errorCode, error.errorMessage);
+        notifyFloodWait(method, error.errorMessage);
       } else {
-        log(1, null, null)
+        log(1, null, null);
       }
-      return result
+      return result;
     } catch (err) {
-      log(0, null, getErrorMessage(err))
-      throw err
+      log(0, null, getErrorMessage(err));
+      throw err;
     }
-  }
+  };
+  return value;
 }
