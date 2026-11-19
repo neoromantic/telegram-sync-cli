@@ -5,7 +5,7 @@ description: Read, search, count and send the user's Telegram messages with the 
 
 # tg
 
-`tg` answers from a local SQLite cache of the user's Telegram account, filled by a read-only daemon. `tg skill validate` (tg newer than 0.14.0) names the account record the next command uses and whether a daemon process is alive; it does not check that the session is authorized or online. While the daemon is stopped, the cache holds only what earlier commands fetched, so a miss means "not cached", not "doesn't exist".
+`tg` answers from a local SQLite cache of the user's Telegram account, filled by a read-only daemon. `tg skill validate` (tg 0.15.0 or later) names the account record the next command uses and whether a daemon process is alive; it does not check that the session is authorized or online. While the daemon is stopped, the cache holds only what earlier commands fetched, so a miss means "not cached", not "doesn't exist".
 
 ## Finding things
 
@@ -28,7 +28,8 @@ tg sql --query "SELECT message_id, datetime(date, 'unixepoch') AS sent, text FRO
 tg sql --query "SELECT low, high FROM history_ranges WHERE chat_id = -1003000000001 ORDER BY low"
 ```
 
-- A result covers only the cached messages. Report it as the whole chat's only when `history_ranges` has one row from 1 up to the chat's newest message; otherwise give the ranges it covers, or fill the gaps first: `tg chats sync <chat>`, then the daemon (`tg status` shows the progress). A large group or channel gets its full history only this way.
+- Report a result as covering the whole chat only when `history_ranges` has one row from 1 through the newest message. Otherwise give the cached ranges. To fetch more history, run `tg chats sync <chat>` and check `syncEnabled` before waiting for the daemon (`tg status` shows progress).
+- A group with `syncEnabled: false` and `syncReason` of `group_participation_unknown` or `group_participation_required` takes no new messages. Report the available ranges. Even after participation resumes, messages from recorded pauses stay outside the cache. Channels can backfill without participation.
 - A NULL `text` can be a rich message cached by tg 0.13.1 or older until `tg db migrate` runs; `tg messages get` already shows it.
 
 ```bash

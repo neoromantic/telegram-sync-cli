@@ -178,7 +178,7 @@ required and can't be empty: it is the agent's skills directory, such as `~/.cla
 Install replaces a `SKILL.md` already there, local edits included. The skills directory may be
 a symbolic link, but `telegram-sync-cli` and `SKILL.md` inside it may not: install refuses
 them (`GENERAL_ERROR`, `details.path`), so a reinstall never writes into another tree. Both
-commands, as described here, need tg newer than 0.14.0; 0.14.0 and older ignore `--dir` and
+commands, as described here, need tg 0.15.0 or later; 0.14.0 and older ignore `--dir` and
 write `skill.json` into the data directory.
 
 Every command in the skill's code blocks runs in `src/test/skill-examples.e2e.test.ts`, so
@@ -192,7 +192,8 @@ through a read-only connection and never changes:
 - `data_dir`: that the data directory is writable;
 - `account`, `accounts_total`: the account record the next command uses without `--account`,
   picked as every command picks it: `activeAccount` in `config.json`, else the active account,
-  else the only one;
+  else the only one. If the choice depends on merging legacy login records, validation returns
+  `account: null` and `valid: false`. Run `tg accounts list` to merge the records and retry;
 - `daemon`: whether a live process holds `daemon.pid`.
 
 The last two are local records. Neither says whether the account's session is still authorized

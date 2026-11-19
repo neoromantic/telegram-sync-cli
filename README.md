@@ -206,7 +206,7 @@ Known gaps are tracked in [issues](https://github.com/neoromantic/telegram-sync-
   `tg skill install --dir <skills dir>`, which replaces the file there. `tg skill validate`
   reports the credentials, the account record the next command uses and whether a live process
   holds `daemon.pid`; it doesn't check that the session is authorized or online. Both need tg
-  newer than 0.14.0 ([details](docs/api-design.md#agent-skill)).
+  0.15.0 or later ([details](docs/api-design.md#agent-skill)).
 - The daemon never sends or edits anything, so it is safe to leave running.
 - To wait for a reply, `tg messages wait --chat @username --after <last message ID>` returns
   the new messages as soon as the daemon stores them, or `{"messages": [], "timedOut": true}`

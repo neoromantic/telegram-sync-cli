@@ -64,14 +64,21 @@ function initSchema(db: Database) {
   migrateAndResolveDuplicates(db);
 }
 
+/** Telegram user ID stored in the phone field by older QR logins. */
+export function legacyPhoneUserId(phone: string) {
+  if (!phone.startsWith("user:")) return null;
+  const id = Number.parseInt(phone.slice(5), 10);
+  return Number.isNaN(id) ? null : id;
+}
+
 function migrateAndResolveDuplicates(db: Database) {
   const accountsWithUserPhone = db
     .query("SELECT id, phone FROM accounts WHERE phone LIKE 'user:%' AND user_id IS NULL")
     .all() as Array<{ id: number; phone: string }>;
 
   for (const acc of accountsWithUserPhone) {
-    const userId = parseInt(acc.phone.replace("user:", ""), 10);
-    if (!Number.isNaN(userId)) {
+    const userId = legacyPhoneUserId(acc.phone);
+    if (userId !== null) {
       const existing = db.query("SELECT id FROM accounts WHERE user_id = ?").get(userId) as {
         id: number;
       } | null;

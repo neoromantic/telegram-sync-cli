@@ -1,6 +1,5 @@
 import { Database } from "bun:sqlite";
-import { constants } from "node:fs";
-import { access, lstat, mkdir, open, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineCommand } from "citty";
@@ -215,7 +214,7 @@ function accountStatus(account: Account) {
 }
 
 async function readAccounts(config: ConfigFile | null) {
-  const { createAccountsDb, getDatabasePath } = await import("../db");
+  const { createAccountsDb, getDatabasePath, legacyPhoneUserId } = await import("../db");
   const path = getDatabasePath();
   const unreadable = (reason: string) => ({
     account: null,
@@ -254,6 +253,27 @@ async function readAccounts(config: ConfigFile | null) {
   }
   if (!config) return { account: null, accountsTotal: total, issues: [] };
   const selected = configured ?? found.account;
+  const candidates = selected ? [selected] : found.accounts;
+  const hasDuplicate = candidates.some((row) => {
+    if (row.user_id !== null) return false;
+    const userId = legacyPhoneUserId(row.phone);
+    return (
+      userId !== null &&
+      found.accounts.some(
+        (other) =>
+          other.id !== row.id && (other.user_id ?? legacyPhoneUserId(other.phone)) === userId,
+      )
+    );
+  });
+  if (hasDuplicate) {
+    return {
+      account: null,
+      accountsTotal: total,
+      issues: [
+        "Legacy account records overlap: run tg accounts list to resolve them, then run tg skill validate again",
+      ],
+    };
+  }
   return {
     account: selected ? accountStatus(selected) : null,
     accountsTotal: total,
@@ -269,7 +289,10 @@ async function readDaemon(dataDir: string) {
   const path = join(dataDir, "daemon.pid");
   let status: SkillDaemonStatus;
   try {
-    await access(path, constants.R_OK);
+    const { readLivePid } = await import("../daemon/pid-file");
+    const pid = readLivePid(path);
+    status = pid === null ? { status: "stopped", pid } : { status: "running", pid };
+    return status;
   } catch (err) {
     if (errorCode(err) === "ENOENT") {
       status = { status: "stopped", pid: null };
@@ -278,10 +301,6 @@ async function readDaemon(dataDir: string) {
     status = { status: "unknown", pid: null, error: getErrorMessage(err) };
     return status;
   }
-  const { createPidFile } = await import("../daemon/pid-file");
-  const pid = createPidFile(path).read();
-  status = pid === null ? { status: "stopped", pid } : { status: "running", pid };
-  return status;
 }
 
 export async function validateSkillEnvironment() {

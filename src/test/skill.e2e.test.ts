@@ -250,6 +250,42 @@ describe("E2E: Skill Commands", () => {
     ]);
   });
 
+  it("validate withholds a legacy duplicate until the next account lookup resolves it", async () => {
+    env = createTestEnvironment("skill-validate-legacy-config");
+    const db = env.initDatabase();
+    env.seedAccounts([
+      { phone: "+15550000001", user_id: 1001, is_active: true },
+      { phone: "+15550000002", user_id: 2002 },
+      { phone: "user:2002" },
+    ]);
+    await runCliSuccess(["config", "set", "activeAccount", "3"], env.getCliOptions());
+
+    const before = await validate();
+    expect(before).toMatchObject({ valid: false, account: null, accounts_total: 3 });
+    expect(before.issues[0]).toContain("tg accounts list");
+    expect(db.query("SELECT id FROM accounts WHERE id = 3").get()).toEqual({ id: 3 });
+
+    const info = await runCliSuccess(["accounts", "info"], env.getCliOptions());
+    expect(info.json).toMatchObject({ data: { account: { id: 1 } } });
+    expect(await validate()).toMatchObject({ valid: true, account: { id: 1 }, accounts_total: 2 });
+  });
+
+  it("validate reports an unreadable daemon.pid directory independently of the account", async () => {
+    env = createTestEnvironment("skill-validate-pid-directory");
+    env.initDatabase();
+    env.seedAccounts([{ phone: "+15550000001" }]);
+    mkdirSync(join(env.dataDir, "daemon.pid"));
+
+    const data = await validate();
+
+    expect(data).toMatchObject({
+      valid: true,
+      account: { id: 1 },
+      daemon: { status: "unknown", pid: null },
+    });
+    expect(data.daemon.error).toBeTruthy();
+  });
+
   it("validate reports a data.db that is not a file", async () => {
     env = createTestEnvironment("skill-validate-data-db-dir");
     const dbPath = join(env.dataDir, "data.db");
