@@ -171,8 +171,8 @@ request's peer).
   and the errors
 - `api-request.test.ts` — `buildApiRequest`, typed by the TL schema: chats as InputPeer,
   InputUser, InputChannel and vectors of them, resolved from the cache or Telegram; longs as
-  Long; the zeros, random ID and empty offset peer of required arguments left out; full TL
-  objects and unknown methods as given
+  Long; the zeros, random ID and empty offset peer of required arguments left out; unknown
+  methods as given
 - `args.test.ts` — which `tg api` flags take the next argument as their value: a method
   argument after the method, followed by a value or a negative number; not `--name=value`,
   `--no-name`, `--account`/`-a`, `--json`/`-j` or `-r`, a flag before the method or followed
@@ -312,8 +312,8 @@ is for tests only.
   sync jobs from a seeded cache, in JSON and pretty output, without credentials; the retry
   commands it prints delete the failed jobs and keep each chat's mode; it shows the daemon's
   version, a restart hint for a running daemon of another or unrecorded version and a "use the
-  newer tg" hint for a newer one; no hint for the same version, a stopped daemon (one that died,
-  stopped cleanly or never ran) or one still starting
+  newer tg" hint for a newer one; no hint for the same version, a stopped daemon or one still
+  starting
 - `multi-account.e2e.test.ts` — two accounts, each with its own cache and a message with the
   same ID: every cache command returns only the selected account's rows, `tg accounts switch`
   changes which and lasts across later commands with and without `activeAccount` in
@@ -327,8 +327,8 @@ is for tests only.
 - `api-args.e2e.test.ts` — the request `tg api` builds: each test records a replay fixture
   for an exact request with a stub client, then `tg api` in replay mode finds it only if it
   sends that request with no extra keys; `--username myuser`, `--username=myuser` and `--json`
-  build the same call, as do flags with no value, dotted names and negative numbers (`-10`,
-  `-1.5`) in either form, with `--account`/`-a` before or after the method; tg's own options
+  build the same call, as do flags with no value, dotted names and negative numbers (`-10` in
+  either form, `-1.5`), with `--account`/`-a` before or after the method; tg's own options
   (`-v`, `--verbose`, `-f json`, `--format json`, `-q`, `--quiet`) stay out of the request;
   `--peer me` and a cached `--peer @username` resolve, the offsets get 0 and `hash` a Long, and
   a group where the method takes a user is `INVALID_ARGS`

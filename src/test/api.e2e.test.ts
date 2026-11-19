@@ -53,16 +53,6 @@ describe("E2E: tg api closes the client and exits", () => {
     });
     expect(result.stderr).toContain(FAKE_CLIENT_DESTROYED);
   });
-
-  it("a failed call closes the client and exits with TELEGRAM_ERROR", async () => {
-    const result = await runApi(["help.getNothing", "--raw"]);
-
-    expect(result.exitCode).toBe(5);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain(FAKE_CLIENT_DESTROYED);
-    expect(result.stderr).toContain('"code": "TELEGRAM_ERROR"');
-    expect(result.stderr).toContain('"telegramErrorCode": 400');
-  });
 });
 
 describe("E2E: errors say whether a retry can work", () => {
@@ -115,10 +105,12 @@ describe("E2E: errors say whether a retry can work", () => {
     expect(wait).toBeLessThanOrEqual(FAKE_FLOOD_SECONDS);
   });
 
-  it("a refused call is not retryable", async () => {
-    const result = await run(["api", "help.getNothing"]);
+  it("a refused call closes the client, prints nothing with --raw and is not retryable", async () => {
+    const result = await run(["api", "help.getNothing", "--raw"]);
 
     expect(result.exitCode).toBe(5);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(FAKE_CLIENT_DESTROYED);
     expect(errorOf(result.stderr)).toEqual({
       code: "TELEGRAM_ERROR",
       message: "API call failed: METHOD_INVALID",

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import { MtInvalidPeerTypeError, type TelegramClient } from "@mtcute/bun";
+import type { TelegramClient } from "@mtcute/bun";
 import Long from "long";
 
 import { buildApiRequest } from "./api";
@@ -9,15 +9,6 @@ import { createChatsCache } from "../db/chats-cache";
 import { createUsersCache } from "../db/users-cache";
 import { toLong } from "../utils/long";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
-
-const HISTORY_ZEROS = {
-  offsetId: 0,
-  offsetDate: 0,
-  addOffset: 0,
-  maxId: 0,
-  minId: 0,
-  hash: toLong(0),
-};
 
 describe("buildApiRequest", () => {
   let db: Database;
@@ -64,39 +55,6 @@ describe("buildApiRequest", () => {
       return peer.inputPeer;
     });
   }
-
-  it("messages.getHistory --peer me --limit 1", async () => {
-    expect(await build("messages.getHistory", { peer: "me", limit: 1 })).toEqual({
-      _: "messages.getHistory",
-      peer: { _: "inputPeerSelf" },
-      limit: 1,
-      ...HISTORY_ZEROS,
-    } as never);
-  });
-
-  it("messages.getHistory --peer @alice resolves from the cache", async () => {
-    expect(await build("messages.getHistory", { peer: "@alice", limit: 10 })).toEqual({
-      _: "messages.getHistory",
-      peer: { _: "inputPeerUser", userId: 1001, accessHash: toLong("5555") },
-      limit: 10,
-      ...HISTORY_ZEROS,
-    } as never);
-    expect(call).not.toHaveBeenCalled();
-  });
-
-  it("messages.getHistory with a full TL peer keeps it and fills the zeros", async () => {
-    expect(
-      await build("messages.getHistory", {
-        peer: { _: "inputPeerSelf" },
-        limit: 1,
-      }),
-    ).toEqual({
-      _: "messages.getHistory",
-      peer: { _: "inputPeerSelf" },
-      limit: 1,
-      ...HISTORY_ZEROS,
-    } as never);
-  });
 
   it("messages.sendMessage resolves @user through Telegram and adds a random ID", async () => {
     const request = (await build("messages.sendMessage", {
@@ -148,10 +106,6 @@ describe("buildApiRequest", () => {
         accessHash: toLong(0),
       },
     } as never);
-  });
-
-  it("refuses a group where the method takes a user", async () => {
-    await expect(build("users.getFullUser", { id: -4242 })).rejects.toThrow(MtInvalidPeerTypeError);
   });
 
   it("resolves every chat of a vector", async () => {

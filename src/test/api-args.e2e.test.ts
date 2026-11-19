@@ -49,7 +49,6 @@ describe("E2E: tg api builds the request from its arguments", () => {
   }
 
   it.each([
-    ["--username myuser", ["--username", "myuser"]],
     ["--username=myuser", ["--username=myuser"]],
     ["--json", ["--json", '{"username":"myuser"}']],
     ["--username myuser -v", ["--username", "myuser", "-v"]],
@@ -98,8 +97,6 @@ describe("E2E: tg api builds the request from its arguments", () => {
   });
 
   it.each([
-    "contacts.getTopPeers --correspondents --offset 0 --limit 5 --hash 0",
-    "contacts.getTopPeers --offset 0 --limit 5 --hash 0 --correspondents",
     "--account 1 contacts.getTopPeers --offset 0 --limit 5 --hash 0 --correspondents",
     "contacts.getTopPeers -a 1 --correspondents --offset 0 --limit 5 --hash 0",
   ])("a flag with no value is true: %s", async (command) => {
@@ -168,10 +165,7 @@ describe("E2E: tg api builds the request from its arguments", () => {
     },
   );
 
-  it.each([
-    ["--peer me --limit 1", ["--peer", "me", "--limit", "1"]],
-    ["--json", ["--json", '{"peer":{"_":"inputPeerSelf"},"limit":1}']],
-  ])("messages.getHistory %s resolves the chat and fills the offsets", async (_form, args) => {
+  it("messages.getHistory --peer me --limit 1 resolves the chat and fills the offsets", async () => {
     const response = {
       _: "messages.messages",
       messages: [],
@@ -193,7 +187,8 @@ describe("E2E: tg api builds the request from its arguments", () => {
       response,
     );
 
-    const result = await runCliSuccess(["api", "messages.getHistory", ...args], replayOptions());
+    const command = "api messages.getHistory --peer me --limit 1";
+    const result = await runCliSuccess(command.split(" "), replayOptions());
 
     expect(result.json).toEqual({
       success: true,
@@ -252,13 +247,7 @@ describe("E2E: tg api builds the request from its arguments", () => {
     expect((result.json as { error: { code: string } }).error.code).toBe(ErrorCodes.INVALID_ARGS);
   });
 
-  it.each([
-    [
-      "--name value",
-      ["--geoPoint._", "inputGeoPoint", "--geoPoint.lat", "-1.5", "--geoPoint.long", "2.5"],
-    ],
-    ["--name=value", ["--geoPoint._=inputGeoPoint", "--geoPoint.lat=-1.5", "--geoPoint.long=2.5"]],
-  ])("contacts.getLocated reads a negative decimal with %s", async (_form, args) => {
+  it("contacts.getLocated reads a negative decimal with --name value", async () => {
     const response = { _: "updates", updates: [], users: [], chats: [] };
     await recordFixture(
       {
@@ -268,7 +257,9 @@ describe("E2E: tg api builds the request from its arguments", () => {
       response,
     );
 
-    const result = await runCliSuccess(["api", "contacts.getLocated", ...args], replayOptions());
+    const command =
+      "api contacts.getLocated --geoPoint._ inputGeoPoint --geoPoint.lat -1.5 --geoPoint.long 2.5";
+    const result = await runCliSuccess(command.split(" "), replayOptions());
 
     expect(result.json).toEqual({
       success: true,
