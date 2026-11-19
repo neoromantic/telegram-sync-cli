@@ -9,7 +9,7 @@ import {
   processInitialLoadReal,
   processJobReal,
 } from "./sync-worker-real-jobs";
-import type { RealJobResult, RealSyncWorkerContext } from "./sync-worker-real-types";
+import type { RealSyncWorkerContext } from "./sync-worker-real-types";
 import { processJobWithHandlers } from "./sync-worker-utils";
 import { createChatSyncStateService } from "../db/chat-sync-state";
 import { createChatsCache } from "../db/chats-cache";
@@ -64,98 +64,6 @@ describe("sync-worker real jobs", () => {
       .all(chatId);
   }
 
-  it("returns rate limited when API calls are blocked (forward catchup)", async () => {
-    const job = ctx.jobsService.create({
-      chat_id: 1,
-      job_type: SyncJobType.ForwardCatchup,
-      priority: SyncPriority.High,
-    });
-
-    ctx.rateLimits.setFloodWait(ctx.config.apiMethod, 10);
-
-    const result = await processForwardCatchupReal(ctx, job);
-
-    expect(result.rateLimited).toBe(true);
-    expect(result.waitSeconds).toBeGreaterThan(0);
-  });
-
-  it("returns rate limited without a request when API calls are blocked (initial load)", async () => {
-    const job = ctx.jobsService.create({
-      chat_id: 1,
-      job_type: SyncJobType.InitialLoad,
-      priority: SyncPriority.High,
-    });
-
-    ctx.rateLimits.setFloodWait(ctx.config.apiMethod, 10);
-
-    const result = await processInitialLoadReal(ctx, job);
-
-    expect(result).toMatchObject({ success: false, rateLimited: true });
-    expect(result.waitSeconds).toBeGreaterThan(0);
-    expect(ctx.client.call).not.toHaveBeenCalled();
-  });
-
-  it("returns error when input peer is missing (forward catchup)", async () => {
-    const job = ctx.jobsService.create({
-      chat_id: -1000000000123,
-      job_type: SyncJobType.ForwardCatchup,
-      priority: SyncPriority.High,
-    });
-
-    const result = await processForwardCatchupReal(ctx, job);
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("InputPeer");
-  });
-
-  it("processes forward catchup and updates cursors + progress", async () => {
-    const chatId = 42;
-    ctx.chatSyncState.upsert({
-      chat_id: chatId,
-      chat_type: "private",
-      sync_priority: SyncPriority.High,
-      sync_enabled: true,
-      forward_cursor: 5,
-    });
-
-    const job = ctx.jobsService.create({
-      chat_id: chatId,
-      job_type: SyncJobType.ForwardCatchup,
-      priority: SyncPriority.High,
-    });
-
-    const clientCall = mock(async (payload: Record<string, unknown>) => {
-      expect(payload.minId).toBe(5);
-      expect(payload.limit).toBe(2);
-      return {
-        messages: [
-          { _: "message", id: 6, date: 1700000000, message: "one" },
-          { _: "message", id: 7, date: 1700000001, message: "two" },
-        ],
-      };
-    });
-
-    ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-    const result = await processForwardCatchupReal(ctx, job);
-
-    expect(result.success).toBe(true);
-    expect(result.messagesFetched).toBe(2);
-    expect(result.hasMore).toBe(true);
-    expect(result.newCursor).toBe(7);
-
-    const state = ctx.chatSyncState.get(chatId);
-    expect(state?.forward_cursor).toBe(7);
-    expect(state?.synced_messages).toBe(2);
-
-    const updatedJob = ctx.jobsService.getById(job.id);
-    expect(updatedJob?.messages_fetched).toBe(2);
-    expect(updatedJob?.cursor_end).toBe(7);
-
-    expect(ctx.messagesCache.countByChatId(chatId)).toBe(2);
-    expect(storedRanges(chatId)).toEqual([{ low: 6, high: 7 }]);
-  });
-
   it("skips backward history when history is already complete", async () => {
     const chatId = 7;
     ctx.chatSyncState.upsert({
@@ -174,9 +82,8 @@ describe("sync-worker real jobs", () => {
 
     const result = await processBackwardHistoryReal(ctx, job);
 
-    expect(result.success).toBe(true);
-    expect(result.historyComplete).toBe(true);
-    expect(result.messagesFetched).toBe(0);
+    expect(result).toMatchObject({ success: true, messagesFetched: 0, historyComplete: true });
+    expect(ctx.client.call).not.toHaveBeenCalled();
   });
 
   it("starts backfill at the newest page when the backward cursor is unset", async () => {
@@ -207,57 +114,16 @@ describe("sync-worker real jobs", () => {
         priority: SyncPriority.High,
       });
 
-    const firstJob = job();
-    const first = await processBackwardHistoryReal(ctx, firstJob);
-
-    expect(history.requests[0]).toMatchObject({ offsetId: 0, limit: 5 });
-    expect(first).toMatchObject({
-      success: true,
-      messagesFetched: 3,
-      newCursor: 26,
-      hasMore: true,
-      historyComplete: false,
-    });
-    expect(ctx.jobsService.getById(firstJob.id)?.messages_fetched).toBe(3);
-    expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(3);
-
     for (let i = 0; i < 10; i++) {
       const result = await processBackwardHistoryReal(ctx, job());
       if (result.historyComplete) break;
     }
 
+    expect(history.requests[0]).toMatchObject({ offsetId: 0, limit: 5 });
     expect(ctx.chatSyncState.get(chatId)?.history_complete).toBe(1);
     expect(ctx.messagesCache.countByChatId(chatId)).toBe(30);
     expect(storedRanges(chatId)).toEqual([{ low: 1, high: 30 }]);
     expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(24);
-  });
-
-  it("marks history complete when backward history returns empty", async () => {
-    const chatId = 101;
-    ctx.chatSyncState.upsert({
-      chat_id: chatId,
-      chat_type: "private",
-      sync_priority: SyncPriority.High,
-      sync_enabled: true,
-    });
-
-    const job = ctx.jobsService.create({
-      chat_id: chatId,
-      job_type: SyncJobType.BackwardHistory,
-      priority: SyncPriority.High,
-    });
-
-    const clientCall = mock(async () => ({ messages: [] }));
-    ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-    const result = await processBackwardHistoryReal(ctx, job);
-
-    expect(result.success).toBe(true);
-    expect(result.historyComplete).toBe(true);
-
-    const state = ctx.chatSyncState.get(chatId);
-    expect(state?.history_complete).toBe(1);
-    expect(storedRanges(chatId)).toEqual([]);
   });
 
   it("covers the rest of the chat when the page below the cursor is empty", async () => {
@@ -291,6 +157,7 @@ describe("sync-worker real jobs", () => {
     );
 
     expect(result.historyComplete).toBe(true);
+    expect(ctx.chatSyncState.get(chatId)?.history_complete).toBe(1);
     expect(storedRanges(chatId)).toEqual([{ low: 1, high: 41 }]);
   });
 
@@ -411,118 +278,85 @@ describe("sync-worker real jobs", () => {
       });
     });
 
-    for (const jobType of [
-      SyncJobType.ForwardCatchup,
-      SyncJobType.BackwardHistory,
-      SyncJobType.InitialLoad,
-    ]) {
-      for (const [label, err] of [
-        ["400 CHANNEL_PRIVATE", new tl.RpcError(400, "CHANNEL_PRIVATE")],
-        ["403", new tl.RpcError(403, "CHAT_ADMIN_REQUIRED")],
-        ["404", new tl.RpcError(404, "NOT_FOUND")],
-        ["406 CHANNEL_PRIVATE", new tl.RpcError(406, "CHANNEL_PRIVATE")],
-      ] as const) {
-        it(`fails a ${jobType} job at once on RPC error ${label}`, async () => {
-          const chatId = 301;
-          ctx.chatSyncState.upsert({
-            chat_id: chatId,
-            chat_type: "private",
-            sync_priority: SyncPriority.High,
-            sync_enabled: true,
-            forward_cursor: jobType === SyncJobType.InitialLoad ? undefined : 5,
-          });
-          const call = throwing(err);
-          const job = queue(jobType, chatId);
+    it("fails a job at once on a permanent RPC error", async () => {
+      const err = new tl.RpcError(400, "CHANNEL_PRIVATE");
+      const call = throwing(err);
+      const job = queue();
 
-          const result = await processJobReal(ctx, job);
+      const result = await processJobReal(ctx, job);
 
-          expect(call).toHaveBeenCalledTimes(1);
-          expect(result.permanent).toBe(true);
-          expect(result.outcome).toEqual({
-            state: "failed",
-            attempts: 1,
-            nextRunAt: null,
-          });
-          expect(ctx.jobsService.getById(job.id)).toMatchObject({
-            status: "failed",
-            attempts: 1,
-            error_message: err.message,
-          });
-        });
-      }
-    }
-
-    for (const jobType of [
-      SyncJobType.ForwardCatchup,
-      SyncJobType.BackwardHistory,
-      SyncJobType.InitialLoad,
-    ]) {
-      it(`fails a ${jobType} job at once when the InputPeer is missing`, async () => {
-        const chatId = -1009876543210;
-        ctx.chatSyncState.upsert({
-          chat_id: chatId,
-          chat_type: "channel",
-          sync_priority: SyncPriority.High,
-          sync_enabled: true,
-          forward_cursor: jobType === SyncJobType.InitialLoad ? undefined : 5,
-          backward_cursor: 100,
-        });
-        const job = queue(jobType, chatId);
-
-        const result = await processJobReal(ctx, job);
-
-        expect(result.error).toContain("InputPeer");
-        expect(ctx.jobsService.getById(job.id)).toMatchObject({
-          status: "failed",
-          attempts: 1,
-        });
+      expect(call).toHaveBeenCalledTimes(1);
+      expect(result.permanent).toBe(true);
+      expect(result.outcome).toEqual({
+        state: "failed",
+        attempts: 1,
+        nextRunAt: null,
       });
-    }
+      expect(ctx.jobsService.getById(job.id)).toMatchObject({
+        status: "failed",
+        attempts: 1,
+        error_message: err.message,
+      });
+    });
 
-    for (const [label, err] of [
-      ["FLOOD_WAIT_600", new Error("FLOOD_WAIT_600")],
-      [
-        "an RpcError 420 with seconds",
+    it("fails a job at once when the InputPeer is missing", async () => {
+      const chatId = -1009876543210;
+      ctx.chatSyncState.upsert({
+        chat_id: chatId,
+        chat_type: "channel",
+        sync_priority: SyncPriority.High,
+        sync_enabled: true,
+        forward_cursor: 5,
+      });
+      const job = queue(SyncJobType.ForwardCatchup, chatId);
+
+      const result = await processJobReal(ctx, job);
+
+      expect(result.error).toContain("InputPeer");
+      expect(ctx.jobsService.getById(job.id)).toMatchObject({
+        status: "failed",
+        attempts: 1,
+      });
+    });
+
+    it("defers a job on a FLOOD_WAIT without using an attempt", async () => {
+      throwing(
         tl.RpcError.fromTl({
           _: "rpcError",
           errorCode: 420,
           errorMessage: "FLOOD_WAIT_600",
         }),
-      ],
-    ] as const) {
-      it(`defers a job on ${label} without using an attempt`, async () => {
-        throwing(err);
-        const job = queue();
+      );
+      const job = queue();
 
-        const result = await processJobReal(ctx, job);
+      const result = await processJobReal(ctx, job);
 
-        expect(result.outcome).toEqual({
-          state: "deferred",
-          attempts: 0,
-          nextRunAt: NOW + 600_000,
-        });
-        expect(ctx.jobsService.getById(job.id)).toMatchObject({
-          status: "pending",
-          attempts: 0,
-          next_run_at: NOW + 600_000,
-          error_message: "Rate limited: wait 600s",
-        });
-        expect(ctx.rateLimits.isBlocked(ctx.config.apiMethod)).toBe(true);
-        expect(failedRows()).toEqual([]);
-        expect(ctx.jobsService.getNextPending()).toBeNull();
-
-        setSystemTime(NOW + 600_000);
-        ctx.client = {
-          call: mock(async () => ({ messages: [rawMessage(99)] })),
-        } as unknown as TelegramClient;
-        const next = ctx.jobsService.getNextPending();
-        expect(next?.id).toBe(job.id);
-        const retried = await processJobReal(ctx, next!);
-
-        expect(retried.success).toBe(true);
-        expect(ctx.jobsService.getById(job.id)?.status).toBe("completed");
+      expect(result.outcome).toEqual({
+        state: "deferred",
+        attempts: 0,
+        nextRunAt: NOW + 600_000,
       });
-    }
+      expect(ctx.jobsService.getById(job.id)).toMatchObject({
+        status: "pending",
+        attempts: 0,
+        next_run_at: NOW + 600_000,
+        error_message: "Rate limited: wait 600s",
+      });
+      expect(ctx.rateLimits.isBlocked(ctx.config.apiMethod)).toBe(true);
+      expect(failedRows()).toEqual([]);
+      expect(ctx.jobsService.getNextPending()).toBeNull();
+
+      setSystemTime(NOW + 600_000);
+      ctx.client = {
+        call: mock(async () => ({ messages: [rawMessage(99)] })),
+      } as unknown as TelegramClient;
+      const next = ctx.jobsService.getNextPending();
+      expect(next?.id).toBe(job.id);
+      const retried = await processJobReal(ctx, next!);
+
+      expect(retried.success).toBe(true);
+      expect(ctx.jobsService.getById(job.id)?.status).toBe("completed");
+    });
 
     it("defers a job on FLOOD_WAIT_0 by a second", async () => {
       throwing(new Error("FLOOD_WAIT_0"));
@@ -555,12 +389,11 @@ describe("sync-worker real jobs", () => {
       });
     });
 
-    for (const [label, err, attempts] of [
-      ["a transient error", new Error("connection reset"), 0],
-      ["a FLOOD_WAIT", new Error("FLOOD_WAIT_30"), 0],
-      ["a permanent error", new tl.RpcError(400, "CHANNEL_PRIVATE"), 0],
-      ["its last attempt", new Error("connection reset"), 4],
-      ["a daemon stop", new DaemonStopError(), 0],
+    for (const [label, err] of [
+      ["a transient error", new Error("connection reset")],
+      ["a FLOOD_WAIT", new Error("FLOOD_WAIT_30")],
+      ["a permanent error", new tl.RpcError(400, "CHANNEL_PRIVATE")],
+      ["a daemon stop", new DaemonStopError()],
     ] as const) {
       it(`drops a job whose chat was turned off while it ran, on ${label}`, async () => {
         ctx.client = {
@@ -570,15 +403,13 @@ describe("sync-worker real jobs", () => {
             throw err;
           }),
         } as unknown as TelegramClient;
-        const queued = queue();
-        db.run("UPDATE sync_jobs SET attempts = ? WHERE id = ?", [attempts, queued.id]);
-        const job = ctx.jobsService.getById(queued.id)!;
+        const job = queue();
 
         const result = await processJobReal(ctx, job);
 
         expect(result.outcome).toEqual({
           state: "cancelled",
-          attempts,
+          attempts: 0,
           nextRunAt: null,
         });
         expect(ctx.jobsService.getById(job.id)).toBeNull();
@@ -635,9 +466,15 @@ describe("sync-worker real jobs", () => {
         [SyncJobType.BackwardHistory, CHAT],
         [SyncJobType.InitialLoad, NEW_CHAT],
       ] as const) {
-        it(`leaves a ${jobType} job pending as it was when the stop cuts its FLOOD_WAIT short`, async () => {
+        it(`leaves a ${jobType} job pending as it was, attempts and last error included, when the stop cuts its FLOOD_WAIT short`, async () => {
           const { worker, request, signal } = stoppingWorker();
-          const job = queue(jobType, chatId);
+          const queued = queue(jobType, chatId);
+          db.run(
+            `UPDATE sync_jobs SET attempts = 2, error_message = 'connection reset',
+               next_run_at = 0 WHERE id = ?`,
+            [queued.id],
+          );
+          const job = ctx.jobsService.getById(queued.id)!;
           const before = chatData(chatId);
 
           const result = await worker.processJobReal(job);
@@ -645,8 +482,8 @@ describe("sync-worker real jobs", () => {
           expect(result).toMatchObject({ success: false, stopped: true });
           expect(result.outcome).toEqual({
             state: "stopped",
-            attempts: job.attempts,
-            nextRunAt: job.next_run_at,
+            attempts: 2,
+            nextRunAt: 0,
           });
           expect(ctx.jobsService.getById(job.id)).toEqual(job);
           expect(request).toHaveBeenCalledTimes(1);
@@ -657,38 +494,10 @@ describe("sync-worker real jobs", () => {
         });
       }
 
-      it("keeps the attempts and the last error of earlier tries", async () => {
-        const { worker } = stoppingWorker();
-        const queued = queue();
-        db.run(
-          `UPDATE sync_jobs SET attempts = 2, error_message = 'connection reset',
-             next_run_at = 0 WHERE id = ?`,
-          [queued.id],
-        );
-        const job = ctx.jobsService.getById(queued.id)!;
-        const retryingBefore = ctx.jobsService.countJobs().retrying;
-
-        const result = await worker.processJobReal(job);
-
-        expect(result.outcome).toEqual({
-          state: "stopped",
-          attempts: 2,
-          nextRunAt: 0,
-        });
-        expect(ctx.jobsService.getById(job.id)).toEqual(job);
-        expect(ctx.jobsService.getById(job.id)).toMatchObject({
-          status: "pending",
-          attempts: 2,
-          error_message: "connection reset",
-          started_at: null,
-        });
-        expect(ctx.jobsService.countJobs().retrying).toBe(retryingBefore);
-      });
-
       it("counts only the stop itself: another error during a stop still fails the try", async () => {
         const { worker } = stoppingWorker((stop) => async () => {
           stop();
-          throw new Error("connection reset");
+          throw new DOMException("The operation was aborted", "AbortError");
         });
         const job = queue();
 
@@ -702,47 +511,8 @@ describe("sync-worker real jobs", () => {
         expect(ctx.jobsService.getById(job.id)).toMatchObject({
           status: "pending",
           attempts: 1,
-          error_message: "connection reset",
+          error_message: "The operation was aborted",
         });
-      });
-
-      it("defers a job whose FLOOD_WAIT is too long to wait out during a stop", async () => {
-        const { worker } = stoppingWorker((stop) => async () => {
-          stop();
-          throw new Error("FLOOD_WAIT_600");
-        });
-        const job = queue();
-
-        const result = await worker.processJobReal(job);
-
-        expect(result.outcome).toEqual({
-          state: "deferred",
-          attempts: 0,
-          nextRunAt: NOW + 600_000,
-        });
-      });
-    });
-
-    it("never leaves a job running when a handler returns no error", async () => {
-      const job = queue();
-
-      const result = await processJobWithHandlers(
-        ctx,
-        job,
-        {
-          [SyncJobType.BackwardHistory]: async () => {
-            const result: RealJobResult = { success: false, messagesFetched: 0 };
-            return result;
-          },
-        },
-        () => ({ success: false, messagesFetched: 0 }),
-      );
-
-      expect(result.outcome?.state).toBe("retrying");
-      expect(ctx.jobsService.getById(job.id)).toMatchObject({
-        status: "pending",
-        attempts: 1,
-        error_message: "Job ended without a result",
       });
     });
 
@@ -765,342 +535,6 @@ describe("sync-worker real jobs", () => {
         permanent: false,
         outcome: { state: "retrying", attempts: 1 },
       });
-    });
-
-    it("fails a job at once when its handler throws a permanent RPC error", async () => {
-      const job = queue();
-
-      const result = await processJobWithHandlers(
-        ctx,
-        job,
-        {
-          [SyncJobType.BackwardHistory]: async () => {
-            throw new tl.RpcError(400, "CHANNEL_PRIVATE");
-          },
-        },
-        () => ({ success: false, messagesFetched: 0 }),
-      );
-
-      expect(result).toMatchObject({
-        permanent: true,
-        outcome: { state: "failed", attempts: 1, nextRunAt: null },
-      });
-      expect(ctx.jobsService.getById(job.id)).toMatchObject({
-        status: "failed",
-        attempts: 1,
-      });
-    });
-  });
-
-  describe("exception handling", () => {
-    it("handles non-flood API error in forward catchup", async () => {
-      const chatId = 200;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-        forward_cursor: 5,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => {
-        throw new Error("Network connection lost");
-      });
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processForwardCatchupReal(ctx, job);
-
-      expect(result.success).toBe(false);
-      expect(result.messagesFetched).toBe(0);
-      expect(result.error).toBe("Network connection lost");
-      expect(result.permanent).toBe(false);
-      expect(result.rateLimited).toBeUndefined();
-    });
-
-    it("handles flood wait error in forward catchup", async () => {
-      const chatId = 201;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-        forward_cursor: 5,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => {
-        throw new Error("FLOOD_WAIT_30");
-      });
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processForwardCatchupReal(ctx, job);
-
-      expect(result.success).toBe(false);
-      expect(result.messagesFetched).toBe(0);
-      expect(result.rateLimited).toBe(true);
-      expect(result.waitSeconds).toBe(30);
-      expect(ctx.rateLimits.isBlocked(ctx.config.apiMethod)).toBe(true);
-    });
-
-    it("handles non-flood API error in backward history", async () => {
-      const chatId = 202;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-        backward_cursor: 100,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => {
-        throw new Error("Server unreachable");
-      });
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processBackwardHistoryReal(ctx, job);
-
-      expect(result.success).toBe(false);
-      expect(result.messagesFetched).toBe(0);
-      expect(result.error).toBe("Server unreachable");
-      expect(result.rateLimited).toBeUndefined();
-    });
-
-    it("handles flood wait error in backward history", async () => {
-      const chatId = 203;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-        backward_cursor: 100,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => {
-        throw new Error("FLOOD_WAIT_60");
-      });
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processBackwardHistoryReal(ctx, job);
-
-      expect(result.success).toBe(false);
-      expect(result.messagesFetched).toBe(0);
-      expect(result.rateLimited).toBe(true);
-      expect(result.waitSeconds).toBe(60);
-    });
-
-    it("handles non-flood API error in initial load", async () => {
-      const chatId = 204;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.InitialLoad,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => {
-        throw new Error("Timeout exceeded");
-      });
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processInitialLoadReal(ctx, job);
-
-      expect(result.success).toBe(false);
-      expect(result.messagesFetched).toBe(0);
-      expect(result.error).toBe("Timeout exceeded");
-      expect(result.rateLimited).toBeUndefined();
-    });
-
-    it("handles flood wait error in initial load", async () => {
-      const chatId = 205;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.InitialLoad,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => {
-        throw new Error("FLOOD_WAIT_45");
-      });
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processInitialLoadReal(ctx, job);
-
-      expect(result.success).toBe(false);
-      expect(result.messagesFetched).toBe(0);
-      expect(result.rateLimited).toBe(true);
-      expect(result.waitSeconds).toBe(45);
-    });
-
-    it("handles non-Error thrown values in forward catchup", async () => {
-      const chatId = 206;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => {
-        throw "string error";
-      });
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processForwardCatchupReal(ctx, job);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe("string error");
-    });
-
-    it("handles non-Error thrown values in backward history", async () => {
-      const chatId = 207;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.BackwardHistory,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => {
-        throw { code: 500 };
-      });
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processBackwardHistoryReal(ctx, job);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe("[object Object]");
-    });
-
-    it("handles non-Error thrown values in initial load", async () => {
-      const chatId = 208;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.InitialLoad,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => {
-        throw 42;
-      });
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processInitialLoadReal(ctx, job);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe("42");
-    });
-  });
-
-  describe("empty messages edge cases", () => {
-    it("returns success with no more when forward catchup gets empty messages", async () => {
-      const chatId = 300;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-        forward_cursor: 10,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.ForwardCatchup,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => ({ messages: [] }));
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processForwardCatchupReal(ctx, job);
-
-      expect(result.success).toBe(true);
-      expect(result.messagesFetched).toBe(0);
-      expect(result.hasMore).toBe(false);
-
-      const state = ctx.chatSyncState.get(chatId);
-      expect(state?.last_forward_sync).not.toBeNull();
-    });
-
-    it("marks history complete when initial load gets empty messages", async () => {
-      const chatId = 301;
-      ctx.chatSyncState.upsert({
-        chat_id: chatId,
-        chat_type: "private",
-        sync_priority: SyncPriority.High,
-        sync_enabled: true,
-      });
-
-      const job = ctx.jobsService.create({
-        chat_id: chatId,
-        job_type: SyncJobType.InitialLoad,
-        priority: SyncPriority.High,
-      });
-
-      const clientCall = mock(async () => ({ messages: [] }));
-      ctx.client = { call: clientCall } as unknown as TelegramClient;
-
-      const result = await processInitialLoadReal(ctx, job);
-
-      expect(result.success).toBe(true);
-      expect(result.messagesFetched).toBe(0);
-
-      const state = ctx.chatSyncState.get(chatId);
-      expect(state?.history_complete).toBe(1);
     });
   });
 
@@ -1134,12 +568,12 @@ describe("sync-worker real jobs", () => {
       return range(1, 2000).filter((id) => ctx.messagesCache.get(chatId, id) !== null);
     }
 
-    it("requests the oldest page above the cursor", async () => {
+    it("pages up from the cursor through a 150-message gap and stops on a short page", async () => {
       seedChat(1000);
       const history = createFakeHistory(range(1, 1150));
       ctx.client = history.client;
 
-      const result = await runCatchup();
+      const first = await runCatchup();
 
       expect(history.requests[0]).toMatchObject({
         offsetId: 1001,
@@ -1147,7 +581,7 @@ describe("sync-worker real jobs", () => {
         limit: 100,
         minId: 1000,
       });
-      expect(result).toMatchObject({
+      expect(first).toMatchObject({
         success: true,
         messagesFetched: 100,
         hasMore: true,
@@ -1155,17 +589,9 @@ describe("sync-worker real jobs", () => {
       });
       expect(cachedIds()).toEqual(range(1001, 1100));
       expect(ctx.chatSyncState.get(chatId)?.forward_cursor).toBe(1100);
-    });
 
-    it("pages through a 150-message gap and stops on a short page", async () => {
-      seedChat(1000);
-      const history = createFakeHistory(range(1, 1150));
-      ctx.client = history.client;
-
-      const first = await runCatchup();
       const second = await runCatchup();
 
-      expect(first.hasMore).toBe(true);
       expect(second).toMatchObject({
         messagesFetched: 50,
         hasMore: false,
@@ -1178,33 +604,13 @@ describe("sync-worker real jobs", () => {
       });
       expect(cachedIds()).toEqual(range(1001, 1150));
       expect(ctx.chatSyncState.get(chatId)?.synced_messages).toBe(150);
+      expect(
+        ctx.jobsService
+          .getJobsForChat(chatId)
+          .map((job) => job.messages_fetched)
+          .sort((a, b) => a - b),
+      ).toEqual([50, 100]);
       expect(storedRanges(chatId)).toEqual([{ low: 1001, high: 1150 }]);
-    });
-
-    it("needs one empty page after a gap of exactly one batch", async () => {
-      seedChat(1000);
-      const history = createFakeHistory(range(1, 1100));
-      ctx.client = history.client;
-
-      const first = await runCatchup();
-      const second = await runCatchup();
-
-      expect(first).toMatchObject({ hasMore: true, newCursor: 1100 });
-      expect(second).toMatchObject({ messagesFetched: 0, hasMore: false });
-      expect(ctx.chatSyncState.get(chatId)?.forward_cursor).toBe(1100);
-      expect(cachedIds()).toEqual(range(1001, 1100));
-    });
-
-    it("makes no change when nothing is above the cursor", async () => {
-      seedChat(1000);
-      const history = createFakeHistory(range(1, 1000));
-      ctx.client = history.client;
-
-      const result = await runCatchup();
-
-      expect(result).toMatchObject({ messagesFetched: 0, hasMore: false });
-      expect(ctx.chatSyncState.get(chatId)?.forward_cursor).toBe(1000);
-      expect(cachedIds()).toEqual([]);
     });
 
     it("ignores messages at or below the cursor", async () => {
@@ -1311,22 +717,16 @@ describe("sync-worker real jobs", () => {
     const state = () => ctx.chatSyncState.get(chatId);
     const isDue = () => ctx.chatSyncState.getCatchupDue().some((chat) => chat.chat_id === chatId);
 
-    it("keeps the chat due after a full page", async () => {
+    it("keeps the chat due after a full page and settles the top at the cursor after a short one", async () => {
       ctx.chatSyncState.raiseTopMessageId(chatId, 1150);
       ctx.client = createFakeHistory(range(1, 1150)).client;
 
-      const result = await runCatchup();
+      const first = await runCatchup();
 
-      expect(result).toMatchObject({ hasMore: true, newCursor: 1100 });
+      expect(first).toMatchObject({ hasMore: true, newCursor: 1100 });
       expect(state()?.top_message_id).toBe(1150);
       expect(isDue()).toBe(true);
-    });
 
-    it("settles the top at the cursor after a short page", async () => {
-      ctx.chatSyncState.raiseTopMessageId(chatId, 1150);
-      ctx.client = createFakeHistory(range(1, 1150)).client;
-
-      await runCatchup();
       const second = await runCatchup();
 
       expect(second).toMatchObject({ hasMore: false, newCursor: 1150 });

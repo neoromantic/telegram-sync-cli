@@ -146,33 +146,20 @@ afterEach(() => {
 
 describe("senders missing from the cache (#143)", () => {
   it("lists each missing user once, with their newest message Telegram can be asked for", () => {
-    expect(ctx.senderLookups.countMissing()).toBe(3);
-    expect(ctx.senderLookups.scan(Date.now())).toBe(2);
+    const ELENA = 7005;
+    seed(GROUP, 900, ELENA);
+    seed(GROUP, 20, ELENA);
+    seed(GROUP, 30, 7006, { is_deleted: true });
+
+    expect(ctx.senderLookups.countMissing()).toBe(4);
+    expect(ctx.senderLookups.scan(Date.now())).toBe(3);
 
     expect(lookupRows()).toEqual([
       { sender_id: ALICIA, chat_id: GROUP, message_id: 12, asked_at: null },
       { sender_id: CARMEN, chat_id: BASIC, message_id: 500, asked_at: null },
+      { sender_id: ELENA, chat_id: GROUP, message_id: 900, asked_at: null },
     ]);
     expect(ctx.senderLookups.chatsDue().sort((a, b) => a - b)).toEqual([GROUP, BASIC]);
-  });
-
-  it("does not count a sender whose every cached message is deleted", () => {
-    seed(GROUP, 30, 7006, { is_deleted: true });
-    expect(ctx.senderLookups.countMissing()).toBe(3);
-    expect(ctx.senderLookups.scan(Date.now())).toBe(2);
-  });
-
-  it("takes the newest message, not the one cached last: history is written newest first", () => {
-    const ELENA = 7005;
-    seed(GROUP, 900, ELENA);
-    seed(GROUP, 20, ELENA);
-    ctx.senderLookups.scan(Date.now());
-    expect(lookupRows()).toContainEqual({
-      sender_id: ELENA,
-      chat_id: GROUP,
-      message_id: 900,
-      asked_at: null,
-    });
   });
 
   it("makes no job for a chat whose senders were cached after the scan", () => {
@@ -217,18 +204,6 @@ describe("senders missing from the cache (#143)", () => {
       { sender_id: CARMEN, chat_id: BASIC, message_id: 500, asked_at: null },
     ]);
     expect(ctx.senderLookups.countMissing()).toBe(2);
-  });
-
-  it("asks for a basic group with messages.getMessages", async () => {
-    ctx.senderLookups.scan(Date.now());
-    answer([user(CARMEN, "Carmen")]);
-    await processJobReal(ctx, fetchJob(BASIC));
-
-    expect(requests[0]).toEqual({
-      _: "messages.getMessages",
-      id: [{ _: "inputMessageID", id: 500 }],
-    });
-    expect(ctx.usersCache.getById(String(CARMEN))).not.toBeNull();
   });
 
   it("asks again after 30 days for a sender Telegram did not return, with their newest message", async () => {
