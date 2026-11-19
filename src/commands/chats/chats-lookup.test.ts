@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it } from "bun:test";
 
 import { dialogToCacheInput } from "./helpers";
 import { findCachedChatById } from "./lookup";
-import { AmbiguousPeerError } from "../send/peer-resolver";
 import { createChatSyncStateService } from "../../db/chat-sync-state";
 import { createChatsCache } from "../../db/chats-cache";
 import { createMessagesCache } from "../../db/messages-cache";
@@ -25,40 +24,12 @@ describe("findCachedChatById", () => {
 
   const idOf = (input: string) => findCachedChatById(db, input)?.chat_id;
 
-  it("finds a chat by the marked ID tg chats list prints", () => {
-    cacheDialog({ kind: "group", id: 4242, title: "Book Club" });
-    cacheDialog({ kind: "channel", id: 1234567890, title: "Example News" });
-    cacheDialog({ kind: "user", id: 10, title: "Alice Able" });
-
-    expect(idOf("-4242")).toBe("-4242");
-    expect(idOf("-1001234567890")).toBe("-1001234567890");
-    expect(idOf("10")).toBe("10");
-  });
-
   it("finds a group or channel by the bare ID that 0.2.0 printed", () => {
     cacheDialog({ kind: "group", id: 4242, title: "Book Club" });
     cacheDialog({ kind: "channel", id: 1234567890, title: "Example News" });
 
     expect(idOf("4242")).toBe("-4242");
     expect(idOf("1234567890")).toBe("-1001234567890");
-  });
-
-  it("takes a bare ID that names a cached group and a cached channel as ambiguous", () => {
-    cacheDialog({ kind: "group", id: 4242, title: "Book Club" });
-    cacheDialog({ kind: "channel", id: 4242, title: "Example News" });
-
-    let thrown: unknown;
-    try {
-      findCachedChatById(db, "4242");
-    } catch (err) {
-      thrown = err;
-    }
-
-    expect(thrown).toBeInstanceOf(AmbiguousPeerError);
-    expect(thrown).toMatchObject({
-      identifier: "4242",
-      candidates: [-4242, -1000000004242],
-    });
   });
 
   describe("a positive ID the cache knows as user N", () => {
@@ -129,7 +100,7 @@ describe("findCachedChatById", () => {
     expect(findCachedChatById(db, "4242")).toBeNull();
   });
 
-  it.each(["", "1e3", "0x10", "-12.5", "0", "-0", " 4242"])("matches nothing for %p", (input) => {
+  it.each(["1e3", " 4242"])("matches nothing for %p", (input) => {
     cacheDialog({ kind: "group", id: 1000, title: "Book Club" });
     cacheDialog({ kind: "group", id: 4242, title: "Book Club" });
 

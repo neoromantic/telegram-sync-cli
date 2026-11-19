@@ -277,8 +277,8 @@ is for tests only.
   `config.json` and `tg skill` runs with one after any format flag (`-q`, `-f <format>`), as
   `tg daemon start` does with and without its `--quiet`; an unreadable one fails other commands
   with `GENERAL_ERROR` (empty stderr under `-q`)
-- `user.e2e.test.ts` — `me`, `user` lookups
-- `commands.e2e.test.ts` — command coverage smoke tests
+- `commands.e2e.test.ts` — `tg contacts list`, `search` and `get` and `tg chats search` and `get`
+  on a seeded cache, without credentials; an empty cache asks Telegram
 - `daemon.e2e.test.ts` — daemon start/stop/status
 - `sql.e2e.test.ts` — `tg sql` queries through the real argument parser
 - `messages.e2e.test.ts` — `tg messages search`, `list` and `get` on a seeded cache, without

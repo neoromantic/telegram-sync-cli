@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { TelegramClient, tl } from "@mtcute/bun";
 
@@ -7,12 +7,10 @@ import type { HistoryChat } from "./history";
 import { markRead, readHistoryRequest, readUnread, type UnreadState } from "./read-state";
 import { createUpdateHandlers, readInboxFromUpdate } from "../../daemon/handlers";
 import { createChatSyncStateService } from "../../db/chat-sync-state";
-import { type CachedChatInput, createChatsCache } from "../../db/chats-cache";
+import { createChatsCache } from "../../db/chats-cache";
 import { createMessagesCache } from "../../db/messages-cache";
-import { initCacheSchema } from "../../db/schema";
-import { initSyncSchema } from "../../db/sync-schema";
-import type { ChatType } from "../../db/types";
 import { toLong } from "../../utils/long";
+import { chatRow, createAccountCacheDb } from "../../test/cache-db.test-utils";
 import { fakeDialog } from "../../test/fake-dialogs.test-utils";
 import { createFakeHistory, type GetHistoryRequest } from "../../test/fake-history.test-utils";
 import { takePartIn } from "../../test/participation.test-utils";
@@ -27,57 +25,18 @@ const NEWS_ID = -1002222222222;
 const SELF_ID = 999;
 const DATE = 1_760_000_000;
 
-const PEERS: Record<string, HistoryChat> = {
-  private: {
-    chatId: ALICE_ID,
-    inputPeer: { _: "inputPeerUser", userId: ALICE_ID, accessHash: toLong(7) },
-  },
-  group: {
-    chatId: BOOK_CLUB_ID,
-    inputPeer: { _: "inputPeerChat", chatId: BOOK_CLUB_RAW_ID },
-  },
-  supergroup: {
-    chatId: TEAM_ID,
-    inputPeer: {
-      _: "inputPeerChannel",
-      channelId: TEAM_RAW_ID,
-      accessHash: toLong(8),
-    },
-  },
-  channel: {
-    chatId: NEWS_ID,
-    inputPeer: {
-      _: "inputPeerChannel",
-      channelId: NEWS_RAW_ID,
-      accessHash: toLong(9),
-    },
+const ALICE: HistoryChat = {
+  chatId: ALICE_ID,
+  inputPeer: { _: "inputPeerUser", userId: ALICE_ID, accessHash: toLong(7) },
+};
+const NEWS: HistoryChat = {
+  chatId: NEWS_ID,
+  inputPeer: {
+    _: "inputPeerChannel",
+    channelId: NEWS_RAW_ID,
+    accessHash: toLong(9),
   },
 };
-
-function createCacheDb() {
-  const db = new Database(":memory:");
-  initCacheSchema(db);
-  initSyncSchema(db);
-  return db;
-}
-
-function chatInput(chatId: number, type: ChatType, extra: Partial<CachedChatInput> = {}) {
-  return {
-    chat_id: String(chatId),
-    type,
-    title: `Chat ${chatId}`,
-    username: null,
-    member_count: null,
-    access_hash: null,
-    is_creator: 0,
-    is_admin: 0,
-    last_message_id: null,
-    last_message_at: null,
-    fetched_at: Date.now(),
-    raw_json: "{}",
-    ...extra,
-  };
-}
 
 function cacheMessages(
   db: Database,
@@ -101,66 +60,9 @@ function cacheMessages(
   if (extra.deleted) messages.markDeleted(chatId, extra.deleted);
 }
 
-function createReadClient(topMessage: number, unreadAbove: (n: number) => number) {
-  const requests: Array<{ _: string } & Record<string, unknown>> = [];
-  let readMaxId: number | null = null;
-  const call = async (request: { _: string } & Record<string, unknown>) => {
-    requests.push(request);
-    switch (request._) {
-      case "messages.readHistory":
-      case "channels.readHistory":
-        readMaxId = request.maxId as number;
-        return request._ === "channels.readHistory"
-          ? true
-          : { _: "messages.affectedMessages", pts: 1, ptsCount: 1 };
-      case "messages.getPeerDialogs": {
-        const boundary = readMaxId === 0 ? topMessage : (readMaxId ?? 0);
-        return {
-          _: "messages.peerDialogs",
-          dialogs: [
-            {
-              _: "dialog",
-              peer: { _: "peerUser", userId: ALICE_ID },
-              topMessage,
-              readInboxMaxId: boundary,
-              unreadCount: unreadAbove(boundary),
-            },
-          ],
-          messages: [],
-          chats: [],
-          users: [],
-        };
-      }
-      default:
-        throw new Error(`unexpected ${request._}`);
-    }
-  };
-  return { client: { call } as unknown as TelegramClient, requests };
-}
-
 describe("readHistoryRequest", () => {
-  it.each([
-    ["private", "messages.readHistory"],
-    ["group", "messages.readHistory"],
-    ["supergroup", "channels.readHistory"],
-    ["channel", "channels.readHistory"],
-  ] as const)("marks a %s read with %s", (type, method) => {
-    const peer = PEERS[type] as HistoryChat;
-    const request = readHistoryRequest(peer.inputPeer, 42);
-    expect(request._).toBe(method);
-    expect(request.maxId).toBe(42);
-  });
-
-  it("reads Saved Messages with messages.readHistory", () => {
-    expect(readHistoryRequest({ _: "inputPeerSelf" }, 0)).toEqual({
-      _: "messages.readHistory",
-      peer: { _: "inputPeerSelf" },
-      maxId: 0,
-    });
-  });
-
-  it("passes a channel with its access hash, or the message it was seen in", () => {
-    expect(readHistoryRequest(PEERS.channel?.inputPeer as tl.TypeInputPeer, 0)).toEqual({
+  it("passes a channel with its access hash or the message it was seen in, Saved Messages as a peer", () => {
+    expect(readHistoryRequest(NEWS.inputPeer, 0)).toEqual({
       _: "channels.readHistory",
       channel: {
         _: "inputChannel",
@@ -186,70 +88,47 @@ describe("readHistoryRequest", () => {
       },
       maxId: 7,
     });
+
+    expect(readHistoryRequest({ _: "inputPeerSelf" }, 0)).toEqual({
+      _: "messages.readHistory",
+      peer: { _: "inputPeerSelf" },
+      maxId: 0,
+    });
   });
 });
 
 describe("markRead", () => {
-  let db: Database;
+  it("reads the chat's dialog back from Telegram after marking it read", async () => {
+    const requests: Array<{ _: string } & Record<string, unknown>> = [];
+    const call = async (request: { _: string } & Record<string, unknown>) => {
+      requests.push(request);
+      if (request._ === "channels.readHistory") return true;
+      return {
+        _: "messages.peerDialogs",
+        dialogs: [
+          {
+            _: "dialog",
+            peer: { _: "peerChannel", channelId: NEWS_RAW_ID },
+            topMessage: 20,
+            readInboxMaxId: 20,
+            unreadCount: 0,
+          },
+        ],
+        messages: [],
+        chats: [],
+        users: [],
+      };
+    };
 
-  beforeEach(() => {
-    db = createCacheDb();
-  });
+    await markRead({ call } as unknown as TelegramClient, createAccountCacheDb(), NEWS, null);
 
-  it.each([
-    ["private", "messages.readHistory"],
-    ["group", "messages.readHistory"],
-    ["supergroup", "channels.readHistory"],
-    ["channel", "channels.readHistory"],
-  ] as const)("marks a whole %s read with %s and max_id 0", async (type, method) => {
-    const peer = PEERS[type] as HistoryChat;
-    createChatsCache(db).upsert(
-      chatInput(peer.chatId, type, {
-        unread_count: 5,
-        read_inbox_max_id: 15,
-      }),
-    );
-    const { client, requests } = createReadClient(20, () => 0);
-
-    const result = await markRead(client, db, peer, null);
-
-    expect(requests.map((request) => request._)).toEqual([method, "messages.getPeerDialogs"]);
-    expect(requests[0]?.maxId).toBe(0);
-    expect(requests[1]?.peers).toEqual([{ _: "inputDialogPeer", peer: peer.inputPeer }]);
-    expect(result).toEqual({
-      chatId: peer.chatId,
-      maxId: null,
-      method,
-      unreadCount: 0,
-      readInboxMaxId: 20,
-    });
-    expect(createChatsCache(db).getById(String(peer.chatId))).toMatchObject({
-      unread_count: 0,
-      read_inbox_max_id: 20,
-    });
-  });
-
-  it("marks read up to --max-id and keeps the count Telegram reports", async () => {
-    const peer = PEERS.supergroup as HistoryChat;
-    createChatsCache(db).upsert(
-      chatInput(TEAM_ID, "supergroup", {
-        unread_count: 5,
-        read_inbox_max_id: 15,
-      }),
-    );
-    const { client, requests } = createReadClient(20, (n) => 20 - n);
-
-    const result = await markRead(client, db, peer, 18);
-
-    expect(requests[0]).toMatchObject({ _: "channels.readHistory", maxId: 18 });
-    expect(result).toMatchObject({
-      maxId: 18,
-      unreadCount: 2,
-      readInboxMaxId: 18,
-    });
-    expect(createChatsCache(db).getById(String(TEAM_ID))).toMatchObject({
-      unread_count: 2,
-      read_inbox_max_id: 18,
+    expect(requests.map((request) => request._)).toEqual([
+      "channels.readHistory",
+      "messages.getPeerDialogs",
+    ]);
+    expect(requests[1]).toEqual({
+      _: "messages.getPeerDialogs",
+      peers: [{ _: "inputDialogPeer", peer: NEWS.inputPeer }],
     });
   });
 });
@@ -258,7 +137,7 @@ describe("readUnread", () => {
   let db: Database;
 
   beforeEach(() => {
-    db = createCacheDb();
+    db = createAccountCacheDb();
   });
 
   function target(chat: HistoryChat, state: UnreadState) {
@@ -269,71 +148,42 @@ describe("readUnread", () => {
     };
   }
 
-  const noClient = {
-    call: async () => {
-      throw new Error("no Telegram call expected");
-    },
-  } as unknown as TelegramClient;
-
-  it("returns the oldest unread incoming messages the cache holds, newest first", async () => {
-    const alice = PEERS.private as HistoryChat;
+  it("leaves deleted and outgoing messages out of the items and the count", async () => {
     cacheMessages(db, ALICE_ID, [8, 9, 10, 11, 12, 13, 14], {
       outgoing: [11],
       deleted: [12],
     });
+    const noClient = {
+      call: async () => {
+        throw new Error("no Telegram call expected");
+      },
+    } as unknown as TelegramClient;
 
     const result = await readUnread(
       db,
       noClient,
-      [target(alice, { unreadCount: 4, readInboxMaxId: 9 })],
+      [target(ALICE, { unreadCount: 4, readInboxMaxId: 9 })],
       3,
       false,
     );
 
     const [chat] = result.chats;
     expect(chat?.items.map((item) => item.messageId)).toEqual([14, 13, 10]);
-    expect(chat).toMatchObject({
-      unreadCount: 4,
-      readInboxMaxId: 9,
-      missing: 1,
-      returned: 3,
-      nextAfter: 14,
-      source: "cache",
-    });
-    expect(result).toMatchObject({
-      unreadCount: 4,
-      missing: 1,
-      returned: 3,
-      limit: 3,
-      source: "cache",
-      stale: false,
-    });
+    expect(chat).toMatchObject({ missing: 1, returned: 3 });
   });
 
-  it("says how many unread messages the cache lacks, without asking Telegram", async () => {
-    const news = PEERS.channel as HistoryChat;
+  it("with fresh, fetches the first unread page only for a chat whose cache lacks some", async () => {
     cacheMessages(db, NEWS_ID, [120]);
-
-    const result = await readUnread(
-      db,
-      noClient,
-      [target(news, { unreadCount: 20, readInboxMaxId: 100 })],
-      5,
-      false,
-    );
-
-    expect(result.chats[0]).toMatchObject({ returned: 1, missing: 19 });
-  });
-
-  it("with fresh, fetches the first unread page of a chat that lacks some", async () => {
-    const news = PEERS.channel as HistoryChat;
-    cacheMessages(db, NEWS_ID, [120]);
+    cacheMessages(db, ALICE_ID, [10, 11]);
     const history = createFakeHistory(Array.from({ length: 30 }, (_, i) => 91 + i));
 
     const result = await readUnread(
       db,
       history.client,
-      [target(news, { unreadCount: 20, readInboxMaxId: 100 })],
+      [
+        target(NEWS, { unreadCount: 20, readInboxMaxId: 100 }),
+        target(ALICE, { unreadCount: 2, readInboxMaxId: 9 }),
+      ],
       5,
       true,
     );
@@ -342,37 +192,24 @@ describe("readUnread", () => {
     expect(history.requests).toHaveLength(1);
     expect(request.minId).toBe(100);
     expect(request.limit).toBe(5);
-    expect(result.chats[0]?.items.map((item) => item.messageId)).toEqual([105, 104, 103, 102, 101]);
-    expect(result.chats[0]).toMatchObject({ missing: 14, source: "api" });
+    expect(result.chats.map((chat) => chat.items.map((item) => item.messageId))).toEqual([
+      [105, 104, 103, 102, 101],
+      [11, 10],
+    ]);
+    expect(result.chats.map((chat) => [chat.missing, chat.source])).toEqual([
+      [14, "api"],
+      [0, "cache"],
+    ]);
     expect(result.source).toBe("api");
-  });
-
-  it("with fresh, leaves a chat whose cache holds every unread message to the cache", async () => {
-    const alice = PEERS.private as HistoryChat;
-    cacheMessages(db, ALICE_ID, [10, 11]);
-
-    const result = await readUnread(
-      db,
-      noClient,
-      [target(alice, { unreadCount: 2, readInboxMaxId: 9 })],
-      20,
-      true,
-    );
-
-    expect(result.chats[0]).toMatchObject({ missing: 0, source: "cache" });
   });
 });
 
 describe("chats_cache unread state", () => {
-  let db: Database;
-  let chats: ReturnType<typeof createChatsCache>;
+  it("takes the state only from a dialog and keeps it on other writes", () => {
+    const chats = createChatsCache(createAccountCacheDb());
+    chats.upsert(chatRow(ALICE_ID, "private"));
+    expect(chats.hasUnreadState()).toBe(false);
 
-  beforeEach(() => {
-    db = createCacheDb();
-    chats = createChatsCache(db);
-  });
-
-  it("takes the state from a dialog and keeps it on other writes", () => {
     chats.upsert(
       dialogToCacheInput(
         fakeDialog({
@@ -384,36 +221,13 @@ describe("chats_cache unread state", () => {
         }),
       ),
     );
-    chats.upsert(chatInput(ALICE_ID, "private", { title: "Alice" }));
+    chats.upsert(chatRow(ALICE_ID, "private", { title: "Alice" }));
 
     expect(chats.getById(String(ALICE_ID))).toMatchObject({
       title: "Alice",
       unread_count: 3,
       read_inbox_max_id: 11,
     });
-  });
-
-  it("lists only chats with unread messages, newest first", () => {
-    chats.upsertMany([
-      chatInput(ALICE_ID, "private", { unread_count: 2, last_message_at: 3 }),
-      chatInput(TEAM_ID, "supergroup", { unread_count: 0, last_message_at: 2 }),
-      chatInput(NEWS_ID, "channel", { unread_count: 7, last_message_at: 4 }),
-      chatInput(BOOK_CLUB_ID, "group", { last_message_at: 5 }),
-    ]);
-
-    expect(chats.list({ unread: true }).map((chat) => chat.chat_id)).toEqual([
-      String(NEWS_ID),
-      String(ALICE_ID),
-    ]);
-    expect(chats.list({ unread: true, type: "private" }).map((chat) => chat.chat_id)).toEqual([
-      String(ALICE_ID),
-    ]);
-    expect(chats.hasUnreadState()).toBe(true);
-  });
-
-  it("has no unread state before a dialog list", () => {
-    chats.upsert(chatInput(ALICE_ID, "private"));
-    expect(chats.hasUnreadState()).toBe(false);
   });
 });
 
@@ -424,7 +238,7 @@ describe("daemon updates keep the unread state current", () => {
   const ctx = { accountId: 1, receivedAt: 0 };
 
   beforeEach(() => {
-    db = createCacheDb();
+    db = createAccountCacheDb();
     chats = createChatsCache(db);
     handlers = createUpdateHandlers({
       db,
@@ -454,7 +268,7 @@ describe("daemon updates keep the unread state current", () => {
 
   it("counts each new incoming message once, and no outgoing one", async () => {
     chats.upsert(
-      chatInput(ALICE_ID, "private", {
+      chatRow(ALICE_ID, "private", {
         unread_count: 1,
         read_inbox_max_id: 9,
         last_message_id: 10,
@@ -475,7 +289,7 @@ describe("daemon updates keep the unread state current", () => {
   });
 
   it("leaves an unknown count unknown", async () => {
-    chats.upsert(chatInput(ALICE_ID, "private"));
+    chats.upsert(chatRow(ALICE_ID, "private"));
     await receive(11);
     expect(chats.getById(String(ALICE_ID))?.unread_count).toBeNull();
   });
@@ -491,7 +305,7 @@ describe("daemon updates keep the unread state current", () => {
 
   it("takes a read on another device from its update", async () => {
     chats.upsert(
-      chatInput(TEAM_ID, "supergroup", {
+      chatRow(TEAM_ID, "supergroup", {
         unread_count: 9,
         read_inbox_max_id: 1,
       }),

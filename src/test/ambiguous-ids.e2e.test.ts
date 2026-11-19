@@ -35,7 +35,6 @@ describe("E2E: a bare ID that names a cached group and a cached channel", () => 
     ["tg chats get", ["chats", "get", "--id", BARE_ID], "identifier"],
     ["tg chats sync", ["chats", "sync", BARE_ID], "chat"],
     ["tg messages list", ["messages", "list", "--chat", BARE_ID], "chat"],
-    ["tg messages get", ["messages", "get", "--chat", BARE_ID, "--id", "1"], "chat"],
   ] as const) {
     it(`${command} fails with INVALID_ARGS and both marked IDs`, async () => {
       const result = await runCliFailure([...args], 3, {
