@@ -315,8 +315,9 @@ tg send --to @user --message "Hi" --quiet
 ## Error Handling
 
 All errors are returned as JSON on stderr (unless `--quiet`). A flag the command doesn't declare
-(`--acount 2`) and a value it takes nowhere (`--silent false`: a boolean flag takes no value, so
-write `--silent` or `--no-silent`) are `INVALID_ARGS` (exit 3) before the command runs.
+(`--acount 2`) and a value it takes nowhere (`--silent false` or `--silent=no`: a boolean flag
+takes no value but `=true` or `=false`, so write `--silent` or `--no-silent`) are `INVALID_ARGS`
+(exit 3) before the command runs.
 `tg api` and `tg sql` pass their flags on and are not checked.
 
 ```json
