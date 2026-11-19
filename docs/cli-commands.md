@@ -462,9 +462,9 @@ cache at once, as `tg send` does for a sent message. So `tg messages get --chat 
                    "isOutgoing": true, "forwardFromId": 10, … } } ] }
 ```
 
-`newMessageId` is `null` when Telegram's response doesn't say which copy a message became, and
-`message` is `null` when the copy could not be stored in the cache; the forward is done either
-way. When Telegram refuses the forward, the error is `TELEGRAM_ERROR` (exit 5) with Telegram's
+`newMessageId` is `null` when Telegram's response doesn't confirm a copy of that message: it may
+have been skipped, so check the target chat before forwarding it again. `message` is `null` when
+the copy could not be stored in the cache. When Telegram refuses the forward, the error is `TELEGRAM_ERROR` (exit 5) with Telegram's
 error name in `details.telegramError`, beside `fromChatId`, `toChatId` and `messageIds`, and
 nothing is cached:
 

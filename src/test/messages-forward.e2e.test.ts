@@ -188,6 +188,7 @@ describe("E2E: messages forward", () => {
     const result = await forward("10", "@bob", [14, 12, 14, 13]);
 
     expect(result.exitCode).toBe(0);
+    expect(result.stderr.split('"method":"messages.forwardMessages"')).toHaveLength(2);
     expect(result.stderr).toContain(
       `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: "messages.forwardMessages", id: [14, 12, 13], randomIds: 3 })}`,
     );
