@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import type { DownloadResult } from "./download-media";
 import { MediaError } from "./errors";
-import { copyOut, lacksHardLinks, publishByCopy } from "./out";
+import { copyOut, lacksHardLinks, publishByCopy, templateTarget } from "./out";
 import { ErrorCodes } from "../../types";
 import { fakeBytes } from "../../test/photo-message.test-utils";
 
@@ -119,4 +119,36 @@ describe("copyOut collisions in a batch", () => {
       expect(err.suggestion).toBe("use a distinct output path for each file");
     },
   );
+});
+
+describe("templateTarget", () => {
+  const values = {
+    chat: "5550001",
+    id: "7",
+    date: "2026-10-09",
+    name: "example-notes.txt",
+    kind: "document",
+  };
+
+  it("puts the file into a directory a placeholder names", () => {
+    fs.mkdirSync(join(root, "out", "5550001"), { recursive: true });
+    expect(templateTarget(join(root, "out", "{chat}"), values, "7_example-notes.txt")).toBe(
+      join(root, "out", "5550001", "7_example-notes.txt"),
+    );
+  });
+
+  it.each(["directory", "file"])("refuses a placeholder part that is a symlink to a %s", (kind) => {
+    const outside = join(root, "outside");
+    if (kind === "directory") fs.mkdirSync(outside);
+    else fs.writeFileSync(outside, "kept");
+    fs.mkdirSync(join(root, "out"));
+    fs.symlinkSync(outside, join(root, "out", "example-notes.txt"));
+
+    expect(() => templateTarget(join(root, "out", "{name}"), values, "example-notes.txt")).toThrow(
+      expect.objectContaining({
+        code: ErrorCodes.GENERAL_ERROR,
+        details: { path: join(root, "out", "example-notes.txt") },
+      }),
+    );
+  });
 });

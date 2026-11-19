@@ -461,7 +461,8 @@ mimeType, size, kind, chatId, messageId, uniqueFileId, groupedId, cached, resume
   A batch also accepts identical bytes. Two different files mapped to the same path within
   one batch conflict even with `--overwrite`.
 - `--out` can be a name template with `{chat}`, `{id}`, `{date}` (the message's UTC day),
-  `{name}` and `{kind}`; each filled part is made a safe file name.
+  `{name}` and `{kind}`; each filled part is made a safe file name, and one that exists as a
+  symlink fails that file with `GENERAL_ERROR` instead of being followed.
 - Repeat `--id` for several messages of the chat. One run fetches the messages together,
   downloads up to 5 files at a time (2 of 20 MiB or more) and pauses the whole batch for a flood
   wait of up to 5 minutes. It prints one JSON line per file as each finishes, success or error,

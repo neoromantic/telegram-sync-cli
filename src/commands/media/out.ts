@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, linkSync, mkdirSync, openSync, renameSync, rmSync, statSync } from "node:fs";
+import {
+  closeSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { ErrorCodes } from "../../types";
@@ -64,6 +73,32 @@ function statOrNull(path: string) {
 export function outTarget(out: string, fileName: string) {
   const isDir = /[/\\]$/.test(out) || statOrNull(out)?.isDirectory() === true;
   return resolve(isDir ? join(out, fileName) : out);
+}
+
+function isSymlink(path: string) {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** Where a name template puts the file; a path part filled from a placeholder must not be a symlink */
+export function templateTarget(template: string, values: TemplateValues, fileName: string) {
+  const expanded = expandTemplate(template, values);
+  const parts = expanded.split("/");
+  template.split(/[/\\]/).forEach((segment, i) => {
+    if (!isTemplate(segment)) return;
+    const path = parts.slice(0, i + 1).join("/");
+    if (isSymlink(path)) {
+      throw new MediaError(
+        ErrorCodes.GENERAL_ERROR,
+        `--out does not follow a symlink a placeholder names: ${path}`,
+        { path: resolve(path) },
+      );
+    }
+  });
+  return outTarget(expanded, fileName);
 }
 
 async function digest(path: string, signal?: AbortSignal) {

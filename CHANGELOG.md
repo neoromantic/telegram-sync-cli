@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   any failed. Cached files need no network and partial files resume, as before. One `--id`
   prints what it printed before.
 - `--out` takes a name template such as `./media/{chat}/{date}_{id}_{name}` (placeholders
-  `{chat}`, `{id}`, `{date}`, `{name}`, `{kind}`); each filled part is made a safe file name.
+  `{chat}`, `{id}`, `{date}`, `{name}`, `{kind}`); each filled part is made a safe file name,
+  and one that exists as a symlink fails that file instead of being followed.
   With several `--id`, a directory `--out` names files `{id}_{name}`, so two photos no longer
   collide on `photo.jpg`. Repeating a batch accepts existing files with identical bytes. A
   collision between different files in one batch returns `FILE_EXISTS` even with `--overwrite`.

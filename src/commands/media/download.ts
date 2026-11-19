@@ -30,6 +30,7 @@ import {
   outTarget,
   TEMPLATE_PLACEHOLDERS,
   templateDate,
+  templateTarget,
   unknownPlaceholders,
 } from "./out";
 
@@ -60,9 +61,7 @@ function targetOf(out: string, result: DownloadResult, batch: boolean, cacheDb: 
     kind: result.kind,
   };
   const name = batch ? expandTemplate(BATCH_NAME_TEMPLATE, values) : result.fileName;
-  return isTemplate(out)
-    ? outTarget(expandTemplate(out, values), name)
-    : outTarget(`${out}/`, name);
+  return isTemplate(out) ? templateTarget(out, values, name) : outTarget(`${out}/`, name);
 }
 
 function outputOf(result: DownloadResult, path: string) {

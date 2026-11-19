@@ -184,7 +184,8 @@ tg sql "SELECT message_id FROM message_attachments WHERE chat_id = 5550001 AND k
 | `{kind}`    | `photo`, `voice`, `document`… (`kind`) |
 
 Each path part that holds a placeholder is made a safe file name once filled, as cached names
-are, so a value never adds a folder. An unknown placeholder is `INVALID_ARGS`.
+are, so a value never adds a folder. Such a part that already exists as a symlink is never
+followed: that file fails with `GENERAL_ERROR`. An unknown placeholder is `INVALID_ARGS`.
 
 ### `--thumb`
 
