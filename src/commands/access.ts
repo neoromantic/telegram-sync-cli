@@ -5,6 +5,7 @@ import { positionalChat, undeclaredArg } from "../utils/args";
 import { error } from "../utils/output";
 import { openHistory, reportHistoryError } from "./messages/helpers";
 import { resolveHistoryChat } from "./messages/history";
+import type { ResolvePeerOptions } from "./send/peer-resolver";
 
 type Args = Record<string, unknown>;
 
@@ -215,13 +216,13 @@ export function checkedChat(args: Args, name: string) {
 
 type HistoryDeps = ReturnType<typeof openHistory>;
 
-async function resolveAllowed(entries: string[], deps: HistoryDeps) {
+async function resolveAllowed(entries: string[], deps: HistoryDeps, options?: ResolvePeerOptions) {
   const ids = new Set<number>();
   for (const entry of entries) {
     ids.add(
       /^-?\d+$/.test(entry)
         ? Number(entry)
-        : (await resolveHistoryChat(deps.client, entry, deps)).chatId,
+        : (await resolveHistoryChat(deps.client, entry, deps, options)).chatId,
     );
   }
   return ids;
@@ -241,7 +242,7 @@ async function checkChatAllowed(
   let ids: Set<number>;
   try {
     chat = await resolveHistoryChat(deps.client, input, deps, { freshUsername: write });
-    ids = await resolveAllowed(allowed, deps);
+    ids = await resolveAllowed(allowed, deps, { freshUsername: write });
   } catch (err) {
     reportHistoryError(err, `check ${input} against allowedChats`);
   }
