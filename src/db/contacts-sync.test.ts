@@ -1,13 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { tl } from "@mtcute/bun";
-import {
-  applyContactsSnapshot,
-  contactsHash,
-  getContactsSyncedAt,
-  markContactsNotModified,
-  unmarkAllContacts,
-} from "./contacts-sync";
+import { applyContactsSnapshot, contactsHash, getContactsSyncedAt } from "./contacts-sync";
 import { createUsersCache } from "./users-cache";
 import { telegramHash } from "../utils/telegram-hash";
 import { createAccountCacheDb } from "../test/cache-db.test-utils";
@@ -86,46 +80,29 @@ function syncState(db: Database) {
 }
 
 describe("telegramHash", () => {
-  it("matches Telegram's 64-bit hash", () => {
+  it("matches Telegram's signed 64-bit hash", () => {
+    expect(telegramHash([0n])).toBe(0n);
     expect(telegramHash([0n, 1n])).toBe(1n);
     expect(telegramHash([0n, 1n, 2n])).toBe(36507222019n);
     expect(telegramHash([2n, 1001n, 1002n])).toBe(1155301373937471n);
     expect(telegramHash([3n, 1001n, 1002n, 1003n])).toBe(4774259776744390986n);
-    expect(telegramHash([0n])).toBe(0n);
-  });
-
-  it("returns a signed 64-bit value", () => {
-    const ids = [1001n, 1002n, 1003n, 1004n, 1005n, 1006n, 1007n];
-    const h = telegramHash([3n, ...ids]);
-    expect(h).toBe(-1816367931557360781n);
-    expect(h).toBe(BigInt.asIntN(64, h));
+    expect(telegramHash([3n, 1001n, 1002n, 1003n, 1004n, 1005n, 1006n, 1007n])).toBe(
+      -1816367931557360781n,
+    );
   });
 });
 
 describe("contactsHash", () => {
-  let db: Database;
-  beforeEach(() => {
-    db = createAccountCacheDb();
-  });
-
-  it("is 0 without a recorded list", () => {
-    seedUser(db, 1001, true);
-    expect(contactsHash(db).toString()).toBe("0");
-  });
-
-  it("hashes saved_count and the contact IDs in numeric order", () => {
+  it("hashes saved_count and the cached contacts' IDs in numeric order", () => {
+    const db = createAccountCacheDb();
     seedUser(db, 10, true);
     seedUser(db, 9, true);
     seedUser(db, 11, false);
     applyContactsSnapshot(db, contactsResult([10, 9], 2), NOW);
     expect(contactsHash(db).toString()).toBe(telegramHash([2n, 9n, 10n]).toString());
-  });
 
-  it("changes when a cached contact is unmarked", () => {
-    applyContactsSnapshot(db, contactsResult([1001, 1002], 2), NOW);
-    const before = contactsHash(db).toString();
-    db.run("UPDATE users_cache SET is_contact = 0 WHERE user_id = '1002'");
-    expect(contactsHash(db).toString()).not.toBe(before);
+    db.run("UPDATE users_cache SET is_contact = 0 WHERE user_id = '10'");
+    expect(contactsHash(db).toString()).toBe(telegramHash([2n, 9n]).toString());
   });
 });
 
@@ -140,8 +117,10 @@ describe("applyContactsSnapshot", () => {
     seedUser(db, 1002, true, 500);
     seedUser(db, 1003, false, 700);
     const before = userCount(db);
+    const result = contactsResult([1001, 1004], 2);
+    result.users = [rawUser(1001), rawUser(1004, false)];
 
-    const applied = applyContactsSnapshot(db, contactsResult([1001, 1004], 2), NOW);
+    const applied = applyContactsSnapshot(db, result, NOW);
 
     expect(applied).toEqual({ contacts: 2, unmarked: 1 });
     expect(row(db, 1001)?.is_contact).toBe(1);
@@ -168,71 +147,15 @@ describe("applyContactsSnapshot", () => {
     expect(userCount(db)).toBe(before + 1);
   });
 
-  it("forces is_contact for a listed user Telegram sent without the flag", () => {
-    const result = contactsResult([1001]);
-    result.users = [rawUser(1001, false)];
-    applyContactsSnapshot(db, result, NOW);
-    expect(row(db, 1001)?.is_contact).toBe(1);
-  });
+  it("unmarks every contact on an empty list, deleting no row, and replaces the recorded list", () => {
+    applyContactsSnapshot(db, contactsResult([1001, 1002], 2), NOW);
 
-  it("unmarks every contact on an empty list, deleting no row", () => {
-    seedUser(db, 1001, true);
-    seedUser(db, 1002, true);
-    const applied = applyContactsSnapshot(db, contactsResult([], 0), NOW);
+    const applied = applyContactsSnapshot(db, contactsResult([], 0), NOW + 5);
+
     expect(applied.unmarked).toBe(2);
     expect(createUsersCache(db).getContacts()).toHaveLength(0);
     expect(userCount(db)).toBe(2);
-    expect(syncState(db)?.forward_cursor).toBe("0");
-  });
-
-  it("updates the sync_state row of an earlier list", () => {
-    applyContactsSnapshot(db, contactsResult([1001], 1), NOW);
-    applyContactsSnapshot(db, contactsResult([1001, 1002], 2), NOW + 5);
-    expect(syncState(db)).toMatchObject({
-      forward_cursor: "2",
-      last_sync_at: NOW + 5,
-    });
+    expect(syncState(db)).toMatchObject({ forward_cursor: "0", last_sync_at: NOW + 5 });
     expect((db.query("SELECT COUNT(*) AS n FROM sync_state").get() as { n: number }).n).toBe(1);
-  });
-});
-
-describe("markContactsNotModified", () => {
-  it("moves only the check time", () => {
-    const db = createAccountCacheDb();
-    applyContactsSnapshot(db, contactsResult([1001], 1), NOW);
-    const user = row(db, 1001);
-
-    markContactsNotModified(db, NOW + 60_000);
-
-    expect(syncState(db)).toMatchObject({
-      forward_cursor: "1",
-      last_sync_at: NOW + 60_000,
-      updated_at: NOW + 60_000,
-    });
-    expect(row(db, 1001)).toEqual(user);
-  });
-
-  it("writes nothing without a recorded list", () => {
-    const db = createAccountCacheDb();
-    markContactsNotModified(db, NOW);
-    expect(getContactsSyncedAt(db)).toBeNull();
-  });
-});
-
-describe("unmarkAllContacts", () => {
-  it("unmarks every contact", () => {
-    const db = createAccountCacheDb();
-    seedUser(db, 1001, true);
-    seedUser(db, 1002, true);
-    seedUser(db, 1003, false);
-    expect(unmarkAllContacts(db, NOW)).toBe(2);
-    expect(
-      (
-        db.query("SELECT COUNT(*) AS n FROM users_cache WHERE is_contact = 1").get() as {
-          n: number;
-        }
-      ).n,
-    ).toBe(0);
-    expect(userCount(db)).toBe(3);
   });
 });

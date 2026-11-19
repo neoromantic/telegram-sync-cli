@@ -16,12 +16,10 @@ afterEach(() => {
 });
 
 describe("chat protection store", () => {
-  it("has no row for a chat never checked", () => {
-    expect(createChatProtectionStore(db).get(-1001234567890)).toBeNull();
-  });
-
-  it("records an answer and reads it back", () => {
+  it("records an answer and reads it back, with no row for a chat never checked", () => {
     const store = createChatProtectionStore(db);
+    expect(store.get(-1001234567890)).toBeNull();
+
     store.record(-1001234567890, { protected: true, reason: "chat" }, 1_000);
     store.record(5550001, { protected: true, reason: "private_chat" }, 2_000);
 

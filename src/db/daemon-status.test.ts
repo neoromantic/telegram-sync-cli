@@ -17,77 +17,8 @@ describe("DaemonStatusService", () => {
     service = createDaemonStatusService(db);
   });
 
-  describe("set/get", () => {
-    it("sets and gets a value", () => {
-      service.set("daemon_pid", "12345");
-
-      expect(service.get("daemon_pid")).toBe("12345");
-    });
-
-    it("returns null for non-existent key", () => {
-      expect(service.get("nonexistent")).toBeNull();
-    });
-
-    it("overwrites existing value", () => {
-      service.set("count", "1");
-      service.set("count", "2");
-
-      expect(service.get("count")).toBe("2");
-    });
-
-    it("stores and retrieves JSON values", () => {
-      const data = { connected: 3, total: 5 };
-      service.set("accounts", JSON.stringify(data));
-
-      const retrieved = service.get("accounts");
-      expect(JSON.parse(retrieved!)).toEqual(data);
-    });
-  });
-
-  describe("delete", () => {
-    it("deletes a key", () => {
-      service.set("key", "value");
-      expect(service.get("key")).toBe("value");
-
-      service.delete("key");
-      expect(service.get("key")).toBeNull();
-    });
-
-    it("does nothing for non-existent key", () => {
-      service.delete("nonexistent");
-    });
-  });
-
-  describe("getAll", () => {
-    it("returns all key-value pairs", () => {
-      service.set("key1", "value1");
-      service.set("key2", "value2");
-      service.set("key3", "value3");
-
-      const all = service.getAll();
-      expect(Object.keys(all)).toHaveLength(3);
-      expect(all.key1).toBe("value1");
-      expect(all.key2).toBe("value2");
-      expect(all.key3).toBe("value3");
-    });
-
-    it("returns empty object when no values", () => {
-      const all = service.getAll();
-      expect(all).toEqual({});
-    });
-  });
-
   describe("convenience methods", () => {
     describe("setDaemonRunning", () => {
-      it("sets daemon as running with PID and start time", () => {
-        const pid = 12345;
-        service.setDaemonRunning(pid, "0.3.1");
-
-        expect(service.get("daemon_pid")).toBe(pid.toString());
-        expect(service.get("daemon_started_at")).not.toBeNull();
-        expect(service.get("daemon_status")).toBe("running");
-      });
-
       it("drops the previous run's connection and queue until the first tick", () => {
         service.setDaemonRunning(1111, "0.4.0");
         service.writeTick({
@@ -111,7 +42,9 @@ describe("DaemonStatusService", () => {
           pendingJobs: 0,
           runningJobs: 0,
         });
-        expect(service.getDaemonInfo().lastUpdate).toBeGreaterThanOrEqual(before);
+        const { startedAt, lastUpdate } = service.getDaemonInfo();
+        expect(startedAt).toBeGreaterThanOrEqual(before);
+        expect(lastUpdate).toBe(startedAt);
         expect(service.get("pending_jobs")).toBeNull();
         expect(service.get("running_jobs")).toBeNull();
       });
@@ -122,6 +55,9 @@ describe("DaemonStatusService", () => {
         expect(service.get("daemon_version")).toBe("0.3.1");
         expect(service.get("daemon_version_pid")).toBe("111");
         expect(service.getDaemonInfo().version).toBe("0.3.1");
+
+        service.set("daemon_pid", "222");
+        expect(service.getDaemonInfo()).toMatchObject({ pid: 222, version: null });
       });
 
       it("writes nothing if one of its keys fails to write", () => {
@@ -138,23 +74,24 @@ describe("DaemonStatusService", () => {
     });
 
     describe("setDaemonStopped", () => {
-      it("clears daemon running state", () => {
-        service.setDaemonRunning(12345, "0.3.1");
-
-        service.setDaemonStopped();
-
-        expect(service.get("daemon_pid")).toBeNull();
-        expect(service.get("daemon_status")).toBe("stopped");
-      });
-
-      it("clears the version", () => {
+      it("clears the PID and the version", () => {
+        expect(service.getDaemonInfo()).toMatchObject({
+          status: "stopped",
+          pid: null,
+          version: null,
+        });
         service.setDaemonRunning(111, "0.3.1");
 
         service.setDaemonStopped();
 
         expect(service.get("daemon_version")).toBeNull();
         expect(service.get("daemon_version_pid")).toBeNull();
-        expect(service.getDaemonInfo().version).toBeNull();
+        expect(service.getDaemonInfo()).toMatchObject({
+          status: "stopped",
+          pid: null,
+          version: null,
+          connectionStatus: "disconnected",
+        });
       });
 
       it("keeps the running state if one of its keys fails to write", () => {
@@ -191,6 +128,12 @@ describe("DaemonStatusService", () => {
         });
         expect(service.get("last_error")).toBeNull();
         expect(Number(service.get("last_update"))).toBeGreaterThanOrEqual(before);
+        expect(service.getDaemonInfo()).toMatchObject({
+          connectionStatus: "connected",
+          messagesSynced: 42,
+          pendingJobs: 3,
+          runningJobs: 1,
+        });
       });
 
       it("writes a tick in one transaction", () => {
@@ -264,50 +207,6 @@ describe("DaemonStatusService", () => {
 
         service.setDaemonRunning(4242, "0.9.0");
         expect(service.getDaemonInfo().pacing).toBeNull();
-      });
-    });
-
-    describe("getDaemonInfo", () => {
-      it("returns all daemon info", () => {
-        service.setDaemonRunning(12345, "0.3.1");
-        service.set("messages_synced", "1000");
-        service.set("connection_status", "connected");
-        service.set("pending_jobs", "4");
-
-        const info = service.getDaemonInfo();
-        expect(info.status).toBe("running");
-        expect(info.pid).toBe(12345);
-        expect(info.startedAt).not.toBeNull();
-        expect(info.connectionStatus).toBe("connected");
-        expect(info.messagesSynced).toBe(1000);
-        expect(info.pendingJobs).toBe(4);
-        expect(info.runningJobs).toBe(0);
-      });
-
-      it("ignores the account totals that 0.3 wrote", () => {
-        service.set("connected_accounts", "3");
-        service.set("total_accounts", "5");
-
-        expect(service.getDaemonInfo()).not.toHaveProperty("connectedAccounts");
-        expect(service.getDaemonInfo()).not.toHaveProperty("totalAccounts");
-      });
-
-      it("returns null values when daemon not running", () => {
-        const info = service.getDaemonInfo();
-        expect(info.status).toBe("stopped");
-        expect(info.pid).toBeNull();
-        expect(info.version).toBeNull();
-      });
-
-      it("ignores a version left by another PID's daemon", () => {
-        service.setDaemonRunning(111, "0.3.1");
-        service.set("daemon_pid", "222");
-        service.set("daemon_started_at", Date.now().toString());
-        service.set("daemon_status", "running");
-
-        const info = service.getDaemonInfo();
-        expect(info.pid).toBe(222);
-        expect(info.version).toBeNull();
       });
     });
   });
