@@ -129,10 +129,7 @@ describe("E2E: read-only mode and allowedChats", () => {
   }
 
   it("refuses an undeclared flag and a value it would drop, before connecting", async () => {
-    for (const extra of [
-      ["--acount", "2"],
-      ["--silent", "false"],
-    ]) {
+    for (const extra of [["--acount", "2"], ["--silent", "false"], ["--silent=no"]]) {
       const { exitCode, json } = await refusal(["send", "--to", "me", "-m", "hi", ...extra], {});
       expect(json.error.code).toBe("INVALID_ARGS");
       expect(exitCode).toBe(3);

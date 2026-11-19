@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`--silent false`, which ran as `--silent`) are `INVALID_ARGS` instead of being ignored (#217).
 - A Telegram call that succeeded is no longer reported as failed when tg can't write it to its
   local `api_activity` log, so a retry doesn't repeat a send (#217).
+- A boolean flag with a value other than `true` or `false` (`--silent=no` and `--silent=0`,
+  which ran as `--silent`) is `INVALID_ARGS` instead of being read as set.
 - The npm package declares `long`, which tg imports directly. Until now it only arrived
   through `@mtcute/core`, so an install that doesn't hoist transitive dependencies could fail
   to start.
