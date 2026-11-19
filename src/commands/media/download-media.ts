@@ -486,8 +486,12 @@ export async function downloadOnline(
   const client = deps.getClient();
 
   for (let attempt = 1; ; attempt++) {
-    const { message, chats, users } =
-      (attempt === 1 && first) || (await fetchMessageById(client, chat, messageId, deps.signal));
+    const {
+      message,
+      chats,
+      users,
+      fetchedAt = now(),
+    } = (attempt === 1 && first) || (await fetchMessageById(client, chat, messageId, deps.signal));
     const info = extractAttachment(message);
     if (!info) {
       cacheFetchedMessage(deps.cacheDb, chatId, message, users);
@@ -496,16 +500,18 @@ export async function downloadOnline(
     const thumb = request.thumb ? pickThumb(message) : null;
 
     const verdict = await checkOnlineProtection(client, chat, message, chats, deps.signal);
-    if (verdict.chat) protection.record(chatId, verdict.chat, now());
+    const superseded = (protection.get(chatId)?.fetched_at ?? -Infinity) > fetchedAt;
+    const chatVerdict = superseded ? null : verdict.chat;
+    if (chatVerdict) protection.record(chatId, chatVerdict, fetchedAt);
     cacheFetchedMessage(deps.cacheDb, chatId, message, users);
     if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
     if (verdict.message.protected) {
       throw contentProtected(chatId, messageId, verdict.message.reason);
     }
-    if (verdict.chat?.protected && verdict.chat.reason) {
-      throw contentProtected(chatId, messageId, verdict.chat.reason);
+    if (chatVerdict?.protected && chatVerdict.reason) {
+      throw contentProtected(chatId, messageId, chatVerdict.reason);
     }
-    if (!verdict.chat) {
+    if (!chatVerdict) {
       const known = knownChatProtection(
         deps.history.chatsCache.getById(String(chatId)),
         protection.get(chatId),

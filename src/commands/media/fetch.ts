@@ -16,6 +16,8 @@ export interface FetchedMessage {
   message: FetchedRawMessage;
   chats: tl.TypeChat[];
   users: tl.TypeUser[];
+  /** When a batch fetched it, ms */
+  fetchedAt?: number;
 }
 
 export function messageNotFound(chatId: number, messageId: number) {

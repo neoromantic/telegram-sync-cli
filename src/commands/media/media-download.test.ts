@@ -1357,6 +1357,57 @@ describe("batch download", () => {
     expect(createMessagesCache(db).get(ALICE_ID, 1)).not.toBeNull();
   });
 
+  it("refuses a queued file after a refreshed file reference finds the chat protected", async () => {
+    const ids = [1, 2, 3, 4, 5, 6];
+    const files = ids.map((id) =>
+      documentMessage(TEAM, id, {
+        id: String(7100 + id),
+        size: 100 + id,
+        mimeType: "text/plain",
+        attributes: [],
+      }),
+    );
+    place(pathsOf(files[5]).file, fakeBytes(106));
+    let pages = 0;
+    const client = {
+      call: async () => ({
+        _: "messages.channelMessages",
+        messages: files,
+        users: [],
+        chats: [teamChannel(++pages > 1)],
+      }),
+    } as unknown as TelegramClient;
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const transfer = fakeTransfer(async function* ({ params }) {
+      if (params.fileSize === 101) throw new tl.RpcError(400, "FILE_REFERENCE_EXPIRED");
+      await settled;
+      yield fakeBytes(params.fileSize!);
+    });
+    const outcomes = new Map<number, string>();
+    let clock = NOW;
+    await batch(
+      { getClient: () => client, download: transfer.download, now: () => clock++ },
+      ids,
+      String(TEAM_CHAT_ID),
+      {
+        done: async (result) => {
+          outcomes.set(result.messageId, "done");
+          if (result.messageId === 6) settle();
+        },
+        failed: (id, failure) => {
+          outcomes.set(id, failure.code);
+          if (id === 6) settle();
+        },
+      },
+    );
+    expect(outcomes.get(1)).toBe("CONTENT_PROTECTED");
+    expect(outcomes.get(6)).toBe("CONTENT_PROTECTED");
+    expect(createChatProtectionStore(db).get(TEAM_CHAT_ID)?.protected).toBe(1);
+  });
+
   it("closes the RPC gate before the flooded transfer finishes unwinding", async () => {
     const files = [1, 2].map((id) =>
       documentMessage(SELF, id, {

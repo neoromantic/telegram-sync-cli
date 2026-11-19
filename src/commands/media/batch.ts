@@ -185,6 +185,7 @@ export async function downloadBatch(
       for (const id of ids) fail(id, err);
       continue;
     }
+    const fetchedAt = (deps.now ?? Date.now)();
     const small: FetchedMessage[] = [];
     const large: FetchedMessage[] = [];
     for (const id of ids) {
@@ -195,7 +196,7 @@ export async function downloadBatch(
       }
       const size = request.thumb ? 0 : (extractAttachment(item.message)?.size ?? 0);
       const queue = size >= LARGE_FILE_BYTES ? large : small;
-      queue.push(item);
+      queue.push({ ...item, fetchedAt });
     }
     const worker = async (takesLarge: boolean) => {
       while (!deps.signal?.aborted) {
