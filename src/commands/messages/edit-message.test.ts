@@ -119,17 +119,15 @@ describe("editMessage", () => {
     expect((err as EditRefusedError).suggestion).toBe("Use at most 20 table columns.");
   });
 
-  it("refuses a rich edit of a message with a file and sends nothing", async () => {
-    const { client, methods } = holding(
-      {
-        message: "Notes from Monday",
-        media: {
-          _: "messageMediaDocument",
-          document: { _: "document", mimeType: "text/plain", attributes: [] },
-        },
-      },
-      async () => ({ _: "updates", updates: [] }),
-    );
+  it.each([
+    ["a file", { _: "messageMediaDocument", document: { _: "document", attributes: [] } }],
+    ["a photo that expired", { _: "messageMediaPhoto" }],
+    ["media this version doesn't know", { _: "messageMediaUnsupported" }],
+  ])("refuses a rich edit of a message with %s and sends nothing", async (_kind, media) => {
+    const { client, methods } = holding({ message: "Notes from Monday", media }, async () => ({
+      _: "updates",
+      updates: [],
+    }));
 
     const attempt = editMessage(client, createAccountCacheDb(), ALICE, 12, "# Notes", "markdown");
 

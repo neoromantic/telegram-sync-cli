@@ -6,7 +6,6 @@ import { fetchMessagesByIdRaw, parseRawMessage } from "../../daemon/sync-worker-
 import { createMessagesCache } from "../../db/messages-cache";
 import { createMessagesHistory } from "../../db/messages-history";
 import type { MessageSearchItem } from "../../types";
-import { rawMediaType } from "../../utils/message-type";
 import { verbose } from "../../utils/output";
 import { toPeerIdFromRawPeer } from "../../utils/telegram-peer-ids";
 import { type RichFormat, richErrorHints, richMessage } from "../send/rich-message";
@@ -62,8 +61,8 @@ async function hasAttachment(client: CallClient, chat: HistoryChat, messageId: n
   return (messages as tl.TypeMessage[]).some((message) => {
     if (message._ !== "message" || message.id !== messageId) return false;
     if (toPeerIdFromRawPeer(message.peerId) !== chat.chatId) return false;
-    const media = rawMediaType(message.media);
-    return media !== null && media !== "webpage";
+    const media = message.media?._;
+    return media !== undefined && media !== "messageMediaEmpty" && media !== "messageMediaWebPage";
   });
 }
 

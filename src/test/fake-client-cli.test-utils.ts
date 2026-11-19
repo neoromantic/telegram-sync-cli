@@ -13,7 +13,7 @@ export const FAKE_SELF_ID = 999;
 
 /** A message of someone else: messages.editMessage refuses it */
 export const FAKE_FOREIGN_MESSAGE = 14;
-/** A message in Saved Messages that holds a file */
+/** A message that holds a file, in Saved Messages and in every channel */
 export const FAKE_FILE_MESSAGE = 16;
 
 export const FAKE_MESSAGE_DATE = 1_760_000_000;
@@ -63,6 +63,7 @@ if (import.meta.main) {
   const { mock } = await import("bun:test");
   const { tl } = await import("@mtcute/bun");
   const telegram = await import("../services/telegram");
+  const { paragraph, richMessage } = await import("./rich-message.test-utils");
 
   setInterval(() => {}, 60_000);
   let readMaxId = 0;
@@ -74,9 +75,13 @@ if (import.meta.main) {
       message?: string;
       richMessage?: { _: string; markdown?: string; html?: string };
       peer?: FakeInputPeer;
+      channel?: { channelId: number };
     }) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
-      if (request._ === "messages.getMessages" && Array.isArray(request.id)) {
+      if (
+        (request._ === "messages.getMessages" || request._ === "channels.getMessages") &&
+        Array.isArray(request.id)
+      ) {
         return {
           _: "messages.messages",
           messages: request.id.map(({ id }) =>
@@ -85,7 +90,9 @@ if (import.meta.main) {
                   _: "message",
                   id,
                   out: true,
-                  peerId: { _: "peerUser", userId: FAKE_SELF_ID },
+                  peerId: request.channel
+                    ? { _: "peerChannel", channelId: request.channel.channelId }
+                    : { _: "peerUser", userId: FAKE_SELF_ID },
                   date: FAKE_MESSAGE_DATE,
                   message: "Notes from Monday",
                   media: {
@@ -124,8 +131,12 @@ if (import.meta.main) {
                 fromId: { _: "peerUser", userId: FAKE_SELF_ID },
                 date: FAKE_MESSAGE_DATE,
                 editDate: FAKE_EDIT_DATE,
-                message:
-                  request.message ?? request.richMessage?.markdown ?? request.richMessage?.html,
+                message: request.message ?? "",
+                richMessage: request.richMessage
+                  ? richMessage([
+                      paragraph(request.richMessage.markdown ?? request.richMessage.html ?? ""),
+                    ])
+                  : undefined,
               },
               pts: 1,
               ptsCount: 1,

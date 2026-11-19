@@ -213,9 +213,16 @@ describe("E2E: messages edit", () => {
     });
   });
 
-  it("replaces the message with a rich one for --markdown", async () => {
+  it("replaces the message with a rich one for --markdown, and with plain text again", async () => {
+    const search = async (query: string) => {
+      const found = await runCli(["messages", "search", "--query", query], offline());
+      return (found.json as { data: { results: MessageSearchItem[] } }).data.results.map(
+        (item) => item.messageId,
+      );
+    };
+
     const result = await runCli(
-      ["messages", "edit", "--chat", "@alice", "--id", "12", "-m", "# Plan", "--markdown"],
+      ["messages", "edit", "--chat", "@alice", "--id", "12", "-m", "Plan for Monday", "--markdown"],
       fake(),
     );
 
@@ -226,16 +233,27 @@ describe("E2E: messages edit", () => {
     expect((result.json as { data: EditMessageResult }).data).toMatchObject({
       messageId: 12,
       format: "markdown",
+      message: { text: "Plan for Monday" },
     });
+    expect((await cached("@alice", 12)).text).toBe("Plan for Monday");
+    expect(await search("Monday")).toEqual([12]);
+
+    await edit("@alice", 12, "See you at ten.");
+
+    expect((await cached("@alice", 12)).text).toBe("See you at ten.");
+    expect(await search("Monday")).toEqual([]);
   });
 
-  it("refuses to make the caption of a file rich and leaves the message alone", async () => {
+  it.each([
+    ["Saved Messages", "me"],
+    ["a supergroup", "@teamchat"],
+  ])("refuses to make the caption of a file rich in %s", async (_name, chat) => {
     const result = await runCli(
       [
         "messages",
         "edit",
         "--chat",
-        "me",
+        chat,
         "--id",
         String(FAKE_FILE_MESSAGE),
         "-m",

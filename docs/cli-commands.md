@@ -473,7 +473,7 @@ and `messageId`, and the cached message stays as it was:
 | `CHAT_WRITE_FORBIDDEN`, `CHAT_ADMIN_REQUIRED` | no permission to edit messages in this chat             |
 | `RICH_MESSAGE_…`                              | Telegram refused the rich message, as for `tg send`     |
 
-Any other failure is `Failed to edit the message: <Telegram's error>`. Deleting, forwarding and
+Any other refusal by Telegram is `Failed to edit the message: <Telegram's error>`. Deleting, forwarding and
 pinning still go through `tg api`
 ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23)).
 
