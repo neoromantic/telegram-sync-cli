@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across pages.
 - A string flag's value that looks like a repeatable flag is no longer read as that flag: `tg send
   --caption '--file=x'` sends that caption.
+- A cached page of history vouches for the IDs above its newest message only up to the chat's
+  newest message known before the request: a fetch that Telegram answers with nothing new now
+  settles the gap (`tg messages list --before 21 --fresh` below a known message 30, a chat
+  Telegram shows empty, or a chat whose newest messages were deleted), and a message cached while
+  the request ran no longer vouches for a page that could miss a message sent meanwhile. The
+  daemon's history pages follow the same rule.
 
 ## [0.15.1] - 2026-11-19
 

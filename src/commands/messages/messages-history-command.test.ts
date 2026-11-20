@@ -858,6 +858,34 @@ describe("listHistory with filters", () => {
 
   const VOICE = { types: ["voice"] };
 
+  it("stays incomplete after a fill when a message arrived during its request", async () => {
+    cacheMessages(cacheDb, TEAM_CHAT_ID, [1, 10]);
+    createHistoryRanges(cacheDb).add(TEAM_CHAT_ID, { low: 1, high: 10 });
+    const server = createFakeHistory([1, 10]);
+    const read = server.client.call as unknown as (
+      request: GetHistoryRequest,
+    ) => Promise<Record<string, unknown>>;
+    const call = async (request: GetHistoryRequest) => {
+      const page = await read(request);
+      server.add(15, 30);
+      cacheMessages(cacheDb, TEAM_CHAT_ID, [30]);
+      return { ...page, users: [], chats: [] };
+    };
+    const client = { call } as unknown as CallClient;
+    const fill = () => fetchHistoryPage(client, cacheDb, TEAM_CHAT, { limit: 100, before: 21 });
+    const TEXT = { types: ["text"] };
+
+    await fill();
+    const first = await list({ limit: 20, before: 21 }, TEXT);
+    expect(messageIds(first.items)).toEqual([10, 1]);
+    expect(first).toMatchObject({ complete: false, missingBefore: 21 });
+
+    await fill();
+    const second = await list({ limit: 20, before: 21 }, TEXT);
+    expect(messageIds(second.items)).toEqual([15, 10, 1]);
+    expect(second.complete).toBe(true);
+  });
+
   it("reads every match from the cache and is complete when the range reaches message 1", async () => {
     cacheRun(cacheDb, TEAM_CHAT_ID, 1, 30);
     markVoices();

@@ -509,7 +509,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
 
     history_ranges: {
       description:
-        "Message ID ranges of a chat that messages_cache holds without a gap. Every cached getHistory page (daemon or CLI) adds the range it covers; touching ranges merge. tg messages list and get read from the cache only inside a range.",
+        "Message ID ranges of a chat that messages_cache holds without a gap. Every cached getHistory page (daemon or CLI) adds the range it covers; touching ranges merge; low 1 with high 0 records a chat whose newest page was empty. tg messages list and get read from the cache only inside a range.",
       primaryKey: ["chat_id", "low"],
       columns: {
         chat_id: {

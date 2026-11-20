@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { chatRow } from "./cache-db.test-utils";
+import { FAKE_CLIENT_CLI, FAKE_HISTORY_ENV } from "./fake-client-cli.test-utils";
 import { fakeDialog } from "./fake-dialogs.test-utils";
 import { range } from "./fake-history.test-utils";
 import { LEGACY } from "./legacy-cache.test-utils";
@@ -24,7 +25,7 @@ import type { MessageSearchItem } from "../types";
 import { extractAttachment } from "../utils/attachment";
 import { toRawJson } from "../utils/raw-json";
 import { toPeerIdFromRawPeer } from "../utils/telegram-peer-ids";
-import { NO_CREDENTIALS, runCli, runCliSuccess } from "./cli.test-utils";
+import { NO_CREDENTIALS, runCli, runCliSuccess, runShellCommand } from "./cli.test-utils";
 import { createTestEnvironment, type TestEnvironment } from "./e2e-setup.test-utils";
 
 describe("E2E: Messages Search", () => {
@@ -1172,6 +1173,128 @@ describe("E2E: Messages List filters offline and on another account", () => {
     } finally {
       db.run("UPDATE cache_migrations SET state = 'done' WHERE name = 'messages_raw_json_v2'");
     }
+  });
+});
+
+const SHORE_ID = 7_000_000_201;
+const REEF_ID = 7_000_000_202;
+const COVE_ID = 7_000_000_203;
+const BAY_ID = 7_000_000_204;
+const CAPE_ID = 7_000_000_205;
+
+describe("E2E: Messages List filters, filled from Telegram", () => {
+  let env: TestEnvironment;
+
+  beforeAll(() => {
+    env = createTestEnvironment("messages-list-filters-fill");
+    env.initDatabase();
+    env.seedAccounts([
+      { phone: "+15550000000", user_id: SELF_ID, is_active: true },
+      { phone: "+15550000001", user_id: SELF_ID + 1, is_active: false },
+    ]);
+    env.openCacheDb(1);
+    const db = env.openCacheDb(2);
+    const chats = createChatsCache(db);
+    const dms: Array<[number, number | null, number[]]> = [
+      [SHORE_ID, 30, [1, 10]],
+      [REEF_ID, null, [1, 10]],
+      [COVE_ID, 30, []],
+      [BAY_ID, null, []],
+      [CAPE_ID, 30, range(1, 10)],
+    ];
+    for (const [chatId, top, ids] of dms) {
+      chats.upsert(chatRow(chatId, "private", { last_message_id: top }));
+      createMessagesCache(db).upsertBatch(
+        ids.map((id) =>
+          parseRawMessage(
+            {
+              _: "message",
+              id,
+              peerId: { _: "peerUser", userId: chatId },
+              message: `note ${id}`,
+              date: PIER_START + id * 60,
+            },
+            chatId,
+          )!,
+        ),
+      );
+      if (ids.length > 0) createHistoryRanges(db).add(chatId, { low: 1, high: Math.max(...ids) });
+    }
+    db.run(
+      "INSERT INTO chat_sync_state (chat_id, chat_type, top_message_id) VALUES (?, 'private', 30)",
+      [REEF_ID],
+    );
+  });
+
+  afterAll(() => {
+    env.cleanup();
+  });
+
+  async function run(command: string, serverIds: number[]) {
+    const result = await runShellCommand(command, {
+      env: { ...env.getCliOptions().env, [FAKE_HISTORY_ENV]: serverIds.join(",") },
+      entry: FAKE_CLIENT_CLI,
+    });
+    expect(result.exitCode).toBe(0);
+    return result.json as FilteredAnswer;
+  }
+
+  async function fillAndRepeat(command: string, serverIds: number[], fill: string) {
+    const first = await run(command, serverIds);
+    expect(first.data.complete).toBe(false);
+    expect(first.next?.map((n) => n.command)).toEqual([fill, command]);
+
+    await run(fill, serverIds);
+    const repeated = await run(command, serverIds);
+    expect(repeated.data).toMatchObject({ complete: true, missing: [], suggestion: null });
+    expect(repeated.next ?? []).toEqual([]);
+    return repeated.data;
+  }
+
+  it.each([
+    ["the dialog list", SHORE_ID],
+    ["the sync state", REEF_ID],
+  ])(
+    "settles an empty gap in one fetch when only %s knows a newer message",
+    async (_name, chat) => {
+      const data = await fillAndRepeat(
+        `tg messages list --chat=${chat} --before=21 --type=text --account=2`,
+        [1, 10, 30],
+        `tg messages list --chat=${chat} --limit=100 --before=21 --fresh --account=2`,
+      );
+
+      expect(data.items.map((item) => item.messageId)).toEqual([10, 1]);
+    },
+  );
+
+  it("settles a gap below --before that Telegram shows empty", async () => {
+    const data = await fillAndRepeat(
+      `tg messages list --chat=${COVE_ID} --before=21 --type=text --account=2`,
+      [30],
+      `tg messages list --chat=${COVE_ID} --limit=100 --before=21 --fresh --account=2`,
+    );
+
+    expect(data.items).toEqual([]);
+  });
+
+  it("settles a chat that Telegram shows empty", async () => {
+    const data = await fillAndRepeat(
+      `tg messages list --chat=${BAY_ID} --type=text --account=2`,
+      [],
+      `tg messages list --chat=${BAY_ID} --limit=100 --fresh --account=2`,
+    );
+
+    expect(data.items).toEqual([]);
+  });
+
+  it("settles the top of a chat whose newest messages are gone", async () => {
+    const data = await fillAndRepeat(
+      `tg messages list --chat=${CAPE_ID} --type=text --account=2`,
+      range(1, 10),
+      `tg messages list --chat=${CAPE_ID} --limit=100 --fresh --account=2`,
+    );
+
+    expect(data.items.map((item) => item.messageId)).toEqual(range(1, 10).reverse());
   });
 });
 

@@ -223,6 +223,7 @@ export async function fetchHistoryPage(
   chat: HistoryChat,
   window: HistoryWindow,
 ) {
+  const knownTop = createHistoryRanges(cacheDb).knownTop(chat.chatId);
   const { messages, users } = await callHistory(client, chat, historyRequest(window));
 
   const floor = window.after ?? 0;
@@ -237,10 +238,12 @@ export async function fetchHistoryPage(
     .slice(0, window.limit);
 
   const short = messages.length < window.limit;
-  const bounds: PageBounds =
-    window.after === undefined
-      ? { before: window.before, reachedStart: short }
-      : { after: window.after, before: short ? window.before : undefined };
+  let bounds: PageBounds = { after: window.after };
+  if (window.after === undefined) {
+    bounds = { before: window.before, reachedStart: short, knownTop };
+  } else if (short) {
+    bounds = { after: window.after, before: window.before, knownTop };
+  }
 
   return cacheHistoryResponse(cacheDb, chat.chatId, page, users, bounds);
 }
@@ -372,19 +375,6 @@ async function readHistoryPage({
   return { rows, source: "api" as const };
 }
 
-function knownTop(cacheDb: Database, chatId: number) {
-  const row = cacheDb
-    .query(`
-      SELECT MAX(
-        COALESCE((SELECT MAX(message_id) FROM messages_cache WHERE chat_id = $id), -1),
-        COALESCE((SELECT last_message_id FROM chats_cache WHERE chat_id = $text_id), -1),
-        COALESCE((SELECT top_message_id FROM chat_sync_state WHERE chat_id = $id), -1)
-      ) AS top
-    `)
-    .get({ $id: chatId, $text_id: String(chatId) }) as { top: number };
-  return row.top < 0 ? null : row.top;
-}
-
 function vouchedSpan(
   cacheDb: Database,
   chatId: number,
@@ -491,7 +481,7 @@ export function readFilteredPage(
     const history = createMessagesHistory(cacheDb);
     const rows = history.list(chatId, { ...window, includeDeleted, filter });
     const ids = rows.map((row) => row.message_id);
-    const top = knownTop(cacheDb, chatId);
+    const top = createHistoryRanges(cacheDb).knownTop(chatId);
     const span = vouchedSpan(cacheDb, chatId, window, filter, ids, top);
     const gap = span && newestGap(cacheDb, chatId, span, top);
     const migrating =
