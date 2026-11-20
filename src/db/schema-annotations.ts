@@ -136,6 +136,61 @@ const CHAT_CONTENT_PROTECTION_ANNOTATION: TableAnnotation = {
   },
 };
 
+const MESSAGE_TRANSCRIPTS_ANNOTATION: TableAnnotation = {
+  description:
+    "The text tg media transcribe got from a voice note or video note, with a speech-to-text program on this machine. One row per message. Not indexed for search. Join messages_cache USING (chat_id, message_id).",
+  primaryKey: ["chat_id", "message_id"],
+  columns: {
+    chat_id: {
+      description: "Marked peer ID of the chat, as in messages_cache",
+      nullable: false,
+    },
+    message_id: {
+      description: "Message ID within the chat",
+      nullable: false,
+    },
+    unique_file_id: {
+      description:
+        "Telegram unique file ID of the audio, as in message_attachments: the row counts only while the message holds this file, and a forwarded copy reuses it",
+      nullable: false,
+    },
+    text: {
+      description: "The transcript; empty for silent audio",
+      nullable: false,
+    },
+    language: {
+      description:
+        "Language code the program detected or was given (en, ru…); null for silent audio",
+      nullable: true,
+    },
+    source: {
+      description:
+        "The provider that made it (media.md#providers); local: a program on this machine",
+      nullable: false,
+      semanticType: "enum",
+      enumValues: ["local"],
+    },
+    runner: {
+      description:
+        "The provider's program or service: whisper-cli, mlx_whisper, whisper-ctranslate2, whisper or a configured one; null for silent audio, which no provider read",
+      nullable: true,
+    },
+    model: {
+      description:
+        "The model the program used (a name, or a model file for whisper.cpp); null for silent audio",
+      nullable: true,
+    },
+    transcribed_at: {
+      description: "When the transcript was made",
+      nullable: false,
+      semanticType: "timestamp",
+    },
+  },
+  indexes: {
+    idx_message_transcripts_unique_file_id: "Find a transcript of the same file in another message",
+  },
+};
+
 const CACHE_MIGRATIONS_ANNOTATION: TableAnnotation = {
   description:
     "The progress of each background migration: a rewrite of every row of a table that the daemon or tg db migrate does in short batches, resuming from cursor. tg status shows the unfinished ones.",
@@ -505,6 +560,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
 
     message_attachments: MESSAGE_ATTACHMENTS_ANNOTATION,
     chat_content_protection: CHAT_CONTENT_PROTECTION_ANNOTATION,
+    message_transcripts: MESSAGE_TRANSCRIPTS_ANNOTATION,
     cache_migrations: CACHE_MIGRATIONS_ANNOTATION,
 
     history_ranges: {
