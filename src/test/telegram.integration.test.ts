@@ -211,6 +211,73 @@ describe.skipIf(!SHOULD_RUN)("Smoke: tg against the real Telegram API", () => {
   );
 
   it(
+    "messages forward copies a message on Telegram and into the cache",
+    async () => {
+      const marker = uniqueMarker();
+      const messageId = await sendToSavedMessages(`tg smoke test ${marker}`);
+
+      const forward = await runCliSuccess(
+        ["messages", "forward", "--from", "me", "--to", "me", "--id", String(messageId)],
+        cli(),
+      );
+      const data = (
+        forward.json as Envelope<{
+          fromChatId: number;
+          toChatId: number;
+          forwarded: Array<{
+            messageId: number;
+            newMessageId: number | null;
+            message: { text: string } | null;
+          }>;
+        }>
+      ).data;
+      const newMessageId = data.forwarded[0]?.newMessageId;
+      if (typeof newMessageId === "number") sentMessageIds.push(newMessageId);
+      expect(data.fromChatId).toBe(data.toChatId);
+      expect(data.forwarded).toHaveLength(1);
+      expect(data.forwarded[0]).toMatchObject({
+        messageId,
+        message: { text: `tg smoke test ${marker}` },
+      });
+      expect(newMessageId).toBeGreaterThan(messageId);
+
+      const raw = await runCliSuccess(
+        [
+          "api",
+          "messages.getMessages",
+          "--json",
+          JSON.stringify({ id: [{ _: "inputMessageID", id: newMessageId }] }),
+        ],
+        cli(),
+      );
+      const copy = (
+        raw.json as Envelope<{
+          result: {
+            messages: Array<{ id: number; message?: string }>;
+          };
+        }>
+      ).data.result.messages.find((m) => m.id === newMessageId);
+      expect(copy?.message).toBe(`tg smoke test ${marker}`);
+
+      const cached = await runCliSuccess(
+        ["messages", "get", "--chat", "me", "--id", String(newMessageId)],
+        cli(),
+      );
+      expect(cached.json).toMatchObject({
+        success: true,
+        data: {
+          source: "cache",
+          message: {
+            messageId: newMessageId,
+            text: `tg smoke test ${marker}`,
+          },
+        },
+      });
+    },
+    API_TIMEOUT_MS * 3,
+  );
+
+  it(
     "messages list and get read Saved Messages from Telegram, then from the cache",
     async () => {
       type Item = {

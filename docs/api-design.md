@@ -144,6 +144,7 @@ tg send --to @username --message "Hello"
 tg send --to @username -m "Hello" --silent
 tg send --to @username -m "Reply" --reply-to 123
 tg send --to me --file ./report.pdf --caption "Q3"   # one file: a photo or a document
+tg messages forward --from @username --to me --id 123 --id 124   # copy into Saved Messages
 
 # Media: a message's file into the account's media cache (cache-first)
 tg media download --chat me --id 42 --out ./

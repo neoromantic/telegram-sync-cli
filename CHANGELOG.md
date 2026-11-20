@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg messages forward --from <peer> --to <peer> --id <id>...` forwards up to 100 messages of
+  one chat into another in one `messages.forwardMessages` call (the forward part of #23). It
+  prints each source ID with the ID of its copy and the copy as `tg messages get` does, and
+  stores the copies in the cache at once, so search finds them without a daemon. Telegram's
+  refusals (protected source chat, no such message, no right to post, blocked) are
+  `TELEGRAM_ERROR` with the reason in `details.telegramError`. It is a write: read-only mode
+  refuses it, and both chats must be in `allowedChats`.
+
 ## [0.15.1] - 2026-11-19
 
 ### Fixed

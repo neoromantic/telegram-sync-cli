@@ -142,7 +142,13 @@ describe("E2E: read-only mode and allowedChats", () => {
 
     it("enumerates the write commands from the tree", () => {
       expect(writes).toEqual(
-        expect.arrayContaining(["send", "messages read", "auth logout", "auth login"]),
+        expect.arrayContaining([
+          "send",
+          "messages read",
+          "messages forward",
+          "auth logout",
+          "auth login",
+        ]),
       );
     });
 
@@ -206,6 +212,7 @@ describe("E2E: read-only mode and allowedChats", () => {
           "messages watch",
           "messages unread",
           "messages read",
+          "messages forward",
           "media download",
         ]),
       );
@@ -227,6 +234,22 @@ describe("E2E: read-only mode and allowedChats", () => {
         expect(exitCode).toBe(1);
       });
     }
+
+    it("tg messages forward needs both chats in the list", async () => {
+      for (const [from, to] of [
+        ["@teamchat", String(CLUB_ID)],
+        [String(CLUB_ID), "me"],
+      ] as const) {
+        const result = await runCli(
+          ["messages", "forward", "--from", from, "--to", to, "--id", "1"],
+          { ...options(ALLOWED), entry: FAKE_CLIENT_CLI },
+        );
+        expect((result.json as ErrorJson).error).toMatchObject({
+          code: "CHAT_NOT_ALLOWED",
+          details: { chat: String(CLUB_ID), id: CLUB_ID },
+        });
+      }
+    });
 
     it("takes @username and its marked ID as one chat, and me as the own ID", async () => {
       for (const id of ["@teamchat", String(TEAM_ID)]) {
