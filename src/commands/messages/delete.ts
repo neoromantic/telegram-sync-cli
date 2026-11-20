@@ -71,13 +71,6 @@ export const deleteMessagesCommand = defineCommand({
     },
   },
   async run({ args, rawArgs }) {
-    const revokeValue = rawArgs.find((arg) => /^--revoke=(?!(true|false)$)/.test(arg));
-    if (revokeValue) {
-      error(
-        ErrorCodes.INVALID_ARGS,
-        `--revoke takes no value: pass --revoke or --no-revoke, not ${revokeValue}. Nothing was deleted.`,
-      );
-    }
     const messageIds = readMessageIds(rawArgs);
     const { account } = openAccountCache(args.account);
 
