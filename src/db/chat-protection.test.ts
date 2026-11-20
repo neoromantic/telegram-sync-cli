@@ -52,7 +52,10 @@ describe("chat protection store", () => {
       const store = createChatProtectionStore(db);
       store.record(-4001, { protected: true, reason: "chat" }, 1000);
       store.record(-4001, { protected: false, reason: null }, time);
+      store.record(-4002, { protected: false, reason: null }, time);
+      store.record(-4002, { protected: true, reason: "chat" }, 1000);
       expect(store.get(-4001)).toMatchObject({ protected: 1, fetched_at: 1000 });
+      expect(store.get(-4002)).toMatchObject({ protected: 1, fetched_at: 1000 });
     },
   );
 
