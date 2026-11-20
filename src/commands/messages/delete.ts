@@ -77,7 +77,8 @@ export const deleteMessagesCommand = defineCommand({
     try {
       const deps = openHistory(account.id, "cli:messages.delete");
       const chat =
-        checkedChat(args, "chat") ?? (await resolveHistoryChat(deps.client, args.chat, deps));
+        checkedChat(args, "chat") ??
+        (await resolveHistoryChat(deps.client, args.chat, deps, { freshUsername: true }));
       success(await deleteMessages(deps.client, deps.cacheDb, chat, messageIds, args.revoke));
     } catch (err) {
       if (err instanceof DeleteRefusedError || err instanceof MessagesNotInChatError) {
