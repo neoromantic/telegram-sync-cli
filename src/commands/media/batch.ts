@@ -166,7 +166,7 @@ export async function downloadBatch(
   checkDownloadInterrupted(deps.signal);
   if (!online.length) return failures;
 
-  const { client, retry } = batchTransfers(deps.getClient(), deps.signal);
+  const { client, retry } = batchTransfers(await deps.getClient(), deps.signal);
   const fileDeps = {
     ...deps,
     getClient: () => client,

@@ -1,6 +1,6 @@
 {
   "name": "@goodit/telegram-sync-cli",
-  "version": "0.14.0",
+  "version": "0.15.1",
   "description": "Agent-friendly Telegram sync CLI with full API support",
   "keywords": [
     "agent",
@@ -25,6 +25,7 @@
   },
   "files": [
     "bin/tg.js",
+    "skills/telegram-sync-cli/SKILL.md",
     "src/**/*.ts",
     "!src/**/*.test.ts",
     "!src/**/*.test-utils.ts",
@@ -42,7 +43,7 @@
     "build:minify": "bun build ./src/index.ts --compile --minify --sourcemap --outfile dist/tg",
     "build:all": "bun run scripts/build-all.ts",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run check:knip",
-    "check:knip": "knip",
+    "check:knip": "knip --cache",
     "typecheck": "tsc --noEmit",
     "test": "bun test --parallel --timings=test-timings.json --path-ignore-patterns='**/*.e2e.test.ts' --path-ignore-patterns='**/*.integration.test.ts'",
     "test:e2e": "bun test --parallel --timings=test-timings.json --timeout 30000 .e2e.test.ts",

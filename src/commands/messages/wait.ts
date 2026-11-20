@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { type ArgsDef, defineCommand } from "citty";
 
-import { createPidFile } from "../../daemon";
+import { createPidFile } from "../../daemon/pid-file";
 import { getDataDir } from "../../db";
 import { createDaemonStatusService } from "../../db/daemon-status";
 import { createNewMessagesFeed, oldestFirst } from "../../db/new-messages";

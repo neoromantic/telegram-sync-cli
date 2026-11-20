@@ -41,21 +41,13 @@ function processExists(pid: number) {
   }
 }
 
-function readPidFromFile(path: string) {
-  if (!existsSync(path)) {
-    return null;
-  }
-
-  try {
-    const content = readFileSync(path, "utf-8").trim();
-    const pid = parseInt(content, 10);
-    if (Number.isNaN(pid)) {
-      return null;
-    }
-    return pid;
-  } catch {
-    return null;
-  }
+/** Return a live PID, preserving filesystem errors for callers that report them. */
+export function readLivePid(path: string) {
+  const content = readFileSync(path, "utf-8").trim();
+  const pid = Number(content);
+  return /^\d+$/.test(content) && Number.isSafeInteger(pid) && pid > 0 && processExists(pid)
+    ? pid
+    : null;
 }
 
 function removePidFile(path: string) {
@@ -76,8 +68,8 @@ class PidFileManager implements PidFile {
   constructor(private readonly path: string) {}
 
   acquire() {
-    const existingPid = readPidFromFile(this.path);
-    if (existingPid && processExists(existingPid)) {
+    const existingPid = this.read();
+    if (existingPid !== null) {
       throw new PidFileError(
         `Daemon already running with PID ${existingPid}`,
         "ALREADY_RUNNING",
@@ -85,7 +77,7 @@ class PidFileManager implements PidFile {
       );
     }
 
-    if (existingPid || existsSync(this.path)) {
+    if (existsSync(this.path)) {
       removePidFile(this.path);
     }
 
@@ -97,14 +89,11 @@ class PidFileManager implements PidFile {
   }
 
   read() {
-    const pid = readPidFromFile(this.path);
-    if (!pid) {
+    try {
+      return readLivePid(this.path);
+    } catch {
       return null;
     }
-    if (!processExists(pid)) {
-      return null;
-    }
-    return pid;
   }
 
   isRunning() {
