@@ -394,6 +394,138 @@ common word.
   less than tg writes with the merges. The daemon merges at most 250 ms a second, shared with
   the background migrations.
 
+### 9. Other word forms and typos
+
+**Decision** ([#92](https://github.com/neoromantic/telegram-sync-cli/issues/92)): E2, on by
+default in `tg messages search`, with `--exact` to turn it off. Each plain query word becomes an
+`OR` of the index's own words with the same light stem (Savoy's Russian, Lucene's plural-only
+English, `ё` read as `е`), read from a persistent `fts5vocab` table; the index is unchanged. Why
+E2: of the candidates that find the same messages, it is the simplest (a query rewrite: no index
+change, no migration, and older versions and other SQLite clients read the same file), and it
+doubles Russian recall (0.368 to 0.704, +0.34 [0.30, 0.37]; pairs 0.111 to 0.323) and raises
+English recall (0.749 to 0.843). D1/E1 find more (0.839) but are right less often (0.887), B2
+and C less still. Production adds two things the benchmark's candidate didn't have: at most 30
+forms a word (the word itself, then the most frequent), and the vocabulary scan reads `е` and
+`ё` both at every position of the stem's prefix, where the candidate stopped the prefix at the
+first of them. Both scans cover every word with the stem, so below the cap they find the same
+words, only with fewer words read; the benchmark's E2 now runs through the shipped code
+(`findQueryForms`). Typo correction is a separate change. How word forms work:
+[search.md](search.md#word-forms).
+
+**Why it is the default although it missed Q3.** No candidate passed Q3, the precision limit
+fixed in advance: E2 loses 0.059 of Russian precision (to 0.946), 0.053 in the first 50, against
+a limit of 0.05. So the first version was an opt-in flag. The owner then made it the default
+anyway. This is a product decision that overrides the rule set before the benchmark; the rule
+and the numbers stay as they are. The reasons:
+
+- A missed message is silent: the caller sees nothing and concludes that nothing exists. A wrong
+  form is visible: the result's text is shown, and the answer lists the forms searched for in
+  `forms`.
+- With exact search a Russian word finds about a third of the messages that contain some form
+  of it (recall 0.368), and a two-word Russian query about a ninth (recall 0.111).
+- An opt-in flag doesn't meet the goal of #92, finding other word forms without a manual prefix.
+- Exact search stays one flag away: `--exact`, or any query with FTS5 syntax, is matched as
+  written.
+
+The maintainer may prefer the opt-in flag; these numbers are the basis for either choice.
+
+The benchmark below was defined before any candidate ran; a change made afterwards is listed
+under it with the reason.
+
+**Benchmark** (`bun run bench:search`). The question: should a plain query find other forms of
+its words (`квартира` finding `квартиру`, `meeting` finding `meetings`), and how; separately,
+should it find words typed with a typo.
+
+Candidates. Every one keeps unicode61's words; Cyrillic words go to a Russian stemmer, Latin
+words to an English one.
+
+| Candidate | Index                                              | Query word becomes                                                                 |
+| --------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| A         | today's                                            | `"w"`                                                                              |
+| B1        | today's (B1p: with FTS5 `prefix='2 3'`)            | `"w"*`                                                                             |
+| B2        | today's                                            | `"stem"*`, the Snowball stem                                                       |
+| C         | a second, trigram index                            | the Snowball stem as a substring (3+ characters)                                   |
+| D1        | Snowball stems (D1+: an extra column of them)      | `"stem"`                                                                           |
+| D2        | light stems: Savoy's Russian, Lucene's plural-only | `"stem"`                                                                           |
+| E1, E2    | today's                                            | an `OR` of the index's own words with the same stem (fts5vocab), Snowball or light |
+
+Data. Quality: [Tatoeba](https://tatoeba.org) sentences (CC BY 2.0 FR), a seeded sample of
+50,000 Russian and 50,000 English, downloaded at run time and never committed. Cost: those and
+100,000 messages of the storage benchmark's generator, whose Cyrillic words are syllables with
+random endings: fine for cost, not for quality. `--cache` adds a real cache's texts, read-only,
+and prints only numbers.
+
+Judge. A message is relevant to a query word when one of its words has the query word's lemma
+among its lemmas, as pymorphy3 (Russian, OpenCorpora dictionary) and LemmInflect (English) give
+them, run locally with uv; ё reads as е. A query of two words needs both.
+
+Queries, per language. Single content words (no prepositions, conjunctions, particles,
+interjections or pronouns; 3+ letters) in four bands of message frequency (2–4, 5–29, 30–299,
+300+), up to 100 each, typed in the dictionary form and, separately, as a form seen in the
+text; and 200 pairs of content words of one message.
+
+Measures. Quality: recall and precision of all matches, and of the first 50 newest first, macro
+means with a paired bootstrap 95% interval of the difference to A. Cost, on the text column:
+index size after a full merge, the full rebuild, writes through triggers (pages of 100 in one
+transaction, messages one per transaction), and in-process times of the storage benchmark's
+query shapes through `searchNewestFirst`, the query rewrite included.
+
+Thresholds, all needed for a significant improvement:
+
+- Q1. Russian single words, dictionary form: recall at least +0.15 over A, the interval above 0.
+  Today every other form is missed; on short Russian documents stemming raised MAP by 80–90%
+  (Dolamic and Savoy, 2009). Less than 0.15 is what a typed prefix gives.
+- Q2. Russian pairs: recall at least +0.15.
+- Q3. Precision, of all matches and of the first 50, at most 0.05 below A in both languages: one
+  wrong result in 20 is noise that an agent reading 50 results acts on.
+- Q4. English recall not below A.
+- C1–C5. Index at most 1.5 times A's; writes at least 0.8 times A's rate; rebuild at most twice
+  A's time; each query shape at most twice A's median and under 50 ms at p95; at most one small
+  pure-JS runtime dependency or 2,000 lines in the repo, no native extension.
+
+Not worth the complication: a Russian recall gain under 0.05, or no candidate passes; 0.05 to
+0.15 is marginal. Of those that pass, the best Russian F1 wins; within 0.02 of it, the simplest
+(a query rewrite, then an extra column, then a replaced index, then a second index).
+
+Typos. The single dictionary-form words of 4+ letters, one typo each, in turn: a keyboard
+neighbour substituted, a letter deleted, a neighbour inserted, two letters swapped, and in
+Russian `е` for `ё` and `и` for `й`. Corrections: index words within Damerau (OSA) distance 1
+for 4–7 letters and 2 for 8+ (F-DL), or with trigram similarity 0.3 or more (F-TRI), then their
+forms; always, or only when the query finds nothing. Worth building when recall on the typed
+words rises by at least 0.30, precision on them is at least 0.70 and the correction takes under
+50 ms at p95; on by default only if, always on, precision on correctly typed words drops at
+most 0.05, else as the fallback if that passes.
+
+**Numbers** (public and made-up data; quality is seeded and the same in every run). Recall and
+precision of all matches, single words in the dictionary form, and pairs; the gain's 95%
+interval in brackets. The judge counts a match as right when any lemma of the found word is the
+query word's lemma, without its context (`Они стали` counts for `сталь`), so real precision on
+ambiguous words is somewhat lower:
+
+| Candidate   | Russian recall             | Russian precision | Russian pairs recall | English recall | English precision |
+| ----------- | -------------------------- | ----------------: | -------------------: | -------------- | ----------------: |
+| A           | 0.368                      |             1.000 |                0.111 | 0.749          |             1.000 |
+| B1, B1p     | 0.447 (+0.08)              |             0.923 |                0.160 | 0.957 (+0.21)  |             0.898 |
+| B2          | 0.850 (+0.48)              |             0.789 |                0.548 | 0.916 (+0.17)  |             0.799 |
+| C           | 0.842 (+0.47)              |             0.701 |                0.548 | 0.916 (+0.17)  |             0.722 |
+| D1, D1+, E1 | 0.839 (+0.47 [0.43, 0.51]) |             0.887 |                0.520 | 0.964 (+0.21)  |             0.907 |
+| D2, E2      | 0.704 (+0.34 [0.30, 0.37]) |             0.946 |                0.323 | 0.843 (+0.09)  |             0.997 |
+
+E1 and E2 find exactly what D1 and D2 find: an index of stems and an `OR` of the index's words
+with the same stem are the same match. No candidate passes Q3: the closest, D2 and E2, lose 0.059
+of Russian precision [0.042, 0.078], 0.053 of it in the first 50. About half of their wrong
+matches are other words with the same stem (`как` for `какой`, `брат` for `брать`, `лет` for
+`лето`); the rest are words the judge gives another lemma of the same family (`больше` for
+`большой`, `домой` for `дом`). E2 also fails C4 (a pair of words: 0.6 ms against 0.07 ms), D2
+fails C2 and C3 (stemming in a SQL function made the rebuild 2.5 to 6 times as long). Index
+size: B1p 1.8–2.1 times A's, C 4–7 times, D1+ 1.7–1.8 times, D1 and D2 0.89–0.99 times.
+
+Typos, the correction F-DL with exact words: recall on words with a typo from 0.001 to 0.48
+(Russian) and 0.75 (English), precision 0.80 and 0.82, 21 ms and 15 ms at p95 on a vocabulary of
+33,733 and 17,680 words; always on, precision on correctly typed words falls to 0.71 and 0.62,
+as the fallback to 0.93 and 0.99. F-TRI's precision is 0.39–0.48. Measured on a laptop shared
+with other work (load average 20–40), so the times are rough: run it again on an idle machine.
+
 ## All query times
 
 Median of the in-process runs, with p95 in parentheses:
@@ -507,6 +639,20 @@ took 15.73 GB and 30.94 GB more during the VACUUM.
 
 Compare runs on the same machine only. To measure a change, run the same `--messages` and
 `--seed` before and after it.
+
+The word-forms benchmark ([9](#9-other-word-forms-and-typos)) runs apart. It needs `uv` (the judge
+installs pymorphy3 and LemmInflect on first use) and `bunzip2`, downloads the Tatoeba sentences
+on each run unless `--corpus-dir` keeps them, and takes about 5 minutes:
+
+```bash
+bun run bench:search                                   # Tatoeba ru + en, 100,000 made-up messages
+bun run bench:search --no-tatoeba --messages 0 --cache <path to cache.db>   # a real cache only
+```
+
+`--cache` opens the file read-only, copies the message texts to a temp folder, and prints only
+numbers: sizes, rates, times, recall and precision, never a word or a message. Other options:
+`--sentences N` (50000), `--messages N` (100000, 0 skips), `--seed`, `--runs` (20), `--out file`,
+`--keep`.
 
 ## Follow-up issues
 

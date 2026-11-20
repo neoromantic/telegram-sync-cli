@@ -2,10 +2,12 @@ import { type ArgsDef, defineCommand } from "citty";
 
 import {
   createMessagesSearch,
+  hasFts5Syntax,
   isFts5QueryError,
   MESSAGE_SEARCH_SORTS,
   type MessageSearchSort,
 } from "../../db/messages-search";
+import { findQueryForms } from "../../db/word-forms";
 import { ErrorCodes } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
@@ -65,12 +67,18 @@ const searchArgs = {
   query: {
     type: "string",
     description:
-      'Words to find (all of them, any order), or an FTS5 query: error OR timeout, "exact phrase", sender:alice, chat:team, word*',
+      'Words to find (all of them, any order, in any of their forms), or an FTS5 query, matched as written: error OR timeout, "exact phrase", sender:alice, chat:team, word*',
     required: true,
   },
   phrase: {
     type: "boolean",
     description: "Match the whole query as one exact phrase",
+    default: false,
+  },
+  exact: {
+    type: "boolean",
+    description:
+      "Match each word only as typed, without its other forms (квартира would also find квартиру, meeting also meetings)",
     default: false,
   },
   limit: {
@@ -132,7 +140,7 @@ export const searchMessagesCommand = defineCommand({
   meta: {
     name: "search",
     description:
-      'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
+      'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, word*. Plain words also match their other forms in the cache (квартира finds квартиру); --exact turns that off',
   },
   args: searchArgs,
   async run({ args }) {
@@ -174,8 +182,11 @@ export const searchMessagesCommand = defineCommand({
 
     try {
       const search = createMessagesSearch(cacheDb);
+      const expand = allowed === null && !args.exact && !args.phrase && !hasFts5Syntax(query);
+      const forms = expand ? findQueryForms(cacheDb, query) : undefined;
 
       const options = {
+        forms,
         includeDeleted: args.includeDeleted ?? false,
         phrase: args.phrase ?? false,
         chatId: chatFilter?.id,
@@ -205,7 +216,14 @@ export const searchMessagesCommand = defineCommand({
             ]
           : [];
       const count = args.count ? search.count(query, options) : null;
-      const terms = args.snippet ? snippetTerms(query, { phrase: options.phrase }) : [];
+      const terms = args.snippet
+        ? [
+            ...snippetTerms(query, { phrase: options.phrase }),
+            ...[...(forms?.values() ?? [])].flatMap((found) =>
+              found.words.map((text) => ({ text, prefix: false })),
+            ),
+          ]
+        : [];
       const toItem = messageItemReader(cacheDb);
 
       success(
@@ -216,10 +234,12 @@ export const searchMessagesCommand = defineCommand({
             sender: args.sender ?? null,
             includeDeleted: args.includeDeleted ?? false,
             phrase: args.phrase ?? false,
+            exact: args.exact ?? false,
             since: args.since ?? null,
             until: args.until ?? null,
           },
           sort,
+          forms: forms ? Object.fromEntries(forms) : null,
           results: results.map((row) => {
             const item = toItem(row);
             return args.snippet ? { ...item, snippet: buildSnippet(item.text, terms) } : item;

@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 
+import type { QueryForms } from "./word-forms";
+
 const FTS5_SYNTAX =
   /["*:()]|(?<!\S)\^(?=\S)|(?<![^\s"])\+(?![^\s"])|(?<![\p{L}\p{N}_])(?:AND|OR|NOT|NEAR)(?![\p{L}\p{N}_])/u;
 
@@ -12,16 +14,25 @@ function quotePhrase(text: string) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+function anyOf(words: string[]) {
+  const quoted = [...new Set(words)].map(quotePhrase);
+  return quoted.length > 1 ? `(${quoted.join(" OR ")})` : quoted[0];
+}
+
 /**
  * The FTS5 MATCH expression for a user query. A plain query matches every
  * word in any order: each word is quoted, so punctuation (`don't`, `e-mail`)
- * is never syntax. A query with FTS5 syntax goes to FTS5 as written, and
- * `phrase` makes the whole query one phrase.
+ * is never syntax. With `forms`, a plain word matches itself or any of its forms. A
+ * query with FTS5 syntax goes to FTS5 as written, and `phrase` makes the
+ * whole query one phrase.
  */
-export function toFts5Query(query: string, options: { phrase?: boolean } = {}) {
+export function toFts5Query(query: string, options: { phrase?: boolean; forms?: QueryForms } = {}) {
   if (options.phrase) return quotePhrase(query);
   if (hasFts5Syntax(query)) return query;
-  return query.split(/\s+/).filter(Boolean).map(quotePhrase).join(" ");
+  const words = query.split(/\s+/).filter(Boolean);
+  const { forms } = options;
+  if (!forms) return words.map(quotePhrase).join(" ");
+  return words.map((word) => anyOf([word, ...(forms.get(word)?.words ?? [])])).join(" AND ");
 }
 
 /**
@@ -110,6 +121,8 @@ export interface MessageSearchOptions {
   includeDeleted?: boolean;
   /** Match the whole query as one phrase */
   phrase?: boolean;
+  /** Match each plain word by any of these forms (findQueryForms) */
+  forms?: QueryForms;
   /** Messages sent at or after this Unix time, in seconds */
   since?: number;
   /** Messages sent before this Unix time, in seconds */
@@ -262,7 +275,7 @@ export function searchNewestFirst(
   const now = tuning.now ?? (() => performance.now());
   const limit = options.limit ?? 50;
   const offset = options.offset ?? 0;
-  const match = toFts5Query(query, { phrase: options.phrase });
+  const match = toFts5Query(query, options);
   const sorted = () => ({
     rows: sortedPage(db, MATCHES_FROM, match, options, NEWEST_FIRST),
     way: "sort" as const,
@@ -381,7 +394,7 @@ export function createMessagesSearch(db: Database) {
       return sortedPage(
         db,
         MATCHES_FROM,
-        toFts5Query(query, { phrase: options.phrase }),
+        toFts5Query(query, options),
         options,
         `message_search.rank, ${NEWEST_FIRST}`,
       );
@@ -396,7 +409,7 @@ export function createMessagesSearch(db: Database) {
            ${options.chatUsername ? CHAT_JOIN : ""}${options.senderUsername ? SENDER_JOIN : ""}
            ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}`,
         )
-        .get(toFts5Query(query, { phrase: options.phrase }), ...params) as {
+        .get(toFts5Query(query, options), ...params) as {
         n: number;
       };
       return row.n;

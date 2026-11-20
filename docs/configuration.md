@@ -307,7 +307,8 @@ while it is set, even to an empty string) limit the commands that read or send t
   IDs to avoid that). The command acts on the chat and account the check resolved, so a switch
   of the active account in between doesn't move it.
 - Commands that read across chats show only allowed ones: `tg chats list` (with `--unread`
-  too), `tg chats search`, `tg messages search` (its `chat:` query filter narrows within them),
+  too), `tg chats search`, `tg messages search` (its `chat:` query filter narrows within them;
+  words match only as typed, without their other forms, which come from the whole cache),
   and `tg messages wait`, `watch` and `unread`, all without `--chat`.
 - `tg sql` and `tg api` can't be limited to some chats, so they fail with `CHAT_NOT_ALLOWED`
   (`details: { command }`) while a list is set.

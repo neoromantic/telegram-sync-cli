@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `tg messages search` also matches other forms of each plain word that occur in the cache, so
+  it returns more results: `квартира` finds `квартиру` and `квартирой`, `meeting` finds
+  `meetings`, and `еще` finds `ещё`; a word with a digit (`2ms`) stays as typed. It works on
+  the index's own words with light Russian and English stemmers, so the index and older
+  versions are unchanged. `--exact` gives the old
+  behaviour, each word only as typed; a query with FTS5 syntax or `--phrase` is matched as
+  written, as before, and so is every query while `allowedChats` is set, since the forms come
+  from the whole cache. The answer adds `forms`, the forms searched for (`null` when the query
+  wasn't expanded), and `filters.exact`. The cache gets the table `message_search_vocab`, the
+  index's words, which `tg sql` can read. See [docs/search.md](docs/search.md#word-forms).
+
 ## [0.15.1] - 2026-11-19
 
 ### Fixed
