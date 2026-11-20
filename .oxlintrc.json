@@ -15,7 +15,7 @@
       {
         "allow": {
           "src/db/background-migrations.test.ts": 1,
-          "src/test/telegram.integration.test.ts": 7
+          "src/test/telegram.integration.test.ts": 8
         }
       }
     ]

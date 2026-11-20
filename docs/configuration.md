@@ -278,7 +278,7 @@ TELEGRAM_SYNC_CLI_READ_ONLY=1 TELEGRAM_SYNC_CLI_ALLOWED_CHATS="@teamchat,me" my-
 `false` or `off`; the variable turns it on, never off) refuses every command that changes
 something on Telegram, before it connects, with `READ_ONLY` (exit 1):
 
-- `tg send`, and `tg messages read`, which marks a chat read;
+- `tg send`, `tg messages edit`, and `tg messages read`, which marks a chat read;
 - `tg api` with a method whose name after the namespace doesn't start with `get`, `search`,
   `resolve` or `check` (`messages.getHistory`, `account.checkUsername` and `help.getConfig`
   run; `messages.sendMessage` and `messages.readHistory` don't). The rule goes by the name, so a
