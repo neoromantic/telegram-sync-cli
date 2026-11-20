@@ -13,18 +13,13 @@ if (!(globalThis as Record<symbol, boolean>)[timeoutPatchKey]) {
 }
 
 import { join } from "node:path";
-import {
-  type FloodWaiterOptions,
-  networkMiddlewares,
-  proxyTransportFromUrl,
-  TelegramClient,
-} from "@mtcute/bun";
+import type { FloodWaiterOptions, proxyTransportFromUrl, TelegramClient } from "@mtcute/bun";
 
 import { ConfigError } from "../config";
 import { getDataDir } from "../db";
 import { wrapClientCallWithRecordReplay } from "../utils/telegram-record-replay";
 
-const clients = new Map<number, TelegramClient>();
+const clients = new Map<number, Promise<TelegramClient>>();
 
 /**
  * Configuration for telegram service
@@ -59,9 +54,10 @@ const DEFAULT_FLOOD_WAITER_OPTIONS: FloodWaiterOptions = {
 };
 
 /**
- * Get default configuration from environment
+ * Get default configuration from environment. mtcute loads only for
+ * TELEGRAM_PROXY: importing it is most of the start of tg.
  */
-export function getDefaultConfig() {
+export async function getDefaultConfig() {
   const config: TelegramConfig = {
     apiId: parseInt(process.env.TELEGRAM_API_ID ?? "0", 10),
     apiHash: process.env.TELEGRAM_API_HASH ?? "",
@@ -71,8 +67,9 @@ export function getDefaultConfig() {
     ),
   };
   if (process.env.TELEGRAM_PROXY !== undefined) {
+    const mtcute = await import("@mtcute/bun");
     try {
-      config.transport = proxyTransportFromUrl(process.env.TELEGRAM_PROXY);
+      config.transport = mtcute.proxyTransportFromUrl(process.env.TELEGRAM_PROXY);
     } catch {
       throw new ConfigError("Invalid TELEGRAM_PROXY URL", [
         { path: "TELEGRAM_PROXY", message: "Expected a supported proxy URL" },
@@ -116,8 +113,8 @@ export class MissingCredentialsError extends ConfigError {
 /**
  * Get config from environment, throwing if credentials are missing
  */
-export function requireDefaultConfig() {
-  const config = getDefaultConfig();
+export async function requireDefaultConfig() {
+  const config = await getDefaultConfig();
   const validation = validateConfig(config);
   if (!validation.valid) {
     throw new MissingCredentialsError(validation.error ?? "Invalid config");
@@ -142,7 +139,8 @@ export interface ClientFactory {
 /**
  * Default client factory using mtcute
  */
-export function createDefaultClientFactory(config: TelegramConfig, dataDir?: string) {
+export async function createDefaultClientFactory(config: TelegramConfig, dataDir?: string) {
+  const { networkMiddlewares, TelegramClient } = await import("@mtcute/bun");
   const floodWaiterOpts = config.floodWaiter ?? DEFAULT_FLOOD_WAITER_OPTIONS;
   const middlewares = [networkMiddlewares.floodWaiter(floodWaiterOpts)];
 
@@ -178,8 +176,8 @@ export async function isAuthorized(client: TelegramClient) {
 
 let defaultFactory: ClientFactory | null = null;
 
-function getDefaultFactory() {
-  defaultFactory ??= createDefaultClientFactory(requireDefaultConfig());
+async function getDefaultFactory() {
+  defaultFactory ??= await createDefaultClientFactory(await requireDefaultConfig());
   return defaultFactory;
 }
 
@@ -187,7 +185,7 @@ function getDefaultFactory() {
  * Create a new Telegram client for an account (uses global clients map)
  */
 export function createClient(accountId: number) {
-  const client = getDefaultFactory().create(accountId);
+  const client = getDefaultFactory().then((factory) => factory.create(accountId));
   clients.set(accountId, client);
   return client;
 }

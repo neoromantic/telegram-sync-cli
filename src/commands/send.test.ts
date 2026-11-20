@@ -266,10 +266,40 @@ describe("send command", () => {
     }
   });
 
+  const resolvedTo = (id: number, accessHash: string) => ({
+    _: "contacts.resolvedPeer",
+    peer: { _: "peerUser", userId: id },
+    users: [
+      { _: "user", id, accessHash: toLong(accessHash), firstName: "Test", username: "testuser" },
+    ],
+    chats: [],
+  });
+  const NEW_OWNER = 654321;
+  const requests = () => commandCall.mock.calls.map(([request]) => (request as { _: string })._);
+
+  it("sends to the user who holds @username now, not its previous owner in the cache", async () => {
+    createUsersCache(commandCacheDb).upsert(createTestUser({ fetched_at: 1 }));
+    commandReplies.push(async () => resolvedTo(654321, "555"), sentUpdates);
+    const { sendCommand } = await import("./send");
+    const logSpy = spyOn(console, "log");
+    try {
+      await runCommand(sendCommand, { rawArgs: ["--to", "@testuser", "-m", "hi"] });
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    expect(requests()).toEqual(["contacts.resolveUsername", "messages.sendMessage"]);
+    const sent = commandCall.mock.calls[1]?.[0] as tl.messages.RawSendMessageRequest;
+    assertPeer(sent.peer, "inputPeerUser");
+    expect(sent.peer.userId).toBe(654321);
+    expect(createUsersCache(commandCacheDb).getByUsername("testuser")?.user_id).toBe("654321");
+  });
+
   it("sends to the chat and account allowedChats checked, even when both move before it runs", async () => {
     const users = createUsersCache(commandCacheDb);
     users.upsert(createTestUser({ access_hash: "111" }));
-    commandReplies.push(sentUpdates);
+    const owner = async () => resolvedTo(123456, "111");
+    commandReplies.push(owner, owner, sentUpdates);
     process.env[ALLOWED_CHATS_ENV] = "@testuser";
     const { sendCommand } = await import("./send");
     const send = {
@@ -292,10 +322,73 @@ describe("send command", () => {
     }
 
     expect(secondCall).not.toHaveBeenCalled();
-    const sent = commandCall.mock.calls[0]?.[0] as tl.messages.RawSendMessageRequest;
-    expect(sent._).toBe("messages.sendMessage");
+    expect(requests()).toEqual([
+      "contacts.resolveUsername",
+      "contacts.resolveUsername",
+      "messages.sendMessage",
+    ]);
+    const sent = commandCall.mock.calls[2]?.[0] as tl.messages.RawSendMessageRequest;
     assertPeer(sent.peer, "inputPeerUser");
     expect(sent.peer.userId).toBe(123456);
     expectLongEqual(sent.peer.accessHash, "111");
+  });
+
+  describe("allowedChats by @username after the username moved", () => {
+    const resolvedToChannel = async () => ({
+      _: "contacts.resolvedPeer",
+      peer: { _: "peerChannel", channelId: 777 },
+      users: [],
+      chats: [
+        {
+          _: "channel",
+          id: 777,
+          accessHash: toLong("888"),
+          title: "Example News",
+          username: "testuser",
+          photo: { _: "chatPhotoEmpty" },
+          date: 1_700_000_000,
+        },
+      ],
+    });
+
+    beforeEach(() => {
+      createUsersCache(commandCacheDb).upsert(createTestUser({ fetched_at: 1 }));
+      process.env[ALLOWED_CHATS_ENV] = "@testuser";
+    });
+
+    async function guardedSend(to: string) {
+      const { sendCommand } = await import("./send");
+      const tree = { subCommands: { send: { ...sendCommand } } };
+      guardCommands(tree);
+      const logSpy = spyOn(console, "log");
+      const errorSpy = spyOn(console, "error");
+      try {
+        await runCommand(tree, { rawArgs: ["send", "--to", to, "-m", "hi"] });
+        return null;
+      } catch (err) {
+        return (err as { code?: string }).code ?? String(err);
+      } finally {
+        logSpy.mockRestore();
+        errorSpy.mockRestore();
+        delete process.env[ALLOWED_CHATS_ENV];
+      }
+    }
+
+    it("refuses its previous owner by ID", async () => {
+      commandReplies.push(async () => resolvedTo(NEW_OWNER, "555"), sentUpdates);
+
+      expect(await guardedSend("123456")).toBe("CHAT_NOT_ALLOWED");
+      expect(requests()).not.toContain("messages.sendMessage");
+    });
+
+    it("sends to the chat that holds it now, though a user keeps it in the cache", async () => {
+      commandReplies.push(resolvedToChannel, resolvedToChannel, sentUpdates);
+
+      expect(await guardedSend("@testuser")).toBe(null);
+      const sent = commandCall.mock.calls.at(-1)?.[0] as tl.messages.RawSendMessageRequest;
+      expect(sent._).toBe("messages.sendMessage");
+      assertPeer(sent.peer, "inputPeerChannel");
+      expect(sent.peer.channelId).toBe(777);
+    });
   });
 });

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { type TelegramClient, tl } from "@mtcute/bun";
+import type { TelegramClient, tl } from "@mtcute/bun";
 
 import { getErrorMessage } from "../../daemon/daemon-utils";
 import { fetchMessagesByIdRaw, parseRawMessage } from "../../daemon/sync-worker-real-helpers";
@@ -150,7 +150,8 @@ export async function editMessage(
     }
     result = await client.call(editMessageRequest(chat.inputPeer, messageId, text, format));
   } catch (err) {
-    if (tl.RpcError.is(err)) {
+    const { RpcError } = (await import("@mtcute/bun")).tl;
+    if (RpcError.is(err)) {
       if (format && err.text.startsWith("RICH_MESSAGE_")) {
         throw new EditRefusedError(
           err.message,

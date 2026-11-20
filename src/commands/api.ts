@@ -1,7 +1,7 @@
-import { MtInvalidPeerTypeError, type TelegramClient, type tl } from "@mtcute/bun";
-import { randomLong, toInputChannel, toInputUser } from "@mtcute/bun/utils.js";
+import type { TelegramClient, tl } from "@mtcute/bun";
 import { defineCommand } from "citty";
 
+import { isReadMethod } from "./access";
 import { createChatsCache } from "../db/chats-cache";
 import { createUsersCache } from "../db/users-cache";
 import { getClientForAccount } from "../services/telegram";
@@ -77,7 +77,7 @@ export const apiCommand = defineCommand({
     let client: TelegramClient | undefined;
 
     try {
-      const apiClient = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+      const apiClient = wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
         context: "cli:api",
         accountId: account.id,
       });
@@ -114,7 +114,9 @@ export const apiCommand = defineCommand({
       const chatsCache = createChatsCache(db);
       const dms = createDmLookup(db);
       const request = await buildApiRequest(method, params, async (id) => {
-        const peer = await resolvePeer(apiClient, id, usersCache, chatsCache, dms);
+        const peer = await resolvePeer(apiClient, id, usersCache, chatsCache, dms, {
+          freshUsername: !isReadMethod(method),
+        });
         return peer.inputPeer;
       });
       const result = await client.call(request);
@@ -134,7 +136,7 @@ export const apiCommand = defineCommand({
       if (
         err instanceof InvalidPeerError ||
         err instanceof AmbiguousPeerError ||
-        err instanceof MtInvalidPeerTypeError
+        err instanceof (await import("@mtcute/bun")).MtInvalidPeerTypeError
       ) {
         error(ErrorCodes.INVALID_ARGS, err.message, { method });
       }
@@ -175,10 +177,15 @@ interface TlEntry {
 
 type ResolveInputPeer = (identifier: string) => Promise<tl.TypeInputPeer>;
 
-const PEER_INPUTS: Record<string, (peer: tl.TypeInputPeer, identifier: string) => unknown> = {
-  InputPeer: (peer) => peer,
-  InputUser: toInputUser,
-  InputChannel: toInputChannel,
+type MtcuteUtils = typeof import("@mtcute/bun/utils.js");
+
+const PEER_INPUTS: Record<
+  string,
+  (utils: MtcuteUtils, peer: tl.TypeInputPeer, identifier: string) => unknown
+> = {
+  InputPeer: (_utils, peer) => peer,
+  InputUser: (utils, peer, identifier) => utils.toInputUser(peer, identifier),
+  InputChannel: (utils, peer, identifier) => utils.toInputChannel(peer, identifier),
 };
 
 /**
@@ -196,6 +203,7 @@ export async function buildApiRequest(
   resolve: ResolveInputPeer,
 ) {
   const { default: schema } = await import("@mtcute/core/tl/api-schema.json");
+  const utils = await import("@mtcute/bun/utils.js");
   const entry = (schema.e as TlEntry[]).find((e) => e.kind === "method" && e.name === method);
   const request: Record<string, unknown> = { _: method, ...params };
   for (const arg of entry?.arguments ?? []) {
@@ -206,27 +214,32 @@ export async function buildApiRequest(
     if (value !== undefined) {
       request[key] =
         isVector && Array.isArray(value)
-          ? await Promise.all(value.map((v) => toTlValue(arg.type, v, resolve)))
-          : await toTlValue(arg.type, value, resolve);
+          ? await Promise.all(value.map((v) => toTlValue(utils, arg.type, v, resolve)))
+          : await toTlValue(utils, arg.type, value, resolve);
     } else if (!predicate && !isVector) {
-      const zero = zeroValue(arg);
+      const zero = zeroValue(utils, arg);
       if (zero !== undefined) request[key] = zero;
     }
   }
   return request as unknown as tl.RpcMethod;
 }
 
-async function toTlValue(type: string, value: unknown, resolve: ResolveInputPeer) {
+async function toTlValue(
+  utils: MtcuteUtils,
+  type: string,
+  value: unknown,
+  resolve: ResolveInputPeer,
+) {
   if (typeof value !== "string" && typeof value !== "number") return value;
   const text = String(value);
   if (type === "long") return /^-?\d+$/.test(text) ? toLong(text) : value;
   const toInput = PEER_INPUTS[type];
-  return toInput ? toInput(await resolve(text), text) : value;
+  return toInput ? toInput(utils, await resolve(text), text) : value;
 }
 
-function zeroValue({ name, type }: TlArgument) {
+function zeroValue(utils: MtcuteUtils, { name, type }: TlArgument) {
   if (type === "int") return 0;
-  if (type === "long") return name === "random_id" ? randomLong() : toLong(0);
+  if (type === "long") return name === "random_id" ? utils.randomLong() : toLong(0);
   if (type === "InputPeer" && name === "offset_peer") {
     return { _: "inputPeerEmpty" };
   }

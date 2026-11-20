@@ -25,6 +25,28 @@ export const FAKE_FLOOD_METHOD = "help.getNearestDc";
 
 export const FAKE_FLOOD_SECONDS = 42;
 
+const FAKE_USERNAMES: Record<string, { users: object[]; chats: object[] }> = {
+  alice: {
+    users: [{ _: "user", id: 10, accessHash: 777, firstName: "Alice", username: "alice" }],
+    chats: [],
+  },
+  teamchat: {
+    users: [],
+    chats: [
+      {
+        _: "channel",
+        id: 1234567890,
+        accessHash: 777,
+        title: "Team Chat",
+        username: "teamchat",
+        megagroup: true,
+        photo: { _: "chatPhotoEmpty" },
+        date: 1_700_000_000,
+      },
+    ],
+  },
+};
+
 /** Methods Telegram fails on its side, with the error code and text */
 export const FAKE_INTERNAL_ERRORS: Record<string, [number, string]> = {
   "help.getAppConfig": [500, "INTERNAL"],
@@ -71,6 +93,7 @@ if (import.meta.main) {
     async call(request: {
       _: string;
       maxId?: number;
+      username?: string;
       id?: number | { id: number }[];
       message?: string;
       richMessage?: { _: string; markdown?: string; html?: string };
@@ -78,6 +101,18 @@ if (import.meta.main) {
       channel?: { channelId: number };
     }) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
+      if (request._ === "messages.getHistory") {
+        return {
+          _: "messages.messages",
+          messages: [],
+          chats: [],
+          users: [],
+        };
+      }
+      const owner = FAKE_USERNAMES[request.username ?? ""];
+      if (request._ === "contacts.resolveUsername" && owner) {
+        return { _: "contacts.resolvedPeer", ...owner };
+      }
       if (
         (request._ === "messages.getMessages" || request._ === "channels.getMessages") &&
         Array.isArray(request.id)

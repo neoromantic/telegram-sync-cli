@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import { loadDaemonConfig } from "../config";
-import { createDaemon, createPidFile, DaemonExitCode } from "../daemon";
+import { createPidFile } from "../daemon/pid-file";
+import { DaemonExitCode } from "../daemon/types";
 import { createLogger } from "../daemon/daemon-logger";
 import { accountsDb, getDataDir } from "../db";
 import { summarizeDaemonStatus } from "../db/daemon-status";
@@ -34,6 +35,7 @@ const startCommand = defineCommand({
     const verbosity = args.quiet ? "quiet" : args.verbose ? "verbose" : "normal";
     const { retention, pacing, warning } = await loadDaemonConfig();
     if (warning) createLogger(verbosity).warn(warning);
+    const { createDaemon } = await import("../daemon/daemon");
     const daemon = createDaemon({ verbosity, retention, pacing });
     const exitCode = await daemon.start();
 
