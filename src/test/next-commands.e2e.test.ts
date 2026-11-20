@@ -54,6 +54,20 @@ async function run(...args: string[]) {
   return answer(await runCliSuccess(args, options()));
 }
 
+async function resolvedSince(duration: number, runIt: () => Promise<Answer>) {
+  const start = Math.floor(Date.now() / 1000);
+  const result = await runIt();
+  const end = Math.ceil(Date.now() / 1000);
+  const since = /--since=(\S+)/.exec(result.next?.[0]?.command ?? "")?.[1];
+  const seconds = Date.parse(since ?? "") / 1000;
+  expect(since).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  expect(seconds).toBeGreaterThanOrEqual(start - duration);
+  expect(seconds).toBeLessThanOrEqual(end - duration);
+  return { answer: result, since: since! };
+}
+
+const WEEK = 7 * 86_400;
+
 const messageIds = (data: Answer["data"]) =>
   (data.items ?? data.results ?? data.messages ?? []).map((m) => m.messageId);
 
@@ -181,33 +195,63 @@ describe("E2E: next for messages list", () => {
     expect(messageIds(second.data)).toEqual([6, 5, 4]);
     expect(second.data.after).toBe(3);
   });
+
+  it("keeps --type, --since and --until, with a repeated --type as one list", async () => {
+    const { answer: first, since } = await resolvedSince(WEEK, () =>
+      run(
+        "messages",
+        "list",
+        "--chat",
+        String(TEAM_CHAT_ID),
+        "--limit",
+        "2",
+        "--type",
+        "text",
+        "--type",
+        "voice",
+        "--since",
+        "7d",
+        "--account",
+        WORK,
+      ),
+    );
+    expect(messageIds(first.data)).toEqual([7, 6]);
+    expect(first.next?.[0]?.command).toBe(
+      `tg messages list --chat=${TEAM_CHAT_ID} --limit=2 --before=6 --type=text,voice --since=${since} --account='Work Phone'`,
+    );
+
+    const second = await follow(first);
+    expect(messageIds(second.data)).toEqual([5, 4]);
+  });
 });
 
 describe("E2E: next for messages search", () => {
   it("keeps an awkward query, the account and every filter", async () => {
-    const first = await run(
-      "messages",
-      "search",
-      "--query",
-      PHRASE,
-      "--phrase",
-      "--chat",
-      String(TEAM_CHAT_ID),
-      "--sender",
-      "@alice",
-      "--since",
-      "7d",
-      "--count",
-      "--limit",
-      "2",
-      "--account",
-      WORK,
+    const { answer: first, since } = await resolvedSince(WEEK, () =>
+      run(
+        "messages",
+        "search",
+        "--query",
+        PHRASE,
+        "--phrase",
+        "--chat",
+        String(TEAM_CHAT_ID),
+        "--sender",
+        "@alice",
+        "--since",
+        "7d",
+        "--count",
+        "--limit",
+        "2",
+        "--account",
+        WORK,
+      ),
     );
     expect(messageIds(first.data)).toEqual([5, 4]);
     expect(first.data.count).toBe(5);
     expect(first.next).toEqual([
       {
-        command: `tg messages search --query='--it'\\''s $5 "today"' --phrase --limit=2 --offset=2 --chat=${TEAM_CHAT_ID} --sender=@alice --since=7d --count --account='Work Phone'`,
+        command: `tg messages search --query='--it'\\''s $5 "today"' --phrase --limit=2 --offset=2 --chat=${TEAM_CHAT_ID} --sender=@alice --since=${since} --count --account='Work Phone'`,
         why: "The next page of results.",
       },
     ]);
@@ -219,11 +263,36 @@ describe("E2E: next for messages search", () => {
       offset: 2,
       limit: 2,
       count: 5,
-      filters: { chat: String(TEAM_CHAT_ID), sender: "@alice", since: "7d" },
+      filters: { chat: String(TEAM_CHAT_ID), sender: "@alice", since },
     });
     const third = await follow(second);
     expect(messageIds(third.data)).toEqual([1]);
     expect(third.next).toBeUndefined();
+  });
+
+  it("keeps a repeated --type as one list", async () => {
+    const first = await run(
+      "messages",
+      "search",
+      "--query",
+      "today",
+      "--type",
+      "text",
+      "--type",
+      "voice",
+      "--limit",
+      "2",
+      "--account",
+      WORK,
+    );
+    expect(messageIds(first.data)).toEqual([6, 5]);
+    expect(first.next?.[0]?.command).toBe(
+      `tg messages search --query=today --limit=2 --offset=2 --type=text,voice --account='Work Phone'`,
+    );
+
+    const second = await follow(first);
+    expect(messageIds(second.data)).toEqual([4, 3]);
+    expect(second.data.filters).toMatchObject({ type: ["text", "voice"] });
   });
 
   it("suggests nothing when the page holds every match", async () => {

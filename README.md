@@ -76,8 +76,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
   ([sync strategy](docs/sync-strategy.md#group-participation))
 - Full Telegram API access through `tg api <method>`
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
-- Chat history with cursor paging (`tg messages list`) and a message in context
-  (`tg messages get`), cache-first
+- Chat history with cursor paging (`tg messages list`), filtered by type (voice notes, round
+  videos, photos…) and date, and a message in context (`tg messages get`), cache-first
 - Unread messages: chats with unread messages (`tg chats list --unread`), their unread messages
   (`tg messages unread`) and marking them read (`tg messages read`); the daemon keeps the
   counts current
@@ -136,6 +136,7 @@ tg contacts list --limit 50
 tg chats list --limit 20
 tg chats sync @examplenews          # also sync a large group or channel
 tg messages list --chat @username --limit 20
+tg messages list --chat @username --type voice,round --since 7d   # voice notes and round videos
 tg messages get --chat @username --id 42 --context 3
 tg messages search --query "hello world" --since 7d   # both words, any order
 tg messages wait --chat @username --after 42 --timeout 60   # block until the next reply

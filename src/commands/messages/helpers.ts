@@ -151,10 +151,29 @@ export class MessageNotFoundError extends Error {
   }
 }
 
+/** A read that takes only the cache got a chat name that only Telegram could resolve */
+export class ChatNotCachedError extends Error {
+  readonly identifier: string;
+
+  constructor(identifier: string) {
+    super(`${identifier} is not in the cache, and this read doesn't connect to Telegram`);
+    this.name = "ChatNotCachedError";
+    this.identifier = identifier;
+  }
+}
+
 /** Report a failed history read with the error codes other commands use */
 export function reportHistoryError(err: unknown, action: string): never {
   if (err instanceof MessageNotFoundError) {
     error(ErrorCodes.TELEGRAM_ERROR, err.message, err.details);
+  }
+  if (err instanceof ChatNotCachedError) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      err.message,
+      { chat: err.identifier },
+      "Pass the chat's numeric ID as tg chats list prints it, or cache the chat first: tg chats list --fresh, or tg chats get --id with the @username",
+    );
   }
   if (err instanceof AmbiguousPeerError) {
     error(ErrorCodes.INVALID_ARGS, err.message, {

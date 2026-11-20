@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg messages list` takes `--type`, `--since` and `--until`, so every voice note of a chat, or
+  the chat since Monday, is one command instead of `tg api messages.search` with a hand-built
+  peer and filter. `--type` takes one or more message types, comma-separated or repeated
+  (`voice`, `photo`, `video`, `document`…), plus `round` and `animation` for the round video
+  messages and GIFs that `video` also covers; `--since` and `--until` take the forms of
+  `tg messages search`. A filtered page reads only the cache, needs no credentials for a chat
+  the cache knows (a cached `@username` included, with `allowedChats` set too), explains a name
+  the cache can't resolve, and pages with `--before` and `--after` as before. It adds `complete`, `true` only when one cached range covers the page up to the chat's
+  newest known message and, with `--type`, every message in it has its type (a date window never
+  guesses the date of a message the cache lacks); `missing`
+  (`history`, `types`) says why it is `false`, `missingBefore` where the newest gap ends, and
+  `suggestion` one sentence. `next` of an incomplete page has what fills it
+  (`tg messages list --fresh`, `tg db migrate`), then the same page again, with `--account`
+  kept; `next` carries `--since` and `--until` resolved to UTC seconds. Without the new flags the
+  output is unchanged. `tg messages search` takes `--type` too, echoes it in `filters.type` and
+  adds `typesPending`; its `next` then finishes a pending migration, or else fetches again the
+  newest matching message cached without its raw message.
+
+### Fixed
+
+- `tg messages search --since` and `--until` with milliseconds round up to the next second,
+  since message dates are whole seconds: `--until 00:01:40.500Z` no longer leaves out a message
+  sent at `00:01:40`, and `--since` with milliseconds no longer takes one sent just before it.
+  Its `next` carries the bounds resolved to UTC, so a relative bound (`60s`) keeps its window
+  across pages.
+- With `allowedChats` set, `tg messages search` resolves its chat and the list from the cache
+  alone, so a cached `@username` without an access hash needs no credentials again.
+- `tg messages search --fresh` is `INVALID_ARGS` that says search reads only the cache, instead
+  of a generic unknown option.
+- A string flag's value that looks like a repeatable flag is no longer read as that flag: `tg send
+  --caption '--file=x'` sends that caption.
+- A cached page of history vouches for the IDs above its newest message only up to the chat's
+  newest message known before the request: a fetch that Telegram answers with nothing new now
+  settles the gap (`tg messages list --before 21 --fresh` below a known message 30, a chat
+  Telegram shows empty, or a chat whose newest messages were deleted), and a message cached while
+  the request ran no longer vouches for a page that could miss a message sent meanwhile. The
+  daemon's history pages follow the same rule.
+
 ## [0.15.1] - 2026-11-19
 
 ### Fixed

@@ -19,7 +19,8 @@ export function range(from: number, to: number) {
   return Array.from({ length: to - from + 1 }, (_, i) => from + i);
 }
 
-function historyPage(ids: Iterable<number>, request: GetHistoryRequest) {
+/** The messages.getHistory answer for a chat that holds these message IDs */
+export function historyPage(ids: Iterable<number>, request: GetHistoryRequest) {
   const { offsetId, addOffset, limit, minId, maxId } = request;
 
   const newestFirst = [...ids]

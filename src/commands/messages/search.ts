@@ -1,35 +1,32 @@
 import { type ArgsDef, defineCommand } from "citty";
 
+import { isMigrationPending } from "../../db/background-migrations";
 import {
   createMessagesSearch,
   isFts5QueryError,
   MESSAGE_SEARCH_SORTS,
   type MessageSearchSort,
 } from "../../db/messages-search";
-import { ErrorCodes } from "../../types";
+import { MESSAGE_TYPES_MIGRATION } from "../../db/raw-json-migrations";
+import { ErrorCodes, type NextCommand } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { normalizeUsername } from "../../utils/identifiers";
 import { error, success } from "../../utils/output";
 import { buildSnippet, snippetTerms } from "../../utils/search-snippet";
-import { parseTimeBound } from "../../utils/time-bounds";
 import { allowedChatIds } from "../access";
+import { migrateArgs } from "../db";
 import { nextCommand } from "../next";
-import { messageItemReader } from "./helpers";
-
-function parseBound(value: string | undefined, name: "since" | "until", now: number) {
-  if (value === undefined) return undefined;
-  const seconds = parseTimeBound(value, { now, end: name === "until" });
-  if (seconds === null) {
-    error(
-      ErrorCodes.INVALID_ARGS,
-      `Invalid --${name}: ${value}`,
-      { [name]: value },
-      "Use a date (2026-10-01), a date and time (2026-10-01T09:30, local unless it ends with Z or an offset) or a duration back from now (30m, 24h, 7d, 2w)",
-    );
-  }
-  return seconds;
-}
+import {
+  formatTimeBound,
+  parseTimeWindow,
+  parseTypeArg,
+  SINCE_ARG_DESCRIPTION,
+  TYPE_ARG_DESCRIPTION,
+  UNTIL_ARG_DESCRIPTION,
+} from "./filters";
+import { MAX_MESSAGE_ID, messageItemReader } from "./helpers";
+import { listArgs } from "./list";
 
 function parseIdentifier(
   input: string | undefined,
@@ -98,13 +95,15 @@ const searchArgs = {
   },
   since: {
     type: "string",
-    description:
-      "Only messages sent at or after: a date (2026-10-01), a date and time (2026-10-01T09:30) or a duration back from now (24h, 7d)",
+    description: SINCE_ARG_DESCRIPTION,
   },
   until: {
     type: "string",
-    description:
-      "Only messages sent before: a date and time, a duration back from now, or a date (its whole day included)",
+    description: UNTIL_ARG_DESCRIPTION,
+  },
+  type: {
+    type: "string",
+    description: TYPE_ARG_DESCRIPTION,
   },
   sort: {
     type: "string",
@@ -122,6 +121,12 @@ const searchArgs = {
     description: "Also count every message that matches the query and filters (a second query)",
     default: false,
   },
+  fresh: {
+    type: "boolean",
+    description:
+      "Refused: search reads only the cache. tg messages list --chat <chat> --fresh fetches a chat's messages from Telegram",
+    default: false,
+  },
   account: {
     type: "string",
     description: ACCOUNT_SELECTOR_DESCRIPTION,
@@ -135,7 +140,15 @@ export const searchMessagesCommand = defineCommand({
       'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
   },
   args: searchArgs,
-  async run({ args }) {
+  async run({ args, rawArgs }) {
+    if (args.fresh) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        "tg messages search reads only the cache, so it can't search Telegram with --fresh",
+        { fresh: true },
+        "Fetch the chat's messages first with tg messages list --chat <chat> --fresh, then search the cache",
+      );
+    }
     const query = (args.query ?? "").trim();
     if (!query) {
       error(ErrorCodes.INVALID_ARGS, "Search query is required");
@@ -157,20 +170,13 @@ export const searchMessagesCommand = defineCommand({
       error(ErrorCodes.INVALID_ARGS, `Invalid sort: ${args.sort}. Use 'date' or 'relevance'.`);
     }
 
-    const now = Date.now();
-    const since = parseBound(args.since, "since", now);
-    const until = parseBound(args.until, "until", now);
-    if (since !== undefined && until !== undefined && since >= until) {
-      error(
-        ErrorCodes.INVALID_ARGS,
-        `--since (${args.since}) must be earlier than --until (${args.until})`,
-      );
-    }
+    const { since, until } = parseTimeWindow(args);
+    const types = parseTypeArg(rawArgs ?? [], searchArgs);
 
     const { account, db: cacheDb } = openAccountCache(args.account);
     const chatFilter = parseIdentifier(args.chat, "chat", account.user_id);
     const senderFilter = parseIdentifier(args.sender, "sender", account.user_id);
-    const allowed = await allowedChatIds(account.id);
+    const allowed = await allowedChatIds(account.id, { cacheOnly: true });
 
     try {
       const search = createMessagesSearch(cacheDb);
@@ -185,6 +191,7 @@ export const searchMessagesCommand = defineCommand({
         senderUsername: senderFilter?.username,
         since,
         until,
+        types,
       };
       const rows = search.search(query, {
         ...options,
@@ -193,17 +200,57 @@ export const searchMessagesCommand = defineCommand({
         sort,
       });
       const results = rows.slice(0, limit);
-      const next =
-        rows.length > limit
+      const migrating = types !== undefined && isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION);
+      const untyped = types === undefined ? null : search.newestUntypedMatch(query, options);
+      const typesPending = migrating || untyped !== null;
+      const values = {
+        ...args,
+        query,
+        type: types?.join(","),
+        since: formatTimeBound(since),
+        until: formatTimeBound(until),
+        limit,
+      };
+      const fills: NextCommand[] = [];
+      if (migrating) {
+        fills.push(
+          nextCommand(
+            "db migrate",
+            migrateArgs,
+            { account: args.account },
+            "Some cached messages have no type yet: this finishes the background migration that types them.",
+          ),
+        );
+      } else if (untyped) {
+        const { chatId, messageId } = untyped;
+        fills.push(
+          nextCommand(
+            "messages list",
+            listArgs,
+            {
+              chat: String(chatId),
+              account: args.account,
+              limit: 100,
+              before: messageId < MAX_MESSAGE_ID ? messageId + 1 : undefined,
+              fresh: true,
+            },
+            `Message ${messageId} of chat ${chatId} matches but was cached without its raw message, so its type is unknown: this fetches it and the messages below it again from Telegram.`,
+          ),
+        );
+      }
+      const next = [
+        ...fills,
+        ...(rows.length > limit
           ? [
               nextCommand(
                 "messages search",
                 searchArgs,
-                { ...args, query, limit, offset: offset + limit },
+                { ...values, offset: offset + limit },
                 "The next page of results.",
               ),
             ]
-          : [];
+          : []),
+      ];
       const count = args.count ? search.count(query, options) : null;
       const terms = args.snippet ? snippetTerms(query, { phrase: options.phrase }) : [];
       const toItem = messageItemReader(cacheDb);
@@ -218,6 +265,7 @@ export const searchMessagesCommand = defineCommand({
             phrase: args.phrase ?? false,
             since: args.since ?? null,
             until: args.until ?? null,
+            type: types ?? null,
           },
           sort,
           results: results.map((row) => {
@@ -226,6 +274,7 @@ export const searchMessagesCommand = defineCommand({
           }),
           total: results.length,
           count,
+          typesPending,
           limit,
           offset,
           source: "cache",
