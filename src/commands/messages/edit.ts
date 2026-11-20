@@ -69,7 +69,8 @@ export const editMessageCommand = defineCommand({
     try {
       const deps = openHistory(account.id, "cli:messages.edit");
       const chat =
-        checkedChat(args, "chat") ?? (await resolveHistoryChat(deps.client, args.chat, deps));
+        checkedChat(args, "chat") ??
+        (await resolveHistoryChat(deps.client, args.chat, deps, { freshUsername: true }));
       success(await editMessage(deps.client, deps.cacheDb, chat, messageId, args.message, format));
     } catch (err) {
       if (err instanceof EditRefusedError) {
