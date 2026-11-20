@@ -49,7 +49,8 @@ async function runPinChange(
   try {
     const deps = openHistory(account.id, `cli:messages.${command}`);
     const chat =
-      checkedChat(args, "chat") ?? (await resolveHistoryChat(deps.client, args.chat, deps));
+      checkedChat(args, "chat") ??
+      (await resolveHistoryChat(deps.client, args.chat, deps, { freshUsername: true }));
     success(await pinMessage(deps.client, deps.cacheDb, chat, messageId, change));
   } catch (err) {
     if (err instanceof PinRefusedError) {
