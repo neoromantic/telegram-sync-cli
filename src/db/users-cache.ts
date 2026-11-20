@@ -67,7 +67,9 @@ export class UsersCache {
   }
 
   /**
-   * Get user by username (without @)
+   * Get user by username (without @). A username moves between users, and
+   * its previous owner keeps it here until fetched again: the latest
+   * fetched owner wins.
    */
   getByUsername(username: string) {
     const normalized = username.startsWith("@") ? username.slice(1) : username;
@@ -200,7 +202,9 @@ function createStatements(db: Database) {
     getById: db.query("SELECT * FROM users_cache WHERE user_id = $user_id").as(UserCacheRow),
 
     getByUsername: db
-      .query("SELECT * FROM users_cache WHERE LOWER(username) = $username COLLATE NOCASE")
+      .query(
+        "SELECT * FROM users_cache WHERE LOWER(username) = $username COLLATE NOCASE ORDER BY fetched_at DESC LIMIT 1",
+      )
       .as(UserCacheRow),
 
     getByPhone: db.query("SELECT * FROM users_cache WHERE phone = $phone").as(UserCacheRow),

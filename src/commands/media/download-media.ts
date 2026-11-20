@@ -1,17 +1,8 @@
 import type { Database } from "bun:sqlite";
 import { open, rename, rm, stat } from "node:fs/promises";
 import { basename } from "node:path";
-import {
-  Document,
-  type FileDownloadLocation,
-  MtTimeoutError,
-  MtUnsupportedError,
-  Photo,
-  type TelegramClient,
-  Thumbnail,
-  tl,
-} from "@mtcute/bun";
-import { downloadAsIterable } from "@mtcute/bun/methods.js";
+import type { FileDownloadLocation, TelegramClient, tl } from "@mtcute/bun";
+import type { downloadAsIterable } from "@mtcute/bun/methods.js";
 
 import { createChatProtectionStore } from "../../db/chat-protection";
 import { createMessagesCache } from "../../db/messages-cache";
@@ -74,7 +65,7 @@ export interface DownloadDeps {
   /** The account's media cache, accounts/<id>/media */
   mediaDir: string;
   /** Lazy: calling it is the first thing that needs credentials */
-  getClient: () => TelegramClient;
+  getClient: () => TelegramClient | Promise<TelegramClient>;
   /** Resolves --chat, offline for cached peers (openHistory()) */
   history: ResolveHistoryChatDeps & { client: HistoryClient };
   now?: () => number;
@@ -277,13 +268,15 @@ function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: DownloadR
   });
 }
 
-function fileLocation(message: FetchedRawMessage, thumb: MediaThumb | null) {
+type Mtcute = typeof import("@mtcute/bun");
+
+function fileLocation(mtcute: Mtcute, message: FetchedRawMessage, thumb: MediaThumb | null) {
   const media = attachmentMedia(message);
   if (!media) throw new Error("The message has no file");
   if (!thumb) {
     return media.file === "photo"
-      ? new Photo(media.raw as unknown as tl.RawPhoto)
-      : new Document(media.raw as unknown as tl.RawDocument);
+      ? new mtcute.Photo(media.raw as unknown as tl.RawPhoto)
+      : new mtcute.Document(media.raw as unknown as tl.RawDocument);
   }
   const owner = media.raw as unknown as tl.RawPhoto | tl.RawDocument;
   const sizes: tl.TypePhotoSize[] = owner._ === "photo" ? owner.sizes : (owner.thumbs ?? []);
@@ -292,7 +285,7 @@ function fileLocation(message: FetchedRawMessage, thumb: MediaThumb | null) {
       (item._ === "photoSize" || item._ === "photoSizeProgressive") && item.type === thumb.type,
   );
   if (!size) throw new Error(`The file has no ${thumb.type} preview`);
-  return new Thumbnail(owner, size);
+  return new mtcute.Thumbnail(owner, size);
 }
 
 function errorCode(err: unknown) {
@@ -313,9 +306,9 @@ const NETWORK_ERROR_CODES = new Set([
   "EAI_AGAIN",
 ]);
 
-function isFileReferenceError(err: unknown) {
-  if (tl.RpcError.is(err)) return err.text.startsWith("FILE_REFERENCE_");
-  return err instanceof MtUnsupportedError && /file ref/i.test(err.message);
+function isFileReferenceError(mtcute: Mtcute, err: unknown) {
+  if (mtcute.tl.RpcError.is(err)) return err.text.startsWith("FILE_REFERENCE_");
+  return err instanceof mtcute.MtUnsupportedError && /file ref/i.test(err.message);
 }
 
 function floodWaitSeconds(err: tl.RpcError) {
@@ -344,13 +337,15 @@ async function sizeOf(path: string) {
 }
 
 async function transferError(
+  mtcute: Mtcute,
   err: unknown,
   target: DownloadTarget,
   stallTimeoutMs: number,
   rateLimits: () => RateLimitsService,
 ) {
-  if (isFileReferenceError(err)) {
-    const text = tl.RpcError.is(err) ? err.text : (err as Error).message;
+  const { RpcError } = mtcute.tl;
+  if (isFileReferenceError(mtcute, err)) {
+    const text = RpcError.is(err) ? err.text : (err as Error).message;
     return new MediaError(
       ErrorCodes.TELEGRAM_ERROR,
       `Telegram rejected the file reference of a freshly fetched message: ${text}`,
@@ -358,14 +353,14 @@ async function transferError(
     );
   }
   if (isRateLimitError(err)) return rateLimited(err.method, err.waitSeconds);
-  if (tl.RpcError.is(err) && err.code === tl.RpcError.FLOOD) {
+  if (RpcError.is(err) && err.code === RpcError.FLOOD) {
     const seconds = floodWaitSeconds(err);
     if (seconds !== null) {
       rateLimits().setFloodWait(GET_FILE, seconds);
       return rateLimited(GET_FILE, seconds);
     }
   }
-  if (err instanceof MtTimeoutError) {
+  if (err instanceof mtcute.MtTimeoutError) {
     return new MediaError(
       ErrorCodes.NETWORK_ERROR,
       `The download stalled: nothing arrived for ${stallTimeoutMs / 1000}s`,
@@ -377,7 +372,7 @@ async function transferError(
       "run the command again to resume",
     );
   }
-  if (err instanceof MtUnsupportedError && /cdn/i.test(err.message)) {
+  if (err instanceof mtcute.MtUnsupportedError && /cdn/i.test(err.message)) {
     await rm(target.paths.part, { force: true });
     return new MediaError(
       ErrorCodes.MEDIA_UNSUPPORTED,
@@ -385,7 +380,7 @@ async function transferError(
       { reason: "cdn" },
     );
   }
-  if (tl.RpcError.is(err)) {
+  if (RpcError.is(err)) {
     return new MediaError(ErrorCodes.TELEGRAM_ERROR, `Telegram refused the download: ${err.text}`, {
       method: GET_FILE,
       error: err.text,
@@ -430,7 +425,7 @@ async function streamToCache({ client, location, target, deps, stallTimeoutMs }:
   let size: number;
   try {
     await handle.truncate(offset);
-    const download = deps.download ?? downloadAsIterable;
+    const download = deps.download ?? (await import("@mtcute/bun/methods.js")).downloadAsIterable;
     const chunks = download(transferClient(client), location, {
       offset,
       partSize: PART_SIZE_KB,
@@ -473,7 +468,7 @@ async function downloadOnline(deps: DownloadDeps, chat: HistoryChat, request: Do
   const stallTimeoutMs = deps.stallTimeoutMs ?? STALL_TIMEOUT_MS;
   const rateLimits = () => deps.rateLimits ?? createRateLimitsService(deps.cacheDb);
   const protection = createChatProtectionStore(deps.cacheDb);
-  const client = deps.getClient();
+  const client = await deps.getClient();
 
   for (let attempt = 1; ; attempt++) {
     const { message, chats, users } = await fetchMessageById(client, chat, messageId, deps.signal);
@@ -526,11 +521,12 @@ async function downloadOnline(deps: DownloadDeps, chat: HistoryChat, request: Do
       const finished = servedFromCache();
       if (finished) return finished;
 
+      const mtcute = await import("@mtcute/bun");
       let resumedFrom: number | null;
       try {
         resumedFrom = await streamToCache({
           client,
-          location: fileLocation(message, thumb),
+          location: fileLocation(mtcute, message, thumb),
           target,
           deps,
           stallTimeoutMs,
@@ -539,8 +535,8 @@ async function downloadOnline(deps: DownloadDeps, chat: HistoryChat, request: Do
         if (deps.signal?.aborted) {
           throw new DownloadInterruptedError(await sizeOf(target.paths.part), target.expectedSize);
         }
-        if (attempt === 1 && isFileReferenceError(err)) continue;
-        throw await transferError(err, target, stallTimeoutMs, rateLimits);
+        if (attempt === 1 && isFileReferenceError(mtcute, err)) continue;
+        throw await transferError(mtcute, err, target, stallTimeoutMs, rateLimits);
       }
 
       const size = target.expectedSize ?? (await sizeOf(target.paths.file));

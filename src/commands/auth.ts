@@ -82,8 +82,8 @@ export async function promptPassword(message: string, streams: PromptStreams = t
  */
 export interface AuthDependencies {
   accountsDb: AccountsDbInterface;
-  createClient: (accountId: number) => TelegramClient;
-  getClient: (accountId: number) => TelegramClient;
+  createClient: (accountId: number) => TelegramClient | Promise<TelegramClient>;
+  getClient: (accountId: number) => TelegramClient | Promise<TelegramClient>;
   isAuthorized: (client: TelegramClient) => Promise<boolean>;
   prompt: (message: string) => Promise<string>;
   promptPassword: (message: string) => Promise<string>;
@@ -183,7 +183,7 @@ async function saveLoggedInUser(
     return account;
   }
 
-  const target = deps.createClient(existing.id);
+  const target = await deps.createClient(existing.id);
   try {
     await target.importSession(await client.exportSession(), true);
   } finally {
@@ -207,7 +207,7 @@ export async function loginWithPhone(
 
   const account = accountsDb.getByPhone(phone) ?? accountsDb.create({ phone, label: labelValue });
 
-  const client = createClient(account.id);
+  const client = await createClient(account.id);
   let loggedIn: PhoneLoginAccount;
 
   try {
@@ -257,7 +257,7 @@ export async function loginWithQr(accountName: string | undefined, deps: AuthDep
     label: label && label.length > 0 ? label : undefined,
   });
 
-  const client = createClient(account.id);
+  const client = await createClient(account.id);
   let loggedIn: QrLoginAccount;
   let signedIn = false;
 
@@ -321,7 +321,7 @@ export async function logout(accountId: number | undefined, deps: AuthDependenci
     return result;
   }
 
-  const client = getClient(account.id);
+  const client = await getClient(account.id);
 
   try {
     await client.call({ _: "auth.logOut" });
@@ -360,7 +360,7 @@ export async function getAuthStatus(accountId: number | undefined, deps: AuthDep
     return result;
   }
 
-  const client = getClient(account.id);
+  const client = await getClient(account.id);
 
   try {
     const authorized = await isAuthorized(client);
@@ -411,9 +411,9 @@ function exitOnConfigError(err: unknown) {
   }
 }
 
-function ensureCredentials() {
+async function ensureCredentials() {
   try {
-    requireDefaultConfig();
+    await requireDefaultConfig();
   } catch (err) {
     exitOnConfigError(err);
     throw err;
@@ -444,7 +444,7 @@ export const loginCommand = defineCommand({
     const label = args.label;
 
     settleCacheLayoutBeforeAccountChange();
-    ensureCredentials();
+    await ensureCredentials();
     info(`Logging in with phone: ${phone}`);
     const result = await loginWithPhone(phone, getDefaultDependencies(), {
       label,
@@ -479,7 +479,7 @@ export const loginQrCommand = defineCommand({
   },
   async run({ args }) {
     settleCacheLayoutBeforeAccountChange();
-    ensureCredentials();
+    await ensureCredentials();
     console.error("\n=== QR Code Login ===\n");
     console.error("Scan this QR code with your Telegram mobile app:");
     console.error("(Settings → Devices → Link Desktop Device)\n");

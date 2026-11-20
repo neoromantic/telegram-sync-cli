@@ -21,6 +21,47 @@ export const FAKE_FLOOD_METHOD = "help.getNearestDc";
 
 export const FAKE_FLOOD_SECONDS = 42;
 
+const FAKE_USERNAMES: Record<string, { users: object[]; chats: object[] }> = {
+  alice: {
+    users: [{ _: "user", id: 10, accessHash: 777, firstName: "Alice", username: "alice" }],
+    chats: [],
+  },
+  bob: {
+    users: [{ _: "user", id: 20, accessHash: 777, firstName: "Bob", username: "bob" }],
+    chats: [],
+  },
+  vault: {
+    users: [],
+    chats: [
+      {
+        _: "channel",
+        id: FAKE_PROTECTED_CHANNEL,
+        accessHash: 777,
+        title: "Vault",
+        username: "vault",
+        broadcast: true,
+        photo: { _: "chatPhotoEmpty" },
+        date: 1_700_000_000,
+      },
+    ],
+  },
+  teamchat: {
+    users: [],
+    chats: [
+      {
+        _: "channel",
+        id: 1234567890,
+        accessHash: 777,
+        title: "Team Chat",
+        username: "teamchat",
+        megagroup: true,
+        photo: { _: "chatPhotoEmpty" },
+        date: 1_700_000_000,
+      },
+    ],
+  },
+};
+
 /** Methods Telegram fails on its side, with the error code and text */
 export const FAKE_INTERNAL_ERRORS: Record<string, [number, string]> = {
   "help.getAppConfig": [500, "INTERNAL"],
@@ -109,8 +150,22 @@ if (import.meta.main) {
   setInterval(() => {}, 60_000);
   let readMaxId = 0;
   const client = {
-    async call(request: { _: string; maxId?: number } & Partial<FakeForwardRequest>) {
+    async call(
+      request: { _: string; maxId?: number; username?: string } & Partial<FakeForwardRequest>,
+    ) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
+      if (request._ === "messages.getHistory") {
+        return {
+          _: "messages.messages",
+          messages: [],
+          chats: [],
+          users: [],
+        };
+      }
+      const owner = FAKE_USERNAMES[request.username ?? ""];
+      if (request._ === "contacts.resolveUsername" && owner) {
+        return { _: "contacts.resolvedPeer", ...owner };
+      }
       if (request._ === "messages.forwardMessages") {
         const forward = request as FakeForwardRequest;
         const randomIds = new Set(forward.randomId.map(String)).size;

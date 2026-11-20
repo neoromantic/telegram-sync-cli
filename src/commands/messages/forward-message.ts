@@ -1,11 +1,11 @@
 import type { Database } from "bun:sqlite";
-import { type TelegramClient, tl } from "@mtcute/bun";
-import { randomLong } from "@mtcute/bun/utils.js";
+import type { TelegramClient, tl } from "@mtcute/bun";
 
 import { getErrorMessage } from "../../daemon/daemon-utils";
 import { createMessagesCache } from "../../db/messages-cache";
 import { createMessagesHistory } from "../../db/messages-history";
 import type { MessageSearchItem } from "../../types";
+import { toLong } from "../../utils/long";
 import { verbose } from "../../utils/output";
 import { newMessageInputs } from "../send/sent-message-cache";
 import { messageRowsToItems } from "./helpers";
@@ -79,7 +79,9 @@ export function forwardMessagesRequest(
     fromPeer: from,
     toPeer: to,
     id: messageIds,
-    randomId: messageIds.map(() => randomLong()),
+    randomId: messageIds.map(() =>
+      toLong(BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))),
+    ),
   } satisfies tl.messages.RawForwardMessagesRequest;
 }
 
@@ -154,7 +156,8 @@ export async function forwardMessages(
   try {
     result = await client.call(request);
   } catch (err) {
-    if (tl.RpcError.is(err)) {
+    const { RpcError } = (await import("@mtcute/bun")).tl;
+    if (RpcError.is(err)) {
       const refusal = refusalMessage(err.text);
       if (refusal) {
         throw new ForwardRefusedError(refusal, {
