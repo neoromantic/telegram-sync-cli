@@ -16,14 +16,17 @@ import { documentMessage } from "./media-messages.test-utils";
 import { photoMessage } from "./photo-message.test-utils";
 import { defaultModelPath, installSuggestion } from "../commands/media/local-provider";
 import { parseRawMessage } from "../daemon/sync-worker-real-helpers";
+import { createChatProtectionStore } from "../db/chat-protection";
 import { createHistoryRanges } from "../db/history-ranges";
 import { createMessagesCache } from "../db/messages-cache";
+import { createUsersCache } from "../db/users-cache";
 import { extractAttachment } from "../utils/attachment";
 import { mediaPaths } from "../utils/media-cache";
 import { NO_CREDENTIALS, runCli, spawnCli } from "./cli.test-utils";
 import { createTestEnvironment, type TestEnvironment } from "./e2e-setup.test-utils";
 
 const SELF_ID = 5_550_001;
+const PEER_ID = 5_550_002;
 const MODEL_URL =
   "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
 const self = { _: "peerUser" as const, userId: SELF_ID };
@@ -125,14 +128,16 @@ describe("E2E: media transcribe", () => {
     content: string,
     options: {
       round?: boolean;
+      peer?: number;
       fileId?: string;
       extra?: object;
       file?: boolean;
     } = {},
   ) {
     const size = Buffer.byteLength(content);
+    const chatId = options.peer ?? SELF_ID;
     const raw = documentMessage(
-      self,
+      { _: "peerUser", userId: chatId },
       id,
       {
         id: options.fileId ?? `60000000000000001${String(id).padStart(2, "0")}`,
@@ -153,7 +158,7 @@ describe("E2E: media transcribe", () => {
       },
       options.extra as Record<string, unknown>,
     );
-    createMessagesCache(env.openCacheDb(1)).upsert(parseRawMessage(raw, SELF_ID)!);
+    createMessagesCache(env.openCacheDb(1)).upsert(parseRawMessage(raw, chatId)!);
     if (options.file === false) return;
     const { file } = mediaPaths(mediaDir, extractAttachment(raw)!);
     mkdirSync(join(file, ".."), { recursive: true });
@@ -179,6 +184,19 @@ describe("E2E: media transcribe", () => {
 
   async function transcribe(...args: string[]) {
     return tg(["media", "transcribe", "--chat", "me", ...args]);
+  }
+
+  async function readerTranscripts(chat: string, highId: number) {
+    const chatId = chat === "me" ? SELF_ID : Number(chat);
+    createHistoryRanges(env.openCacheDb(1)).add(chatId, { low: 1, high: highId });
+    type Item = { transcript: { text: string } | null };
+    const get = await tg(["messages", "get", "--chat", chat, "--id", "1"]);
+    const list = await tg(["messages", "list", "--chat", chat]);
+    const texts = (items: Item[]) => items.map((item) => item.transcript?.text ?? null);
+    return {
+      get: texts([(get.json as { data: { message: Item } }).data.message]),
+      list: texts((list.json as { data: { items: Item[] } }).data.items),
+    };
   }
 
   function lines(stdout: string) {
@@ -735,6 +753,45 @@ describe("E2E: media transcribe", () => {
         },
       });
       expect(runnerCalls()).toHaveLength(1);
+      expect(await readerTranscripts("me", 2)).toEqual({ get: [null], list: [null, null] });
+    });
+
+    it("refuses a stored transcript and hides it from tg messages once its chat is content-protected", async () => {
+      install("ffmpeg", FAKE_FFMPEG);
+      install("whisper", FAKE_OPENAI_RUNNER);
+      const db = env.openCacheDb(1);
+      createUsersCache(db).upsert({
+        user_id: String(PEER_ID),
+        first_name: "Example",
+        last_name: "Person",
+        access_hash: "1111",
+        fetched_at: Date.now(),
+        raw_json: "{}",
+      });
+      note(1, "Said before protection.", { peer: PEER_ID });
+      const chat = String(PEER_ID);
+      await tg(["media", "transcribe", "--chat", chat, "--id", "1"]);
+      expect(await readerTranscripts(chat, 1)).toEqual({
+        get: ["Said before protection."],
+        list: ["Said before protection."],
+      });
+
+      createChatProtectionStore(db).record(
+        PEER_ID,
+        { protected: true, reason: "private_chat" },
+        Date.now(),
+      );
+      const again = await tg(["media", "transcribe", "--chat", chat, "--id", "1"]);
+
+      expect(again.json).toMatchObject({
+        success: false,
+        error: {
+          code: "CONTENT_PROTECTED",
+          details: { chatId: PEER_ID, messageId: 1, reason: "private_chat" },
+        },
+      });
+      expect(runnerCalls()).toHaveLength(1);
+      expect(await readerTranscripts(chat, 1)).toEqual({ get: [null], list: [null] });
     });
   });
 });

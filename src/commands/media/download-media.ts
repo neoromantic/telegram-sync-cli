@@ -38,7 +38,7 @@ import {
 import { DownloadInterruptedError, MediaError } from "./errors";
 import { cacheFetchedMessage, type FetchedRawMessage, fetchMessageById } from "./fetch";
 import {
-  checkCachedProtection,
+  cachedProtection,
   checkOnlineProtection,
   knownChatProtection,
   type ProtectionReason,
@@ -253,11 +253,7 @@ function readCachedTarget(
   const thumb = request.thumb ? pickThumb(row.raw_json) : null;
   if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
 
-  const verdict = checkCachedProtection(
-    row.raw_json,
-    deps.history.chatsCache.getById(String(chatId)),
-    createChatProtectionStore(deps.cacheDb).get(chatId),
-  );
+  const verdict = cachedProtection(deps.cacheDb)(chatId, row.raw_json);
   if (verdict.protected) {
     throw contentProtected(chatId, messageId, verdict.reason, "pass --fresh to check again");
   }

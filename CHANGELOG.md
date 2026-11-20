@@ -23,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   empty without running it. Ctrl-C, SIGTERM or SIGHUP stops ffmpeg or the program, removes
   the converted audio and exits 130.
   Transcripts go into the new `message_transcripts` table, and every `tg messages` item has
-  `transcript` (`{ text, language, source, model }` or `null`). Config keys
+  `transcript` (`{ text, language, source, model }` or `null`; `null` once the cache knows the
+  message or its chat is content-protected, the check `tg media transcribe` makes). Config keys
   `transcribe.command`, `transcribe.model` and `transcribe.language`; a missing program or
   ffmpeg is the new error `TRANSCRIBER_NOT_FOUND` (exit 1), and every setup error (no program,
   no ffmpeg, no whisper.cpp model) has the install, download and config commands in

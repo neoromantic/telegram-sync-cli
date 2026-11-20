@@ -15,6 +15,7 @@ import {
   reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from "../../utils/telegram-rate-limits";
+import { cachedProtection } from "../media/protection";
 import { AmbiguousPeerError, createDmLookup, InvalidPeerError } from "../send/peer-resolver";
 
 /** The JSON item for a message row, shared by every `tg messages` command */
@@ -61,7 +62,8 @@ export function messageRowToItem(
 /**
  * A function that makes the item for a row, with the attachment and the
  * service action read from its raw_json (only media and service rows are
- * read), the transcript of a voice or video note, and the text of a rich
+ * read), the transcript of a voice or video note unless the cache knows
+ * the message or its chat is protected, and the text of a rich
  * message cached before its text was (a text row without text). Every
  * cached message has raw_json, so this works for rows cached before
  * message_attachments existed too.
@@ -73,6 +75,7 @@ export function messageItemReader(db: Database) {
   const transcriptOf = db.query<MessageTranscript, [number, number, string]>(
     "SELECT text, language, source, model FROM message_transcripts WHERE chat_id = ? AND message_id = ? AND unique_file_id = ?",
   );
+  const protection = cachedProtection(db);
   const result: (row: MessageRow) => MessageSearchItem = (row) => {
     const isService = row.message_type === "service";
     const mayBeRich = !row.text && row.message_type === "text";
@@ -84,7 +87,8 @@ export function messageItemReader(db: Database) {
     const text = mayBeRich ? richMessageText(raw) : null;
     const attachment = row.has_media === 1 ? extractAttachment(raw) : null;
     const transcript =
-      attachment?.kind === "voice" || attachment?.kind === "round"
+      (attachment?.kind === "voice" || attachment?.kind === "round") &&
+      !protection(row.chat_id, raw).protected
         ? transcriptOf.get(row.chat_id, row.message_id, attachment.uniqueFileId)
         : null;
     return messageRowToItem(

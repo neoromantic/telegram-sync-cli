@@ -187,7 +187,9 @@ failing doesn't stop the others; the run exits 1 when any failed and says how ma
   not stored or printed. A second Ctrl-C exits at once, still removing the converted audio.
   Transcripts finished before it stay stored.
 - Every `tg messages` item has `transcript`: `{ text, language, source, model }` for a voice or
-  video note that has one, else `null`. For `tg sql` the table is
+  video note that has one, else `null`. It is `null` too once the cache knows the message or its
+  chat is content-protected, by the same offline check `tg media transcribe` makes; the stored
+  row stays. For `tg sql` the table is
   [`message_transcripts`](database-schema.md#table-message_transcripts). Transcripts are not
   in the search index yet.
 
