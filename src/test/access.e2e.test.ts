@@ -142,7 +142,13 @@ describe("E2E: read-only mode and allowedChats", () => {
 
     it("enumerates the write commands from the tree", () => {
       expect(writes).toEqual(
-        expect.arrayContaining(["send", "messages read", "auth logout", "auth login"]),
+        expect.arrayContaining([
+          "send",
+          "messages read",
+          "messages delete",
+          "auth logout",
+          "auth login",
+        ]),
       );
     });
 
@@ -206,6 +212,7 @@ describe("E2E: read-only mode and allowedChats", () => {
           "messages watch",
           "messages unread",
           "messages read",
+          "messages delete",
           "media download",
         ]),
       );
