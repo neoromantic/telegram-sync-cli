@@ -121,6 +121,12 @@ const searchArgs = {
     description: "Also count every message that matches the query and filters (a second query)",
     default: false,
   },
+  fresh: {
+    type: "boolean",
+    description:
+      "Refused: search reads only the cache. tg messages list --chat <chat> --fresh fetches a chat's messages from Telegram",
+    default: false,
+  },
   account: {
     type: "string",
     description: ACCOUNT_SELECTOR_DESCRIPTION,
@@ -135,6 +141,14 @@ export const searchMessagesCommand = defineCommand({
   },
   args: searchArgs,
   async run({ args, rawArgs }) {
+    if (args.fresh) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        "tg messages search reads only the cache, so it can't search Telegram with --fresh",
+        { fresh: true },
+        "Fetch the chat's messages first with tg messages list --chat <chat> --fresh, then search the cache",
+      );
+    }
     const query = (args.query ?? "").trim();
     if (!query) {
       error(ErrorCodes.INVALID_ARGS, "Search query is required");

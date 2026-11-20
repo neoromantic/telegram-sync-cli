@@ -430,8 +430,9 @@ relevance` puts the best matches first (bm25); `--count` adds `count`, every mat
 pages, while `total` stays the size of the page; `--snippet` adds `snippet` to each item, the
 text around the first match with matched words in `**`. When another page has matches, `next`
 has the same search with the following `--offset` and `--since`/`--until` resolved to UTC
-seconds, so a relative bound keeps its window ([Next commands](#next-commands)). Search has no
-`--fresh`: it reads only the cache. The rules and examples are in
+seconds, so a relative bound keeps its window ([Next commands](#next-commands)). Search reads
+only the cache, so `--fresh` is `INVALID_ARGS` (exit 3), not a cached answer that looks fresh:
+fetch the chat with `tg messages list --chat <chat> --fresh` first. The rules and examples are in
 [search.md](search.md#query-rules).
 
 #### Waiting for new messages

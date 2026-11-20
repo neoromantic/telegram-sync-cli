@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across pages.
 - With `allowedChats` set, `tg messages search` resolves its chat and the list from the cache
   alone, so a cached `@username` without an access hash needs no credentials again.
+- `tg messages search --fresh` is `INVALID_ARGS` that says search reads only the cache, instead
+  of a generic unknown option.
 - A string flag's value that looks like a repeatable flag is no longer read as that flag: `tg send
   --caption '--file=x'` sends that caption.
 - A cached page of history vouches for the IDs above its newest message only up to the chat's

@@ -1120,6 +1120,19 @@ describe("E2E: Messages List filters", () => {
     expect(json.error.code).toBe("INVALID_ARGS");
     expect(json.error.message).toContain(message);
   });
+
+  it("refuses search --fresh, as search reads only the cache", async () => {
+    const result = await runCli(
+      ["messages", "search", "--query", "note", "--type", "voice", "--fresh"],
+      options(),
+    );
+
+    expect(result.exitCode).toBe(3);
+    const { error } = result.json as ErrorData & { error: { suggestion?: string } };
+    expect(error.code).toBe("INVALID_ARGS");
+    expect(error.message).toContain("reads only the cache");
+    expect(error.suggestion).toContain("tg messages list --chat <chat> --fresh");
+  });
 });
 
 const QUAY_CLUB_RAW_ID = 1_555_000_005;
