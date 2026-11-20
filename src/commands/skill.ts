@@ -1,20 +1,26 @@
+import { Database } from "bun:sqlite";
+import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineCommand } from "citty";
 
+import skillMarkdown from "../../skills/telegram-sync-cli/SKILL.md" with { type: "text" };
+import {
+  ConfigError,
+  type ConfigFile,
+  ConfigReadError,
+  configuredActiveAccount,
+  getConfigPath,
+  loadConfig,
+} from "../config";
 import { getErrorMessage } from "../daemon/daemon-utils";
-import { ErrorCodes } from "../types";
+import { type Account, ErrorCodes } from "../types";
+import { findDefaultAccount } from "../utils/account-selector";
 import { error, success } from "../utils/output";
-import { VERSION } from "../version";
 
-export interface SkillManifest {
-  name: string;
-  description: string;
-  install_command: string;
-  entrypoint: string;
-  version: string;
-  output: "json";
-}
+export const SKILL_NAME = "telegram-sync-cli";
+
+export const SKILL_MARKDOWN: string = skillMarkdown;
 
 export interface SkillEnvStatus {
   telegram_api_id: {
@@ -35,10 +41,28 @@ export interface SkillDataDirStatus {
   error?: string;
 }
 
+export interface SkillAccountStatus {
+  id: number;
+  username: string | null;
+  label: string | null;
+}
+
+export interface SkillDaemonStatus {
+  /** `unknown`: daemon.pid exists but can't be read */
+  status: "running" | "stopped" | "unknown";
+  pid: number | null;
+  error?: string;
+}
+
 export interface SkillValidationResult {
   valid: boolean;
   env: SkillEnvStatus;
   data_dir: SkillDataDirStatus;
+  /** The account record the next command uses without --account, or null */
+  account: SkillAccountStatus | null;
+  /** null: data.db can't be read */
+  accounts_total: number | null;
+  daemon: SkillDaemonStatus;
   issues: string[];
 }
 
@@ -46,27 +70,10 @@ export interface SkillInstallResult {
   path: string;
   bytes: number;
   overwritten: boolean;
-  manifest: SkillManifest;
 }
 
 function resolveDataDir() {
   return process.env.TELEGRAM_SYNC_CLI_DATA_DIR ?? join(homedir(), ".telegram-sync-cli");
-}
-
-export function buildSkillManifest() {
-  const result: SkillManifest = {
-    name: "@goodit/telegram-sync-cli",
-    description: "Agent-friendly Telegram Sync CLI",
-    install_command: "bun install -g @goodit/telegram-sync-cli",
-    entrypoint: "tg",
-    version: VERSION,
-    output: "json",
-  };
-  return result;
-}
-
-export function getSkillManifestPath() {
-  return join(resolveDataDir(), "skill.json");
 }
 
 function buildEnvStatus() {
@@ -74,7 +81,7 @@ function buildEnvStatus() {
   const apiHashRaw = process.env.TELEGRAM_API_HASH ?? "";
   const apiId = Number.parseInt(apiIdRaw, 10);
 
-  return {
+  const result: SkillEnvStatus = {
     telegram_api_id: {
       present: apiIdRaw.length > 0,
       valid: Number.isFinite(apiId) && apiId > 0,
@@ -84,6 +91,11 @@ function buildEnvStatus() {
       valid: apiHashRaw.length > 0,
     },
   };
+  return result;
+}
+
+function errorCode(err: unknown) {
+  return typeof err === "object" && err && "code" in err ? err.code : null;
 }
 
 export async function tryStat(path: string) {
@@ -100,8 +112,7 @@ export async function tryStat(path: string) {
         } = { exists: true, isDirectory: stat.isDirectory() };
     return result;
   } catch (err) {
-    const code = typeof err === "object" && err && "code" in err ? err.code : null;
-    if (code === "ENOENT") {
+    if (errorCode(err) === "ENOENT") {
       const result:
         | {
             exists: true;
@@ -170,9 +181,135 @@ export async function checkDataDirAccess(dataDir: string) {
   return result;
 }
 
+async function readConfig() {
+  try {
+    const { config } = await loadConfig({ strict: true });
+    const result: { config: ConfigFile; issue: null } | { config: null; issue: string } = {
+      config,
+      issue: null,
+    };
+    return result;
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      const details = err.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
+      return {
+        config: null,
+        issue: `${getConfigPath()}: ${err.message} (${details}); fix it with tg config set or edit the file`,
+      };
+    }
+    if (err instanceof ConfigReadError) {
+      return { config: null, issue: err.message };
+    }
+    throw err;
+  }
+}
+
+function accountStatus(account: Account) {
+  const result: SkillAccountStatus = {
+    id: account.id,
+    username: account.username ?? null,
+    label: account.label ?? null,
+  };
+  return result;
+}
+
+async function readAccounts(config: ConfigFile | null) {
+  const { createAccountsDb, getDatabasePath, legacyPhoneUserId } = await import("../db");
+  const path = getDatabasePath();
+  const unreadable = (reason: string) => ({
+    account: null,
+    accountsTotal: null,
+    issues: [`Could not read the accounts in ${path}: ${reason}`],
+  });
+  const stat = await tryStat(path);
+  if (!stat.exists) {
+    return stat.error
+      ? unreadable(stat.error)
+      : { account: null, accountsTotal: 0, issues: ["No account: log in with tg auth login"] };
+  }
+  if (stat.isDirectory) return unreadable("not a file");
+  let found: ReturnType<typeof findDefaultAccount>;
+  let configured: Account | null;
+  let db: Database | null = null;
+  try {
+    db = new Database(path, { readonly: true });
+    db.run("PRAGMA busy_timeout = 5000");
+    db.run("PRAGMA query_only = ON");
+    const accounts = createAccountsDb(db);
+    found = findDefaultAccount(accounts);
+    configured = config ? configuredActiveAccount(config, accounts) : null;
+  } catch (err) {
+    return unreadable(getErrorMessage(err));
+  } finally {
+    db?.close();
+  }
+  const total = found.accounts.length;
+  if (total === 0) {
+    return {
+      account: null,
+      accountsTotal: 0,
+      issues: ["No account: log in with tg auth login"],
+    };
+  }
+  if (!config) return { account: null, accountsTotal: total, issues: [] };
+  const selected = configured ?? found.account;
+  const candidates = selected ? [selected] : found.accounts;
+  const hasDuplicate = candidates.some((row) => {
+    if (row.user_id !== null) return false;
+    const userId = legacyPhoneUserId(row.phone);
+    return (
+      userId !== null &&
+      found.accounts.some(
+        (other) =>
+          other.id !== row.id && (other.user_id ?? legacyPhoneUserId(other.phone)) === userId,
+      )
+    );
+  });
+  if (hasDuplicate) {
+    return {
+      account: null,
+      accountsTotal: total,
+      issues: [
+        "Legacy account records overlap: run tg accounts list to resolve them, then run tg skill validate again",
+      ],
+    };
+  }
+  return {
+    account: selected ? accountStatus(selected) : null,
+    accountsTotal: total,
+    issues: selected
+      ? []
+      : [
+          `${total} accounts and none is active: pass --account or run tg accounts switch --id <id>`,
+        ],
+  };
+}
+
+async function readDaemon(dataDir: string) {
+  const path = join(dataDir, "daemon.pid");
+  let status: SkillDaemonStatus;
+  try {
+    const { readLivePid } = await import("../daemon/pid-file");
+    const pid = readLivePid(path);
+    status = pid === null ? { status: "stopped", pid } : { status: "running", pid };
+    return status;
+  } catch (err) {
+    if (errorCode(err) === "ENOENT") {
+      status = { status: "stopped", pid: null };
+      return status;
+    }
+    status = { status: "unknown", pid: null, error: getErrorMessage(err) };
+    return status;
+  }
+}
+
 export async function validateSkillEnvironment() {
   const envStatus = buildEnvStatus();
-  const dataDirStatus = await checkDataDirAccess(resolveDataDir());
+  const dataDir = resolveDataDir();
+  const dataDirStatus = await checkDataDirAccess(dataDir);
+  const { config, issue: configIssue } = await readConfig();
+  const accounts = await readAccounts(config);
+  const daemon = await readDaemon(dataDir);
 
   const issues: string[] = [];
   if (!envStatus.telegram_api_id.valid) {
@@ -187,66 +324,129 @@ export async function validateSkillEnvironment() {
   if (dataDirStatus.exists && !dataDirStatus.is_directory) {
     issues.push("Data directory path is not a directory");
   }
+  if (configIssue) issues.push(configIssue);
+  issues.push(...accounts.issues);
 
   const result: SkillValidationResult = {
     valid: issues.length === 0,
     env: envStatus,
     data_dir: dataDirStatus,
+    account: accounts.account,
+    accounts_total: accounts.accountsTotal,
+    daemon,
     issues,
   };
   return result;
 }
 
-export async function installSkillManifest(targetPath = getSkillManifestPath()) {
-  const manifest = buildSkillManifest();
-  const payload = `${JSON.stringify(manifest, null, 2)}\n`;
-  const existed = await Bun.file(targetPath).exists();
+/** A destination install won't write through */
+export class SkillInstallRefused extends Error {
+  constructor(
+    message: string,
+    readonly path: string,
+  ) {
+    super(message);
+    this.name = "SkillInstallRefused";
+  }
+}
 
-  await Bun.write(targetPath, payload, { createPath: true });
+async function existsNotLink(path: string) {
+  let stat: Awaited<ReturnType<typeof lstat>>;
+  try {
+    stat = await lstat(path);
+  } catch (err) {
+    if (errorCode(err) === "ENOENT") return false;
+    throw err;
+  }
+  if (stat.isSymbolicLink()) {
+    throw new SkillInstallRefused(`${path} is a symbolic link`, path);
+  }
+  return true;
+}
 
+/**
+ * Writes SKILL.md to `<dir>/telegram-sync-cli/SKILL.md`, replacing the file
+ * there. `dir` itself may be a link; the skill directory and the file in it
+ * may not.
+ */
+export async function installSkill(dir: string) {
+  const skillDir = join(dir, SKILL_NAME);
+  const path = join(skillDir, "SKILL.md");
+  await existsNotLink(skillDir);
+  const existed = await existsNotLink(path);
+  if (existed && !(await lstat(path)).isFile()) {
+    throw new SkillInstallRefused(`${path} is not a regular file`, path);
+  }
+  await mkdir(skillDir, { recursive: true });
+  const temp = join(skillDir, `.SKILL.md.${crypto.randomUUID()}.tmp`);
+  const file = await open(temp, "wx");
+  try {
+    try {
+      await file.writeFile(SKILL_MARKDOWN);
+    } finally {
+      await file.close();
+    }
+    await rename(temp, path);
+  } catch (err) {
+    await rm(temp, { force: true });
+    throw err;
+  }
   const result: SkillInstallResult = {
-    path: targetPath,
-    bytes: payload.length,
+    path,
+    bytes: Buffer.byteLength(SKILL_MARKDOWN),
     overwritten: existed,
-    manifest,
   };
   return result;
 }
 
-export const skillManifestCommand = defineCommand({
-  meta: {
-    name: "manifest",
-    description: "Print the skill manifest JSON",
-  },
-  async run() {
-    success(buildSkillManifest());
-  },
-});
-
 export const skillValidateCommand = defineCommand({
   meta: {
     name: "validate",
-    description: "Validate environment and data directory access",
+    description:
+      "Check locally: the credentials in the environment, the data directory, config.json, the account record the next command uses and whether a live process holds daemon.pid",
   },
   async run() {
-    const result = await validateSkillEnvironment();
-    success(result);
+    success(await validateSkillEnvironment());
   },
 });
 
 export const skillInstallCommand = defineCommand({
   meta: {
     name: "install",
-    description: "Write the skill manifest to the default location",
+    description:
+      "Write the agent skill to <dir>/telegram-sync-cli/SKILL.md, replacing the file there, local edits included. <dir> is an agent's skills directory",
   },
-  async run() {
+  args: {
+    dir: {
+      type: "string",
+      description: "Skills directory, such as ~/.claude/skills",
+      required: true,
+    },
+  },
+  async run({ args }) {
+    const dir = typeof args.dir === "string" ? args.dir : "";
+    if (!dir.trim()) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        "--dir needs a directory",
+        undefined,
+        "Pass the agent's skills directory, such as --dir ~/.claude/skills",
+      );
+    }
     try {
-      const result = await installSkillManifest();
-      success(result);
+      success(await installSkill(dir));
     } catch (err) {
-      error(ErrorCodes.GENERAL_ERROR, "Failed to write skill manifest", {
-        reason: getErrorMessage(err),
-      });
+      error(
+        ErrorCodes.GENERAL_ERROR,
+        "Failed to write the skill",
+        {
+          reason: getErrorMessage(err),
+          ...(err instanceof SkillInstallRefused ? { path: err.path } : {}),
+        },
+        err instanceof SkillInstallRefused
+          ? "Remove it or pass another --dir: install never writes through a link inside the skills directory"
+          : undefined,
+      );
     }
   },
 });
@@ -254,10 +454,9 @@ export const skillInstallCommand = defineCommand({
 export const skillCommand = defineCommand({
   meta: {
     name: "skill",
-    description: "AI skill helpers (manifest, validate, install)",
+    description: "The agent skill: install it, check the setup it needs",
   },
   subCommands: {
-    manifest: skillManifestCommand,
     validate: skillValidateCommand,
     install: skillInstallCommand,
   },

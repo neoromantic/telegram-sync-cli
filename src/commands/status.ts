@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import { ConfigError, loadAccessSettings } from "../config";
-import { createPidFile } from "../daemon";
+import { createPidFile } from "../daemon/pid-file";
 import {
   accountsDb,
   ensureCacheLayout,

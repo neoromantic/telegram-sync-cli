@@ -148,7 +148,7 @@ export const getChatCommand = defineCommand({
 
       assertUsernameIdentifier(isUsername, identifier, fresh);
       verbose(`Fetching chat "${identifier}" from Telegram API...`);
-      const client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+      const client = wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
         context: "cli:chats.get",
         accountId: account.id,
       });

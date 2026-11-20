@@ -133,10 +133,39 @@ describe("undeclaredArg", () => {
     expect(send("stray")).toBe("Unexpected argument stray");
   });
 
+  it.each([
+    ["--silent=no", "--silent takes no value: pass --silent or --no-silent, not --silent=no"],
+    ["--silent=0", "--silent takes no value: pass --silent or --no-silent, not --silent=0"],
+    ["--silent=", "--silent takes no value: pass --silent or --no-silent, not --silent="],
+    [
+      "--no-silent=false",
+      "--no-silent takes no value: pass --silent or --no-silent, not --no-silent=false",
+    ],
+    ["-q=false", "-q takes no value: pass -q, not -q=false"],
+  ])("refuses %s, which citty would read without its value", (flag, problem) => {
+    expect(send(flag)).toBe(problem);
+  });
+
+  it("names both forms of a negated flag that got a value", () => {
+    expect(send("--no-silent", "false")).toBe(
+      "--no-silent takes no value: pass --silent or --no-silent, not --no-silent false",
+    );
+  });
+
   it("takes declared flags, aliases, --no-, =values, global flags and negative IDs", () => {
     expect(
       undeclaredArg(
-        ["--to", "-1001234567890", "-m", "-5", "--silent=false", "--no-markdown", "-f", "pretty"],
+        [
+          "--to",
+          "-1001234567890",
+          "-m",
+          "-5",
+          "--silent=false",
+          "--html=true",
+          "--no-markdown",
+          "-f",
+          "pretty",
+        ],
         known("send"),
       ),
     ).toBeNull();

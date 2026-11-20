@@ -448,7 +448,7 @@ describe("Authentication Commands", () => {
       writeStringSession({ version: 3, primaryDcs: dcs, authKey: new Uint8Array(256).fill(byte) });
 
     let dataDir: string;
-    let sessions: ReturnType<typeof createDefaultClientFactory>;
+    let sessions: Awaited<ReturnType<typeof createDefaultClientFactory>>;
     let existingId: number;
 
     const keyOf = async (accountId: number) => {
@@ -460,7 +460,7 @@ describe("Authentication Commands", () => {
 
     beforeEach(async () => {
       dataDir = mkdtempSync(join(tmpdir(), "telegram-sync-cli-auth-merge-"));
-      sessions = createDefaultClientFactory(requireDefaultConfig(), dataDir);
+      sessions = await createDefaultClientFactory(await requireDefaultConfig(), dataDir);
       existingId = accountsDb.create({ phone: "user:4242", user_id: 4242, label: "Main" }).id;
       const revoked = sessions.create(existingId);
       await revoked.importSession(sessionWithKey(1));
@@ -515,7 +515,7 @@ describe("Authentication Commands", () => {
         phone: "+1234567890",
         is_active: true,
       });
-      const client = deps.getClient(account.id);
+      const client = await deps.getClient(account.id);
 
       const result = await logout(account.id, deps);
 

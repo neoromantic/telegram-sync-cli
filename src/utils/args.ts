@@ -90,12 +90,18 @@ interface ArgDef {
   alias?: string | string[];
 }
 
+function takesNoValue(flag: string, written: string) {
+  const on = flag.replace(/^--no-/, "--");
+  const forms = flag.startsWith("--") ? `${on} or ${on.replace(/^--/, "--no-")}` : flag;
+  return `${flag} takes no value: pass ${forms}, not ${written}`;
+}
+
 /**
  * What in rawArgs the command would drop without a word, or null: a flag
  * it doesn't declare (`--acount 2` would run on the active account), or a
- * value it takes nowhere, such as the `false` of `--silent false`, which
- * citty reads as `--silent`. A negative number is a value, not a flag
- * (positionalChat).
+ * value it takes nowhere, such as the `false` of `--silent false` and the
+ * `no` of `--silent=no`, both of which citty reads as `--silent`. A
+ * negative number is a value, not a flag (positionalChat).
  */
 export function undeclaredArg(rawArgs: string[], defs: Record<string, ArgDef>) {
   const flags = new Map<string, ArgDef>();
@@ -110,9 +116,7 @@ export function undeclaredArg(rawArgs: string[], defs: Record<string, ArgDef>) {
     if (arg === "--") break;
     if (!arg.startsWith("-") || NEGATIVE_NUMBER.test(arg)) {
       if (--positionals < 0) {
-        return boolean
-          ? `${boolean} takes no value: pass ${boolean} or ${boolean.replace(/^--/, "--no-")}, not ${boolean} ${arg}`
-          : `Unexpected argument ${arg}`;
+        return boolean ? takesNoValue(boolean, `${boolean} ${arg}`) : `Unexpected argument ${arg}`;
       }
       boolean = null;
       continue;
@@ -127,6 +131,10 @@ export function undeclaredArg(rawArgs: string[], defs: Record<string, ArgDef>) {
         def = flags.get(name.slice(3));
       }
       if (!def) return `Unknown option ${long ? "--" : "-"}${name}`;
+    }
+    if (def?.type === "boolean" && eq >= 0) {
+      const read = long && flags.has(flag.slice(2)) ? /^(true|false)$/ : /^true$/;
+      if (!read.test(arg.slice(eq + 1))) return takesNoValue(flag, arg);
     }
     boolean = def?.type === "boolean" && eq < 0 && long ? flag : null;
     if (def?.type !== "boolean" && eq < 0) i++;

@@ -602,28 +602,6 @@ describe("daemon-accounts: connection + event wiring", () => {
     });
   });
 
-  it("merges duplicate user_id by keeping real phone account", async () => {
-    const accountsDb = createAccountsDb([
-      { id: 1, phone: "user:555", user_id: 555 },
-      { id: 2, phone: "+1999", user_id: null },
-    ]);
-    const ctx = createContext(accountsDb);
-
-    nextGetMe = { id: 555, firstName: "Test", lastName: "User" };
-
-    const { connectAccount } = await import("./daemon-accounts");
-
-    const connected = await connectAccount(ctx, 2, "+1999", null);
-
-    expect(connected).toBe(true);
-    expect(accountsDb.getById(1)).toBeNull();
-    const account = accountsDb.getById(2);
-    expect(account?.user_id).toBe(555);
-    expect(createdClients[0]?.startUpdatesLoop).toHaveBeenCalled();
-    expect(ctx.runtime.accounts.has(1)).toBe(false);
-    expect(ctx.runtime.accounts.has(2)).toBe(true);
-  });
-
   it("daemon clients use the daemon platform", async () => {
     const ctx = createContext(createAccountsDb([{ id: 1, phone: "+15550000001", user_id: 555 }]));
     const { attemptReconnect, connectAccount } = await import("./daemon-accounts");
@@ -650,31 +628,37 @@ describe("daemon-accounts: connection + event wiring", () => {
     );
   });
 
-  it("merges duplicate user_id by keeping existing real phone account", async () => {
-    const accountsDb = createAccountsDb([
-      { id: 1, phone: "+1555", user_id: 555 },
-      { id: 2, phone: "user:555", user_id: null },
-    ]);
-    const ctx = createContext(accountsDb);
+  for (const [kept, duplicate] of [
+    ["user:555", "+1999"],
+    ["user:555", "qr:Second"],
+    ["+1555", "user:555"],
+  ] as const) {
+    it(`leaves account ${kept} and the ${duplicate} account of the same user as they are`, async () => {
+      const accountsDb = createAccountsDb([
+        { id: 1, phone: kept, user_id: 555 },
+        { id: 2, phone: duplicate, user_id: null },
+      ]);
+      accountsDb.update(1, { label: "Main" });
+      accountsDb.setActive(1);
+      const accounts = accountsDb.getAll();
+      const ctx = createContext(accountsDb);
+      nextGetMe = { id: 555, firstName: "Test", lastName: "User" };
+      const { connectAccount } = await import("./daemon-accounts");
 
-    nextGetMe = { id: 555, firstName: "Test", lastName: "User" };
+      expect(await connectAccount(ctx, 2, duplicate, null)).toBe(false);
 
-    const { connectAccount } = await import("./daemon-accounts");
-
-    const connected = await connectAccount(ctx, 2, "user:555", null);
-
-    expect(connected).toBe(false);
-    expect(accountsDb.getActive()?.id).toBe(1);
-    expect(accountsDb.getById(2)).toBeNull();
-    expect(ctx.state.accounts.has(2)).toBe(false);
-    expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1);
-    expect(ctx.runtime.accounts.has(2)).toBe(false);
-    expect(ctx.runtime.accounts.has(1)).toBe(true);
-
-    const { disconnectAllAccounts } = await import("./daemon-accounts");
-    await disconnectAllAccounts(ctx);
-    expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1);
-  });
+      expect(accountsDb.getAll()).toEqual(accounts);
+      expect(createdClients[0]?.destroy).toHaveBeenCalledTimes(1);
+      expect(createdClients[0]?.startUpdatesLoop).not.toHaveBeenCalled();
+      expect(ctx.state.accounts.get(2)).toMatchObject({
+        status: "error",
+        lastError:
+          "Same Telegram user as account #1. Run tg auth login or tg auth login-qr again to move the session to account #1, or tg accounts remove --id 2",
+      });
+      expect(ctx.state.accounts.get(2)?.nextReconnectAt).toBeUndefined();
+      expect([...ctx.runtime.accounts.keys()]).toEqual([1, 2]);
+    });
+  }
 
   it("a connect that fails at start closes its client and logs one line without source or the phone number (#128)", async () => {
     const ctx = createContext(createAccountsDb([{ id: 1, phone: "+15550000001", user_id: null }]));

@@ -49,6 +49,12 @@ describe("PidFile", () => {
     expect(createPidFile(pidPath).read()).toBeNull();
   });
 
+  it("ignores a malformed file even when it begins with a live PID", () => {
+    writeFileSync(pidPath, `${process.pid} trailing text`);
+
+    expect(createPidFile(pidPath).read()).toBeNull();
+  });
+
   it("signals only a live process", () => {
     writeFileSync(pidPath, String(process.pid));
     expect(createPidFile(pidPath).sendSignal(0)).toBe(true);
