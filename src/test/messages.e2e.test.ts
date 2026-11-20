@@ -1160,17 +1160,60 @@ describe("E2E: Messages List filters offline and on another account", () => {
     env.cleanup();
   });
 
+  const offline = (allowed?: string) => ({
+    env: {
+      ...env.getCliOptions().env,
+      ...NO_CREDENTIALS,
+      TELEGRAM_SYNC_CLI_ALLOWED_CHATS: allowed,
+    },
+  });
+
   async function list(...args: string[]) {
-    const result = await runCliSuccess(["messages", "list", "--account", "2", ...args], {
-      env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
-    });
+    const result = await runCliSuccess(["messages", "list", "--account", "2", ...args], offline());
     return result.json as FilteredAnswer;
   }
 
-  it("reads a chat by a cached username without credentials", async () => {
-    const { data } = await list("--chat", "@quayclub", "--type", "voice", "--before", "11");
-    expect(data.items.map((item) => item.messageId)).toEqual([10, 5]);
-    expect(data.complete).toBe(true);
+  it.each([undefined, "@quayclub", String(QUAY_CLUB_ID)])(
+    "reads a chat by a cached username without credentials, allowedChats %p",
+    async (allowed) => {
+      const voices = ["--chat", "@quayclub", "--type", "voice", "--before", "11"];
+      const result = await runCliSuccess(
+        ["messages", "list", "--account", "2", ...voices],
+        offline(allowed),
+      );
+      const { data } = result.json as FilteredAnswer;
+      expect(data.items.map((item) => item.messageId)).toEqual([10, 5]);
+      expect(data.complete).toBe(true);
+
+      const search = await runCliSuccess(
+        ["messages", "search", "--query", "note", "--chat", "@quayclub", "--account", "2"],
+        offline(allowed),
+      );
+      expect((search.json as { data: { total: number } }).data.total).toBeGreaterThan(0);
+    },
+  );
+
+  it("refuses a chat outside allowedChats without credentials", async () => {
+    const result = await runCli(
+      ["messages", "list", "--account", "2", "--chat", "@quayclub", "--type", "voice"],
+      offline("-1001555000999"),
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect((result.json as ErrorData).error.code).toBe("CHAT_NOT_ALLOWED");
+  });
+
+  it("explains a name the cache can't resolve and takes the numeric ID", async () => {
+    const result = await runCli(
+      ["messages", "list", "--account", "2", "--chat", "@nobodycached", "--type", "voice"],
+      offline(),
+    );
+
+    expect(result.exitCode).toBe(3);
+    const { error } = result.json as ErrorData & { error: { suggestion?: string } };
+    expect(error).toMatchObject({ code: "INVALID_ARGS", details: { chat: "@nobodycached" } });
+    expect(error.message).toContain("@nobodycached is not in the cache");
+    expect(error.suggestion).toContain("numeric ID");
   });
 
   it("keeps --account in every command it suggests", async () => {

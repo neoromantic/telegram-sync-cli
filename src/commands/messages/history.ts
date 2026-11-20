@@ -22,10 +22,12 @@ import { createUsersCache, type UsersCache } from "../../db/users-cache";
 import type { MessageSearchItem } from "../../types";
 import { normalizeUsername } from "../../utils/identifiers";
 import { verbose } from "../../utils/output";
-import { toPeerIdFromInputPeer } from "../../utils/telegram-peer-ids";
+import { toInputPeerFromPeerId, toPeerIdFromInputPeer } from "../../utils/telegram-peer-ids";
 import { type DmLookup, type ResolvePeerOptions, resolvePeer } from "../send/peer-resolver";
 import { resolveSelfId } from "../send/sent-message-cache";
 import {
+  ChatNotCachedError,
+  createLazyClient,
   type HistoryClient,
   MAX_MESSAGE_ID,
   MessageNotFoundError,
@@ -83,24 +85,28 @@ export async function resolveHistoryChat(
 const CHAT_USERNAME = /^@?(?!(?:me|self)$)[a-z]\w*$/i;
 
 /**
- * The marked chat ID for `--chat`, from the cache when it knows the
- * username: only the ID is read, so no access hash is needed. Anything else
- * resolves as resolveHistoryChat does, which reads the cache first too.
+ * Resolve `--chat` from the cache alone, for a read that never connects to
+ * Telegram. A cached @username resolves without an access hash too, so its
+ * input peer may lack one; anything only Telegram could resolve throws
+ * ChatNotCachedError.
  */
-export async function resolveHistoryChatId(
-  client: HistoryClient,
-  identifier: string,
-  deps: ResolveHistoryChatDeps,
-) {
+export async function resolveCachedChat(identifier: string, deps: ResolveHistoryChatDeps) {
   const value = identifier.trim();
   if (CHAT_USERNAME.test(value)) {
     const username = normalizeUsername(value);
-    const user = deps.usersCache.getByUsername(username);
-    if (user) return Number(user.user_id);
-    const chat = deps.chatsCache.getByUsername(username);
-    if (chat) return Number(chat.chat_id);
+    const id =
+      deps.usersCache.getByUsername(username)?.user_id ??
+      deps.chatsCache.getByUsername(username)?.chat_id;
+    const inputPeer = id === undefined ? null : toInputPeerFromPeerId(Number(id), null);
+    if (inputPeer) {
+      const chat: HistoryChat & { name: string } = { chatId: Number(id), inputPeer, name: value };
+      return chat;
+    }
   }
-  return (await resolveHistoryChat(client, identifier, deps)).chatId;
+  const offline = createLazyClient(() => {
+    throw new ChatNotCachedError(value);
+  });
+  return resolveHistoryChat(offline, value, deps);
 }
 
 /** A page of history. Both bounds are exclusive message IDs. */

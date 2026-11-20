@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`voice`, `photo`, `video`, `document`…), plus `round` and `animation` for the round video
   messages and GIFs that `video` also covers; `--since` and `--until` take the forms of
   `tg messages search`. A filtered page reads only the cache, needs no credentials for a chat
-  the cache knows (a cached `@username` included), and pages with `--before` and `--after` as
-  before. It adds `complete`, `true` only when one cached range covers the page up to the chat's
+  the cache knows (a cached `@username` included, with `allowedChats` set too), explains a name
+  the cache can't resolve, and pages with `--before` and `--after` as before. It adds `complete`, `true` only when one cached range covers the page up to the chat's
   newest known message and, with `--type`, every message in it has its type (a date window never
   guesses the date of a message the cache lacks); `missing`
   (`history`, `types`) says why it is `false`, `missingBefore` where the newest gap ends, and
@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sent at `00:01:40`, and `--since` with milliseconds no longer takes one sent just before it.
   Its `next` carries the bounds resolved to UTC, so a relative bound (`60s`) keeps its window
   across pages.
+- With `allowedChats` set, `tg messages search` resolves its chat and the list from the cache
+  alone, so a cached `@username` without an access hash needs no credentials again.
 - A string flag's value that looks like a repeatable flag is no longer read as that flag: `tg send
   --caption '--file=x'` sends that caption.
 - A cached page of history vouches for the IDs above its newest message only up to the chat's

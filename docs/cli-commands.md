@@ -277,9 +277,11 @@ as usual but its new messages aren't cached.
   and a filter that matches nothing is an empty page.
 
 A filtered page reads only the cache and never asks Telegram for messages: Telegram's history
-has no such filters, so `--fresh` with a filter is `INVALID_ARGS`. Resolving `--chat` reads the
-cache too, so a chat the cache knows, by ID or by a cached `@username`, needs no credentials and
-no connection. The page lists every cached match and adds four keys:
+has no such filters, so `--fresh` with a filter is `INVALID_ARGS`. Resolving `--chat` and the
+[`allowedChats`](configuration.md#read-only-mode-and-allowed-chats) check read only the cache
+too, so a chat the cache knows, by ID or by a cached `@username`, needs no credentials and no
+connection. A name the cache can't resolve is `INVALID_ARGS` that says so: pass the chat's ID
+as `tg chats list` prints it. The page lists every cached match and adds four keys:
 
 ```json
 { "chatId": -1001234567890, "items": [ … ], "limit": 20, "before": null, "after": null,

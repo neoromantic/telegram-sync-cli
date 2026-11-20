@@ -3,6 +3,7 @@ import { ErrorCodes, type NextCommand } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { error, success } from "../../utils/output";
+import { checkedChat } from "../access";
 import { migrateArgs } from "../db";
 import { nextCommand } from "../next";
 import {
@@ -25,8 +26,8 @@ import {
   type ListHistoryResult,
   listHistory,
   readFilteredPage,
+  resolveCachedChat,
   resolveHistoryChat,
-  resolveHistoryChatId,
 } from "./history";
 
 /** The args of `tg messages list`, for the `next` commands that run it */
@@ -118,8 +119,8 @@ export const listMessagesCommand = defineCommand({
     try {
       const deps = openHistory(account.id, "cli:messages.list");
       if (filtered) {
-        const chatId = await resolveHistoryChatId(deps.client, args.chat, deps);
-        const result = readFilteredPage(deps.cacheDb, chatId, window, includeDeleted, {
+        const chat = checkedChat(args, "chat") ?? (await resolveCachedChat(args.chat, deps));
+        const result = readFilteredPage(deps.cacheDb, chat.chatId, window, includeDeleted, {
           types,
           since,
           until,

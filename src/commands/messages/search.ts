@@ -162,7 +162,7 @@ export const searchMessagesCommand = defineCommand({
     const { account, db: cacheDb } = openAccountCache(args.account);
     const chatFilter = parseIdentifier(args.chat, "chat", account.user_id);
     const senderFilter = parseIdentifier(args.sender, "sender", account.user_id);
-    const allowed = await allowedChatIds(account.id);
+    const allowed = await allowedChatIds(account.id, { cacheOnly: true });
 
     try {
       const search = createMessagesSearch(cacheDb);
