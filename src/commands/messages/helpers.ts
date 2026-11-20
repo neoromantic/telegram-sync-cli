@@ -192,16 +192,16 @@ export type HistoryClient = Pick<TelegramClient, "call" | "getMe">;
  * A client that is created on first use, so a read the cache answers needs
  * no credentials and opens no connection.
  */
-export function createLazyClient(create: () => HistoryClient) {
-  let client: HistoryClient | undefined;
+export function createLazyClient(create: () => HistoryClient | Promise<HistoryClient>) {
+  let client: HistoryClient | Promise<HistoryClient> | undefined;
   const get = () => {
     client ??= create();
     return client;
   };
   return {
-    call: ((...args: Parameters<HistoryClient["call"]>) =>
-      get().call(...args)) as HistoryClient["call"],
-    getMe: () => get().getMe(),
+    call: (async (...args: Parameters<HistoryClient["call"]>) =>
+      (await get()).call(...args)) as HistoryClient["call"],
+    getMe: async () => (await get()).getMe(),
   };
 }
 
@@ -213,8 +213,8 @@ export function openHistory(accountId: number, context: string) {
   const cacheDb = getAccountCacheDb(accountId);
   return {
     cacheDb,
-    client: createLazyClient(() =>
-      wrapClientCallWithRateLimits(getClientForAccount(accountId), {
+    client: createLazyClient(async () =>
+      wrapClientCallWithRateLimits(await getClientForAccount(accountId), {
         context,
         accountId,
       }),

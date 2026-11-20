@@ -90,8 +90,8 @@ export const transcribeMediaCommand = defineCommand({
       const { config } = await loadConfig({ strict: true });
       const transcribe = config.transcribe ?? {};
       const history = openHistory(account.id, CONTEXT);
-      const getClient = () =>
-        wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+      const getClient = async () =>
+        wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
           context: CONTEXT,
           accountId: account.id,
         });

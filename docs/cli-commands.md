@@ -23,6 +23,7 @@
 | `db`        | vacuum: prune an account's cache and give its free space back to the disk; migrate: finish its background migrations                                                            |
 | `sql`       | read-only cache queries                                                                                                                                                         |
 | `telemetry` | status, on, off: [usage stats](configuration.md#usage-stats)                                                                                                                    |
+| `skill`     | install (the agent skill into `--dir`), validate: [agent skill](api-design.md#agent-skill)                                                                                      |
 
 ## Global Flags
 

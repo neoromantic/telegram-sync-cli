@@ -29,11 +29,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no ffmpeg, no whisper.cpp model) has the install, download and config commands in
   `suggestion` and fails only the messages that need the program
   ([#102](https://github.com/neoromantic/telegram-sync-cli/issues/102)).
+
+## [0.15.1] - 2026-11-19
+
+### Fixed
+
+- A boolean flag with a value other than `true` or `false` (`--silent=no` and `--silent=0`,
+  which ran as `--silent`) is `INVALID_ARGS` instead of being read as set (#217).
+- `tg send`, `tg messages read` and `tg api` write methods resolve an `@username` through
+  Telegram, not the cache, so a username that moved never sends to its previous owner. The
+  `allowedChats` check of a write resolves the list's `@username` entries the same way: an entry
+  allows the chat that holds the username now, not its previous owner by ID. Reads take the
+  latest fetched owner of a username (#217).
+- The daemon no longer deletes an account when two accounts sign in as the same Telegram user.
+  It picked the one to keep by the kind of phone, so it could delete the account with the cache,
+  label and active choice, or the one with the only working session. Now it leaves both and
+  doesn't sync the second; its error says to log in again or remove it.
+
+## [0.15.0] - 2026-11-19
+
+### Added
+
+- An agent skill, `skills/telegram-sync-cli/SKILL.md`: when to use `tg`, finding chats and
+  messages, counting and reading whole chats with one `tg sql` query and checking that the
+  cache covers the chat, confirming before `tg send`, the error schema and the exit codes.
+  Install it with `bunx skills add neoromantic/telegram-sync-cli` or
+  `tg skill install --dir <skills dir>`, which writes the same file from `tg` itself. A test
+  runs every command in its examples against made-up data and checks the answers of its SQL.
+- `tg skill validate` reports the account record the next command uses without `--account`
+  (`account`, `accounts_total`): `activeAccount` in `config.json`, else the active account,
+  else the only one. It also reports whether a live process holds `daemon.pid`
+  (`daemon: { status, pid }`). Neither checks that the session is authorized or online. No
+  account, several and none active, or an invalid `config.json` is an issue. Each value is
+  read on its own: one that can't be read is `null` (`accounts_total`) or `unknown`
+  (`daemon.status`), with the reason, and the others stay accurate.
 - `tg send --markdown` and `--html` send rich messages such as headings and tables on
   supported accounts. The result includes `format`. File captions stay plain text.
 
 ### Changed
 
+- `tg` starts about five times faster for every command that answers from the cache, and for
+  `--help` and `--version`: it loads the Telegram client library only when a command calls
+  Telegram (0.1 s of CPU instead of 0.5 s on a source install).
 - A group (basic group or supergroup) adds new messages to the cache only while you take part
   in it: you sent an ordinary message there in the last 90 days. Reading a group doesn't count.
   The rule holds in every `tg chats sync` mode and in `tg messages list`/`get`, `--fresh`
@@ -45,9 +82,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the reason `group_participation_required` or `group_participation_unknown` and
   `lastOwnMessageAt`, and `tg status` leaves it out of the chats with sync on and of the history
   progress. See [docs/sync-strategy.md](docs/sync-strategy.md#group-participation).
+- **Breaking:** `tg skill` installs only the Markdown skill. tg 0.14.0 and older wrote
+  `<dataDir>/skill.json` there and ignored `--dir`. Now:
+  - `tg skill manifest` is removed;
+  - `tg skill install` needs `--dir`, the agent's skills directory, and rejects an empty one;
+  - it writes `<dir>/telegram-sync-cli/SKILL.md` instead of `<dataDir>/skill.json`,
+    replacing a file already there, local edits included, and refusing a symbolic link for
+    `telegram-sync-cli` or `SKILL.md` (the skills directory itself may be one);
+  - its JSON drops `data.manifest` and keeps `path`, `bytes` and `overwritten`.
+
+  Replace `tg skill install` with:
+
+  ```bash
+  tg skill install --dir ~/.claude/skills
+  ```
+
+- **Breaking:** `tg skill validate` reports a missing account as an issue, so before
+  `tg auth login` it prints `valid: false`, still with exit 0. tg 0.14.0 and older checked only
+  the credentials and the data directory.
+- **Breaking:** `src/db/index.ts` no longer exports `db`, the open `data.db` connection. Code
+  that imports it from the package source calls `getDataDb()`, which opens `data.db` on first
+  use.
 
 ### Fixed
 
+- `tg skill install` and `tg skill validate` work with a corrupt `data.db`, which stopped every
+  command with a SQLite stack trace before it started: `data.db` now opens when a command first
+  reads an account. Install writes the skill, and validate names the file as an issue.
 - A command acts on the chat and account it checked against
   `allowedChats`: the check pins the account and hands its resolved chat to the command, so a
   switch of the active account or a second lookup in between can't move it (#217).
@@ -1089,7 +1150,9 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.15.0...v0.15.1
+[0.15.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.12.2...v0.13.0

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { tl } from "@mtcute/bun";
-import { isPermanentSyncError } from "./sync-retry";
+import { isPermanentSyncError } from "./sync-worker-utils";
 
 describe("isPermanentSyncError", () => {
   it("treats 400, 403 and 404 RPC errors, and CHANNEL_PRIVATE with any code, as permanent", () => {

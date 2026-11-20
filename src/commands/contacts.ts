@@ -82,7 +82,7 @@ export const listContactsCommand = defineCommand({
       }
 
       verbose("Fetching contacts from Telegram API...");
-      const client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+      const client = wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
         context: "cli:contacts.list",
         accountId: account.id,
       });
@@ -203,7 +203,7 @@ export const searchContactsCommand = defineCommand({
       }
 
       verbose(`Searching Telegram API for "${query}"...`);
-      const client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+      const client = wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
         context: "cli:contacts.search",
         accountId: account.id,
       });
@@ -287,7 +287,7 @@ export const getContactCommand = defineCommand({
       }
 
       verbose(`Fetching user "${identifier}" from Telegram API...`);
-      const client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+      const client = wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
         context: "cli:contacts.get",
         accountId: account.id,
       });

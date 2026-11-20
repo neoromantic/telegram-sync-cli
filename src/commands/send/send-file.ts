@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import type { TelegramClient, tl } from "@mtcute/bun";
-import { uploadFile } from "@mtcute/bun/methods.js";
+import type { uploadFile } from "@mtcute/bun/methods.js";
 
 import { type AttachmentInfo, extractAttachment } from "../../utils/attachment";
 import { toLong } from "../../utils/long";
@@ -66,7 +66,7 @@ export async function sendFile(
   const mimeType = fileMimeType(request.path);
   const kind = chooseSendKind(mimeType, size, request.forceDocument);
 
-  const upload = deps.upload ?? uploadFile;
+  const upload = deps.upload ?? (await import("@mtcute/bun/methods.js")).uploadFile;
   await client.prepare();
   const uploaded = await upload(transferClient(client), {
     file: file.stream(),

@@ -10,9 +10,9 @@ describe("Telegram Service", () => {
       delete process.env.TELEGRAM_PROXY;
     });
 
-    it("parses a SOCKS5 proxy with credentials", () => {
+    it("parses a SOCKS5 proxy with credentials", async () => {
       process.env.TELEGRAM_PROXY = "socks5://user:secret@127.0.0.1:1080";
-      expect(getDefaultConfig().transport).toEqual(
+      expect((await getDefaultConfig()).transport).toEqual(
         new SocksProxyTcpTransport({
           version: 5,
           host: "127.0.0.1",
