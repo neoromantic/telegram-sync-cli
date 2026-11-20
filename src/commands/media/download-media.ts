@@ -36,11 +36,17 @@ import {
   resolveHistoryChat,
 } from "../messages/history";
 import { DownloadInterruptedError, MediaError } from "./errors";
-import { cacheFetchedMessage, type FetchedRawMessage, fetchMessageById } from "./fetch";
+import {
+  cacheFetchedMessage,
+  type FetchedMessage,
+  type FetchedRawMessage,
+  fetchMessageById,
+} from "./fetch";
 import {
   checkCachedProtection,
   checkOnlineProtection,
   knownChatProtection,
+  privateChatProtection,
   type ProtectionReason,
 } from "./protection";
 
@@ -69,6 +75,7 @@ export interface DownloadDeps {
   /** Resolves --chat, offline for cached peers (openHistory()) */
   history: ResolveHistoryChatDeps & { client: HistoryClient };
   now?: () => number;
+  checkPrivate?: ReturnType<typeof privateChatProtection>;
   stallTimeoutMs?: number;
   /** Aborted on SIGINT/SIGTERM: the partial download is kept */
   signal?: AbortSignal;
@@ -102,6 +109,8 @@ export interface DownloadResult {
   kind: AttachmentKind | "thumbnail";
   chatId: number;
   messageId: number;
+  /** The message's date, Unix seconds */
+  date: number;
   uniqueFileId: string;
   /** The message's album ID */
   groupedId: string | null;
@@ -151,6 +160,7 @@ function downloadTarget(mediaDir: string, info: AttachmentInfo, thumb: MediaThum
 interface MessageRef {
   chatId: number;
   messageId: number;
+  date: number;
   groupedId: string | null;
 }
 
@@ -168,6 +178,7 @@ function toResult(
     kind: target.kind,
     chatId: ref.chatId,
     messageId: ref.messageId,
+    date: ref.date,
     uniqueFileId: target.uniqueFileId,
     groupedId: ref.groupedId,
     cached: transfer.cached,
@@ -236,7 +247,7 @@ function lockTimeout(err: DownloadLockTimeoutError) {
   );
 }
 
-function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: DownloadRequest) {
+export function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: DownloadRequest) {
   const { chatId } = chat;
   const { messageId } = request;
   const row = createMessagesCache(deps.cacheDb).get(chatId, messageId);
@@ -262,7 +273,7 @@ function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: DownloadR
   const file = findCachedFile(target.paths.file, target.expectedSize);
   if (!file) return null;
   touch(file.path);
-  return toResult(target, { chatId, messageId, groupedId: info.groupedId }, file, {
+  return toResult(target, { chatId, messageId, date: row.date, groupedId: info.groupedId }, file, {
     cached: true,
     resumedFrom: null,
   });
@@ -461,7 +472,12 @@ async function streamToCache({ client, location, target, deps, stallTimeoutMs }:
   return offset > 0 ? offset : null;
 }
 
-async function downloadOnline(deps: DownloadDeps, chat: HistoryChat, request: DownloadRequest) {
+export async function downloadOnline(
+  deps: DownloadDeps,
+  chat: HistoryChat,
+  request: DownloadRequest,
+  first?: FetchedMessage,
+) {
   const { chatId } = chat;
   const { messageId } = request;
   const now = deps.now ?? Date.now;
@@ -471,36 +487,40 @@ async function downloadOnline(deps: DownloadDeps, chat: HistoryChat, request: Do
   const client = await deps.getClient();
 
   for (let attempt = 1; ; attempt++) {
-    const { message, chats, users } = await fetchMessageById(client, chat, messageId, deps.signal);
-    cacheFetchedMessage(deps.cacheDb, chatId, message, users);
-
+    const {
+      message,
+      chats,
+      users,
+      fetchedAt = now(),
+    } = (attempt === 1 && first) || (await fetchMessageById(client, chat, messageId, deps.signal));
     const info = extractAttachment(message);
     if (!info) {
+      cacheFetchedMessage(deps.cacheDb, chatId, message, users);
       throw noMedia(chatId, messageId, resolveRawMessageType(message).messageType);
     }
     const thumb = request.thumb ? pickThumb(message) : null;
-    if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
 
-    const verdict = await checkOnlineProtection(client, chat, message, chats, deps.signal);
-    if (verdict.chat) protection.record(chatId, verdict.chat, now());
+    const verdict = await checkOnlineProtection(
+      deps.checkPrivate ?? privateChatProtection(client, deps.signal, now),
+      chat,
+      message,
+      chats,
+      fetchedAt,
+    );
+    if (verdict.chat) protection.record(chatId, verdict.chat, verdict.chat.fetchedAt);
+    cacheFetchedMessage(deps.cacheDb, chatId, message, users);
+    if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
     if (verdict.message.protected) {
       throw contentProtected(chatId, messageId, verdict.message.reason);
     }
-    if (verdict.chat?.protected && verdict.chat.reason) {
-      throw contentProtected(chatId, messageId, verdict.chat.reason);
-    }
-    if (!verdict.chat) {
-      const known = knownChatProtection(
-        deps.history.chatsCache.getById(String(chatId)),
-        protection.get(chatId),
-      );
-      if (known.protected) {
-        throw contentProtected(chatId, messageId, known.reason);
-      }
-    }
+    const known = knownChatProtection(
+      deps.history.chatsCache.getById(String(chatId)),
+      protection.get(chatId),
+    );
+    if (known.protected) throw contentProtected(chatId, messageId, known.reason);
 
     const target = downloadTarget(deps.mediaDir, info, thumb);
-    const ref = { chatId, messageId, groupedId: info.groupedId };
+    const ref = { chatId, messageId, date: message.date, groupedId: info.groupedId };
     const servedFromCache = () => {
       const file = findCachedFile(target.paths.file, target.expectedSize);
       if (!file) return null;

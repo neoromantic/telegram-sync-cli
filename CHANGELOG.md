@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg media download` takes several `--id` values and downloads the files of those messages of
+  the chat in one run: up to 100 IDs per fetch, one private-chat protection check, up to 5 files at
+  a time (2 of 20 MiB or more) and a flood wait that pauses the whole batch instead of failing
+  files. A file fails on waits only after six in a row with no part downloaded between them,
+  so a large download throttled by Telegram's speed limit completes. It prints one JSON line per file as each finishes, success or error, and exits 1 when
+  any failed. Cached files need no network and partial files resume, as before. One `--id`
+  prints what it printed before; a repeated `--id` still runs as a batch, downloading the ID once.
+- `--out` takes a name template such as `./media/{chat}/{date}_{id}_{name}` (placeholders
+  `{chat}`, `{id}`, `{date}`, `{name}`, `{kind}`); each filled part is made a safe file name,
+  and one that exists as a symlink fails that file instead of being followed.
+  With several `--id`, a directory `--out` names files `{id}_{name}`, so two photos no longer
+  collide on `photo.jpg`. Repeating a batch accepts existing files with identical bytes. A
+  collision between different files in one batch returns `FILE_EXISTS` even with `--overwrite`.
+  Without `--overwrite`, a new file is published with a hard link; on a filesystem without
+  hard links (exFAT, FAT, some network shares) it is copied instead, never over an existing
+  file. If the copy is interrupted, use `--overwrite` to replace a partial export.
+
 ## [0.15.1] - 2026-11-19
 
 ### Fixed

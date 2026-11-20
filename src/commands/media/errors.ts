@@ -43,6 +43,10 @@ export class DownloadInterruptedError extends Error {
   }
 }
 
+export function checkDownloadInterrupted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new DownloadInterruptedError(null, null);
+}
+
 /**
  * Report a failed download: a MediaError with its own code, a peer, config
  * or rate-limit error as `tg messages` reports it, anything else as

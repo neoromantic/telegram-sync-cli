@@ -11,6 +11,7 @@ export type ProtectionResult = { protected: false } | { protected: true; reason:
 
 /** The chat-level answer of an online check, recorded in chat_content_protection */
 export interface ChatProtectionResult {
+  fetchedAt: number;
   protected: boolean;
   reason: ChatProtectionReason | null;
 }
@@ -97,6 +98,37 @@ export function checkCachedProtection(
   return knownChatProtection(chat, stored);
 }
 
+export function privateChatProtection(
+  client: Pick<TelegramClient, "call">,
+  signal?: AbortSignal,
+  now = Date.now,
+) {
+  let pending: Promise<ChatProtectionResult> | undefined;
+  return (peer: tl.RawInputPeerUser) =>
+    (pending ??= client
+      .call(
+        {
+          _: "users.getFullUser",
+          id: { _: "inputUser", userId: peer.userId, accessHash: peer.accessHash },
+        },
+        { abortSignal: signal },
+      )
+      .then(({ fullUser }) => {
+        const protectedChat = Boolean(
+          fullUser.noforwardsMyEnabled || fullUser.noforwardsPeerEnabled,
+        );
+        return {
+          protected: protectedChat,
+          reason: protectedChat ? "private_chat" : null,
+          fetchedAt: now(),
+        } satisfies ChatProtectionResult;
+      })
+      .catch((err) => {
+        pending = undefined;
+        throw err;
+      }));
+}
+
 export interface OnlineProtection {
   message: ProtectionResult;
   /** Null when no chat-level check ran: Saved Messages, or no chat object */
@@ -109,11 +141,11 @@ export interface OnlineProtection {
  * other than Saved Messages, the user's full info
  */
 export async function checkOnlineProtection(
-  client: Pick<TelegramClient, "call">,
+  checkPrivate: ReturnType<typeof privateChatProtection>,
   chat: HistoryChat,
   message: FetchedRawMessage,
   chats: tl.TypeChat[],
-  signal?: AbortSignal,
+  fetchedAt: number,
 ) {
   const result: OnlineProtection = {
     message: messageProtection(message as unknown as RawObject),
@@ -122,22 +154,7 @@ export async function checkOnlineProtection(
 
   const peer = chat.inputPeer;
   if (peer._ === "inputPeerUser") {
-    const { fullUser } = await client.call(
-      {
-        _: "users.getFullUser",
-        id: {
-          _: "inputUser",
-          userId: peer.userId,
-          accessHash: peer.accessHash,
-        },
-      },
-      { abortSignal: signal },
-    );
-    const isProtected = Boolean(fullUser.noforwardsMyEnabled || fullUser.noforwardsPeerEnabled);
-    result.chat = {
-      protected: isProtected,
-      reason: isProtected ? "private_chat" : null,
-    };
+    if (!result.message.protected) result.chat = await checkPrivate(peer);
     return result;
   }
 
@@ -147,6 +164,7 @@ export async function checkOnlineProtection(
     result.chat = {
       protected: isProtected,
       reason: isProtected ? "chat" : null,
+      fetchedAt,
     };
   }
   return result;
