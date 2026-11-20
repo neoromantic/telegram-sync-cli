@@ -1,4 +1,3 @@
-import { tl } from "@mtcute/bun";
 import { calculateReconnectDelay } from "./daemon-utils";
 import type { ReconnectConfig } from "./types";
 
@@ -16,17 +15,4 @@ export const SYNC_RETRY_CONFIG: ReconnectConfig = {
 /** The wait before the next try of a job that failed `failures` times */
 export function retryDelayMs(failures: number) {
   return calculateReconnectDelay(failures, SYNC_RETRY_CONFIG);
-}
-
-const PERMANENT_RPC_CODES = [400, 403, 404];
-
-/**
- * An error that a retry can't fix: a 400, 403 or 404 RPC error, or
- * CHANNEL_PRIVATE with any code. Everything else is transient, including 401
- * and 406, which are about the account and are left to the connection
- * health check.
- */
-export function isPermanentSyncError(err: unknown) {
-  if (!tl.RpcError.is(err)) return false;
-  return PERMANENT_RPC_CODES.includes(err.code) || err.text === "CHANNEL_PRIVATE";
 }

@@ -129,10 +129,7 @@ describe("E2E: read-only mode and allowedChats", () => {
   }
 
   it("refuses an undeclared flag and a value it would drop, before connecting", async () => {
-    for (const extra of [
-      ["--acount", "2"],
-      ["--silent", "false"],
-    ]) {
+    for (const extra of [["--acount", "2"], ["--silent", "false"], ["--silent=no"]]) {
       const { exitCode, json } = await refusal(["send", "--to", "me", "-m", "hi", ...extra], {});
       expect(json.error.code).toBe("INVALID_ARGS");
       expect(exitCode).toBe(3);
@@ -225,7 +222,13 @@ describe("E2E: read-only mode and allowedChats", () => {
 
     for (const path of scoped) {
       it(`tg ${path} refuses a chat outside the list`, async () => {
-        const { exitCode, json } = await refusal(argv(path, String(CLUB_ID)), ALLOWED);
+        const write = COMMAND_ACCESS[path]?.write === true;
+        const result = await runCli(argv(path, String(CLUB_ID)), {
+          ...options(ALLOWED),
+          ...(write && { entry: FAKE_CLIENT_CLI }),
+        });
+        const { exitCode } = result;
+        const json = result.json as ErrorJson;
         expect(json.error).toMatchObject({
           code: "CHAT_NOT_ALLOWED",
           details: { chat: String(CLUB_ID), id: CLUB_ID },

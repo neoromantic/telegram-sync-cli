@@ -90,4 +90,9 @@ Authentication data lives in the data directory (default `~/.telegram-sync-cli`,
 ## Notes
 
 - If SMS codes are blocked for unofficial clients, use **QR login**.
-- `auth login` will merge duplicate accounts if the same Telegram user is detected under another account ID.
+- `auth login` and `auth login-qr` merge into the account the Telegram user already has: it
+  keeps its ID and cache and gets the new session.
+- The daemon doesn't merge accounts. An account that signs in as the user of another account
+  (left by an older version or by a login that couldn't move its session) isn't synced, and
+  the daemon logs `Same Telegram user as account #<id>`. Log in again to move its session to
+  that account, or remove it with `tg accounts remove --id <id>`.

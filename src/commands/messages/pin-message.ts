@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { type TelegramClient, tl } from "@mtcute/bun";
+import type { TelegramClient, tl } from "@mtcute/bun";
 
 import { getErrorMessage } from "../../daemon/daemon-utils";
 import { createMessagesCache } from "../../db/messages-cache";
@@ -102,7 +102,8 @@ export async function pinMessage(
   try {
     result = await client.call(updatePinnedMessageRequest(chat.inputPeer, messageId, change));
   } catch (err) {
-    if (!tl.RpcError.is(err)) throw withPeerHint(err);
+    const { RpcError } = (await import("@mtcute/bun")).tl;
+    if (!RpcError.is(err)) throw withPeerHint(err);
     if (err.text !== "CHAT_NOT_MODIFIED") {
       const refusal = REFUSALS[err.text];
       throw refusal

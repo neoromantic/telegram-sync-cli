@@ -147,8 +147,8 @@ export const downloadMediaCommand = defineCommand({
     let result: DownloadResult;
     try {
       const history = openHistory(account.id, CONTEXT);
-      const getClient = () =>
-        wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+      const getClient = async () =>
+        wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
           context: CONTEXT,
           accountId: account.id,
         });
