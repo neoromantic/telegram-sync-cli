@@ -71,7 +71,10 @@ export const forwardMessagesCommand = defineCommand({
       const deps = openHistory(account.id, "cli:messages.forward");
       const resolve = async (flag: "from" | "to", input: string) => {
         try {
-          return checkedChat(args, flag) ?? (await resolveHistoryChat(deps.client, input, deps));
+          return (
+            checkedChat(args, flag) ??
+            (await resolveHistoryChat(deps.client, input, deps, { freshUsername: true }))
+          );
         } catch (err) {
           if (err instanceof InvalidPeerError) {
             error(

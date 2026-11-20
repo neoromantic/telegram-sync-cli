@@ -240,11 +240,11 @@ describe("E2E: read-only mode and allowedChats", () => {
         ["@teamchat", String(CLUB_ID)],
         [String(CLUB_ID), "me"],
       ] as const) {
-        const { json } = await refusal(
+        const result = await runCli(
           ["messages", "forward", "--from", from, "--to", to, "--id", "1"],
-          ALLOWED,
+          { ...options(ALLOWED), entry: FAKE_CLIENT_CLI },
         );
-        expect(json.error).toMatchObject({
+        expect((result.json as ErrorJson).error).toMatchObject({
           code: "CHAT_NOT_ALLOWED",
           details: { chat: String(CLUB_ID), id: CLUB_ID },
         });
