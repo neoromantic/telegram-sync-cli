@@ -156,48 +156,95 @@ tg status
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg sql print-schema --table=users_cache
 
-# Skill integration
-tg skill manifest
+# Agent skill
+tg skill install --dir ~/.claude/skills
 tg skill validate
-tg skill install
 ```
 
-### Skill Manifest
+### Agent skill
 
-`tg skill manifest` returns the manifest used for agent integration. `tg skill install`
-writes the manifest to `<dataDir>/skill.json` (default `~/.telegram-sync-cli/skill.json`,
-override with `TELEGRAM_SYNC_CLI_DATA_DIR`).
+[`skills/telegram-sync-cli/SKILL.md`](../skills/telegram-sync-cli/SKILL.md) tells a coding
+agent how to use `tg`: when to reach for it, the read paths (`tg messages search`, `tg sql`),
+checking that the cache covers a chat before reporting a total, confirming before `tg send`,
+the error schema and the exit codes. Install it with the skills CLI:
 
-Fields:
+```bash
+bunx skills add neoromantic/telegram-sync-cli
+```
 
-- `name`
-- `description`
-- `install_command`
-- `entrypoint`
-- `version` (CLI version)
-- `output` (always `json`)
+or with `tg skill install --dir <skills dir>`, which writes the same file, embedded in `tg`, to
+`<dir>/telegram-sync-cli/SKILL.md` and prints `{ path, bytes, overwritten }`. `--dir` is
+required and can't be empty: it is the agent's skills directory, such as `~/.claude/skills`.
+Install replaces a `SKILL.md` already there, local edits included. The skills directory may be
+a symbolic link, but `telegram-sync-cli` and `SKILL.md` inside it may not: install refuses
+them (`GENERAL_ERROR`, `details.path`), so a reinstall never writes into another tree. Both
+commands, as described here, need tg 0.15.0 or later; 0.14.0 and older ignore `--dir` and
+write `skill.json` into the data directory.
 
-Example output:
+Every command in the skill's code blocks runs in `src/test/skill-examples.e2e.test.ts`, so
+an example can't go stale.
+
+`tg skill validate` checks what the skill needs, locally, without a network call or
+credentials, and works with an invalid `config.json` or a broken `data.db`, which it reads
+through a read-only connection and never changes:
+
+- `env`: the API credentials in the environment;
+- `data_dir`: that the data directory is writable;
+- `account`, `accounts_total`: the account record the next command uses without `--account`,
+  picked as every command picks it: `activeAccount` in `config.json`, else the active account,
+  else the only one. If the choice depends on merging legacy login records, validation returns
+  `account: null` and `valid: false`. Run `tg accounts list` to merge the records and retry;
+- `daemon`: whether a live process holds `daemon.pid`.
+
+The last two are local records. Neither says whether the account's session is still authorized
+or whether the daemon is connected; `tg status` shows the connection. Each value is read on
+its own, so one that can't be read leaves the others accurate: `accounts_total` is `null` when
+`data.db` can't be read, and `daemon.status` is `unknown`, with `daemon.error`, when
+`daemon.pid` can't.
 
 ```json
 {
   "success": true,
   "data": {
-    "name": "@goodit/telegram-sync-cli",
-    "description": "Agent-friendly Telegram Sync CLI",
-    "install_command": "bun install -g @goodit/telegram-sync-cli",
-    "entrypoint": "tg",
-    "version": "<cli-version>",
-    "output": "json"
+    "valid": true,
+    "env": {
+      "telegram_api_id": {
+        "present": true,
+        "valid": true
+      },
+      "telegram_api_hash": {
+        "present": true,
+        "valid": true
+      }
+    },
+    "data_dir": {
+      "path": "/tmp/tg-example-data",
+      "exists": true,
+      "is_directory": true,
+      "writable": true
+    },
+    "account": {
+      "id": 1,
+      "username": "example_one",
+      "label": null
+    },
+    "accounts_total": 1,
+    "daemon": {
+      "status": "running",
+      "pid": 23595
+    },
+    "issues": []
   }
 }
 ```
 
-`tg skill validate` performs local checks only (environment variables and data
-directory access). It does not make network calls.
-
-`tg skill install` writes the manifest to the default location and returns
-metadata about the write.
+`issues` lists what keeps `tg` from working: missing credentials, a data directory it can't
+write, an invalid or unreadable `config.json` (every other command refuses to start until it is
+fixed, so `account` is `null`), no account (`tg auth login`), several accounts and none active,
+or a `data.db` it can't read, such as
+`Could not read the accounts in /tmp/tg-example-data/data.db: file is not a database`. A
+stopped daemon isn't an issue, since cache reads work without it, but the cache then holds only
+what earlier commands fetched.
 
 ### Cache Behavior
 
@@ -268,8 +315,9 @@ tg send --to @user --message "Hi" --quiet
 ## Error Handling
 
 All errors are returned as JSON on stderr (unless `--quiet`). A flag the command doesn't declare
-(`--acount 2`) and a value it takes nowhere (`--silent false`: a boolean flag takes no value, so
-write `--silent` or `--no-silent`) are `INVALID_ARGS` (exit 3) before the command runs.
+(`--acount 2`) and a value it takes nowhere (`--silent false` or `--silent=no`: a boolean flag
+takes no value but `=true` or `=false`, so write `--silent` or `--no-silent`) are `INVALID_ARGS`
+(exit 3) before the command runs.
 `tg api` and `tg sql` pass their flags on and are not checked.
 
 ```json
@@ -410,6 +458,12 @@ phone numbers with `+` to skip the ID lookup. Negative IDs resolve from the cach
 chat's access hash, or from the ID alone with no API call. Telegram may refuse a user or channel
 peer built without an access hash; cache reads don't need one. Users that an `@username` or
 phone lookup returns are cached, so the next lookup by ID needs no API call.
+
+A command that changes Telegram (`tg send`, `tg messages read`, a `tg api` method that is not a
+read) resolves an `@username` with `contacts.resolveUsername`, never from the cache: a username
+can move to another user or chat, and its previous owner keeps it in the cache until fetched
+again. Pass an ID to skip that call. Reads stay cache-first and take the latest fetched owner
+of a username.
 
 Note: `tg chats get` fetches from Telegram by **@username only**; an ID works for a cached chat.
 An ID the cache doesn't hold, or any ID with `--fresh`, is `INVALID_ARGS` (exit 3) before any

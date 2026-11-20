@@ -49,7 +49,9 @@ export class ChatsCache {
       .as(ChatCacheRow);
 
     this.getByUsernameStmt = db
-      .query("SELECT * FROM chats_cache WHERE username = $username COLLATE NOCASE")
+      .query(
+        "SELECT * FROM chats_cache WHERE username = $username COLLATE NOCASE ORDER BY fetched_at DESC LIMIT 1",
+      )
       .as(ChatCacheRow);
 
     this.upsertStmt = db.query(`
@@ -130,7 +132,8 @@ export class ChatsCache {
   }
 
   /**
-   * Get chat by username (without @)
+   * Get chat by username (without @); the latest fetched owner of a
+   * username that moved wins
    */
   getByUsername(username: string) {
     const cleanUsername = username.startsWith("@") ? username.slice(1) : username;

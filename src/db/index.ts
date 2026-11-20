@@ -24,9 +24,6 @@ function resolveDataDir() {
 const DATA_DIR = resolveDataDir();
 const DB_PATH = join(DATA_DIR, "data.db");
 
-/**
- * Initialize database schema
- */
 function initSchema(db: Database) {
   db.run("PRAGMA busy_timeout = 5000");
   enableWal(db);
@@ -67,17 +64,21 @@ function initSchema(db: Database) {
   migrateAndResolveDuplicates(db);
 }
 
-/**
- * Extract user_id from "user:xxx" phone patterns and resolve duplicate accounts
- */
+/** Telegram user ID stored in the phone field by older QR logins. */
+export function legacyPhoneUserId(phone: string) {
+  if (!phone.startsWith("user:")) return null;
+  const id = Number.parseInt(phone.slice(5), 10);
+  return Number.isNaN(id) ? null : id;
+}
+
 function migrateAndResolveDuplicates(db: Database) {
   const accountsWithUserPhone = db
     .query("SELECT id, phone FROM accounts WHERE phone LIKE 'user:%' AND user_id IS NULL")
     .all() as Array<{ id: number; phone: string }>;
 
   for (const acc of accountsWithUserPhone) {
-    const userId = parseInt(acc.phone.replace("user:", ""), 10);
-    if (!Number.isNaN(userId)) {
+    const userId = legacyPhoneUserId(acc.phone);
+    if (userId !== null) {
       const existing = db.query("SELECT id FROM accounts WHERE user_id = ?").get(userId) as {
         id: number;
       } | null;
@@ -118,9 +119,6 @@ function normalizeLabelValue(label?: string | null) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/**
- * Create prepared statements for a database instance
- */
 function createStatements(db: Database) {
   return {
     getAllAccounts: db.query("SELECT * FROM accounts ORDER BY id").as(AccountRow),
@@ -339,14 +337,28 @@ if (!existsSync(DATA_DIR)) {
   mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const db = new Database(DB_PATH);
-initSchema(db);
+let production: { db: Database; accounts: AccountsDbInterface } | null = null;
 
-export const accountsDb = createAccountsDb(db);
+function openProduction() {
+  if (production) return production;
+  const db = new Database(DB_PATH);
+  try {
+    initSchema(db);
+  } catch (err) {
+    db.close();
+    throw err;
+  }
+  production = { db, accounts: createAccountsDb(db) };
+  return production;
+}
+
+export const accountsDb: AccountsDbInterface = new Proxy({} as AccountsDbInterface, {
+  get: (_target, key) => Reflect.get(openProduction().accounts, key),
+});
 
 const cacheLayout = createCacheLayoutGuard(() => ({
   dataDir: DATA_DIR,
-  db,
+  db: openProduction().db,
   accounts: accountsDb,
   notice: info,
 }));
@@ -473,6 +485,10 @@ export function getDatabasePath() {
   return DB_PATH;
 }
 
+export function getDataDb() {
+  return openProduction().db;
+}
+
 /** Get data directory path */
 export function getDataDir() {
   return DATA_DIR;
@@ -496,4 +512,3 @@ export {
   SyncJobType,
   SyncPriority,
 } from "./sync-schema";
-export { db };

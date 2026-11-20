@@ -135,7 +135,7 @@ export const userCommand = defineCommand({
       }
 
       verbose("Fetching user from API...");
-      const client = wrapClientCallWithRateLimits(getClientForAccount(account.id), {
+      const client = wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
         context: "cli:user.lookup",
         accountId: account.id,
       });
