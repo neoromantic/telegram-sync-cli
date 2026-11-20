@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { type TelegramClient, tl } from "@mtcute/bun";
-import { isInputPeerChannel, toInputChannel } from "@mtcute/bun/utils.js";
+import type { TelegramClient, tl } from "@mtcute/bun";
 
 import { getErrorMessage } from "../../daemon/daemon-utils";
 import { createMessagesCache } from "../../db/messages-cache";
@@ -52,6 +51,25 @@ export class MessagesNotInChatError extends Error {
   }
 }
 
+function inputChannel(inputPeer: tl.TypeInputPeer) {
+  if (inputPeer._ === "inputPeerChannel") {
+    return {
+      _: "inputChannel",
+      channelId: inputPeer.channelId,
+      accessHash: inputPeer.accessHash,
+    } satisfies tl.TypeInputChannel;
+  }
+  if (inputPeer._ === "inputPeerChannelFromMessage") {
+    return {
+      _: "inputChannelFromMessage",
+      peer: inputPeer.peer,
+      msgId: inputPeer.msgId,
+      channelId: inputPeer.channelId,
+    } satisfies tl.TypeInputChannel;
+  }
+  return null;
+}
+
 /**
  * channels.deleteMessages for a channel or supergroup, which always deletes
  * for everyone; messages.deleteMessages for a private chat, a basic group
@@ -62,10 +80,11 @@ export function deleteMessagesRequest(
   messageIds: number[],
   revoke: boolean,
 ) {
-  if (isInputPeerChannel(inputPeer)) {
+  const channel = inputChannel(inputPeer);
+  if (channel) {
     return {
       _: "channels.deleteMessages",
-      channel: toInputChannel(inputPeer),
+      channel,
       id: messageIds,
     } satisfies tl.channels.RawDeleteMessagesRequest;
   }
@@ -81,12 +100,9 @@ async function fetchMessages(client: CallClient, chat: HistoryChat, messageIds: 
     _: "inputMessageID" as const,
     id: messageId,
   }));
-  const result = isInputPeerChannel(chat.inputPeer)
-    ? await client.call({
-        _: "channels.getMessages",
-        channel: toInputChannel(chat.inputPeer),
-        id,
-      })
+  const channel = inputChannel(chat.inputPeer);
+  const result = channel
+    ? await client.call({ _: "channels.getMessages", channel, id })
     : await client.call({ _: "messages.getMessages", id });
   return "messages" in result ? result.messages : [];
 }
@@ -148,7 +164,8 @@ export async function deleteMessages(
     }
     affected = await client.call(request);
   } catch (err) {
-    if (tl.RpcError.is(err)) {
+    const { RpcError } = (await import("@mtcute/bun")).tl;
+    if (RpcError.is(err)) {
       const refusal = REFUSALS[err.text];
       if (refusal) {
         throw new DeleteRefusedError(refusal, chat.chatId, messageIds, err.text);

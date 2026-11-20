@@ -6,7 +6,7 @@ import {
   accountsDb,
   closeAccountCacheDbs,
   createTestDatabase,
-  db,
+  getDataDb,
   getDataDir,
   getLegacyCachePath,
 } from "../db";
@@ -41,6 +41,7 @@ export function createSeededAccountsDb(seed: AccountSeed[] = [testAccount()]) {
  */
 export function resetDataDir() {
   closeAccountCacheDbs();
+  const db = getDataDb();
   db.run("DELETE FROM accounts");
   db.run("DELETE FROM sqlite_sequence WHERE name = 'accounts'");
   rmSync(join(getDataDir(), "accounts"), { recursive: true, force: true });

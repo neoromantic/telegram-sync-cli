@@ -137,9 +137,10 @@ Once that lands, the Telegram client fakes above need an explicit override in `.
 - `output.test.ts` — the JSON success output, which errors are retryable, exit codes, `info`
   and `verbose`
 - `telegram.test.ts` — Telegram service layer
+- `cli.test.ts` — loading the command tree loads no mtcute module, so a cache read starts fast
 - `sync-jobs.test.ts` — sync job lifecycle, retries and counts
 - `sync-scheduler.test.ts` — what the scheduler queues and the lane turns
-- `sync-retry.test.ts` — which errors are permanent
+- `sync-worker-utils.test.ts` — which errors are permanent
 - `refetch-empty-raw-json.test.ts` — messages cached with `raw_json = '{}'` are queued by a
   background pass and fetched again by ID, a chat at a time (#130)
 - `update-handlers.test.ts` — daemon update handlers
@@ -304,6 +305,20 @@ is for tests only.
   as runCli's `entry`), which keeps the process alive even after it is closed, as a connected
   mtcute client might: with and without `--raw` and on a failed call, the command prints its
   output, closes the client and exits the process itself
+- `skill.e2e.test.ts` — `tg skill install --dir` writes the repo's `SKILL.md`, replaces a file
+  with other contents, follows a skills directory that is a link, refuses a link for the skill
+  directory or the file and rejects an empty `--dir`; `tg skill validate` reports the account
+  the next command uses (right after `tg config set activeAccount`, agreeing with
+  `tg accounts info`), an invalid `config.json` as an issue, the accounts and the daemon of a
+  read-only data directory, an unreadable `daemon.pid` as `unknown`, and a corrupt `data.db` as
+  an issue while install still works
+- `skill-examples.e2e.test.ts` — every command in the code blocks of
+  `skills/telegram-sync-cli/SKILL.md` runs against a seeded cache with a deleted voice note, a
+  deleted text and a gap of ten messages between two history ranges. The SQL examples must
+  return the exact rows: the live voice notes, the live message IDs and the two ranges. The
+  other cache examples must answer a non-empty list. Two examples reach Telegram in real use:
+  `tg daemon start` runs only up to the credentials check (the test unsets them), and
+  `tg api` runs with the fake client of `fake-client-cli.test-utils.ts`
 - `status.e2e.test.ts` — `tg status` counts and lists running, pending, retrying and failed
   sync jobs from a seeded cache, in JSON and pretty output, without credentials; the retry
   commands it prints delete the failed jobs and keep each chat's mode; it shows the daemon's

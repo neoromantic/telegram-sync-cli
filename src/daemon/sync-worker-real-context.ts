@@ -1,8 +1,8 @@
 import type { tl } from "@mtcute/bun";
 import { isDaemonStopError } from "./daemon-utils";
-import { isPermanentSyncError } from "./sync-retry";
 import { buildInputPeer, extractFloodWaitSeconds } from "./sync-worker-real-helpers";
 import type { RealJobResult, RealSyncWorkerContext } from "./sync-worker-real-types";
+import { isPermanentSyncError } from "./sync-worker-utils";
 
 export function canMakeApiCall(ctx: RealSyncWorkerContext) {
   return !ctx.rateLimits.isBlocked(ctx.config.apiMethod);
