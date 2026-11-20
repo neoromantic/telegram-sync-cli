@@ -155,10 +155,13 @@ export interface MessagesSearchService {
   /** How many messages match, with the same filters and no page */
   count(query: string, options?: MessageSearchOptions): number;
   /**
-   * Whether a message that matches the query and the filters other than
-   * `types` has no type to filter on yet (AWAITING_RAW_MESSAGE)
+   * The newest message that matches the query and the filters other than
+   * `types` but has no type to filter on yet (AWAITING_RAW_MESSAGE), or null
    */
-  hasUntypedMatch(query: string, options?: MessageSearchOptions): boolean;
+  newestUntypedMatch(
+    query: string,
+    options?: MessageSearchOptions,
+  ): { chatId: number; messageId: number } | null;
 }
 
 /**
@@ -421,25 +424,14 @@ export function searchNewestFirst(
 }
 
 export function createMessagesSearch(db: Database) {
-  const countMatches = (
-    query: string,
-    options: MessageSearchOptions,
-    extra?: string,
-    cap?: number,
-  ) => {
+  const matching = (columns: string, query: string, options: MessageSearchOptions, extra = "") => {
     const { conditions, params } = searchFilter(options);
     if (extra) conditions.push(extra);
-    const matches = `SELECT 1
+    const sql = `SELECT ${columns}
       ${MATCHES_FROM}
       ${options.chatUsername ? CHAT_JOIN : ""}${options.senderUsername ? SENDER_JOIN : ""}
-      ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
-      ${cap === undefined ? "" : `LIMIT ${cap}`}`;
-    const row = db
-      .query(`SELECT COUNT(*) AS n FROM (${matches})`)
-      .get(toFts5Query(query, { phrase: options.phrase }), ...params) as {
-      n: number;
-    };
-    return row.n;
+      ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}`;
+    return { sql, params: [toFts5Query(query, { phrase: options.phrase }), ...params] };
   };
 
   const result: MessagesSearchService = {
@@ -457,12 +449,23 @@ export function createMessagesSearch(db: Database) {
     },
 
     count(query: string, options: MessageSearchOptions = {}) {
-      return countMatches(query, options);
+      const { sql, params } = matching("1", query, options);
+      const row = db.query(`SELECT COUNT(*) AS n FROM (${sql})`).get(...params) as { n: number };
+      return row.n;
     },
 
-    hasUntypedMatch(query, options = {}) {
-      const untyped = { ...options, types: undefined };
-      return countMatches(query, untyped, AWAITING_RAW_MESSAGE, 1) > 0;
+    newestUntypedMatch(query, options = {}) {
+      const { sql, params } = matching(
+        "m.chat_id AS chatId, m.message_id AS messageId",
+        query,
+        { ...options, types: undefined },
+        AWAITING_RAW_MESSAGE,
+      );
+      return db
+        .query<{ chatId: number; messageId: number }, typeof params>(
+          `${sql} ORDER BY ${NEWEST_FIRST} LIMIT 1`,
+        )
+        .get(...params);
     },
   };
   return result;

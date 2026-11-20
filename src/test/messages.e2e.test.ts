@@ -1037,7 +1037,7 @@ describe("E2E: Messages List filters", () => {
         )
       ).json as {
         data: { count: number; typesPending: boolean };
-        next?: Array<{ command: string }>;
+        next?: Array<{ command: string; why: string }>;
       };
 
     expect((await search("--type", "text")).data).toMatchObject({
@@ -1053,6 +1053,29 @@ describe("E2E: Messages List filters", () => {
       expect((await search()).data.typesPending).toBe(false);
     } finally {
       db.run("UPDATE cache_migrations SET state = 'done' WHERE name = 'messages_raw_json_v2'");
+    }
+
+    createMessagesCache(db).upsertBatch([
+      {
+        chat_id: PIER_CLUB_ID,
+        message_id: 13,
+        from_id: null,
+        text: "note 13",
+        message_type: "document",
+        has_media: true,
+        date: PIER_START + 13 * 12 * 3600,
+        raw_json: "{}",
+      },
+    ]);
+    try {
+      const awaiting = await search("--type", "round");
+      expect(awaiting.data.typesPending).toBe(true);
+      expect(awaiting.next?.map((n) => n.command)).toEqual([
+        `tg messages list --chat=${PIER_CLUB_ID} --limit=100 --before=14 --fresh`,
+      ]);
+      expect(awaiting.next?.[0]?.why).toContain("Message 13");
+    } finally {
+      db.run("DELETE FROM messages_cache WHERE chat_id = ? AND message_id = 13", [PIER_CLUB_ID]);
     }
   });
 

@@ -8,7 +8,7 @@ import {
   type MessageSearchSort,
 } from "../../db/messages-search";
 import { MESSAGE_TYPES_MIGRATION } from "../../db/raw-json-migrations";
-import { ErrorCodes } from "../../types";
+import { ErrorCodes, type NextCommand } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { normalizeUsername } from "../../utils/identifiers";
@@ -25,7 +25,8 @@ import {
   TYPE_ARG_DESCRIPTION,
   UNTIL_ARG_DESCRIPTION,
 } from "./filters";
-import { messageItemReader } from "./helpers";
+import { MAX_MESSAGE_ID, messageItemReader } from "./helpers";
+import { listArgs } from "./list";
 
 function parseIdentifier(
   input: string | undefined,
@@ -185,10 +186,9 @@ export const searchMessagesCommand = defineCommand({
         sort,
       });
       const results = rows.slice(0, limit);
-      const typesPending =
-        types !== undefined &&
-        (isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION) ||
-          search.hasUntypedMatch(query, options));
+      const migrating = types !== undefined && isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION);
+      const untyped = types === undefined ? null : search.newestUntypedMatch(query, options);
+      const typesPending = migrating || untyped !== null;
       const values = {
         ...args,
         query,
@@ -197,17 +197,35 @@ export const searchMessagesCommand = defineCommand({
         until: formatTimeBound(until),
         limit,
       };
+      const fills: NextCommand[] = [];
+      if (migrating) {
+        fills.push(
+          nextCommand(
+            "db migrate",
+            migrateArgs,
+            { account: args.account },
+            "Some cached messages have no type yet: this finishes the background migration that types them.",
+          ),
+        );
+      } else if (untyped) {
+        const { chatId, messageId } = untyped;
+        fills.push(
+          nextCommand(
+            "messages list",
+            listArgs,
+            {
+              chat: String(chatId),
+              account: args.account,
+              limit: 100,
+              before: messageId < MAX_MESSAGE_ID ? messageId + 1 : undefined,
+              fresh: true,
+            },
+            `Message ${messageId} of chat ${chatId} matches but was cached without its raw message, so its type is unknown: this fetches it and the messages below it again from Telegram.`,
+          ),
+        );
+      }
       const next = [
-        ...(typesPending
-          ? [
-              nextCommand(
-                "db migrate",
-                migrateArgs,
-                { account: args.account },
-                "Some cached messages have no type yet: this finishes the background migration that types them.",
-              ),
-            ]
-          : []),
+        ...fills,
         ...(rows.length > limit
           ? [
               nextCommand(

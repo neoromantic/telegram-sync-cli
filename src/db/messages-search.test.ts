@@ -115,14 +115,17 @@ describe("MessagesSearch", () => {
   it("tells a match with no type yet from a genuine non-match", () => {
     seedBaseData();
     const search = createMessagesSearch(db);
-    expect(search.hasUntypedMatch("hello", { types: ["round"] })).toBe(false);
+    expect(search.newestUntypedMatch("hello", { types: ["round"] })).toBeNull();
 
     db.run(
       "UPDATE messages_cache SET message_type = 'video', has_media = 1, raw_json = '{}' WHERE message_id = 1",
     );
     expect(search.search("hello", { types: ["round"] })).toEqual([]);
-    expect(search.hasUntypedMatch("hello", { types: ["round"] })).toBe(true);
-    expect(search.hasUntypedMatch("nothingmatches", {})).toBe(false);
+    expect(search.newestUntypedMatch("hello", { types: ["round"] })).toEqual({
+      chatId: -1001234567890,
+      messageId: 1,
+    });
+    expect(search.newestUntypedMatch("nothingmatches", {})).toBeNull();
   });
 
   it("searches text and orders results by date desc", () => {

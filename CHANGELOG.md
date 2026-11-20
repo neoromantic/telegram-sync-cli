@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tg messages list --fresh`, `tg db migrate`), then the same page again, with `--account`
   kept; `next` carries `--since` and `--until` resolved to UTC seconds. Without the new flags the
   output is unchanged. `tg messages search` takes `--type` too, echoes it in `filters.type` and
-  adds `typesPending`.
+  adds `typesPending`; its `next` then finishes a pending migration, or else fetches again the
+  newest matching message cached without its raw message.
 
 ### Fixed
 

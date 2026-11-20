@@ -334,8 +334,11 @@ until its next catch-up.
 `tg messages search --type` keeps the same types among the search hits; `filters.type` echoes
 it (`null` without the flag). Search vouches for nothing about history: it finds what the cache
 holds. `typesPending` is `true` when `--type` may miss cached matches that have no type yet (the
-migration is unfinished, or a matching media message waits for its raw message); `next` then
-starts with `tg db migrate`. Without `--type` it is `false`.
+migration is unfinished, or a matching media message waits for its raw message). `next` then
+starts with `tg db migrate` while the migration is pending; otherwise with the `tg messages list
+--fresh` that fetches the newest such message, and the messages below it, again from Telegram, as
+the migration can't type a message whose raw message the cache lacks. Without `--type` it is
+`false`.
 
 `tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each
 side: `{ chatId, message, newer, older, source, stale }`. `newer` and `older` are newest first,

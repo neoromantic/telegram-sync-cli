@@ -29,7 +29,8 @@ import {
   resolveHistoryChatId,
 } from "./history";
 
-const listArgs = {
+/** The args of `tg messages list`, for the `next` commands that run it */
+export const listArgs = {
   chat: {
     type: "string",
     description: CHAT_ARG_DESCRIPTION,
