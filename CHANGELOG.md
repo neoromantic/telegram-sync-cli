@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tg messages search`. A filtered page reads only the cache, needs no credentials for a chat
   the cache knows (a cached `@username` included), and pages with `--before` and `--after` as
   before. It adds `complete`, `true` only when one cached range covers the page up to the chat's
-  newest known message and, with `--type`, every message in it has its type; `missing`
+  newest known message and, with `--type`, every message in it has its type (a date window never
+  guesses the date of a message the cache lacks); `missing`
   (`history`, `types`) says why it is `false`, `missingBefore` where the newest gap ends, and
   `suggestion` one sentence. `next` of an incomplete page has what fills it
   (`tg messages list --fresh`, `tg db migrate`), then the same page again, with `--account`

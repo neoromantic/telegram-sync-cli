@@ -384,19 +384,16 @@ function vouchedSpan(
   top: number | null,
 ) {
   const history = createMessagesHistory(cacheDb);
+  const ranges = createHistoryRanges(cacheDb);
   let low = (after ?? 0) + 1;
   let high = Math.min(top ?? MAX_MESSAGE_ID, (before ?? MAX_MESSAGE_ID + 1) - 1);
   if (filter.until !== undefined) {
     const late = history.firstSentFrom(chatId, low, high, filter.until);
-    if (late !== null && history.lastSentBefore(chatId, late + 1, high, filter.until) === null) {
-      high = late - 1;
-    }
+    if (late !== null && ranges.holdsEvery(chatId, late, high)) high = late - 1;
   }
   if (filter.since !== undefined) {
     const early = history.lastSentBefore(chatId, low, high, filter.since);
-    if (early !== null && history.firstSentFrom(chatId, low, early - 1, filter.since) === null) {
-      low = early + 1;
-    }
+    if (early !== null && ranges.holdsEvery(chatId, low, early)) low = early + 1;
   }
   if (ids.length === limit) {
     if (after === undefined) low = Math.max(low, Math.min(...ids));

@@ -125,24 +125,58 @@ describe("filtered list coverage", () => {
     expect(page).toMatchObject({ complete: false, missingBefore: null });
   });
 
-  it("distrusts a date bound that cached dates contradict", async () => {
-    cache(db, [
-      { id: 1, date: DATE + 100 },
-      { id: 3, date: DATE + 50 },
-    ]);
-    cover(db, 1, 1);
-    cover(db, 3, 3);
+  it.each<[string, Row[], Row, MessageFilter, number[], number[]]>([
+    [
+      "out of order",
+      [
+        { id: 1, date: DATE + 100 },
+        { id: 3, date: DATE + 50 },
+      ],
+      { id: 2, date: DATE + 90 },
+      { since: DATE + 80 },
+      [1],
+      [2, 1],
+    ],
+    [
+      "in order before --since",
+      [
+        { id: 1, date: DATE + 100 },
+        { id: 3, date: DATE + 130 },
+      ],
+      { id: 2, date: DATE + 180 },
+      { since: DATE + 150 },
+      [],
+      [2],
+    ],
+    [
+      "in order after --until",
+      [
+        { id: 1, date: DATE + 130 },
+        { id: 3, date: DATE + 140 },
+      ],
+      { id: 2, date: DATE + 110 },
+      { until: DATE + 120 },
+      [],
+      [2],
+    ],
+  ])(
+    "keeps a gap in a date window open whatever the cached dates around it, %s",
+    async (_name, around, missing, filter, gapped, filled) => {
+      cache(db, around);
+      cover(db, 1, 1);
+      cover(db, 3, 3);
 
-    const gapped = await list(db, { limit: 20 }, { since: DATE + 80 });
-    expect(ids(gapped)).toEqual([1]);
-    expect(gapped).toMatchObject({ complete: false, missingBefore: 3 });
+      const page = await list(db, { limit: 20 }, filter);
+      expect(ids(page)).toEqual(gapped);
+      expect(page).toMatchObject({ complete: false, missingBefore: 3 });
 
-    cache(db, [{ id: 2, date: DATE + 90 }]);
-    cover(db, 1, 3);
-    const whole = await list(db, { limit: 20 }, { since: DATE + 80 });
-    expect(ids(whole)).toEqual([2, 1]);
-    expect(whole.complete).toBe(true);
-  });
+      cache(db, [missing]);
+      cover(db, 1, 3);
+      const whole = await list(db, { limit: 20 }, filter);
+      expect(ids(whole)).toEqual(filled);
+      expect(whole.complete).toBe(true);
+    },
+  );
 
   it("is complete for a chat the dialog list shows empty", async () => {
     createChatsCache(db).upsert(chatRow(CHAT_ID, "supergroup", { last_message_id: 0 }));

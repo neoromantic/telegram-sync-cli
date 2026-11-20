@@ -1025,7 +1025,7 @@ describe("E2E: Messages List filters", () => {
 
     const halfDay = await list("--chat", "@dockclub", "--since", "750m", "--until", "90m");
     expect(ids(halfDay)).toEqual(range(50, 60).reverse());
-    expect(halfDay.complete).toBe(true);
+    expect(halfDay).toMatchObject({ complete: false, missingBefore: 41 });
   });
 
   it("says when search --type may miss messages still being typed", async () => {

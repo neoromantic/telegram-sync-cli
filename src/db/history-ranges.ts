@@ -46,6 +46,8 @@ export interface HistoryRanges {
    * 0 for a chat known to be empty, null when nothing is known
    */
   knownTop(chatId: number): number | null;
+  /** Whether every message ID from `low` to `high` is cached or inside a recorded range */
+  holdsEvery(chatId: number, low: number, high: number): boolean;
 }
 
 export function createHistoryRanges(db: Database) {
@@ -80,6 +82,16 @@ export function createHistoryRanges(db: Database) {
         COALESCE((SELECT top_message_id FROM chat_sync_state WHERE chat_id = $chat_id), -1),
         COALESCE((SELECT MAX(high) FROM history_ranges WHERE chat_id = $chat_id), -1)
       ) AS top
+    `),
+    held: db.query(`
+      SELECT
+        (SELECT COALESCE(SUM(MIN(high, $high) - MAX(low, $low) + 1), 0) FROM history_ranges
+          WHERE chat_id = $chat_id AND low <= $high AND high >= $low)
+        + (SELECT COUNT(*) FROM messages_cache m
+          WHERE m.chat_id = $chat_id AND m.message_id BETWEEN $low AND $high
+            AND NOT EXISTS (SELECT 1 FROM history_ranges r
+              WHERE r.chat_id = $chat_id AND r.low <= m.message_id AND r.high >= m.message_id))
+        AS held
     `),
   };
 
@@ -143,6 +155,13 @@ export function createHistoryRanges(db: Database) {
         top: number;
       };
       return top < 0 ? null : top;
+    },
+
+    holdsEvery(chatId, low, high) {
+      const { held } = stmts.held.get({ $chat_id: chatId, $low: low, $high: high }) as {
+        held: number;
+      };
+      return held === high - low + 1;
     },
   };
 

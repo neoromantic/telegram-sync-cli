@@ -294,9 +294,9 @@ What a filtered page promises:
    message (the newest cached one, or the newest one the dialog list or the daemon's sync state
    reported, whichever is higher), or the one below `--before`, down to message 1 or the one
    above `--after`; a full page vouches only down to its last item (up to it, paging forward).
-   A cached message sent at or after `--until` (before `--since`) ends the span there, as dates
-   rise with message IDs, unless a cached message beyond it was sent inside the window: then the
-   dates are out of order and the span doesn't end there.
+   A cached message sent at or after `--until` (before `--since`) ends the span there only when
+   the cache knows every message ID beyond it (each is cached or inside a recorded range): the
+   date of a missing message is never guessed, since dates can fall out of ID order.
 2. **`complete: true`** means one recorded history range covers the whole span and, with
    `--type`, every cached message in it has its type: no message of the chat that matches is
    missing from the page, as of the chat's newest known message. An empty complete page is a
@@ -329,8 +329,7 @@ What a filtered page promises:
 `suggestion` is one sentence on what the page lacks, `null` when it is complete; the commands
 are in `next`. A deleted newest message that the daemon hasn't settled yet
 ([sync strategy](sync-strategy.md#when-catch-up-runs)) can keep the newest page incomplete
-until its next catch-up. Messages whose dates fall out of ID order (imported history) can make a
-date window look complete when the cache holds no message that shows the order.
+until its next catch-up.
 
 `tg messages search --type` keeps the same types among the search hits; `filters.type` echoes
 it (`null` without the flag). Search vouches for nothing about history: it finds what the cache

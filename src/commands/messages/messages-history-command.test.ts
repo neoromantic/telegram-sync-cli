@@ -942,8 +942,8 @@ describe("listHistory with filters", () => {
     expect(result).toMatchObject({ complete: false, missingBefore: null });
   });
 
-  it("bounds a date window by the cached messages sent around it", async () => {
-    cacheRun(cacheDb, TEAM_CHAT_ID, 51, 100);
+  it("bounds a date window by the cached messages sent after it, next to a range", async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 100);
     cacheMessages(cacheDb, TEAM_CHAT_ID, [101, 102]);
 
     const result = await list({ limit: 100 }, { since: DATE + 80, until: DATE + 90 });
