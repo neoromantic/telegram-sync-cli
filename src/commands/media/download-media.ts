@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { open, rename, rm, stat } from "node:fs/promises";
+import { open, rename, rm, stat, truncate } from "node:fs/promises";
 import { basename } from "node:path";
 import type { FileDownloadLocation, TelegramClient, tl } from "@mtcute/bun";
 import type { downloadAsIterable } from "@mtcute/bun/methods.js";
@@ -428,14 +428,13 @@ interface StreamOptions {
 async function streamToCache({ client, location, target, deps, stallTimeoutMs }: StreamOptions) {
   const { part, file } = target.paths;
   const { expectedSize } = target;
-  let have = await sizeOf(part);
-  if (expectedSize !== null && have > expectedSize) have = 0;
-  const offset = have - (have % PART_BYTES);
+  const have = await sizeOf(part);
+  const offset = expectedSize !== null && have > expectedSize ? 0 : have - (have % PART_BYTES);
+  if (have > offset) await truncate(part, offset);
 
   const handle = await open(part, "a", 0o600);
   let size: number;
   try {
-    await handle.truncate(offset);
     const download = deps.download ?? (await import("@mtcute/bun/methods.js")).downloadAsIterable;
     const chunks = download(transferClient(client), location, {
       offset,

@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hard links (exFAT, FAT, some network shares) it is copied instead, never over an existing
   file. If the copy is interrupted, use `--overwrite` to replace a partial export.
 
+## [0.15.2] - 2026-11-21
+
+### Fixed
+
+- `tg media download` works on Windows. It failed with `EPERM: operation not permitted,
+  ftruncate` before the first request, because it truncated the partial download through a file
+  opened for appending. A resumed download keeps its whole parts as before (#233).
+
 ## [0.15.1] - 2026-11-19
 
 ### Fixed
@@ -1146,7 +1154,8 @@ back to the disk.
 
 Earlier releases (0.1.0, 0.1.1) predate this changelog.
 
-[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.15.2...HEAD
+[0.15.2]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/neoromantic/telegram-sync-cli/compare/v0.13.1...v0.14.0
