@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tg media download` works on Windows. It failed with `EPERM: operation not permitted,
+  ftruncate` before the first request, because it truncated the partial download through a file
+  opened for appending. A resumed download keeps its whole parts as before (#233).
+
 ## [0.15.1] - 2026-11-19
 
 ### Fixed
