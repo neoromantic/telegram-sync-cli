@@ -5,7 +5,7 @@ import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { error, success } from "../../utils/output";
 import { checkedChat } from "../access";
 import { migrateArgs } from "../db";
-import { nextCommand } from "../next";
+import { nextCommand, tgCommand } from "../next";
 import {
   formatTimeBound,
   parseTimeWindow,
@@ -132,7 +132,7 @@ export const listMessagesCommand = defineCommand({
           until: formatTimeBound(until),
         };
         success(
-          { ...result.page, suggestion: filteredSuggestion(result) },
+          { ...result.page, suggestion: filteredSuggestion(args, result) },
           filteredNext(values, result),
         );
         return;
@@ -215,14 +215,6 @@ function fillCommands(args: Record<string, unknown>, { gap, untyped }: FilteredP
         "Older cached messages are still being typed: this finishes the migration.",
       ),
     );
-  } else if (untyped && untyped.newestAwaitingRaw !== null) {
-    const newest = untyped.newestAwaitingRaw;
-    fills.push(
-      fetch(
-        newest < MAX_MESSAGE_ID ? newest + 1 : null,
-        `Message ${newest} and maybe older ones were cached without their type: this caches them again from Telegram.`,
-      ),
-    );
   }
   return fills.filter((fill, i) => fills.findIndex((f) => f.command === fill.command) === i);
 }
@@ -241,7 +233,26 @@ function filteredNext(args: Record<string, unknown>, result: FilteredPage) {
   ];
 }
 
-function filteredSuggestion({ page, gap, untyped }: FilteredPage) {
+/**
+ * The clause that offers one manual refetch of a message cached without its
+ * raw message, in place of a `next` that would repeat it for good when
+ * Telegram no longer returns the message
+ */
+export function refetchClause(chat: string, account: string | undefined, messageId: number) {
+  const command = tgCommand("messages list", listArgs, {
+    chat,
+    account,
+    limit: 100,
+    before: messageId < MAX_MESSAGE_ID ? messageId + 1 : undefined,
+    fresh: true,
+  });
+  return `${command} fetches it and the messages below it again; run it once, as a message Telegram no longer returns keeps its type unknown`;
+}
+
+function filteredSuggestion(
+  args: { chat: string; account?: string },
+  { page, gap, untyped }: FilteredPage,
+) {
   if (page.complete) return null;
   const parts: string[] = [];
   if (gap) {
@@ -253,9 +264,9 @@ function filteredSuggestion({ page, gap, untyped }: FilteredPage) {
   }
   if (untyped) {
     parts.push(
-      untyped.migrating
+      untyped.migrating || untyped.newestAwaitingRaw === null
         ? "older cached messages are still being typed: next finishes the migration"
-        : "some cached media messages have no type yet: next fetches them again",
+        : `message ${untyped.newestAwaitingRaw} and maybe older media messages were cached without their type: ${refetchClause(args.chat, args.account, untyped.newestAwaitingRaw)}`,
     );
   }
   return `This page may lack matches: ${parts.join("; ")}.`;

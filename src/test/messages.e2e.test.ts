@@ -1036,7 +1036,7 @@ describe("E2E: Messages List filters", () => {
           options(),
         )
       ).json as {
-        data: { count: number; typesPending: boolean };
+        data: { count: number; typesPending: boolean; suggestion: string | null };
         next?: Array<{ command: string; why: string }>;
       };
 
@@ -1070,10 +1070,12 @@ describe("E2E: Messages List filters", () => {
     try {
       const awaiting = await search("--type", "round");
       expect(awaiting.data.typesPending).toBe(true);
-      expect(awaiting.next?.map((n) => n.command)).toEqual([
+      expect(awaiting.data.suggestion).toContain(
+        `Message 13 of chat ${PIER_CLUB_ID} matches but was cached without its raw message`,
+      );
+      expect(awaiting.data.suggestion).toContain(
         `tg messages list --chat=${PIER_CLUB_ID} --limit=100 --before=14 --fresh`,
-      ]);
-      expect(awaiting.next?.[0]?.why).toContain("Message 13");
+      );
     } finally {
       db.run("DELETE FROM messages_cache WHERE chat_id = ? AND message_id = 13", [PIER_CLUB_ID]);
     }
@@ -1260,6 +1262,7 @@ const REEF_ID = 7_000_000_202;
 const COVE_ID = 7_000_000_203;
 const BAY_ID = 7_000_000_204;
 const CAPE_ID = 7_000_000_205;
+const DUNE_ID = 7_000_000_206;
 
 describe("E2E: Messages List filters, filled from Telegram", () => {
   let env: TestEnvironment;
@@ -1280,6 +1283,7 @@ describe("E2E: Messages List filters, filled from Telegram", () => {
       [COVE_ID, 30, []],
       [BAY_ID, null, []],
       [CAPE_ID, 30, range(1, 10)],
+      [DUNE_ID, 3, [1, 3]],
     ];
     for (const [chatId, top, ids] of dms) {
       chats.upsert(chatRow(chatId, "private", { last_message_id: top }));
@@ -1303,6 +1307,18 @@ describe("E2E: Messages List filters, filled from Telegram", () => {
       "INSERT INTO chat_sync_state (chat_id, chat_type, top_message_id) VALUES (?, 'private', 30)",
       [REEF_ID],
     );
+    createMessagesCache(db).upsertBatch([
+      {
+        chat_id: DUNE_ID,
+        message_id: 2,
+        from_id: null,
+        text: "orbit",
+        message_type: "video",
+        has_media: true,
+        date: PIER_START + 2 * 60,
+        raw_json: "{}",
+      },
+    ]);
   });
 
   afterAll(() => {
@@ -1364,6 +1380,29 @@ describe("E2E: Messages List filters, filled from Telegram", () => {
     );
 
     expect(data.items).toEqual([]);
+  });
+
+  it("offers one manual refetch of a type Telegram can no longer give, not an endless next", async () => {
+    const server = [1, 3];
+    const retry = `tg messages list --chat=${DUNE_ID} --limit=100 --before=3 --fresh --account=2`;
+    const search = `tg messages search --query=orbit --type=round --account=2`;
+    const list = `tg messages list --chat=${DUNE_ID} --type=round --account=2`;
+    const answers = async () => {
+      const found = (await run(search, server)) as unknown as {
+        data: { results: unknown[]; typesPending: boolean; suggestion: string | null };
+        next?: unknown[];
+      };
+      const listed = await run(list, server);
+      expect([found.next, listed.next]).toEqual([undefined, undefined]);
+      expect(found.data).toMatchObject({ results: [], typesPending: true });
+      expect(found.data.suggestion).toContain(retry);
+      expect(listed.data).toMatchObject({ items: [], complete: false, missing: ["types"] });
+      expect(listed.data.suggestion).toContain(retry);
+    };
+
+    await answers();
+    expect((await run(retry, server)).data.items.map((item) => item.messageId)).toEqual([1]);
+    await answers();
   });
 
   it("settles the top of a chat whose newest messages are gone", async () => {

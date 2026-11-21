@@ -316,7 +316,10 @@ What a filtered page promises:
    can add matches to it: `tg messages list --chat=… --limit=100 [--before=<missingBefore>]
    --fresh` caches that page from Telegram (it needs credentials and a connection), `tg db
    migrate` finishes the type migration, and the last command is this page again. Repeat until
-   the page is complete; each round fills up to 100 more messages. Every command keeps
+   the page is complete; each round fills up to 100 more messages. A media message waiting for
+   its raw message gets no `next`: `suggestion` names the `tg messages list --fresh` that fetches
+   it again, to run once, since a message Telegram no longer returns keeps its type unknown and
+   the page incomplete. Every command keeps
    `--account`. `next` of a complete page is the next page, as without filters, so `next` never
    steps over a gap. `nextBefore` and `nextAfter` still page through the cached matches when you
    choose to read past a gap. A group keeps its messages from a time you didn't take part in it
@@ -337,10 +340,11 @@ until its next catch-up.
 it (`null` without the flag). Search vouches for nothing about history: it finds what the cache
 holds. `typesPending` is `true` when `--type` may miss cached matches that have no type yet (the
 migration is unfinished, or a matching media message waits for its raw message). `next` then
-starts with `tg db migrate` while the migration is pending; otherwise with the `tg messages list
---fresh` that fetches the newest such message, and the messages below it, again from Telegram, as
-the migration can't type a message whose raw message the cache lacks. Without `--type` it is
-`false`.
+starts with `tg db migrate` while the migration is pending. Otherwise `suggestion` names the `tg
+messages list --fresh` that fetches the newest such message, and the messages below it, again
+from Telegram, as the migration can't type a message whose raw message the cache lacks; run it
+once, since a message Telegram no longer returns keeps its type unknown. `suggestion` is `null`
+otherwise. Without `--type` `typesPending` is `false`.
 
 `tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each
 side: `{ chatId, message, newer, older, source, stale }`. `newer` and `older` are newest first,

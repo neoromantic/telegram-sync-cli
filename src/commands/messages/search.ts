@@ -27,8 +27,8 @@ import {
   TYPE_ARG_DESCRIPTION,
   UNTIL_ARG_DESCRIPTION,
 } from "./filters";
-import { MAX_MESSAGE_ID, messageItemReader } from "./helpers";
-import { listArgs } from "./list";
+import { messageItemReader } from "./helpers";
+import { refetchClause } from "./list";
 
 function parseIdentifier(
   input: string | undefined,
@@ -243,22 +243,6 @@ export const searchMessagesCommand = defineCommand({
             "Some cached messages have no type yet: this finishes the background migration that types them.",
           ),
         );
-      } else if (untyped) {
-        const { chatId, messageId } = untyped;
-        fills.push(
-          nextCommand(
-            "messages list",
-            listArgs,
-            {
-              chat: String(chatId),
-              account: args.account,
-              limit: 100,
-              before: messageId < MAX_MESSAGE_ID ? messageId + 1 : undefined,
-              fresh: true,
-            },
-            `Message ${messageId} of chat ${chatId} matches but was cached without its raw message, so its type is unknown: this fetches it and the messages below it again from Telegram.`,
-          ),
-        );
       }
       const next = [
         ...fills,
@@ -296,6 +280,10 @@ export const searchMessagesCommand = defineCommand({
           total: results.length,
           count,
           typesPending,
+          suggestion:
+            untyped && !migrating
+              ? `Message ${untyped.messageId} of chat ${untyped.chatId} matches but was cached without its raw message, so its type is unknown: ${refetchClause(String(untyped.chatId), args.account, untyped.messageId)}.`
+              : null,
           limit,
           offset,
           source: "cache",
