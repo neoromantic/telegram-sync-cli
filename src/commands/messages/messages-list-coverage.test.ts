@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createLazyClient } from "./helpers";
+import { readSearchPage } from "./search";
 import {
   type FilteredCoverage,
   type HistoryChat,
@@ -13,14 +14,18 @@ import {
   listHistory,
   readFilteredPage,
 } from "./history";
+import { parseRawMessage } from "../../daemon/sync-worker-real-helpers";
+import { runMigrationBatch } from "../../db/background-migrations";
 import { createChatsCache } from "../../db/chats-cache";
 import { createHistoryRanges } from "../../db/history-ranges";
 import { createMessagesCache } from "../../db/messages-cache";
 import type { MessageFilter } from "../../db/messages-history";
+import { BACKGROUND_MIGRATIONS, MESSAGE_TYPES_MIGRATION } from "../../db/raw-json-migrations";
 import { initCacheSchema } from "../../db/schema";
 import { initSyncSchema } from "../../db/sync-schema";
 import { toLong } from "../../utils/long";
 import { chatRow, createAccountCacheDb } from "../../test/cache-db.test-utils";
+import { roundMessage } from "../../test/media-messages.test-utils";
 import { takePartIn } from "../../test/participation.test-utils";
 
 const CHAT_RAW_ID = 1_555_000_031;
@@ -292,7 +297,7 @@ describe("filtered list coverage", () => {
   });
 });
 
-describe("filtered list snapshot", () => {
+describe("cache read snapshot", () => {
   let dir: string;
   let db: Database;
   let writer: Database;
@@ -325,7 +330,7 @@ describe("filtered list snapshot", () => {
           }
           return (...args: unknown[]) => {
             const result = value.apply(target, args);
-            if (!fired && sql.includes("FROM messages_cache m")) {
+            if (!fired && sql.includes("messages_cache m")) {
               fired = true;
               hook();
             }
@@ -360,5 +365,36 @@ describe("filtered list snapshot", () => {
     const after = await list(db, { limit: 20 });
     expect(ids(after)).toEqual([3, 2, 1]);
     expect(after.complete).toBe(true);
+  });
+
+  it("reads search results, their count and the type state in one snapshot", () => {
+    const raw = roundMessage({ _: "peerChannel", channelId: CHAT_RAW_ID }, 1);
+    createMessagesCache(db).upsertBatch([
+      {
+        ...parseRawMessage({ ...raw, message: "orbit", date: DATE }, CHAT_ID)!,
+        message_type: "video",
+      },
+    ]);
+    db.run("DELETE FROM message_attachments");
+    db.run("UPDATE cache_migrations SET state = 'pending' WHERE name = ?", [
+      MESSAGE_TYPES_MIGRATION,
+    ]);
+    const types = BACKGROUND_MIGRATIONS.find((m) => m.name === MESSAGE_TYPES_MIGRATION)!;
+
+    const read = (cacheDb: Database) => {
+      const { rows, count, migrating } = readSearchPage(
+        cacheDb,
+        "orbit",
+        { types: ["round"] },
+        { limit: 20, offset: 0, sort: "date", count: true },
+      );
+      return { ids: rows.map((row) => row.message_id), count, migrating };
+    };
+
+    const racing = interleaved(() => {
+      expect(runMigrationBatch(writer, types).finished).toBe(true);
+    });
+    expect(read(racing)).toEqual({ ids: [], count: 0, migrating: true });
+    expect(read(db)).toEqual({ ids: [1], count: 1, migrating: false });
   });
 });

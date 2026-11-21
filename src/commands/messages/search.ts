@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import { type ArgsDef, defineCommand } from "citty";
 
 import { isMigrationPending } from "../../db/background-migrations";
@@ -5,6 +6,7 @@ import {
   createMessagesSearch,
   isFts5QueryError,
   MESSAGE_SEARCH_SORTS,
+  type MessageSearchOptions,
   type MessageSearchSort,
 } from "../../db/messages-search";
 import { MESSAGE_TYPES_MIGRATION } from "../../db/raw-json-migrations";
@@ -133,6 +135,30 @@ const searchArgs = {
   },
 } satisfies ArgsDef;
 
+/**
+ * One page of search results, one more than `limit` to tell whether
+ * another page follows, with the optional count and the type state, read in
+ * one read transaction, so a migration that commits meanwhile can't make
+ * them disagree
+ */
+export function readSearchPage(
+  cacheDb: Database,
+  query: string,
+  options: MessageSearchOptions,
+  page: { limit: number; offset: number; sort: MessageSearchSort; count: boolean },
+) {
+  return cacheDb.transaction(() => {
+    const search = createMessagesSearch(cacheDb);
+    const typed = options.types !== undefined;
+    return {
+      rows: search.search(query, { ...options, ...page, limit: page.limit + 1 }),
+      count: page.count ? search.count(query, options) : null,
+      migrating: typed && isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION),
+      untyped: typed ? search.newestUntypedMatch(query, options) : null,
+    };
+  })();
+}
+
 export const searchMessagesCommand = defineCommand({
   meta: {
     name: "search",
@@ -179,8 +205,6 @@ export const searchMessagesCommand = defineCommand({
     const allowed = await allowedChatIds(account.id, { cacheOnly: true });
 
     try {
-      const search = createMessagesSearch(cacheDb);
-
       const options = {
         includeDeleted: args.includeDeleted ?? false,
         phrase: args.phrase ?? false,
@@ -193,15 +217,13 @@ export const searchMessagesCommand = defineCommand({
         until,
         types,
       };
-      const rows = search.search(query, {
-        ...options,
-        limit: limit + 1,
+      const { rows, count, migrating, untyped } = readSearchPage(cacheDb, query, options, {
+        limit,
         offset,
         sort,
+        count: args.count ?? false,
       });
       const results = rows.slice(0, limit);
-      const migrating = types !== undefined && isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION);
-      const untyped = types === undefined ? null : search.newestUntypedMatch(query, options);
       const typesPending = migrating || untyped !== null;
       const values = {
         ...args,
@@ -251,7 +273,6 @@ export const searchMessagesCommand = defineCommand({
             ]
           : []),
       ];
-      const count = args.count ? search.count(query, options) : null;
       const terms = args.snippet ? snippetTerms(query, { phrase: options.phrase }) : [];
       const toItem = messageItemReader(cacheDb);
 
