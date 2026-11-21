@@ -381,18 +381,25 @@ async function readHistoryPage({
   return { rows, source: "api" as const };
 }
 
+function pageSpan({ limit, before, after }: HistoryWindow, ids: number[], top: number | null) {
+  let low = (after ?? 0) + 1;
+  let high = Math.min(top ?? MAX_MESSAGE_ID, (before ?? MAX_MESSAGE_ID + 1) - 1);
+  if (ids.length === limit) {
+    if (after === undefined) low = Math.max(low, Math.min(...ids));
+    else high = Math.min(high, Math.max(...ids));
+  }
+  return { low, high };
+}
+
 function vouchedSpan(
   cacheDb: Database,
   chatId: number,
-  { limit, before, after }: HistoryWindow,
   filter: MessageFilter,
-  ids: number[],
-  top: number | null,
+  page: { low: number; high: number },
 ) {
   const history = createMessagesHistory(cacheDb);
   const ranges = createHistoryRanges(cacheDb);
-  let low = (after ?? 0) + 1;
-  let high = Math.min(top ?? MAX_MESSAGE_ID, (before ?? MAX_MESSAGE_ID + 1) - 1);
+  let { low, high } = page;
   if (filter.until !== undefined) {
     const late = history.firstSentFrom(chatId, low, high, filter.until);
     if (late !== null && ranges.holdsEvery(chatId, late, high)) high = late - 1;
@@ -400,10 +407,6 @@ function vouchedSpan(
   if (filter.since !== undefined) {
     const early = history.lastSentBefore(chatId, low, high, filter.since);
     if (early !== null && ranges.holdsEvery(chatId, low, early)) low = early + 1;
-  }
-  if (ids.length === limit) {
-    if (after === undefined) low = Math.max(low, Math.min(...ids));
-    else high = Math.min(high, Math.max(...ids));
   }
   return low <= high ? { low, high } : null;
 }
@@ -485,13 +488,14 @@ export function readFilteredPage(
     const rows = history.list(chatId, { ...window, includeDeleted, filter });
     const ids = rows.map((row) => row.message_id);
     const top = createHistoryRanges(cacheDb).knownTop(chatId);
-    const span = vouchedSpan(cacheDb, chatId, window, filter, ids, top);
+    const bounds = pageSpan(window, ids, top);
+    const span = vouchedSpan(cacheDb, chatId, filter, bounds);
     const gap = span && newestGap(cacheDb, chatId, span, top);
     const migrating =
       filter.types !== undefined && isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION);
     const newestAwaitingRaw =
-      filter.types !== undefined && span !== null
-        ? history.newestUntyped(chatId, span.low, span.high, { ...filter, includeDeleted })
+      filter.types !== undefined
+        ? history.newestUntyped(chatId, bounds.low, bounds.high, { ...filter, includeDeleted })
         : null;
     const untyped =
       migrating || newestAwaitingRaw !== null ? { migrating, newestAwaitingRaw } : null;

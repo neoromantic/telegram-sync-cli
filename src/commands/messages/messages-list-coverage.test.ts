@@ -219,6 +219,30 @@ describe("filtered list coverage", () => {
     expect((await list(db, { limit: 20 }, { since: DATE })).complete).toBe(true);
   });
 
+  it.each<[string, MessageFilter, number]>([
+    ["--since", { since: DATE + 150 }, 1],
+    ["--until", { until: DATE + 150 }, 3],
+  ])(
+    "is incomplete for --type while a row in the %s window waits, whatever the dates around it",
+    async (_name, window, awaiting) => {
+      cache(
+        db,
+        [180, 120, 100].map((date, i) =>
+          i + 1 === awaiting
+            ? { id: i + 1, date: DATE + date, type: "video", rawJson: "{}" }
+            : { id: i + 1, date: DATE + date, type: "text" },
+        ),
+      );
+      cover(db, 1, 3);
+
+      expect(await list(db, { limit: 20 }, { types: ["round"], ...window })).toMatchObject({
+        items: [],
+        complete: false,
+        missing: ["types"],
+      });
+    },
+  );
+
   it("ignores a media row waiting for its raw message that the page leaves out", async () => {
     cache(db, [
       { id: 1, type: "text" },
