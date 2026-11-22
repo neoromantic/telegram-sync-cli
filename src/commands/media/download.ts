@@ -1,4 +1,4 @@
-import { defineCommand } from "citty";
+import { type ArgsDef, defineCommand } from "citty";
 
 import { getAccountMediaDir } from "../../db";
 import { getClientForAccount } from "../../services/telegram";
@@ -79,51 +79,52 @@ function exitWith(code: number) {
   void exitAfterFlush(code);
 }
 
+const downloadArgs = {
+  chat: {
+    type: "string",
+    description: CHAT_ARG_DESCRIPTION,
+    required: true,
+  },
+  id: {
+    type: "string",
+    description: "Message ID; repeat it for several messages of the chat (one JSON line per file)",
+    required: true,
+  },
+  out: {
+    type: "string",
+    description: `Also copy the file here: a directory (under its name; with several --id, as ${BATCH_NAME_TEMPLATE}), a file path, a name template with ${TEMPLATE_PLACEHOLDERS.map((name) => `{${name}}`).join(" ")}, or - for stdout (bytes only, no JSON)`,
+  },
+  thumb: {
+    type: "boolean",
+    description: "Download the file's small preview instead of the file",
+    default: false,
+  },
+  fresh: {
+    type: "boolean",
+    description:
+      "Fetch the message from Telegram again and check its content protection, even when the file is cached",
+    default: false,
+  },
+  overwrite: {
+    type: "boolean",
+    description: "Replace an existing --out file",
+    default: false,
+  },
+  account: {
+    type: "string",
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+} satisfies ArgsDef;
+
 export const downloadMediaCommand = defineCommand({
   meta: {
     name: "download",
     description:
       "Download the files of one or more messages into the account's media cache and print their paths (cache-first: a cached file needs no network)",
   },
-  args: {
-    chat: {
-      type: "string",
-      description: CHAT_ARG_DESCRIPTION,
-      required: true,
-    },
-    id: {
-      type: "string",
-      description:
-        "Message ID; repeat it for several messages of the chat (one JSON line per file)",
-      required: true,
-    },
-    out: {
-      type: "string",
-      description: `Also copy the file here: a directory (under its name; with several --id, as ${BATCH_NAME_TEMPLATE}), a file path, a name template with ${TEMPLATE_PLACEHOLDERS.map((name) => `{${name}}`).join(" ")}, or - for stdout (bytes only, no JSON)`,
-    },
-    thumb: {
-      type: "boolean",
-      description: "Download the file's small preview instead of the file",
-      default: false,
-    },
-    fresh: {
-      type: "boolean",
-      description:
-        "Fetch the message from Telegram again and check its content protection, even when the file is cached",
-      default: false,
-    },
-    overwrite: {
-      type: "boolean",
-      description: "Replace an existing --out file",
-      default: false,
-    },
-    account: {
-      type: "string",
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-  },
+  args: downloadArgs,
   async run({ args, rawArgs }) {
-    const ids = flagValues(rawArgs, "id");
+    const ids = flagValues(rawArgs, "id", downloadArgs);
     const given = ids.length > 0 ? ids : [args.id];
     const messageIds = [
       ...new Set(given.map((id) => parseIntegerArg(id, "id", { min: 1, max: MAX_MESSAGE_ID }))),

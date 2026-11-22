@@ -2,9 +2,11 @@
 
 > **Status: Implemented**
 
-`tg send --file` sends one file. `tg media download` saves the files of one or more messages
-into the account's media cache and prints their paths. `tg messages list`, `get` and `search` show what file each
-message has. The daemon downloads and uploads nothing.
+Create a message with a file using `tg send --file`. Use `tg media download` to save files from
+one or more messages to the account's media cache and print their paths. `tg messages list`,
+`get` and `search` show each message's attachment. To list cached messages in a chat by
+attachment type, use `tg messages list --type voice,round` (or `photo`, `document`…). See
+[Filtering a chat](cli-commands.md#filtering-a-chat). The daemon downloads and uploads nothing.
 
 ## Attachments
 

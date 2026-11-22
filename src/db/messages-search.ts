@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 
+import { ATTACHMENT_KIND_FILTERS } from "../utils/message-type";
+
 const FTS5_SYNTAX =
   /["*:()]|(?<!\S)\^(?=\S)|(?<![^\s"])\+(?![^\s"])|(?<![\p{L}\p{N}_])(?:AND|OR|NOT|NEAR)(?![\p{L}\p{N}_])/u;
 
@@ -114,6 +116,8 @@ export interface MessageSearchOptions {
   since?: number;
   /** Messages sent before this Unix time, in seconds */
   until?: number;
+  /** Only messages of these types (MESSAGE_TYPE_FILTERS) */
+  types?: readonly string[];
   /** Newest first (default), or best match first by FTS5 bm25 */
   sort?: MessageSearchSort;
 }
@@ -150,6 +154,47 @@ export interface MessagesSearchService {
   search(query: string, options?: MessageSearchOptions): MessageSearchRow[];
   /** How many messages match, with the same filters and no page */
   count(query: string, options?: MessageSearchOptions): number;
+  /**
+   * The newest message that matches the query and the filters other than
+   * `types` but has no type to filter on yet (AWAITING_RAW_MESSAGE), or null
+   */
+  newestUntypedMatch(
+    query: string,
+    options?: MessageSearchOptions,
+  ): { chatId: number; messageId: number } | null;
+}
+
+/**
+ * A media message an older version cached without its raw message (#130):
+ * no attachment row, and possibly the `document` type older versions gave
+ * videos and voices, until a refetch brings the raw message
+ */
+export const AWAITING_RAW_MESSAGE = "m.has_media = 1 AND m.raw_json = '{}'";
+
+/**
+ * The condition that keeps messages of these `--type` values, over
+ * `messages_cache m`: a message_type, or for `round` and `animation` the
+ * kind of the message's own attachment
+ */
+export function messageTypeCondition(types: readonly string[]) {
+  const kinds = types.filter((type) => ATTACHMENT_KIND_FILTERS.includes(type));
+  const messageTypes = types.filter((type) => !kinds.includes(type));
+  const marks = (values: string[]) => values.map(() => "?").join(", ");
+  const parts: string[] = [];
+  if (messageTypes.length > 0) {
+    parts.push(`m.message_type IN (${marks(messageTypes)})`);
+  }
+  if (kinds.length > 0) {
+    parts.push(`EXISTS (
+      SELECT 1 FROM message_attachments a
+      WHERE a.chat_id = m.chat_id AND a.message_id = m.message_id
+        AND a.source = 'message' AND a.kind IN (${marks(kinds)})
+    )`);
+  }
+  return {
+    condition: `(${parts.join(" OR ")})`,
+    params: [...messageTypes, ...kinds],
+  };
 }
 
 function searchFilter(options: MessageSearchOptions) {
@@ -193,6 +238,12 @@ function searchFilter(options: MessageSearchOptions) {
   if (options.until !== undefined) {
     conditions.push("m.date < ?");
     params.push(options.until);
+  }
+
+  if (options.types !== undefined) {
+    const { condition, params: typeParams } = messageTypeCondition(options.types);
+    conditions.push(condition);
+    params.push(...typeParams);
   }
 
   return { conditions, params };
@@ -373,7 +424,17 @@ export function searchNewestFirst(
 }
 
 export function createMessagesSearch(db: Database) {
-  return {
+  const matching = (columns: string, query: string, options: MessageSearchOptions, extra = "") => {
+    const { conditions, params } = searchFilter(options);
+    if (extra) conditions.push(extra);
+    const sql = `SELECT ${columns}
+      ${MATCHES_FROM}
+      ${options.chatUsername ? CHAT_JOIN : ""}${options.senderUsername ? SENDER_JOIN : ""}
+      ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}`;
+    return { sql, params: [toFts5Query(query, { phrase: options.phrase }), ...params] };
+  };
+
+  const result: MessagesSearchService = {
     search(query: string, options: MessageSearchOptions = {}) {
       if (options.sort !== "relevance") {
         return searchNewestFirst(db, query, options).rows;
@@ -388,18 +449,24 @@ export function createMessagesSearch(db: Database) {
     },
 
     count(query: string, options: MessageSearchOptions = {}) {
-      const { conditions, params } = searchFilter(options);
-      const row = db
-        .query(
-          `SELECT COUNT(*) AS n
-           ${MATCHES_FROM}
-           ${options.chatUsername ? CHAT_JOIN : ""}${options.senderUsername ? SENDER_JOIN : ""}
-           ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}`,
-        )
-        .get(toFts5Query(query, { phrase: options.phrase }), ...params) as {
-        n: number;
-      };
+      const { sql, params } = matching("1", query, options);
+      const row = db.query(`SELECT COUNT(*) AS n FROM (${sql})`).get(...params) as { n: number };
       return row.n;
     },
+
+    newestUntypedMatch(query, options = {}) {
+      const { sql, params } = matching(
+        "m.chat_id AS chatId, m.message_id AS messageId",
+        query,
+        { ...options, types: undefined },
+        AWAITING_RAW_MESSAGE,
+      );
+      return db
+        .query<{ chatId: number; messageId: number }, typeof params>(
+          `${sql} ORDER BY ${NEWEST_FIRST} LIMIT 1`,
+        )
+        .get(...params);
+    },
   };
+  return result;
 }

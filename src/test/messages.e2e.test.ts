@@ -3,9 +3,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
+import { chatRow } from "./cache-db.test-utils";
+import { FAKE_CLIENT_CLI, FAKE_HISTORY_ENV } from "./fake-client-cli.test-utils";
 import { fakeDialog } from "./fake-dialogs.test-utils";
+import { range } from "./fake-history.test-utils";
 import { LEGACY } from "./legacy-cache.test-utils";
-import { videoMessage } from "./media-messages.test-utils";
+import { roundMessage, videoMessage, voiceMessage } from "./media-messages.test-utils";
 import { takePartIn } from "./participation.test-utils";
 import { assertPeerIdInvariants } from "./peer-id-invariants.test-utils";
 import { photoMessage } from "./photo-message.test-utils";
@@ -22,7 +25,7 @@ import type { MessageSearchItem } from "../types";
 import { extractAttachment } from "../utils/attachment";
 import { toRawJson } from "../utils/raw-json";
 import { toPeerIdFromRawPeer } from "../utils/telegram-peer-ids";
-import { NO_CREDENTIALS, runCli, runCliSuccess } from "./cli.test-utils";
+import { NO_CREDENTIALS, runCli, runCliSuccess, runShellCommand } from "./cli.test-utils";
 import { createTestEnvironment, type TestEnvironment } from "./e2e-setup.test-utils";
 
 describe("E2E: Messages Search", () => {
@@ -816,6 +819,648 @@ describe("E2E: Message attachments", () => {
       [2, "photo"],
       [3, "video"],
     ]);
+  });
+});
+
+const PIER_CLUB_RAW_ID = 1_555_000_003;
+const PIER_CLUB_ID = -1_001_555_000_003;
+const DOCK_CLUB_RAW_ID = 1_555_000_004;
+const DOCK_CLUB_ID = -1_001_555_000_004;
+const PIER_START = Date.UTC(2025, 9, 10) / 1000;
+
+type FilteredListData = ListData & {
+  complete: boolean;
+  missing: Array<"history" | "types">;
+  missingBefore: number | null;
+  suggestion: string | null;
+};
+
+interface FilteredAnswer {
+  data: FilteredListData;
+  next?: Array<{ command: string; why: string }>;
+}
+
+describe("E2E: Messages List filters", () => {
+  let env: TestEnvironment;
+
+  beforeAll(() => {
+    env = createTestEnvironment("messages-list-filters");
+    env.initDatabase();
+    env.seedAccounts([{ phone: "+15550000000", user_id: SELF_ID, is_active: true }]);
+    const db = env.openCacheDb(1);
+    takePartIn(db, PIER_CLUB_ID, DOCK_CLUB_ID);
+    createChatsCache(db).upsertMany(
+      [
+        fakeDialog({
+          kind: "supergroup",
+          id: PIER_CLUB_RAW_ID,
+          title: "Pier Club",
+          username: "pierclub",
+        }),
+        fakeDialog({
+          kind: "supergroup",
+          id: DOCK_CLUB_RAW_ID,
+          title: "Dock Club",
+          username: "dockclub",
+        }),
+      ].map(dialogToCacheInput),
+    );
+
+    const pier = { _: "peerChannel" as const, channelId: PIER_CLUB_RAW_ID };
+    const kinds = "voice round text video voice photo round text voice video round voice";
+    const pierMessages = kinds.split(" ").map((kind, index) => {
+      const id = index + 1;
+      const date = PIER_START + index * 12 * 3600;
+      const raw =
+        kind === "voice"
+          ? voiceMessage(pier, id)
+          : kind === "round"
+            ? roundMessage(pier, id)
+            : kind === "video"
+              ? videoMessage(pier, id)
+              : kind === "photo"
+                ? photoMessage(pier, id)
+                : { _: "message", id, peerId: pier, message: `note ${id}` };
+      return parseRawMessage({ ...raw, date }, PIER_CLUB_ID)!;
+    });
+
+    const dock = { _: "peerChannel" as const, channelId: DOCK_CLUB_RAW_ID };
+    const now = Math.floor(Date.now() / 1000);
+    const dockMessages = range(41, 62).map((id) => {
+      const date = now - (62 - id) * 3600;
+      const raw =
+        id % 5 === 0
+          ? voiceMessage(dock, id)
+          : { _: "message", id, peerId: dock, message: `note ${id}` };
+      return parseRawMessage({ ...raw, date }, DOCK_CLUB_ID)!;
+    });
+
+    createMessagesCache(db).upsertBatch([...pierMessages, ...dockMessages]);
+    createHistoryRanges(db).add(PIER_CLUB_ID, { low: 1, high: 12 });
+    createHistoryRanges(db).add(DOCK_CLUB_ID, { low: 41, high: 60 });
+  });
+
+  afterAll(() => {
+    env.cleanup();
+  });
+
+  const options = () => ({
+    env: { ...env.getCliOptions().env, ...NO_CREDENTIALS },
+  });
+
+  async function answer(...args: string[]) {
+    const result = await runCliSuccess(["messages", "list", ...args], options());
+    return result.json as FilteredAnswer;
+  }
+
+  async function list(...args: string[]) {
+    return (await answer(...args)).data;
+  }
+
+  const ids = (data: ListData) => data.items.map((item) => item.messageId);
+  const WINDOW = ["--since", "2025-10-12T00:00Z", "--until", "2025-10-14T00:00Z"];
+
+  it("lists every voice note of a chat in one command", async () => {
+    const data = await list("--chat", "@pierclub", "--type", "voice");
+
+    expect(ids(data)).toEqual([12, 9, 5, 1]);
+    expect(data.items.every((item) => item.attachment?.kind === "voice")).toBe(true);
+    expect(data).toMatchObject({
+      source: "cache",
+      complete: true,
+      missingBefore: null,
+      suggestion: null,
+    });
+  });
+
+  it("takes several types, round video messages among them", async () => {
+    const data = await list("--chat", "@pierclub", "--type", "voice,round");
+
+    expect(ids(data)).toEqual([12, 11, 9, 7, 5, 2, 1]);
+    expect(await list("--chat", "@pierclub", "--type", "voice", "--type", "round")).toEqual(data);
+    expect(ids(await list("--chat", "@pierclub", "--type", "video"))).toEqual([11, 10, 7, 4, 2]);
+  });
+
+  it("lists a date window", async () => {
+    const data = await list("--chat", "@pierclub", ...WINDOW);
+
+    expect(ids(data)).toEqual([8, 7, 6, 5]);
+    expect(data.complete).toBe(true);
+  });
+
+  it("combines type and date", async () => {
+    const data = await list("--chat", "@pierclub", "--type", "voice,round", ...WINDOW);
+
+    expect(ids(data)).toEqual([7, 5]);
+    expect(data.complete).toBe(true);
+  });
+
+  it("pages through the filtered list with the cursors", async () => {
+    const filter = ["--chat", "@pierclub", "--type", "voice,round", "--limit", "3"];
+
+    const back: number[][] = [];
+    let before: string | undefined;
+    for (;;) {
+      const data = await list(...filter, ...(before ? ["--before", before] : []));
+      expect(data.complete).toBe(true);
+      if (data.items.length === 0) break;
+      back.push(ids(data));
+      before = String(data.nextBefore);
+    }
+    expect(back).toEqual([[12, 11, 9], [7, 5, 2], [1]]);
+
+    const forward: number[][] = [];
+    let after = "0";
+    for (;;) {
+      const data = await list(...filter, "--after", after);
+      expect(data.complete).toBe(true);
+      if (data.items.length === 0) break;
+      forward.push(ids(data));
+      after = String(data.nextAfter);
+    }
+    expect(forward).toEqual([[5, 2, 1], [11, 9, 7], [12]]);
+  });
+
+  it("keeps a full page in place when a video note may be missing in either direction", async () => {
+    const chatId = 7_000_000_207;
+    const db = env.openCacheDb(1);
+    const messages = createMessagesCache(db);
+    const videoNote = (id: number) =>
+      parseRawMessage(roundMessage({ _: "peerUser", userId: chatId }, id), chatId)!;
+    messages.upsertBatch([videoNote(2), { ...videoNote(3), raw_json: "{}" }, videoNote(4)]);
+    createHistoryRanges(db).add(chatId, { low: 1, high: 4 });
+
+    const filter = ["--chat", String(chatId), "--type", "round", "--limit", "1"];
+    const windows = [
+      { cursor: "--before=4", known: 2 },
+      { cursor: "--after=2", known: 4 },
+    ];
+    for (const { cursor, known } of windows) {
+      const { data, next } = await answer(...filter, cursor);
+      expect(ids(data)).toEqual([known]);
+      expect(data).toMatchObject({
+        complete: false,
+        missing: ["types"],
+        nextBefore: known,
+        nextAfter: known,
+      });
+      expect(data.suggestion).toContain("--before=4 --fresh");
+      expect(next).toBeUndefined();
+    }
+
+    messages.upsert(videoNote(3));
+    for (const { cursor } of windows) {
+      const { data, next } = await answer(...filter, cursor);
+      expect(ids(data)).toEqual([3]);
+      expect(data.complete).toBe(true);
+      expect(next).toHaveLength(1);
+    }
+  });
+
+  it("returns an empty page when nothing matches", async () => {
+    const data = await list("--chat", "@pierclub", "--type", "sticker");
+
+    expect(data).toMatchObject({
+      items: [],
+      nextBefore: null,
+      nextAfter: null,
+      complete: true,
+    });
+  });
+
+  it("says the page is incomplete where the cache has gaps", async () => {
+    const voices = await answer("--chat", "@dockclub", "--type", "voice");
+    expect(ids(voices.data)).toEqual([60, 55, 50, 45]);
+    expect(voices.data).toMatchObject({
+      complete: false,
+      missing: ["history"],
+      missingBefore: null,
+    });
+    expect(voices.data.suggestion).toContain("lacks messages 61-62");
+    expect(voices.next?.map((n) => n.command)).toEqual([
+      "tg messages list --chat=@dockclub --limit=100 --fresh",
+      "tg messages list --chat=@dockclub --type=voice",
+    ]);
+
+    const twoDays = ["--chat", "@dockclub", "--since", "2d", "--until", "90m"];
+    const all = await answer(...twoDays, "--limit", "50");
+    expect(ids(all.data)).toEqual(range(41, 60).reverse());
+    expect(all.data).toMatchObject({ complete: false, missingBefore: 41 });
+    expect(all.next?.[0]?.command).toBe(
+      "tg messages list --chat=@dockclub --limit=100 --before=41 --fresh",
+    );
+
+    const full = await list(...twoDays, "--limit", "20");
+    expect(full).toMatchObject({ complete: true, nextBefore: 41 });
+    const next = await list(...twoDays, "--before", "41");
+    expect(next).toMatchObject({
+      items: [],
+      complete: false,
+      missingBefore: 41,
+    });
+
+    const halfDay = await list("--chat", "@dockclub", "--since", "750m", "--until", "90m");
+    expect(ids(halfDay)).toEqual(range(50, 60).reverse());
+    expect(halfDay).toMatchObject({ complete: false, missingBefore: 41 });
+  });
+
+  it("says when search --type may miss messages still being typed", async () => {
+    const search = async (...args: string[]) =>
+      (
+        await runCliSuccess(
+          ["messages", "search", "--query", "note", "--chat", "@pierclub", "--count", ...args],
+          options(),
+        )
+      ).json as {
+        data: { count: number; typesPending: boolean; suggestion: string | null };
+        next?: Array<{ command: string; why: string }>;
+      };
+
+    expect((await search("--type", "text")).data).toMatchObject({
+      count: 2,
+      typesPending: false,
+    });
+    const db = env.openCacheDb(1);
+    db.run("UPDATE cache_migrations SET state = 'pending' WHERE name = 'messages_raw_json_v2'");
+    try {
+      const pending = await search("--type", "text");
+      expect(pending.data.typesPending).toBe(true);
+      expect(pending.next?.[0]?.command).toBe("tg db migrate");
+      expect((await search()).data.typesPending).toBe(false);
+    } finally {
+      db.run("UPDATE cache_migrations SET state = 'done' WHERE name = 'messages_raw_json_v2'");
+    }
+
+    createMessagesCache(db).upsertBatch([
+      {
+        chat_id: PIER_CLUB_ID,
+        message_id: 13,
+        from_id: null,
+        text: "note 13",
+        message_type: "document",
+        has_media: true,
+        date: PIER_START + 13 * 12 * 3600,
+        raw_json: "{}",
+      },
+    ]);
+    try {
+      const awaiting = await search("--type", "round");
+      expect(awaiting.data.typesPending).toBe(true);
+      expect(awaiting.data.suggestion).toContain(
+        `Message 13 of chat ${PIER_CLUB_ID} matches but was cached without its raw message`,
+      );
+      expect(awaiting.data.suggestion).toContain(
+        `tg messages list --chat=${PIER_CLUB_ID} --limit=100 --before=14 --fresh`,
+      );
+    } finally {
+      db.run("DELETE FROM messages_cache WHERE chat_id = ? AND message_id = 13", [PIER_CLUB_ID]);
+    }
+  });
+
+  it("reads --type=voice as the query in both spellings", async () => {
+    const query = async (...args: string[]) =>
+      (
+        (await runCliSuccess(["messages", "search", ...args, "--count"], options())).json as {
+          data: { query: string; count: number; filters: object };
+        }
+      ).data;
+
+    const spaced = await query("--query", "--type=voice");
+    expect(spaced).toEqual(await query("--query=--type=voice"));
+    expect(spaced.filters).toMatchObject({ type: null });
+  });
+
+  it("adds no keys without filters", async () => {
+    const data = await list("--chat", "@pierclub");
+
+    expect(Object.keys(data)).toEqual([
+      "chatId",
+      "items",
+      "limit",
+      "before",
+      "after",
+      "nextBefore",
+      "nextAfter",
+      "source",
+      "stale",
+    ]);
+  });
+
+  it.each([
+    [["--type", "voice", "--fresh"], "--fresh"],
+    [["--type", "voicenote"], "Invalid --type"],
+    [["--since", "monday"], "Invalid --since"],
+  ])("rejects %p", async (args, message) => {
+    const result = await runCli(["messages", "list", "--chat", "@pierclub", ...args], options());
+
+    expect(result.exitCode).toBe(3);
+    const json = result.json as ErrorData;
+    expect(json.error.code).toBe("INVALID_ARGS");
+    expect(json.error.message).toContain(message);
+  });
+
+  it("refuses search --fresh, as search reads only the cache", async () => {
+    const result = await runCli(
+      ["messages", "search", "--query", "note", "--type", "voice", "--fresh"],
+      options(),
+    );
+
+    expect(result.exitCode).toBe(3);
+    const { error } = result.json as ErrorData & { error: { suggestion?: string } };
+    expect(error.code).toBe("INVALID_ARGS");
+    expect(error.message).toContain("reads only the cache");
+    expect(error.suggestion).toContain("tg messages list --chat <chat> --fresh");
+  });
+});
+
+const QUAY_CLUB_RAW_ID = 1_555_000_005;
+const QUAY_CLUB_ID = -1_001_555_000_005;
+
+describe("E2E: Messages List filters offline and on another account", () => {
+  let env: TestEnvironment;
+
+  beforeAll(() => {
+    env = createTestEnvironment("messages-list-filters-accounts");
+    env.initDatabase();
+    env.seedAccounts([
+      { phone: "+15550000000", user_id: SELF_ID, is_active: true },
+      { phone: "+15550000001", user_id: SELF_ID + 1, is_active: false },
+    ]);
+    env.openCacheDb(1);
+    const db = env.openCacheDb(2);
+    takePartIn(db, QUAY_CLUB_ID);
+    createChatsCache(db).upsert(chatRow(QUAY_CLUB_ID, "supergroup", { username: "quayclub" }));
+    const quay = { _: "peerChannel" as const, channelId: QUAY_CLUB_RAW_ID };
+    createMessagesCache(db).upsertBatch(
+      [...range(1, 10), 21].map((id) =>
+        parseRawMessage(
+          {
+            ...(id % 5 === 0 || id === 21
+              ? voiceMessage(quay, id)
+              : { _: "message", id, peerId: quay, message: `note ${id}` }),
+            date: PIER_START + id * 60,
+          },
+          QUAY_CLUB_ID,
+        )!,
+      ),
+    );
+    createHistoryRanges(db).add(QUAY_CLUB_ID, { low: 1, high: 10 });
+  });
+
+  afterAll(() => {
+    env.cleanup();
+  });
+
+  const offline = (allowed?: string) => ({
+    env: {
+      ...env.getCliOptions().env,
+      ...NO_CREDENTIALS,
+      TELEGRAM_SYNC_CLI_ALLOWED_CHATS: allowed,
+    },
+  });
+
+  async function list(...args: string[]) {
+    const result = await runCliSuccess(["messages", "list", "--account", "2", ...args], offline());
+    return result.json as FilteredAnswer;
+  }
+
+  it.each([undefined, "@quayclub", String(QUAY_CLUB_ID)])(
+    "reads a chat by a cached username without credentials, allowedChats %p",
+    async (allowed) => {
+      const voices = ["--chat", "@quayclub", "--type", "voice", "--before", "11"];
+      const result = await runCliSuccess(
+        ["messages", "list", "--account", "2", ...voices],
+        offline(allowed),
+      );
+      const { data } = result.json as FilteredAnswer;
+      expect(data.items.map((item) => item.messageId)).toEqual([10, 5]);
+      expect(data.complete).toBe(true);
+
+      const search = await runCliSuccess(
+        ["messages", "search", "--query", "note", "--chat", "@quayclub", "--account", "2"],
+        offline(allowed),
+      );
+      expect((search.json as { data: { total: number } }).data.total).toBeGreaterThan(0);
+    },
+  );
+
+  it("refuses a chat outside allowedChats without credentials", async () => {
+    const result = await runCli(
+      ["messages", "list", "--account", "2", "--chat", "@quayclub", "--type", "voice"],
+      offline("-1001555000999"),
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect((result.json as ErrorData).error.code).toBe("CHAT_NOT_ALLOWED");
+  });
+
+  it("explains a name the cache can't resolve and takes the numeric ID", async () => {
+    const result = await runCli(
+      ["messages", "list", "--account", "2", "--chat", "@nobodycached", "--type", "voice"],
+      offline(),
+    );
+
+    expect(result.exitCode).toBe(3);
+    const { error } = result.json as ErrorData & { error: { suggestion?: string } };
+    expect(error).toMatchObject({ code: "INVALID_ARGS", details: { chat: "@nobodycached" } });
+    expect(error.message).toContain("@nobodycached is not in the cache");
+    expect(error.suggestion).toContain("numeric ID");
+  });
+
+  it("points to allowedChats when a configured name is missing from the cache", async () => {
+    const result = await runCli(
+      ["messages", "search", "--account", "2", "--query", "note"],
+      offline("@nobodycached"),
+    );
+
+    expect(result.exitCode).toBe(3);
+    const { error } = result.json as ErrorData & { error: { suggestion?: string } };
+    expect(error).toMatchObject({ code: "INVALID_ARGS", details: { chat: "@nobodycached" } });
+    expect(error.suggestion).toContain("allowedChats");
+  });
+
+  it("keeps --account in every command it suggests", async () => {
+    const { data, next } = await list("--chat", "@quayclub", "--type", "voice", "--before", "21");
+
+    expect(data).toMatchObject({ complete: false, missingBefore: 21 });
+    expect(next?.map((n) => n.command)).toEqual([
+      "tg messages list --chat=@quayclub --limit=100 --before=21 --fresh --account=2",
+      "tg messages list --chat=@quayclub --before=21 --type=voice --account=2",
+    ]);
+  });
+
+  it("suggests the migration of its own account while types are pending", async () => {
+    const db = env.openCacheDb(2);
+    db.run("UPDATE cache_migrations SET state = 'pending' WHERE name = 'messages_raw_json_v2'");
+    try {
+      const { data, next } = await list("--chat", "@quayclub", "--type", "voice", "--before", "11");
+      expect(data).toMatchObject({ complete: false, missing: ["types"] });
+      expect(next?.map((n) => n.command)).toEqual([
+        "tg db migrate --account=2",
+        "tg messages list --chat=@quayclub --before=11 --type=voice --account=2",
+      ]);
+    } finally {
+      db.run("UPDATE cache_migrations SET state = 'done' WHERE name = 'messages_raw_json_v2'");
+    }
+  });
+});
+
+const SHORE_ID = 7_000_000_201;
+const REEF_ID = 7_000_000_202;
+const COVE_ID = 7_000_000_203;
+const BAY_ID = 7_000_000_204;
+const CAPE_ID = 7_000_000_205;
+const DUNE_ID = 7_000_000_206;
+
+describe("E2E: Messages List filters, filled from Telegram", () => {
+  let env: TestEnvironment;
+
+  beforeAll(() => {
+    env = createTestEnvironment("messages-list-filters-fill");
+    env.initDatabase();
+    env.seedAccounts([
+      { phone: "+15550000000", user_id: SELF_ID, is_active: true },
+      { phone: "+15550000001", user_id: SELF_ID + 1, is_active: false },
+    ]);
+    env.openCacheDb(1);
+    const db = env.openCacheDb(2);
+    const chats = createChatsCache(db);
+    const dms: Array<[number, number | null, number[]]> = [
+      [SHORE_ID, 30, [1, 10]],
+      [REEF_ID, null, [1, 10]],
+      [COVE_ID, 30, []],
+      [BAY_ID, null, []],
+      [CAPE_ID, 30, range(1, 10)],
+      [DUNE_ID, 3, [1, 3]],
+    ];
+    for (const [chatId, top, ids] of dms) {
+      chats.upsert(chatRow(chatId, "private", { last_message_id: top }));
+      createMessagesCache(db).upsertBatch(
+        ids.map((id) =>
+          parseRawMessage(
+            {
+              _: "message",
+              id,
+              peerId: { _: "peerUser", userId: chatId },
+              message: `note ${id}`,
+              date: PIER_START + id * 60,
+            },
+            chatId,
+          )!,
+        ),
+      );
+      if (ids.length > 0) createHistoryRanges(db).add(chatId, { low: 1, high: Math.max(...ids) });
+    }
+    db.run(
+      "INSERT INTO chat_sync_state (chat_id, chat_type, top_message_id) VALUES (?, 'private', 30)",
+      [REEF_ID],
+    );
+    createMessagesCache(db).upsertBatch([
+      {
+        chat_id: DUNE_ID,
+        message_id: 2,
+        from_id: null,
+        text: "orbit",
+        message_type: "video",
+        has_media: true,
+        date: PIER_START + 2 * 60,
+        raw_json: "{}",
+      },
+    ]);
+  });
+
+  afterAll(() => {
+    env.cleanup();
+  });
+
+  async function run(command: string, serverIds: number[]) {
+    const result = await runShellCommand(command, {
+      env: { ...env.getCliOptions().env, [FAKE_HISTORY_ENV]: serverIds.join(",") },
+      entry: FAKE_CLIENT_CLI,
+    });
+    expect(result.exitCode).toBe(0);
+    return result.json as FilteredAnswer;
+  }
+
+  async function fillAndRepeat(command: string, serverIds: number[], fill: string) {
+    const first = await run(command, serverIds);
+    expect(first.data.complete).toBe(false);
+    expect(first.next?.map((n) => n.command)).toEqual([fill, command]);
+
+    await run(fill, serverIds);
+    const repeated = await run(command, serverIds);
+    expect(repeated.data).toMatchObject({ complete: true, missing: [], suggestion: null });
+    expect(repeated.next ?? []).toEqual([]);
+    return repeated.data;
+  }
+
+  it.each([
+    ["the dialog list", SHORE_ID],
+    ["the sync state", REEF_ID],
+  ])(
+    "settles an empty gap in one fetch when only %s knows a newer message",
+    async (_name, chat) => {
+      const data = await fillAndRepeat(
+        `tg messages list --chat=${chat} --before=21 --type=text --account=2`,
+        [1, 10, 30],
+        `tg messages list --chat=${chat} --limit=100 --before=21 --fresh --account=2`,
+      );
+
+      expect(data.items.map((item) => item.messageId)).toEqual([10, 1]);
+    },
+  );
+
+  it("settles a gap below --before that Telegram shows empty", async () => {
+    const data = await fillAndRepeat(
+      `tg messages list --chat=${COVE_ID} --before=21 --type=text --account=2`,
+      [30],
+      `tg messages list --chat=${COVE_ID} --limit=100 --before=21 --fresh --account=2`,
+    );
+
+    expect(data.items).toEqual([]);
+  });
+
+  it("settles a chat that Telegram shows empty", async () => {
+    const data = await fillAndRepeat(
+      `tg messages list --chat=${BAY_ID} --type=text --account=2`,
+      [],
+      `tg messages list --chat=${BAY_ID} --limit=100 --fresh --account=2`,
+    );
+
+    expect(data.items).toEqual([]);
+  });
+
+  it("offers one manual refetch of a type Telegram can no longer give, not an endless next", async () => {
+    const server = [1, 3];
+    const retry = `tg messages list --chat=${DUNE_ID} --limit=100 --before=3 --fresh --account=2`;
+    const search = `tg messages search --query=orbit --type=round --account=2`;
+    const list = `tg messages list --chat=${DUNE_ID} --type=round --account=2`;
+    const answers = async () => {
+      const found = (await run(search, server)) as unknown as {
+        data: { results: unknown[]; typesPending: boolean; suggestion: string | null };
+        next?: unknown[];
+      };
+      const listed = await run(list, server);
+      expect([found.next, listed.next]).toEqual([undefined, undefined]);
+      expect(found.data).toMatchObject({ results: [], typesPending: true });
+      expect(found.data.suggestion).toContain(retry);
+      expect(listed.data).toMatchObject({ items: [], complete: false, missing: ["types"] });
+      expect(listed.data.suggestion).toContain(retry);
+    };
+
+    await answers();
+    expect((await run(retry, server)).data.items.map((item) => item.messageId)).toEqual([1]);
+    await answers();
+  });
+
+  it("settles the top of a chat whose newest messages are gone", async () => {
+    const data = await fillAndRepeat(
+      `tg messages list --chat=${CAPE_ID} --type=text --account=2`,
+      range(1, 10),
+      `tg messages list --chat=${CAPE_ID} --limit=100 --fresh --account=2`,
+    );
+
+    expect(data.items.map((item) => item.messageId)).toEqual(range(1, 10).reverse());
   });
 });
 

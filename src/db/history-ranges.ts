@@ -10,10 +10,19 @@ export interface PageBounds {
   /** The page holds the oldest messages above this ID */
   after?: number;
   /**
-   * Nothing lies between the page's newest message and this ID: the page
-   * holds the newest messages below it, or it is a short page capped by it
+   * The page holds the newest messages below this ID, or it is a short page
+   * capped by it
    */
   before?: number;
+  /**
+   * The chat's newest known message ID (knownTop), read before the request
+   * was sent, for a page that holds the newest messages below `before` (the
+   * chat's newest messages without it) or a short forward page. The page
+   * then also vouches for the IDs above its newest message up to this one,
+   * capped below `before`: Telegram gives a later message a higher ID than
+   * any it had, so none can land there. Undefined for any other page
+   */
+  knownTop?: number | null;
   /** The page ran out of older messages, so it reaches the first message */
   reachedStart?: boolean;
 }
@@ -29,6 +38,16 @@ export interface HistoryRanges {
   recordPage(chatId: number, ids: number[], bounds: PageBounds): void;
   /** The recorded range that holds this message ID */
   find(chatId: number, messageId: number): HistoryRange | null;
+  /** The newest recorded range that ends below this message ID */
+  below(chatId: number, messageId: number): HistoryRange | null;
+  /**
+   * The chat's newest known message ID: the highest of its cached messages,
+   * the dialog list's top, the sync state's top and its recorded ranges;
+   * 0 for a chat known to be empty, null when nothing is known
+   */
+  knownTop(chatId: number): number | null;
+  /** Whether every message ID from `low` to `high` is cached or inside a recorded range */
+  holdsEvery(chatId: number, low: number, high: number): boolean;
 }
 
 export function createHistoryRanges(db: Database) {
@@ -36,6 +55,12 @@ export function createHistoryRanges(db: Database) {
     find: db.query(`
       SELECT low, high FROM history_ranges
       WHERE chat_id = $chat_id AND low <= $id AND high >= $id
+      LIMIT 1
+    `),
+    below: db.query(`
+      SELECT low, high FROM history_ranges
+      WHERE chat_id = $chat_id AND high < $id
+      ORDER BY high DESC
       LIMIT 1
     `),
     touching: db.query(`
@@ -50,10 +75,23 @@ export function createHistoryRanges(db: Database) {
       INSERT INTO history_ranges (chat_id, low, high, updated_at)
       VALUES ($chat_id, $low, $high, $now)
     `),
-    hasMessageFrom: db.query(`
-      SELECT 1 FROM messages_cache
-      WHERE chat_id = $chat_id AND message_id >= $id
-      LIMIT 1
+    knownTop: db.query(`
+      SELECT MAX(
+        COALESCE((SELECT MAX(message_id) FROM messages_cache WHERE chat_id = $chat_id), -1),
+        COALESCE((SELECT last_message_id FROM chats_cache WHERE chat_id = $text_id), -1),
+        COALESCE((SELECT top_message_id FROM chat_sync_state WHERE chat_id = $chat_id), -1),
+        COALESCE((SELECT MAX(high) FROM history_ranges WHERE chat_id = $chat_id), -1)
+      ) AS top
+    `),
+    held: db.query(`
+      SELECT
+        (SELECT COALESCE(SUM(MIN(high, $high) - MAX(low, $low) + 1), 0) FROM history_ranges
+          WHERE chat_id = $chat_id AND low <= $high AND high >= $low)
+        + (SELECT COUNT(*) FROM messages_cache m
+          WHERE m.chat_id = $chat_id AND m.message_id BETWEEN $low AND $high
+            AND NOT EXISTS (SELECT 1 FROM history_ranges r
+              WHERE r.chat_id = $chat_id AND r.low <= m.message_id AND r.high >= m.message_id))
+        AS held
     `),
   };
 
@@ -72,25 +110,23 @@ export function createHistoryRanges(db: Database) {
     });
   });
 
-  const hasMessageFrom = (chatId: number, id: number) =>
-    stmts.hasMessageFrom.get({ $chat_id: chatId, $id: id }) !== null;
-
   const ranges: HistoryRanges = {
     add(chatId, { low, high }) {
       if (Number.isSafeInteger(low) && Number.isSafeInteger(high)) {
-        if (low >= 1 && high >= low) merge(chatId, low, high);
+        if (low >= 1 && high >= (low === 1 ? 0 : low)) merge(chatId, low, high);
       }
     },
 
-    recordPage(chatId, ids, { after, before, reachedStart = false }) {
+    recordPage(chatId, ids, { after, before, knownTop, reachedStart = false }) {
       const valid = ids.filter((id) => id > 0);
       let low = Math.min(...valid);
       if (after !== undefined) low = after + 1;
       else if (reachedStart) low = 1;
 
       let high = Math.max(...valid);
-      if (before !== undefined && hasMessageFrom(chatId, before)) {
-        high = before - 1;
+      if (knownTop !== undefined) {
+        const top = knownTop ?? (before === undefined ? 0 : Number.NEGATIVE_INFINITY);
+        high = Math.max(high, Math.min(top, (before ?? Number.POSITIVE_INFINITY) - 1));
       }
 
       ranges.add(chatId, { low, high });
@@ -103,6 +139,29 @@ export function createHistoryRanges(db: Database) {
           $id: messageId,
         }) as HistoryRange | null) ?? null
       );
+    },
+
+    below(chatId, messageId) {
+      return (
+        (stmts.below.get({
+          $chat_id: chatId,
+          $id: messageId,
+        }) as HistoryRange | null) ?? null
+      );
+    },
+
+    knownTop(chatId) {
+      const { top } = stmts.knownTop.get({ $chat_id: chatId, $text_id: String(chatId) }) as {
+        top: number;
+      };
+      return top < 0 ? null : top;
+    },
+
+    holdsEvery(chatId, low, high) {
+      const { held } = stmts.held.get({ $chat_id: chatId, $low: low, $high: high }) as {
+        held: number;
+      };
+      return held === high - low + 1;
     },
   };
 

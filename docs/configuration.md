@@ -316,7 +316,11 @@ while it is set, even to an empty string) limit the commands that read or send t
   keeps syncing every chat.
 
 An empty list allows no chat; remove the key (and unset the variable) to allow every chat. An
-`@username` the cache doesn't know is looked up on Telegram, which needs credentials. `tg status`
+`@username` the cache doesn't know is looked up on Telegram, which needs credentials. A command
+that reads only the cache (`tg messages search`, and `tg messages list` with `--type`, `--since`
+or `--until`) resolves the chat and the list from the cache alone and never connects: a cached
+`@username` resolves without its access hash, and a name the cache doesn't know is
+`INVALID_ARGS` that says so; pass the chat's ID instead. `tg status`
 shows both switches as `access: { read_only, allowed_chats }` (`allowed_chats` is `null`
 without a list), so an agent that was refused can see why.
 

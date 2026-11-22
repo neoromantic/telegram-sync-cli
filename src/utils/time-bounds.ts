@@ -43,5 +43,5 @@ export function parseTimeBound(value: string, options: { now: number; end?: bool
     return null;
   }
 
-  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  return Number.isFinite(ms) ? Math.ceil(ms / 1000) : null;
 }
