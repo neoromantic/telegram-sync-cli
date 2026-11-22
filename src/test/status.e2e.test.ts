@@ -4,6 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { takePartIn } from "./participation.test-utils";
 import type { StatusHistoryProgress } from "../commands/status";
+import { checkVacuumDisk } from "../db/cache-maintenance";
+import { formatBytes } from "../utils/formatting";
 import { createChatSyncStateService } from "../db/chat-sync-state";
 import { createDaemonStatusService } from "../db/daemon-status";
 import { createMessagesCache } from "../db/messages-cache";
@@ -827,17 +829,20 @@ describe("E2E: status cache size", () => {
         ).stdout,
       );
     const stopFirst = "tg daemon stop && tg db vacuum --account 1 && tg daemon start";
-    const short = /needs 64\.\d MB of free disk, 1000 B free/;
+    const needed = formatBytes(checkVacuumDisk(env.cachePath(1)).needed_bytes);
+    const short = `needs ${needed} of free disk, 1000 B free`;
 
     const stopped = await pretty(1024 ** 3);
     expect(stopped).toContain("tg db vacuum --account 1");
     expect(stopped).not.toContain(stopFirst);
     expect(stopped).not.toContain("of free disk");
-    expect(await pretty(1000)).toMatch(new RegExp(`tg db vacuum --account 1\\s+${short.source}`));
+    expect(await pretty(1000)).toMatch(
+      new RegExp(`tg db vacuum --account 1\\s+${short.replaceAll(".", "\\.")}`),
+    );
 
     writeFileSync(join(env.dataDir, "daemon.pid"), String(process.pid));
     expect(await pretty(1024 ** 3)).toContain(stopFirst);
-    expect(await pretty(1000)).toMatch(short);
+    expect(await pretty(1000)).toContain(short);
   });
 
   it("doesn't check the disk for a vacuum the running daemon allows in place", async () => {

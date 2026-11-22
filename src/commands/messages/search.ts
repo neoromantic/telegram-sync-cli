@@ -1,35 +1,36 @@
+import type { Database } from "bun:sqlite";
 import { type ArgsDef, defineCommand } from "citty";
 
+import { isMigrationPending } from "../../db/background-migrations";
 import {
   createMessagesSearch,
   isFts5QueryError,
+  toFts5Query,
   MESSAGE_SEARCH_SORTS,
+  type MessageSearchOptions,
   type MessageSearchSort,
 } from "../../db/messages-search";
-import { ErrorCodes } from "../../types";
+import { MESSAGE_TYPES_MIGRATION } from "../../db/raw-json-migrations";
+import { ErrorCodes, type NextCommand } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
+import { extractAttachment } from "../../utils/attachment";
 import { normalizeUsername } from "../../utils/identifiers";
 import { error, success } from "../../utils/output";
 import { buildSnippet, snippetTerms } from "../../utils/search-snippet";
-import { parseTimeBound } from "../../utils/time-bounds";
 import { allowedChatIds } from "../access";
+import { migrateArgs } from "../db";
 import { nextCommand } from "../next";
-import { messageItemReader } from "./helpers";
-
-function parseBound(value: string | undefined, name: "since" | "until", now: number) {
-  if (value === undefined) return undefined;
-  const seconds = parseTimeBound(value, { now, end: name === "until" });
-  if (seconds === null) {
-    error(
-      ErrorCodes.INVALID_ARGS,
-      `Invalid --${name}: ${value}`,
-      { [name]: value },
-      "Use a date (2026-10-01), a date and time (2026-10-01T09:30, local unless it ends with Z or an offset) or a duration back from now (30m, 24h, 7d, 2w)",
-    );
-  }
-  return seconds;
-}
+import {
+  formatTimeBound,
+  parseTimeWindow,
+  parseTypeArg,
+  SINCE_ARG_DESCRIPTION,
+  TYPE_ARG_DESCRIPTION,
+  UNTIL_ARG_DESCRIPTION,
+} from "./filters";
+import { messageItemReader, visibleTranscriptFile } from "./helpers";
+import { refetchClause } from "./list";
 
 function parseIdentifier(
   input: string | undefined,
@@ -98,13 +99,15 @@ const searchArgs = {
   },
   since: {
     type: "string",
-    description:
-      "Only messages sent at or after: a date (2026-10-01), a date and time (2026-10-01T09:30) or a duration back from now (24h, 7d)",
+    description: SINCE_ARG_DESCRIPTION,
   },
   until: {
     type: "string",
-    description:
-      "Only messages sent before: a date and time, a duration back from now, or a date (its whole day included)",
+    description: UNTIL_ARG_DESCRIPTION,
+  },
+  type: {
+    type: "string",
+    description: TYPE_ARG_DESCRIPTION,
   },
   sort: {
     type: "string",
@@ -122,20 +125,82 @@ const searchArgs = {
     description: "Also count every message that matches the query and filters (a second query)",
     default: false,
   },
+  fresh: {
+    type: "boolean",
+    description:
+      "Refused: search reads only the cache. tg messages list --chat <chat> --fresh fetches a chat's messages from Telegram",
+    default: false,
+  },
   account: {
     type: "string",
     description: ACCOUNT_SELECTOR_DESCRIPTION,
   },
 } satisfies ArgsDef;
 
+/**
+ * One page of search results, one more than `limit` to tell whether
+ * another page follows, with the optional count and the type state, read in
+ * one read transaction, so a migration that commits meanwhile can't make
+ * them disagree
+ */
+export function readSearchPage(
+  cacheDb: Database,
+  query: string,
+  options: MessageSearchOptions,
+  page: { limit: number; offset: number; sort: MessageSearchSort; count: boolean },
+) {
+  return cacheDb.transaction(() => {
+    const candidates = cacheDb.query<
+      { rowid: number; rank: number; chat_id: number; raw_json: string; unique_file_id: string },
+      [string]
+    >(`SELECT m.rowid, transcript_search.rank, m.chat_id, m.raw_json, t.unique_file_id
+       FROM transcript_search JOIN message_transcripts t ON t.rowid = transcript_search.rowid
+       JOIN messages_cache m ON m.chat_id = t.chat_id AND m.message_id = t.message_id
+       WHERE transcript_search MATCH ? AND m.has_media = 1`);
+    const visible = visibleTranscriptFile(cacheDb);
+    const hits: { rowid: number; rank: number }[] = [];
+    for (const candidate of candidates.iterate(toFts5Query(query, options))) {
+      const file = extractAttachment(candidate.raw_json);
+      if (
+        file?.uniqueFileId === candidate.unique_file_id &&
+        visible(candidate.chat_id, candidate.raw_json, file)
+      ) {
+        hits.push({ rowid: candidate.rowid, rank: candidate.rank });
+      }
+    }
+    const search = createMessagesSearch(cacheDb, hits);
+    const rows = search.search(query, { ...options, ...page, limit: page.limit + 1 });
+    const toItem = messageItemReader(cacheDb);
+    const typed = options.types !== undefined;
+    return {
+      rows,
+      items: rows.slice(0, page.limit).map((row) => ({
+        ...toItem(row),
+        ...(row.transcript_match ? { transcriptMatch: true } : {}),
+      })),
+      count: page.count ? search.count(query, options) : null,
+      migrating: typed && isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION),
+      untyped: typed ? search.newestUntypedMatch(query, options) : null,
+    };
+  })();
+}
+
 export const searchMessagesCommand = defineCommand({
   meta: {
     name: "search",
     description:
-      'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
+      'Search cached messages and their available transcripts, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
   },
   args: searchArgs,
-  async run({ args }) {
+  async run({ args, rawArgs }) {
+    if (args.fresh) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        "tg messages search reads only the cache, so it can't search Telegram with --fresh",
+        { fresh: true },
+        "Fetch the chat's messages first with tg messages list --chat <chat> --fresh, then search the cache",
+      );
+    }
     const query = (args.query ?? "").trim();
     if (!query) {
       error(ErrorCodes.INVALID_ARGS, "Search query is required");
@@ -157,24 +222,15 @@ export const searchMessagesCommand = defineCommand({
       error(ErrorCodes.INVALID_ARGS, `Invalid sort: ${args.sort}. Use 'date' or 'relevance'.`);
     }
 
-    const now = Date.now();
-    const since = parseBound(args.since, "since", now);
-    const until = parseBound(args.until, "until", now);
-    if (since !== undefined && until !== undefined && since >= until) {
-      error(
-        ErrorCodes.INVALID_ARGS,
-        `--since (${args.since}) must be earlier than --until (${args.until})`,
-      );
-    }
+    const { since, until } = parseTimeWindow(args);
+    const types = parseTypeArg(rawArgs ?? [], searchArgs);
 
     const { account, db: cacheDb } = openAccountCache(args.account);
     const chatFilter = parseIdentifier(args.chat, "chat", account.user_id);
     const senderFilter = parseIdentifier(args.sender, "sender", account.user_id);
-    const allowed = await allowedChatIds(account.id);
+    const allowed = await allowedChatIds(account.id, { cacheOnly: true });
 
     try {
-      const search = createMessagesSearch(cacheDb);
-
       const options = {
         includeDeleted: args.includeDeleted ?? false,
         phrase: args.phrase ?? false,
@@ -185,28 +241,48 @@ export const searchMessagesCommand = defineCommand({
         senderUsername: senderFilter?.username,
         since,
         until,
+        types,
       };
-      const rows = search.search(query, {
-        ...options,
-        limit: limit + 1,
+      const { rows, items, count, migrating, untyped } = readSearchPage(cacheDb, query, options, {
+        limit,
         offset,
         sort,
+        count: args.count ?? false,
       });
-      const results = rows.slice(0, limit);
-      const next =
-        rows.length > limit
+      const typesPending = migrating || untyped !== null;
+      const values = {
+        ...args,
+        query,
+        type: types?.join(","),
+        since: formatTimeBound(since),
+        until: formatTimeBound(until),
+        limit,
+      };
+      const fills: NextCommand[] = [];
+      if (migrating) {
+        fills.push(
+          nextCommand(
+            "db migrate",
+            migrateArgs,
+            { account: args.account },
+            "Some cached messages have no type yet: this finishes the background migration that types them.",
+          ),
+        );
+      }
+      const next = [
+        ...fills,
+        ...(rows.length > limit
           ? [
               nextCommand(
                 "messages search",
                 searchArgs,
-                { ...args, query, limit, offset: offset + limit },
+                { ...values, offset: offset + limit },
                 "The next page of results.",
               ),
             ]
-          : [];
-      const count = args.count ? search.count(query, options) : null;
+          : []),
+      ];
       const terms = args.snippet ? snippetTerms(query, { phrase: options.phrase }) : [];
-      const toItem = messageItemReader(cacheDb);
 
       success(
         {
@@ -218,14 +294,20 @@ export const searchMessagesCommand = defineCommand({
             phrase: args.phrase ?? false,
             since: args.since ?? null,
             until: args.until ?? null,
+            type: types ?? null,
           },
           sort,
-          results: results.map((row) => {
-            const item = toItem(row);
-            return args.snippet ? { ...item, snippet: buildSnippet(item.text, terms) } : item;
+          results: items.map((item) => {
+            const text = item.transcriptMatch ? (item.transcript?.text ?? null) : item.text;
+            return args.snippet ? { ...item, snippet: buildSnippet(text, terms) } : item;
           }),
-          total: results.length,
+          total: items.length,
           count,
+          typesPending,
+          suggestion:
+            untyped && !migrating
+              ? `Message ${untyped.messageId} of chat ${untyped.chatId} matches but was cached without its raw message, so its type is unknown: ${refetchClause(String(untyped.chatId), args.account, untyped.messageId)}.`
+              : null,
           limit,
           offset,
           source: "cache",

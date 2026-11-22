@@ -1,3 +1,5 @@
+import type { ArgsDef } from "citty";
+
 /**
  * Parse named arguments from argv-style array into an object
  * Supports: --key value, --key=value, --nested.key value
@@ -163,12 +165,29 @@ export function spacedFlagValues(rawArgs: string[], method: string, args: Record
   return values;
 }
 
+function stringFlagSpellings(defs: ArgsDef) {
+  const spellings = new Set<string>();
+  for (const [name, def] of Object.entries(defs)) {
+    if (def.type !== "string") continue;
+    spellings.add(`--${name}`);
+    spellings.add(`--${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`);
+    const aliases = "alias" in def ? def.alias : undefined;
+    for (const alias of [aliases ?? []].flat()) {
+      spellings.add(alias.length === 1 ? `-${alias}` : `--${alias}`);
+    }
+  }
+  return spellings;
+}
+
 /**
  * Every value of a flag given more than once (`--name a --name=b`), up to a
  * bare `--`. citty keeps only the last value of a repeated string flag.
+ * The value of another string flag of `defs` is skipped, as citty takes it:
+ * `--query --type=voice` searches for the text `--type=voice`.
  */
-export function flagValues(rawArgs: string[], name: string) {
+export function flagValues(rawArgs: string[], name: string, defs: ArgsDef) {
   const flag = `--${name}`;
+  const takesValue = stringFlagSpellings(defs);
   const values: string[] = [];
   for (let i = 0; i < rawArgs.length; i++) {
     const arg = rawArgs[i]!;
@@ -178,6 +197,8 @@ export function flagValues(rawArgs: string[], name: string) {
       i++;
     } else if (arg.startsWith(`${flag}=`)) {
       values.push(arg.slice(flag.length + 1));
+    } else if (takesValue.has(arg)) {
+      i++;
     }
   }
   return values;

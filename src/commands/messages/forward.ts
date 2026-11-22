@@ -1,4 +1,4 @@
-import { defineCommand } from "citty";
+import { type ArgsDef, defineCommand } from "citty";
 
 import { ErrorCodes } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
@@ -17,8 +17,30 @@ import {
 } from "./helpers";
 import { resolveHistoryChat } from "./history";
 
+const forwardArgs = {
+  from: {
+    type: "string",
+    description: CHAT_ARG_DESCRIPTION.replace("Chat:", "Source chat:"),
+    required: true,
+  },
+  to: {
+    type: "string",
+    description: CHAT_ARG_DESCRIPTION.replace("Chat:", "Target chat:"),
+    required: true,
+  },
+  id: {
+    type: "string",
+    description: `Message ID in the source chat; repeat for up to ${MAX_FORWARD_IDS}`,
+    required: true,
+  },
+  account: {
+    type: "string",
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+} satisfies ArgsDef;
+
 function readMessageIds(id: string, rawArgs: string[]) {
-  const values = flagValues(rawArgs, "id");
+  const values = flagValues(rawArgs, "id", forwardArgs);
   const ids = [
     ...new Set(
       (values.length > 0 ? values : [id]).map((value) =>
@@ -42,27 +64,7 @@ export const forwardMessagesCommand = defineCommand({
     description:
       "Forward messages from one chat to another as you; the copies cannot be unsent with tg",
   },
-  args: {
-    from: {
-      type: "string",
-      description: CHAT_ARG_DESCRIPTION.replace("Chat:", "Source chat:"),
-      required: true,
-    },
-    to: {
-      type: "string",
-      description: CHAT_ARG_DESCRIPTION.replace("Chat:", "Target chat:"),
-      required: true,
-    },
-    id: {
-      type: "string",
-      description: `Message ID in the source chat; repeat for up to ${MAX_FORWARD_IDS}`,
-      required: true,
-    },
-    account: {
-      type: "string",
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-  },
+  args: forwardArgs,
   async run({ args, rawArgs }) {
     const messageIds = readMessageIds(args.id, rawArgs ?? []);
     const { account } = openAccountCache(args.account);

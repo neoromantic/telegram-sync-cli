@@ -102,9 +102,15 @@ tg messages list --chat @username --before 1200
 The cache can have gaps, so it answers only inside a range it holds without one.
 `history_ranges` records them: a `messages.getHistory` page is a run of consecutive messages, so
 every page the daemon or the CLI caches adds the range of message IDs it covers, and touching
-ranges merge. A page of the newest messages below an ID also covers up to that ID, and a page
-that ran out of older messages covers down to message 1. Messages from live updates and
-`tg send` add no range, because nothing says what sits next to them.
+ranges merge. A page of the newest messages below an ID also covers up to that ID, or only up to
+the chat's newest known message (the highest of its cached messages, the dialog list's top, the
+sync state's top and its ranges) when that is lower; a page of the chat's newest messages covers
+up to that known message too. The known message is read before the request is sent: Telegram
+gives a new message a higher ID than every message the chat had, so only a message known before
+the request proves that nothing can still arrive below it. An empty page of the newest messages
+records the chat as empty (the range 1 to 0). A page that ran out of older messages covers down
+to message 1. Messages from live updates and `tg send` add no range, because nothing says what
+sits next to them.
 
 1. Find the page's anchor: just below `--before`, or the newest cached message, when paging back;
    just above `--after` when paging forward
@@ -128,6 +134,12 @@ from the cache; otherwise one `messages.getHistory` call fetches the message wit
 around it. If that call fails, or Telegram no longer returns the message, a cached message comes
 from the cache with the context its ranges hold, as a cached deleted message always does. Only
 `--fresh` reports the failure.
+
+`tg messages list --type/--since/--until` never takes step 3: it reads the cache only, in one
+read transaction, and says with `complete` whether one range holds the whole filtered page up to
+the chat's newest known message; if not, `missing` says why and `next` has the unfiltered page
+that fills the newest gap, then the filtered page again (see
+[cli-commands.md](cli-commands.md#filtering-a-chat)).
 
 `--fresh` always takes step 3. Fetched pages are searchable right away. The CLI doesn't move the
 daemon's sync cursors and never infers deletions, and backfill doesn't read progress from cached

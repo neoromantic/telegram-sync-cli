@@ -68,31 +68,48 @@ describe("spacedFlagValues", () => {
   });
 });
 
+const SEND_ARGS = sendCommand.args as ArgsDef;
+
 describe("flagValues", () => {
   it("collects --name value and --name=value", () => {
     expect(
-      flagValues(["--to", "me", "--file", "a.pdf", "--caption", "x", "--file=b.png"], "file"),
+      flagValues(
+        ["--to", "me", "--file", "a.pdf", "--caption", "x", "--file=b.png"],
+        "file",
+        SEND_ARGS,
+      ),
     ).toEqual(["a.pdf", "b.png"]);
   });
 
   it("stops at a bare --", () => {
-    expect(flagValues(["--file", "a.pdf", "--", "--file", "b"], "file")).toEqual(["a.pdf"]);
+    expect(flagValues(["--file", "a.pdf", "--", "--file", "b"], "file", SEND_ARGS)).toEqual([
+      "a.pdf",
+    ]);
   });
 
   it("takes the next argument as the value, and counts a flag without one", () => {
-    expect(flagValues(["--file", "--file"], "file")).toEqual(["--file"]);
-    expect(flagValues(["--to", "me", "--file"], "file")).toEqual([""]);
+    expect(flagValues(["--file", "--file"], "file", SEND_ARGS)).toEqual(["--file"]);
+    expect(flagValues(["--to", "me", "--file"], "file", SEND_ARGS)).toEqual([""]);
+  });
+
+  it("skips the value of another string flag, as citty does", () => {
+    expect(flagValues(["--caption", "--file=a.pdf", "-m", "--file"], "file", SEND_ARGS)).toEqual(
+      [],
+    );
+    expect(flagValues(["--caption=--file=a.pdf", "--file", "b.png"], "file", SEND_ARGS)).toEqual([
+      "b.png",
+    ]);
   });
 
   it("ignores other flags with the same prefix", () => {
-    expect(flagValues(["--files", "a", "--file-name=b"], "file")).toEqual([]);
+    expect(flagValues(["--files", "a", "--file-name=b"], "file", SEND_ARGS)).toEqual([]);
   });
 
   it("finds the values citty drops: it keeps only the last one", () => {
     const argv = ["--to", "me", "--file", "a.pdf", "--file", "b.png"];
     const args = parseArgs(argv, sendCommand.args as ArgsDef) as Record<string, unknown>;
     expect(args.file).toBe("b.png");
-    expect(flagValues(argv, "file")).toEqual(["a.pdf", "b.png"]);
+    expect(flagValues(argv, "file", SEND_ARGS)).toEqual(["a.pdf", "b.png"]);
   });
 });
 

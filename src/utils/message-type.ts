@@ -17,6 +17,35 @@ export const MESSAGE_TYPE_BY_MEDIA_TYPE: Record<string, string> = {
   dice: "dice",
 };
 
+/**
+ * What `--type` takes: every message_type the writers store, plus the
+ * attachment kinds that message_type calls `video` (round video messages
+ * and GIFs), matched on message_attachments.kind
+ */
+export const MESSAGE_TYPE_FILTERS = [
+  "text",
+  "photo",
+  "video",
+  "round",
+  "animation",
+  "document",
+  "sticker",
+  "voice",
+  "audio",
+  "poll",
+  "contact",
+  "location",
+  "venue",
+  "game",
+  "invoice",
+  "webpage",
+  "dice",
+  "service",
+  "unknown",
+] as const;
+
+export const ATTACHMENT_KIND_FILTERS: readonly string[] = ["round", "animation"];
+
 /** The cached message_type of a message whose media has this mtcute type */
 export function messageTypeOfMediaType(type: string | undefined | null) {
   return (type && MESSAGE_TYPE_BY_MEDIA_TYPE[type]) || "unknown";
