@@ -1,6 +1,12 @@
+import type { Database } from "bun:sqlite";
 import type { TelegramClient, tl } from "@mtcute/bun";
 
-import type { ChatProtectionReason, ChatProtectionRow } from "../../db/chat-protection";
+import {
+  type ChatProtectionReason,
+  type ChatProtectionRow,
+  createChatProtectionStore,
+} from "../../db/chat-protection";
+import { createChatsCache } from "../../db/chats-cache";
 import { toPeerIdFromRawChat } from "../../utils/telegram-peer-ids";
 import type { HistoryChat } from "../messages/history";
 import type { FetchedRawMessage } from "./fetch";
@@ -82,20 +88,21 @@ export function knownChatProtection(
 }
 
 /**
- * Protection known without Telegram: the message's flags in its raw_json,
- * then the chat's (knownChatProtection)
+ * Protection known without Telegram, from the account's cache: the
+ * message's flags in its raw_json, then the chat's (knownChatProtection).
+ * The one offline rule for reading a message's media or its transcript.
  */
-export function checkCachedProtection(
-  messageRawJson: string,
-  chat: CachedChatState | null,
-  stored: ChatProtectionRow | null,
-) {
-  const message = messageProtection(parseJson(messageRawJson));
-  if (message.protected) {
-    const result: ProtectionResult = message;
-    return result;
-  }
-  return knownChatProtection(chat, stored);
+export function cachedProtection(db: Database) {
+  const chats = createChatsCache(db);
+  const stored = createChatProtectionStore(db);
+  return (chatId: number, messageRawJson: string) => {
+    const message = messageProtection(parseJson(messageRawJson));
+    if (message.protected) {
+      const result: ProtectionResult = message;
+      return result;
+    }
+    return knownChatProtection(chats.getById(String(chatId)), stored.get(chatId));
+  };
 }
 
 export function privateChatProtection(

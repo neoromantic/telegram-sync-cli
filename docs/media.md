@@ -2,9 +2,10 @@
 
 > **Status: Implemented**
 
-`tg send --file` sends one file. `tg media download` saves the files of one or more messages
-into the account's media cache and prints their paths. `tg messages list`, `get` and `search` show what file each
-message has. The daemon downloads and uploads nothing.
+`tg send --file` sends one file. `tg media download` saves one or more files into the account's
+media cache and prints their paths. `tg media transcribe` turns voice notes and video notes into
+text with a program on this machine. `tg messages list`, `get` and `search` show what file each
+message has, and its transcript. The daemon downloads, uploads and transcribes nothing.
 
 ## Attachments
 
@@ -35,7 +36,8 @@ Every message item has `attachment`: the message's file, or `null` when it has n
 
 `tg` reads it from the message's `raw_json` when it prints the item, so messages cached by
 older versions have it too. Polls, locations, contacts and dice have no file:
-`attachment: null`.
+`attachment: null`. A voice note or video note also shows its stored text in `transcript`
+([Transcribe](#transcribe)).
 
 For `tg sql`, the table `message_attachments` has one row per cached message with a file,
 written with the message. Messages cached by 0.6.0 and older get theirs from a
@@ -199,6 +201,187 @@ else its smallest size; the largest preview of a document. It goes into the same
 as `thumb-<type>.jpg` (`.webp` for stickers). A file without a preview is `NO_MEDIA` with
 `details.reason: "no_thumbnail"`.
 
+## Transcribe
+
+```bash
+tg media transcribe --chat me --id 42                      # one voice note or video note
+tg media transcribe --chat @examplegroup --id 7 --id 9 --id 12
+tg media transcribe --chat me --id 42 --language ru        # skip language detection
+tg media transcribe --chat me --id 42 --force              # transcribe again
+```
+
+Output for one `--id`:
+
+```json
+{
+  "success": true,
+  "data": {
+    "chatId": 5550001,
+    "messageId": 42,
+    "text": "Meet me at the harbor at eight.",
+    "language": "en",
+    "source": "local",
+    "runner": "whisper-cli",
+    "model": "ggml-large-v3-turbo-q5_0.bin",
+    "cached": false
+  }
+}
+```
+
+With several `--id`, one compact JSON line per message, in `--id` order: `{"success":true,
+"data":{…}}`, or the error schema with `chatId` and `messageId` in `details`. One message
+failing doesn't stop the others; the run exits 1 when any failed and says how many on stderr.
+
+- `cached: true`: the transcript was stored already, by an earlier run or for the same file in
+  another message (a forward), and no program ran. A stored transcript counts only for the file
+  the message holds now: after the attachment changes, the message is transcribed again, and
+  `tg messages` shows no transcript until then. `--force` transcribes again.
+- `language` is what the program detected, or `--language` (else `transcribe.language`).
+- `runner` is the program that ran and `model` the model it used (for whisper.cpp the model
+  file's name), so a slow run says what it ran. `source` is `local`.
+- Silent audio (a peak below -60 dB, digital silence) is stored as `text: ""` with `language`,
+  `runner` and `model` `null`, without running the program: Whisper models answer silence with
+  invented phrases such as "Thank you.". Audio that holds only noise still goes to the program
+  and can come back as a short invented phrase.
+- Only voice notes (`voice`) and video notes (`round`) are transcribed; any other message is
+  `MEDIA_UNSUPPORTED` with `details.reason: "not_speech"`, before any of its file is
+  downloaded. A file `tg media download` would refuse, such as a content-protected one, is
+  refused with the same error, even when a transcript or the file is stored already. The check
+  runs again before a transcript is saved: a message whose file changed meanwhile is
+  `GENERAL_ERROR` with `details.reason: "attachment_changed"` (retryable), and one that became
+  protected is `CONTENT_PROTECTED`; neither is stored.
+- A transcript is stored only for a message in the cache. A message of a group the cache keeps
+  out ([sync rules](sync-strategy.md)) is printed and not stored.
+- Ctrl-C, SIGTERM or SIGHUP stops the download, ffmpeg or the program, removes the converted
+  audio and exits 130, also when the program had just finished: the results of that call are
+  not stored or printed. A second Ctrl-C exits at once, still removing the converted audio.
+  Transcripts finished before it stay stored.
+- Every `tg messages` item has `transcript`: `{ text, language, source, model }` for a voice or
+  video note that has one, else `null`. It is `null` too once the cache knows the message or its
+  chat is content-protected, by the same offline check `tg media transcribe` makes; the stored
+  row stays. For `tg sql` the table is
+  [`message_transcripts`](database-schema.md#table-message_transcripts). Transcripts are not
+  in the search index yet.
+
+### Setup
+
+tg doesn't ship or download a speech-to-text program or model. It runs one you installed, and
+needs [ffmpeg](https://ffmpeg.org): Telegram's voice notes are OGG/Opus and video notes MP4,
+so tg converts each to 16 kHz mono WAV first.
+
+| Program                                              | Install                               | Model                                                         |
+| ---------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| whisper.cpp (`whisper-cli`), macOS, Linux, Windows   | `brew install whisper-cpp ffmpeg`     | a model file you download and name in `transcribe.model`      |
+| mlx-whisper (`mlx_whisper`), faster on Apple Silicon | `uv tool install mlx-whisper`         | downloads `mlx-community/whisper-large-v3-turbo` on first use |
+| whisper-ctranslate2, openai-whisper (`whisper`)      | `uv tool install whisper-ctranslate2` | downloads `large-v3-turbo` on first use                       |
+
+whisper.cpp is the one native program packaged for all three systems, so it is the first
+choice. Its models are on Hugging Face at
+[ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp): `ggml-large-v3-turbo-q5_0.bin`
+is 574 MB, `ggml-large-v3-turbo.bin` 1.6 GB. tg never downloads one; the errors print the
+commands. They put the model in the user's cache directory (`$XDG_CACHE_HOME`, else `~/.cache`),
+not in tg's data directory, because other programs can use the same file:
+
+```bash
+curl -L --create-dirs -o ~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
+tg config set transcribe.model ~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin
+```
+
+Without `transcribe.command`, tg looks on `PATH` for `whisper-cli`, `mlx_whisper`,
+`whisper-ctranslate2` and `whisper`, in that order. With it, tg runs that program: one named
+`whisper-cli` as whisper.cpp, any other as an openai-whisper-compatible CLI (`-o <dir> -f json`
+and `--model`, `--language`). `transcribe.model` sets the model for any of them.
+
+Each setup problem is an error whose `suggestion` holds the commands to run:
+
+| Problem                                            | Error                                                                                         | `suggestion`                                                                                                                                                       |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| no program on `PATH`                               | `TRANSCRIBER_NOT_FOUND` (exit 1), `details: { searched, runner: null, ffmpeg }`               | the install command for this OS; for whisper.cpp also the model download and `tg config set transcribe.model` (on Apple Silicon, mlx-whisper as the faster option) |
+| no ffmpeg                                          | `TRANSCRIBER_NOT_FOUND`, `details.ffmpeg: null`                                               | `brew install ffmpeg` (Windows: install it and put it on `PATH`)                                                                                                   |
+| whisper.cpp, `transcribe.model` not set            | `INVALID_ARGS` (exit 3), `details: { runner, model: null }`                                   | the `curl` download into `~/.cache/whisper-cli/` and the `tg config set` for that path                                                                             |
+| whisper.cpp, model file missing or unreadable      | `INVALID_ARGS`, `details: { runner, model }`                                                  | the `curl` download to that path                                                                                                                                   |
+| the program exited non-zero or wrote no transcript | `GENERAL_ERROR` for that message, `details: { runner, exitCode, stderr }` (the last 20 lines) | none                                                                                                                                                               |
+
+A setup problem fails each message that still needs the program, and each message the cache
+doesn't hold before Telegram is asked for it, with `chatId` and `messageId` in `details`;
+messages answered from stored transcripts in the same run are printed as usual.
+
+Example, on Linux with ffmpeg but no program:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "TRANSCRIBER_NOT_FOUND",
+    "message": "No speech-to-text program found on PATH",
+    "details": {
+      "searched": ["whisper-cli", "mlx_whisper", "whisper-ctranslate2", "whisper"],
+      "runner": null,
+      "ffmpeg": "/usr/bin/ffmpeg"
+    },
+    "suggestion": "Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.model /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin",
+    "retryable": false
+  }
+}
+```
+
+A run starts the program once for all its messages, so the model loads once. mlx_whisper is
+the exception: it writes every result of one run under the first file's name, so tg runs it
+once per file. On an M4 Pro, nine test clips (295 s of English and Russian speech) took 31 s
+with mlx-whisper, 38 s with whisper.cpp (large-v3-turbo-q5_0) and 281 s with openai-whisper on
+the CPU, each in one process.
+
+### Providers
+
+A source of transcripts is a provider. Every provider implements one protocol
+(`src/commands/media/transcription-provider.ts`), and one pipeline
+(`transcription-pipeline.ts`) runs the same steps for each, in this order:
+
+1. Eligibility: the message's attachment as it is now, from the cache or fetched from
+   Telegram, checked as `tg media download` checks it (content protection), and only voice
+   and video notes. A message the cache doesn't hold is fetched only when the provider is
+   ready; otherwise it fails with the setup problem.
+2. Reuse: a stored transcript of that message for the same file, else of the same file in
+   another message.
+3. Setup: the provider's readiness; a problem fails the messages still pending.
+4. Limits: audio longer than the provider takes is refused before it is fetched.
+5. Audio, only for a provider that reads audio: the file through `tg media download`'s path,
+   handed over as stored when the provider takes the original, else converted by ffmpeg to
+   16 kHz mono WAV in a temporary directory. Digital silence is found in that conversion and
+   stored as empty text without calling the provider.
+6. The provider, in batches of its size, with up to its number of calls at once.
+7. Each result saved as soon as it exists, after the eligibility check runs again.
+
+The temporary directory is removed on success, failure and interrupt.
+
+Before anything runs, a provider declares:
+
+- `sendsTo`: where the audio (or the message reference) goes; `null` keeps it on this machine
+- `cost`: `free`, or `paid` when a request can cost money
+- `input`: the message itself (no download), or audio in the formats it takes (`original`,
+  `wav16k`)
+- `batchSize`, `concurrency` and `maxDurationSeconds`
+- `engine` and `model`, stored as `runner` and `model`, and its `id`, stored as `source`
+
+A provider answers each request with the text, language and model, or a failure that says
+whether trying again can work: `rejected` (it won't as it is; reported as not retryable, whatever
+the error), `retry_later` (a rate limit, a result not ready yet; reported as retryable) or
+`outcome_unknown` (the request may have been accepted and billed, so it is reported with
+`details.outcome: "unknown"`, not retryable, and nothing is stored).
+
+Only the local provider exists: the programs above, which take WAV, cost nothing and send
+nothing anywhere. The `transcribe.*` keys configure it.
+
+### Where the audio goes
+
+The file is downloaded from Telegram into the account's media cache, as `tg media download`
+does, converted by ffmpeg in a temporary directory that is removed afterwards, and given to
+the program on this machine. Nothing leaves the machine, except that mlx-whisper,
+whisper-ctranslate2 and openai-whisper download their model from Hugging Face or OpenAI on
+first use. tg never downloads a model. Telegram's own transcription and external services are
+not used.
+
 ## Content protection
 
 Telegram's [content protection](https://core.telegram.org/api/content-protection) forbids saving
@@ -297,8 +480,9 @@ tg send --to @username --file ./photo.jpg --force-document
 - The daemon downloads nothing.
 - Follow-ups: attachment names in search
   ([#94](https://github.com/neoromantic/telegram-sync-cli/issues/94)), background downloads with
-  a disk quota ([#99](https://github.com/neoromantic/telegram-sync-cli/issues/99)), voice
-  transcription ([#102](https://github.com/neoromantic/telegram-sync-cli/issues/102)), text from
+  a disk quota ([#99](https://github.com/neoromantic/telegram-sync-cli/issues/99)), Telegram's
+  own transcription and searching transcripts
+  ([#102](https://github.com/neoromantic/telegram-sync-cli/issues/102)), text from
   documents and images ([#103](https://github.com/neoromantic/telegram-sync-cli/issues/103)),
   filters for batch downloads (`--type`, `--since`, `--until`, `--limit`) and defaults in
   `config.json` ([#104](https://github.com/neoromantic/telegram-sync-cli/issues/104)) and
