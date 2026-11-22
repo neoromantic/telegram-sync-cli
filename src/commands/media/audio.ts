@@ -1,4 +1,5 @@
 import { ErrorCodes } from "../../types";
+import { runLocalProcess } from "./local-process";
 import { MediaError } from "./errors";
 
 /** Below this peak the audio is digital silence, which Whisper fills with invented phrases */
@@ -20,7 +21,9 @@ export async function convertToWav(
   wav: string,
   signal: AbortSignal,
 ) {
-  const proc = Bun.spawn(
+  let peakDb: number | undefined;
+  let carry = "";
+  const { stderr, exitCode } = await runLocalProcess(
     [
       ffmpeg,
       "-nostdin",
@@ -38,17 +41,20 @@ export async function convertToWav(
       "volumedetect",
       wav,
     ],
-    { stdin: "ignore", stdout: "ignore", stderr: "pipe", signal },
+    signal,
+    (chunk) => {
+      const text = carry + chunk;
+      const match = text.match(/max_volume:\s*(-?[\d.]+|-inf)\s*dB/);
+      if (match) peakDb = match[1] === "-inf" ? -Infinity : Number(match[1]);
+      carry = text.slice(-64);
+    },
   );
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-  signal.throwIfAborted();
-  const peak = stderr.match(/max_volume:\s*(-?[\d.]+|-inf)\s*dB/);
-  if (exitCode !== 0 || !peak) {
+  if (exitCode !== 0 || peakDb === undefined) {
     throw new MediaError(ErrorCodes.GENERAL_ERROR, "ffmpeg could not convert the audio", {
       program: ffmpeg,
       exitCode,
       stderr: tail(stderr),
     });
   }
-  return peak[1] === "-inf" ? -Infinity : Number(peak[1]);
+  return peakDb;
 }

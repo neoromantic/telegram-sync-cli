@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { rmSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -148,6 +149,7 @@ export async function transcribeMessages(
   const chat = await resolveHistoryChat(history.client, chatArg, history);
   const { chatId } = chat;
   const expected = new Map<number, string>();
+  const previouslyCached = new Set<number>();
   const outcomes = new Map<number, TranscribeOutcome>();
   const fail = (messageId: number, err: MediaError) =>
     outcomes.set(messageId, withMessage(err, chatId, messageId));
@@ -155,7 +157,12 @@ export async function transcribeMessages(
   function currentAttachment(messageId: number, fileId: string) {
     try {
       const current = readCachedAttachment(download, chat, messageId);
-      if (current && current.uniqueFileId !== fileId) return attachmentChanged(chatId, messageId);
+      if (
+        current
+          ? current.uniqueFileId !== fileId || !SPEECH_KINDS.has(current.kind)
+          : previouslyCached.has(messageId)
+      )
+        return attachmentChanged(chatId, messageId);
       return current;
     } catch (err) {
       if (!(err instanceof MediaError)) throw err;
@@ -163,36 +170,39 @@ export async function transcribeMessages(
     }
   }
 
-  const save = (
-    request: Pick<TranscriptionRequest, "messageId" | "uniqueFileId">,
-    fields: TranscriptFields,
-    cached = false,
-  ) => {
-    const { messageId, uniqueFileId } = request;
-    const row: MessageTranscriptRow = {
-      chat_id: chatId,
-      message_id: messageId,
-      unique_file_id: uniqueFileId,
-      ...fields,
-    };
-    const current = currentAttachment(messageId, uniqueFileId);
-    if (current instanceof MediaError) return current;
-    if (!current) return toResult(row, cached);
-    store.save(row);
-    return toResult(row, cached);
-  };
+  const save = cacheDb.transaction(
+    (
+      request: Pick<TranscriptionRequest, "messageId" | "uniqueFileId">,
+      fields: TranscriptFields,
+      cached = false,
+    ) => {
+      const { messageId, uniqueFileId } = request;
+      const row: MessageTranscriptRow = {
+        chat_id: chatId,
+        message_id: messageId,
+        unique_file_id: uniqueFileId,
+        ...fields,
+      };
+      const current = currentAttachment(messageId, uniqueFileId);
+      if (current instanceof MediaError) return current;
+      if (!current) return toResult(row, cached);
+      store.save(row);
+      return toResult(row, cached);
+    },
+  ).immediate;
 
   const pending: Pending[] = [];
   for (const messageId of messageIds) {
     download.signal.throwIfAborted();
     let item: Pending;
     try {
-      const checked = await checkedAttachment(download, chat, messageId, setup.ready);
-      if (!checked && !setup.ready) {
-        fail(messageId, setup.problem);
-        continue;
-      }
-      if (!checked) throw new Error("Ready provider skipped attachment check");
+      const checked = await checkedAttachment(
+        download,
+        chat,
+        messageId,
+        setup.ready ? null : setup.problem,
+      );
+      if (!checked.prepared) previouslyCached.add(messageId);
       item = { messageId, ...checked };
     } catch (err) {
       if (!(err instanceof MediaError)) throw err;
@@ -227,11 +237,18 @@ export async function transcribeMessages(
   }
   return messageIds.map((id) => {
     const outcome = outcomes.get(id)!;
-    const result = outcome instanceof MediaError ? outcome : currentAttachment(id, expected.get(id)!);
+    const result =
+      outcome instanceof MediaError ? outcome : currentAttachment(id, expected.get(id)!);
     if (!(result instanceof MediaError)) return outcome;
     if (!result.suggestion?.includes("--fresh")) return result;
     const account = history.accountId === undefined ? "" : ` --account ${history.accountId}`;
-    return new MediaError(result.code, result.message, result.details, `Refresh the cached attachment with tg media download --chat ${chatId} --id ${id}${account} --fresh`, result.retryable);
+    return new MediaError(
+      result.code,
+      result.message,
+      result.details,
+      `Refresh the cached attachment with tg media download --chat ${chatId} --id ${id}${account} --fresh`,
+      result.retryable,
+    );
   });
 
   async function runProvider(ready: Extract<ProviderSetup, { ready: true }>, items: Pending[]) {
@@ -265,18 +282,27 @@ export async function transcribeMessages(
     const format = preparedFormat(input.formats);
     const tmp =
       format === "wav16k" ? await mkdtemp(join(deps.tmpRoot ?? tmpdir(), "tg-transcribe-")) : null;
+    const cleanup = () => {
+      if (tmp) rmSync(tmp, { recursive: true, force: true });
+    };
+    if (tmp) process.once("exit", cleanup);
     try {
       for (const [index, item] of allowed.entries()) {
         signal.throwIfAborted();
         const { messageId } = item;
         try {
-          const file = await downloadResolved(download, chat, {
-            expectedFileId: item.attachment.uniqueFileId,
-            chat: chatArg,
-            messageId,
-            thumb: false,
-            fresh: false,
-          }, item.prepared);
+          const file = await downloadResolved(
+            download,
+            chat,
+            {
+              expectedAttachment: item.attachment,
+              chat: chatArg,
+              messageId,
+              thumb: false,
+              fresh: false,
+            },
+            item.prepared,
+          );
           if (format === "original") {
             toRun.push(
               requestFor(item, {
@@ -314,7 +340,8 @@ export async function transcribeMessages(
       }
       if (toRun.length > 0) await runBatches(provider, toRun);
     } finally {
-      if (tmp) await rm(tmp, { recursive: true, force: true });
+      process.off("exit", cleanup);
+      cleanup();
     }
   }
 
@@ -336,34 +363,61 @@ export async function transcribeMessages(
       const files = `${requests.length} file${requests.length === 1 ? "" : "s"}`;
       info(`Transcribing ${files} with ${engine}${model ? ` (${model})` : ""}`);
     }
-    const batches = chunk(requests, batchSize);
+    const groups = new Map<string | number, TranscriptionRequest[]>();
+    for (const request of requests) {
+      const key =
+        provider.declaration.input.kind === "audio" ? request.uniqueFileId : request.messageId;
+      const group = groups.get(key);
+      if (group) group.push(request);
+      else groups.set(key, [request]);
+    }
+    const batches = chunk([...groups.values()], batchSize);
     let next = 0;
     const worker = async () => {
       for (let batch = batches[next++]; batch; batch = batches[next++]) {
         signal.throwIfAborted();
-        const results = await provider.transcribe(batch, {
-          language: deps.language,
-          signal,
-        });
+        const eligible = batch
+          .map((group) =>
+            group.filter((request) => {
+              const current = currentAttachment(request.messageId, request.uniqueFileId);
+              if (!(current instanceof MediaError)) return true;
+              fail(request.messageId, current);
+              return false;
+            }),
+          )
+          .filter((group) => group.length);
+        if (!eligible.length) continue;
+        const results = await provider.transcribe(
+          eligible.map((group) => group[0]!),
+          {
+            language: deps.language,
+            signal,
+          },
+        );
         signal.throwIfAborted();
-        for (const [i, request] of batch.entries()) {
+        for (const [i, group] of eligible.entries()) {
           const result = results[i]!;
-          outcomes.set(
-            request.messageId,
-            result.status === "done"
-              ? save(request, {
-                  text: result.text,
-                  language: result.language,
-                  source: provider.declaration.id,
-                  runner: engine,
-                  model: result.model,
-                  transcribed_at: now(),
-                })
-              : failureError(result, chatId, request.messageId),
-          );
+          for (const request of group) {
+            outcomes.set(
+              request.messageId,
+              result.status === "done"
+                ? save(request, {
+                    text: result.text,
+                    language: result.language,
+                    source: provider.declaration.id,
+                    runner: engine,
+                    model: result.model ?? model,
+                    transcribed_at: now(),
+                  })
+                : failureError(result, chatId, request.messageId),
+            );
+          }
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(concurrency, batches.length) }, worker));
+    const workers = await Promise.allSettled(
+      Array.from({ length: Math.min(concurrency, batches.length) }, worker),
+    );
+    for (const result of workers) if (result.status === "rejected") throw result.reason;
   }
 }

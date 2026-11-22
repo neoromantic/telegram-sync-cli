@@ -2,8 +2,10 @@ import { accessSync, constants, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import type { TranscribeConfigFile } from "../../config";
+import type { LocalTranscribeConfig } from "../../config";
 import { ErrorCodes } from "../../types";
+import { shellQuote } from "../next";
+import { runLocalProcess } from "./local-process";
 import { tail } from "./audio";
 import { MediaError } from "./errors";
 import type {
@@ -49,16 +51,12 @@ const WHISPER_CPP_MODEL = {
   size: "574 MB",
 };
 
-function shellArg(path: string) {
-  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
-}
-
 function downloadCommand(file: string) {
-  return `curl -L --create-dirs -o ${shellArg(file)} ${WHISPER_CPP_MODEL.url}`;
+  return `curl -L --create-dirs -o ${shellQuote(file)} ${WHISPER_CPP_MODEL.url}`;
 }
 
 function modelCommands(file: string) {
-  return `download the ${WHISPER_CPP_MODEL.size} model and point tg at it: ${downloadCommand(file)} && tg config set transcribe.model ${shellArg(file)}`;
+  return `download the ${WHISPER_CPP_MODEL.size} model and point tg at it: ${downloadCommand(file)} && tg config set transcribe.local.model ${shellQuote(file)}`;
 }
 
 /**
@@ -81,7 +79,7 @@ function readable(path: string) {
 }
 
 function findTranscriber(
-  config: TranscribeConfigFile,
+  config: LocalTranscribeConfig,
   suggestedModel: string,
   which: (name: string) => string | null = (name) => Bun.which(name),
 ) {
@@ -103,9 +101,9 @@ function findTranscriber(
     if (!model) {
       return {
         invalid: new MediaError(
-          ErrorCodes.INVALID_ARGS,
-          "whisper.cpp needs a model file: transcribe.model is not set",
-          { runner: path, model: null },
+          ErrorCodes.TRANSCRIBER_NOT_FOUND,
+          "whisper.cpp needs a model file: transcribe.local.model is not set",
+          { runnerPath: path, model: null },
           `Run whisper.cpp with a model: ${modelCommands(suggestedModel)}`,
         ),
       } satisfies FindResult;
@@ -115,7 +113,7 @@ function findTranscriber(
         invalid: new MediaError(
           ErrorCodes.INVALID_ARGS,
           `whisper.cpp model file not found or not readable: ${model}`,
-          { runner: path, model },
+          { runnerPath: path, model },
           `Download the ${WHISPER_CPP_MODEL.size} model to that path: ${downloadCommand(model)}`,
         ),
       } satisfies FindResult;
@@ -179,7 +177,11 @@ export function parseWhisperCppJson(json: unknown) {
     throw new Error("expected an object with a transcription array");
   }
   const text = json.transcription
-    .map((segment) => (isRecord(segment) && typeof segment.text === "string" ? segment.text : ""))
+    .map((segment) => {
+      if (!isRecord(segment) || typeof segment.text !== "string")
+        throw new Error("expected a text string in each segment");
+      return segment.text;
+    })
     .join("")
     .trim();
   const language = isRecord(json.result) ? json.result.language : undefined;
@@ -218,14 +220,16 @@ async function runProgram(
   signal: AbortSignal,
 ) {
   const outDir = dirname(wavs[0]!);
-  const proc = Bun.spawn(runnerArgs(runner, wavs, outDir, language), {
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "pipe",
-    signal,
-  });
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-  signal.throwIfAborted();
+  let run: Awaited<ReturnType<typeof runLocalProcess>>;
+  try {
+    run = await runLocalProcess(runnerArgs(runner, wavs, outDir, language), signal);
+  } catch (err) {
+    if (!(err instanceof MediaError)) throw err;
+    return wavs.map(
+      () => ({ status: "failed", failure: "rejected", error: err }) satisfies ProviderResult,
+    );
+  }
+  const { stderr, exitCode } = run;
   const results: ProviderResult[] = [];
   for (const wav of wavs) {
     const file = Bun.file(outputPath(runner, wav, outDir));
@@ -234,7 +238,12 @@ async function runProgram(
       const json: unknown = await file.json();
       const transcript =
         runner.shape === "whisper.cpp" ? parseWhisperCppJson(json) : parseOpenAiWhisperJson(json);
-      results.push({ status: "done", ...transcript, model: runner.modelName });
+      results.push({
+        status: "done",
+        ...transcript,
+        language: transcript.language ?? language,
+        model: runner.modelName,
+      });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       results.push({
@@ -243,7 +252,7 @@ async function runProgram(
         error: new MediaError(
           ErrorCodes.GENERAL_ERROR,
           `${runner.name} produced no transcript: ${reason}`,
-          { runner: runner.path, exitCode, stderr: tail(stderr) },
+          { runnerPath: runner.path, exitCode, stderr: tail(stderr) },
         ),
       });
     }
@@ -286,17 +295,17 @@ function notFound(found: Extract<FindResult, { missing: true }>, suggestedModel:
   return new MediaError(
     ErrorCodes.TRANSCRIBER_NOT_FOUND,
     `${what} found on PATH`,
-    { searched: found.searched, runner: found.runner, ffmpeg: found.ffmpeg },
+    { searched: found.searched, runnerPath: found.runner, ffmpeg: found.ffmpeg },
     installSuggestion({ runner: !found.runner, ffmpeg: !found.ffmpeg }, suggestedModel),
   );
 }
 
 /**
- * The local provider for transcribe.command, or the first program on PATH,
+ * The local provider for transcribe.local.command, or the first program on PATH,
  * with ffmpeg for its WAV input; otherwise the problem and its fix
  */
 export function openLocalProvider(
-  config: TranscribeConfigFile,
+  config: LocalTranscribeConfig,
   suggestedModel = defaultModelPath(),
   which: (name: string) => string | null = (name) => Bun.which(name),
 ) {

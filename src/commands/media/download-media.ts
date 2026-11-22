@@ -90,7 +90,7 @@ export interface DownloadDeps {
 }
 
 export interface DownloadRequest {
-  expectedFileId?: string;
+  expectedAttachment?: Pick<AttachmentInfo, "uniqueFileId" | "kind">;
   chat: string;
   messageId: number;
   thumb: boolean;
@@ -284,7 +284,8 @@ export function readCachedAttachment(
   const target = readCachedTarget(deps, chat, { messageId, thumb: false });
   if (target) return target.info;
   const known = cachedProtection(deps.cacheDb)(chat.chatId, "{}");
-  if (known.protected) throw contentProtected(chat.chatId, messageId, known.reason, "pass --fresh to check again");
+  if (known.protected)
+    throw contentProtected(chat.chatId, messageId, known.reason, "pass --fresh to check again");
   return null;
 }
 
@@ -292,14 +293,19 @@ export function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: Do
   const cachedTarget = readCachedTarget(deps, chat, request);
   if (!cachedTarget) return null;
   const { info, thumb } = cachedTarget;
-  if (request.expectedFileId && request.expectedFileId !== info.uniqueFileId) throw attachmentChanged(chat.chatId, request.messageId);
+  checkExpectedAttachment(request, chat.chatId, info);
   const target = downloadTarget(deps.mediaDir, info, thumb);
   const file = findCachedFile(target.paths.file, target.expectedSize);
   if (!file) return null;
   touch(file.path);
   return toResult(
     target,
-    { chatId: chat.chatId, messageId: request.messageId, date: cachedTarget.date, groupedId: info.groupedId },
+    {
+      chatId: chat.chatId,
+      messageId: request.messageId,
+      date: cachedTarget.date,
+      groupedId: info.groupedId,
+    },
     file,
     { cached: true, resumedFrom: null },
   );
@@ -548,10 +554,15 @@ async function fetchCheckedTarget(
  * online. The eligibility `tg media download` applies, for callers that
  * may not need the file.
  */
-export async function checkedAttachment(deps: DownloadDeps, chat: HistoryChat, messageId: number, online: boolean) {
+export async function checkedAttachment(
+  deps: DownloadDeps,
+  chat: HistoryChat,
+  messageId: number,
+  offlineProblem: MediaError | null,
+) {
   const cached = readCachedAttachment(deps, chat, messageId);
-  if (cached) return { attachment: cached };
-  if (!online) return null;
+  if (cached) return { attachment: cached, prepared: undefined };
+  if (offlineProblem) throw offlineProblem;
   try {
     const request = { messageId, thumb: false };
     const prepared = await fetchCheckedTarget(deps, chat, request, await deps.getClient());
@@ -564,7 +575,13 @@ export async function checkedAttachment(deps: DownloadDeps, chat: HistoryChat, m
 
 export type CheckedTarget = Awaited<ReturnType<typeof fetchCheckedTarget>>;
 
-export async function downloadOnline(deps: DownloadDeps, chat: HistoryChat, request: DownloadRequest, first?: FetchedMessage, prepared?: CheckedTarget) {
+export async function downloadOnline(
+  deps: DownloadDeps,
+  chat: HistoryChat,
+  request: DownloadRequest,
+  first?: FetchedMessage,
+  prepared?: CheckedTarget,
+) {
   const { chatId } = chat;
   const { messageId } = request;
   const stallTimeoutMs = deps.stallTimeoutMs ?? STALL_TIMEOUT_MS;
@@ -572,8 +589,10 @@ export async function downloadOnline(deps: DownloadDeps, chat: HistoryChat, requ
   const client = await deps.getClient();
 
   for (let attempt = 1; ; attempt++) {
-    const { message, info, thumb } = (attempt === 1 && prepared) || await fetchCheckedTarget(deps, chat, request, client, attempt === 1 ? first : undefined);
-    if (request.expectedFileId && request.expectedFileId !== info.uniqueFileId) throw attachmentChanged(chatId, messageId);
+    const { message, info, thumb } =
+      (attempt === 1 && prepared) ||
+      (await fetchCheckedTarget(deps, chat, request, client, attempt === 1 ? first : undefined));
+    checkExpectedAttachment(request, chatId, info);
 
     const target = downloadTarget(deps.mediaDir, info, thumb);
     const ref = { chatId, messageId, date: message.date, groupedId: info.groupedId };
@@ -638,11 +657,29 @@ export async function downloadMedia(deps: DownloadDeps, request: DownloadRequest
   return downloadResolved(deps, chat, request);
 }
 
-export function attachmentChanged(chatId: number, messageId: number) {
-  return new MediaError(ErrorCodes.GENERAL_ERROR, "The attachment changed during transcription", { chatId, messageId, reason: "attachment_changed" }, "run the command again", true);
+function checkExpectedAttachment(request: DownloadRequest, chatId: number, info: AttachmentInfo) {
+  const expected = request.expectedAttachment;
+  if (expected && (info.uniqueFileId !== expected.uniqueFileId || info.kind !== expected.kind)) {
+    throw attachmentChanged(chatId, request.messageId);
+  }
 }
 
-export async function downloadResolved(deps: DownloadDeps, chat: HistoryChat, request: DownloadRequest, prepared?: CheckedTarget) {
+export function attachmentChanged(chatId: number, messageId: number) {
+  return new MediaError(
+    ErrorCodes.GENERAL_ERROR,
+    "The attachment changed during transcription",
+    { chatId, messageId, reason: "attachment_changed" },
+    "run the command again",
+    true,
+  );
+}
+
+export async function downloadResolved(
+  deps: DownloadDeps,
+  chat: HistoryChat,
+  request: DownloadRequest,
+  prepared?: CheckedTarget,
+) {
   if (!request.fresh) {
     const cached = readFromCache(deps, chat, request);
     if (cached) return cached;

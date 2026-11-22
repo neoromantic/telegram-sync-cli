@@ -261,8 +261,7 @@ failing doesn't stop the others; the run exits 1 when any failed and says how ma
   video note that has one, else `null`. It is `null` too once the cache knows the message or its
   chat is content-protected, by the same offline check `tg media transcribe` makes; the stored
   row stays. For `tg sql` the table is
-  [`message_transcripts`](database-schema.md#table-message_transcripts). Transcripts are not
-  in the search index yet.
+  [`message_transcripts`](database-schema.md#table-message_transcripts).
 
 ### Setup
 
@@ -270,11 +269,11 @@ tg doesn't ship or download a speech-to-text program or model. It runs one you i
 needs [ffmpeg](https://ffmpeg.org): Telegram's voice notes are OGG/Opus and video notes MP4,
 so tg converts each to 16 kHz mono WAV first.
 
-| Program                                              | Install                               | Model                                                         |
-| ---------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
-| whisper.cpp (`whisper-cli`), macOS, Linux, Windows   | `brew install whisper-cpp ffmpeg`     | a model file you download and name in `transcribe.model`      |
-| mlx-whisper (`mlx_whisper`), faster on Apple Silicon | `uv tool install mlx-whisper`         | downloads `mlx-community/whisper-large-v3-turbo` on first use |
-| whisper-ctranslate2, openai-whisper (`whisper`)      | `uv tool install whisper-ctranslate2` | downloads `large-v3-turbo` on first use                       |
+| Program                                              | Install                               | Model                                                          |
+| ---------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------- |
+| whisper.cpp (`whisper-cli`), macOS, Linux, Windows   | `brew install whisper-cpp ffmpeg`     | a model file you download and name in `transcribe.local.model` |
+| mlx-whisper (`mlx_whisper`), faster on Apple Silicon | `uv tool install mlx-whisper`         | downloads `mlx-community/whisper-large-v3-turbo` on first use  |
+| whisper-ctranslate2, openai-whisper (`whisper`)      | `uv tool install whisper-ctranslate2` | downloads `large-v3-turbo` on first use                        |
 
 whisper.cpp is the one native program packaged for all three systems, so it is the first
 choice. Its models are on Hugging Face at
@@ -286,23 +285,23 @@ not in tg's data directory, because other programs can use the same file:
 ```bash
 curl -L --create-dirs -o ~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
-tg config set transcribe.model ~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin
+tg config set transcribe.local.model ~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin
 ```
 
-Without `transcribe.command`, tg looks on `PATH` for `whisper-cli`, `mlx_whisper`,
+Without `transcribe.local.command`, tg looks on `PATH` for `whisper-cli`, `mlx_whisper`,
 `whisper-ctranslate2` and `whisper`, in that order. With it, tg runs that program: one named
 `whisper-cli` as whisper.cpp, any other as an openai-whisper-compatible CLI (`-o <dir> -f json`
-and `--model`, `--language`). `transcribe.model` sets the model for any of them.
+and `--model`, `--language`). `transcribe.local.model` sets the model for any of them.
 
 Each setup problem is an error whose `suggestion` holds the commands to run:
 
-| Problem                                            | Error                                                                                         | `suggestion`                                                                                                                                                       |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| no program on `PATH`                               | `TRANSCRIBER_NOT_FOUND` (exit 1), `details: { searched, runner: null, ffmpeg }`               | the install command for this OS; for whisper.cpp also the model download and `tg config set transcribe.model` (on Apple Silicon, mlx-whisper as the faster option) |
-| no ffmpeg                                          | `TRANSCRIBER_NOT_FOUND`, `details.ffmpeg: null`                                               | `brew install ffmpeg` (Windows: install it and put it on `PATH`)                                                                                                   |
-| whisper.cpp, `transcribe.model` not set            | `INVALID_ARGS` (exit 3), `details: { runner, model: null }`                                   | the `curl` download into `~/.cache/whisper-cli/` and the `tg config set` for that path                                                                             |
-| whisper.cpp, model file missing or unreadable      | `INVALID_ARGS`, `details: { runner, model }`                                                  | the `curl` download to that path                                                                                                                                   |
-| the program exited non-zero or wrote no transcript | `GENERAL_ERROR` for that message, `details: { runner, exitCode, stderr }` (the last 20 lines) | none                                                                                                                                                               |
+| Problem                                            | Error                                                                                             | `suggestion`                                                                                                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| no program on `PATH`                               | `TRANSCRIBER_NOT_FOUND` (exit 1), `details: { searched, runnerPath: null, ffmpeg }`               | the install command for this OS; for whisper.cpp also the model download and `tg config set transcribe.local.model` (on Apple Silicon, mlx-whisper as the faster option) |
+| no ffmpeg                                          | `TRANSCRIBER_NOT_FOUND`, `details.ffmpeg: null`                                                   | `brew install ffmpeg` (Windows: install it and put it on `PATH`)                                                                                                         |
+| whisper.cpp, `transcribe.local.model` not set      | `TRANSCRIBER_NOT_FOUND` (exit 1), `details: { runnerPath, model: null }`                          | the `curl` download into `~/.cache/whisper-cli/` and the `tg config set` for that path                                                                                   |
+| whisper.cpp, model file missing or unreadable      | `INVALID_ARGS`, `details: { runnerPath, model }`                                                  | the `curl` download to that path                                                                                                                                         |
+| the program exited non-zero or wrote no transcript | `GENERAL_ERROR` for that message, `details: { runnerPath, exitCode, stderr }` (the last 20 lines) | none                                                                                                                                                                     |
 
 A setup problem fails each message that still needs the program, and each message the cache
 doesn't hold before Telegram is asked for it, with `chatId` and `messageId` in `details`;
@@ -318,10 +317,10 @@ Example, on Linux with ffmpeg but no program:
     "message": "No speech-to-text program found on PATH",
     "details": {
       "searched": ["whisper-cli", "mlx_whisper", "whisper-ctranslate2", "whisper"],
-      "runner": null,
+      "runnerPath": null,
       "ffmpeg": "/usr/bin/ffmpeg"
     },
-    "suggestion": "Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.model /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin",
+    "suggestion": "Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.local.model /home/example/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin",
     "retryable": false
   }
 }
@@ -482,7 +481,7 @@ tg send --to @username --file ./photo.jpg --force-document
 - Follow-ups: attachment names in search
   ([#94](https://github.com/neoromantic/telegram-sync-cli/issues/94)), background downloads with
   a disk quota ([#99](https://github.com/neoromantic/telegram-sync-cli/issues/99)), Telegram's
-  own transcription and searching transcripts
+  own transcription and additional providers
   ([#102](https://github.com/neoromantic/telegram-sync-cli/issues/102)), text from
   documents and images ([#103](https://github.com/neoromantic/telegram-sync-cli/issues/103)),
   filters for batch downloads (`--type`, `--since`, `--until`, `--limit`) and defaults in

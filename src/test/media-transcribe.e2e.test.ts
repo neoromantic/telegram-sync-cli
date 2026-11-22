@@ -117,6 +117,29 @@ describe("E2E: media transcribe", () => {
     chmodSync(path, 0o755);
   }
 
+  function killIfRunning(pid: number) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ESRCH") throw err;
+    }
+  }
+
+  async function processStopped(pid: number) {
+    for (let i = 0; i < 40; i++) {
+      try {
+        process.kill(pid, 0);
+        if (process.platform === "linux" && /\) Z /.test(readFileSync(`/proc/${pid}/stat`, "utf8")))
+          return true;
+      } catch (err) {
+        if (["ESRCH", "ENOENT"].includes((err as NodeJS.ErrnoException).code ?? "")) return true;
+        throw err;
+      }
+      await Bun.sleep(25);
+    }
+    return false;
+  }
+
   function runnerCalls() {
     return readFileSync(logPath, "utf-8")
       .split("\n")
@@ -166,7 +189,10 @@ describe("E2E: media transcribe", () => {
   }
 
   function writeConfig(transcribe: Record<string, string>) {
-    writeFileSync(join(env.dataDir, "config.json"), JSON.stringify({ transcribe }));
+    writeFileSync(
+      join(env.dataDir, "config.json"),
+      JSON.stringify({ transcribe: { local: transcribe } }),
+    );
   }
 
   async function tg(args: string[], extraEnv: Record<string, string> = {}) {
@@ -391,19 +417,19 @@ describe("E2E: media transcribe", () => {
     const result = await transcribe("--id", "1");
 
     const model = join(cacheHome, "whisper-cli", "ggml-large-v3-turbo-q5_0.bin");
-    expect(result.exitCode).toBe(3);
+    expect(result.exitCode).toBe(1);
     expect(result.json).toEqual({
       success: false,
       error: {
-        code: "INVALID_ARGS",
-        message: "whisper.cpp needs a model file: transcribe.model is not set",
+        code: "TRANSCRIBER_NOT_FOUND",
+        message: "whisper.cpp needs a model file: transcribe.local.model is not set",
         details: {
           chatId: SELF_ID,
           messageId: 1,
-          runner: join(binDir, "whisper-cli"),
+          runnerPath: join(binDir, "whisper-cli"),
           model: null,
         },
-        suggestion: `Run whisper.cpp with a model: download the 574 MB model and point tg at it: curl -L --create-dirs -o ${model} ${MODEL_URL} && tg config set transcribe.model ${model}`,
+        suggestion: `Run whisper.cpp with a model: download the 574 MB model and point tg at it: curl -L --create-dirs -o ${model} ${MODEL_URL} && tg config set transcribe.local.model ${model}`,
         retryable: false,
       },
     });
@@ -450,7 +476,7 @@ describe("E2E: media transcribe", () => {
           details: {
             chatId: SELF_ID,
             messageId: 1,
-            runner: join(binDir, "whisper"),
+            runnerPath: join(binDir, "whisper"),
             exitCode: 2,
             stderr: "loading model\nRuntimeError: out of memory",
           },
@@ -520,7 +546,7 @@ describe("E2E: media transcribe", () => {
           chatId: SELF_ID,
           messageId: 1,
           searched: ["whisper-cli", "mlx_whisper", "whisper-ctranslate2", "whisper"],
-          runner: null,
+          runnerPath: null,
           ffmpeg: join(binDir, "ffmpeg"),
         },
         suggestion: installSuggestion({ runner: true, ffmpeg: false }, defaultModelPath(cacheHome)),
@@ -530,7 +556,7 @@ describe("E2E: media transcribe", () => {
     if (process.platform !== "win32") {
       const model = join(cacheHome, "whisper-cli", "ggml-large-v3-turbo-q5_0.bin");
       expect((result.json as { error: { suggestion: string } }).error.suggestion).toStartWith(
-        `Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o ${model} ${MODEL_URL} && tg config set transcribe.model ${model}`,
+        `Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o ${model} ${MODEL_URL} && tg config set transcribe.local.model ${model}`,
       );
     }
   });
@@ -546,7 +572,7 @@ describe("E2E: media transcribe", () => {
       error: {
         code: "TRANSCRIBER_NOT_FOUND",
         message: "No ffmpeg found on PATH",
-        details: { runner: join(binDir, "whisper"), ffmpeg: null },
+        details: { runnerPath: join(binDir, "whisper"), ffmpeg: null },
         suggestion:
           process.platform === "win32"
             ? "Install ffmpeg and put it on PATH"
@@ -555,7 +581,7 @@ describe("E2E: media transcribe", () => {
     });
   });
 
-  it("looks for transcribe.command instead of the list", async () => {
+  it("looks for transcribe.local.command instead of the list", async () => {
     install("ffmpeg", FAKE_FFMPEG);
     install("whisper", FAKE_OPENAI_RUNNER);
     writeConfig({ command: "example-whisper" });
@@ -587,7 +613,13 @@ describe("E2E: media transcribe", () => {
         details: { chatId: SELF_ID, messageId: 1, reason: "message" },
       },
     });
-    expect(result.json).toEqual(download.json);
+    expect(download.json).toMatchObject({ error: { code: "CONTENT_PROTECTED" } });
+    expect(result.json).toMatchObject({
+      error: {
+        code: "CONTENT_PROTECTED",
+        suggestion: expect.stringContaining("tg media download"),
+      },
+    });
     expect(readFileSync(logPath, "utf-8")).toBe("");
     expect(env.openCacheDb(1).query("SELECT 1 FROM message_transcripts").get()).toBeNull();
   });
@@ -676,12 +708,14 @@ describe("E2E: media transcribe", () => {
 
           expect(exitCode).toBe(130);
           expect(readdirSync(tmp)).toEqual([]);
-          if (!stubborn) expect(() => process.kill(childPid, 0)).toThrow();
+          expect(await processStopped(childPid)).toBe(true);
+          if (stubborn)
+            expect(await processStopped(Number(readFileSync(sleepPidFile, "utf-8")))).toBe(true);
           expect(env.openCacheDb(1).query("SELECT 1 FROM message_transcripts").get()).toBeNull();
         } finally {
           if (stubborn) {
             for (const pid of [childPid, Number(readFileSync(sleepPidFile, "utf-8"))]) {
-              process.kill(pid, "SIGKILL");
+              killIfRunning(pid);
             }
           }
         }
@@ -744,7 +778,13 @@ describe("E2E: media transcribe", () => {
       const download = await tg(["media", "download", "--chat", "me", "--id", "1"]);
 
       expect(byMessage.exitCode).toBe(1);
-      expect(byMessage.json).toEqual(download.json);
+      expect(download.json).toMatchObject({ error: { code: "CONTENT_PROTECTED" } });
+      expect(byMessage.json).toMatchObject({
+        error: {
+          code: "CONTENT_PROTECTED",
+          suggestion: expect.stringContaining("tg media download"),
+        },
+      });
       expect(byFile.json).toMatchObject({
         success: false,
         error: {

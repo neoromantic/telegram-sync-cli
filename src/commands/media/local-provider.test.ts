@@ -83,6 +83,9 @@ describe("parseWhisperCppJson", () => {
   });
 
   it("rejects output without a transcription array", () => {
+    expect(() => parseWhisperCppJson({ transcription: [{ text: "part" }, {}] })).toThrow(
+      "each segment",
+    );
     expect(() => parseWhisperCppJson(MLX_WHISPER_OUTPUT)).toThrow("transcription array");
   });
 });
@@ -146,7 +149,7 @@ describe("openLocalProvider", () => {
         message: "No ffmpeg found on PATH",
         details: {
           searched: ["whisper-cli", "mlx_whisper", "whisper-ctranslate2", "whisper"],
-          runner: "/bin/whisper",
+          runnerPath: "/bin/whisper",
           ffmpeg: null,
         },
       },
@@ -157,7 +160,7 @@ describe("openLocalProvider", () => {
       },
     });
     expect(open({ command: "my-whisper" }, on("whisper", "ffmpeg"))).toMatchObject({
-      problem: { details: { searched: ["my-whisper"], runner: null } },
+      problem: { details: { searched: ["my-whisper"], runnerPath: null } },
     });
   });
 
@@ -168,8 +171,8 @@ describe("openLocalProvider", () => {
       const which = on("whisper-cli", "ffmpeg");
       expect(open({}, which)).toMatchObject({
         problem: {
-          code: "INVALID_ARGS",
-          message: "whisper.cpp needs a model file: transcribe.model is not set",
+          code: "TRANSCRIBER_NOT_FOUND",
+          message: "whisper.cpp needs a model file: transcribe.local.model is not set",
         },
       });
       expect(open({ model }, which)).toMatchObject({
@@ -192,7 +195,7 @@ describe("installSuggestion", () => {
 
   it("names whisper.cpp, its model and the config command", () => {
     expect(installSuggestion(both, MODEL, "linux", "x64")).toBe(
-      `Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o ${MODEL} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.model ${MODEL}`,
+      `Install whisper.cpp: brew install whisper-cpp ffmpeg, then download the 574 MB model and point tg at it: curl -L --create-dirs -o ${MODEL} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin && tg config set transcribe.local.model ${MODEL}`,
     );
   });
 

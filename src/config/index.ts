@@ -41,8 +41,8 @@ export type ConfigLeafKey =
   | "cache.retention.failedJobs"
   | "sync.pacing.maxCallsPerSecond"
   | "sync.pacing.calmInterval"
-  | "transcribe.command"
-  | "transcribe.model"
+  | "transcribe.local.command"
+  | "transcribe.local.model"
   | "transcribe.language";
 
 const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
@@ -60,8 +60,8 @@ const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   "cache.retention.failedJobs": "positiveDuration",
   "sync.pacing.maxCallsPerSecond": "rate",
   "sync.pacing.calmInterval": "positiveDuration",
-  "transcribe.command": "string",
-  "transcribe.model": "string",
+  "transcribe.local.command": "string",
+  "transcribe.local.model": "string",
   "transcribe.language": "string",
 };
 
@@ -72,6 +72,7 @@ const CONFIG_PREFIX_KEYS = new Set<string>([
   "sync",
   "sync.pacing",
   "transcribe",
+  "transcribe.local",
 ]);
 
 const RETENTION_KEYS = {
@@ -111,9 +112,13 @@ export interface SyncConfigFile {
 }
 
 /** The local speech-to-text program `tg media transcribe` runs */
-export interface TranscribeConfigFile {
+export interface LocalTranscribeConfig {
   command?: string;
   model?: string;
+}
+
+interface TranscribeConfigFile {
+  local?: LocalTranscribeConfig;
   language?: string;
 }
 

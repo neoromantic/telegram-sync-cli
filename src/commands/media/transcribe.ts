@@ -1,36 +1,46 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { defineCommand } from "citty";
+import { stopLocalProcesses } from "./local-process";
+import { openDownloadDeps } from "./download-deps";
+import { type ArgsDef, defineCommand } from "citty";
 
-import { loadConfig, type TranscribeConfigFile } from "../../config";
-import { getAccountMediaDir } from "../../db";
-import { getClientForAccount } from "../../services/telegram";
+import { loadConfig } from "../../config";
 import { exitAfterFlush } from "../../telemetry";
-import type { TranscriptSource } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { flagValues } from "../../utils/args";
 import { getOutputFormat, info, success } from "../../utils/output";
-import { createProgress } from "../../utils/progress";
-import { wrapClientCallWithRateLimits } from "../../utils/telegram-rate-limits";
-import {
-  CHAT_ARG_DESCRIPTION,
-  MAX_MESSAGE_ID,
-  openHistory,
-  parseIntegerArg,
-} from "../messages/helpers";
+import { CHAT_ARG_DESCRIPTION, MAX_MESSAGE_ID, parseIntegerArg } from "../messages/helpers";
 import { MediaError, reportMediaError } from "./errors";
 import { openLocalProvider } from "./local-provider";
 import { type TranscribeOutcome, transcribeMessages } from "./transcription-pipeline";
-import type { ProviderSetup } from "./transcription-provider";
 
 const CONTEXT = "cli:media.transcribe";
 const INTERRUPTED_EXIT_CODE = 130;
 
-const PROVIDERS: Record<TranscriptSource, (config: TranscribeConfigFile) => ProviderSetup> = {
-  local: (config) => openLocalProvider(config),
-};
+const transcribeArgs = {
+  chat: {
+    type: "string",
+    description: CHAT_ARG_DESCRIPTION,
+    required: true,
+  },
+  id: {
+    type: "string",
+    description: "Message ID; repeat for several",
+    required: true,
+  },
+  language: {
+    type: "string",
+    description: "Language code of the speech (en, ru…); the program detects it by default",
+  },
+  force: {
+    type: "boolean",
+    description: "Transcribe again, even when a transcript is stored",
+    default: false,
+  },
+  account: {
+    type: "string",
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+} satisfies ArgsDef;
 
 export const transcribeMediaCommand = defineCommand({
   meta: {
@@ -38,33 +48,9 @@ export const transcribeMediaCommand = defineCommand({
     description:
       "Transcribe voice notes and video notes with a speech-to-text program on this machine (whisper.cpp or an openai-whisper CLI), store the text and print it",
   },
-  args: {
-    chat: {
-      type: "string",
-      description: CHAT_ARG_DESCRIPTION,
-      required: true,
-    },
-    id: {
-      type: "string",
-      description: "Message ID; repeat for several",
-      required: true,
-    },
-    language: {
-      type: "string",
-      description: "Language code of the speech (en, ru…); the program detects it by default",
-    },
-    force: {
-      type: "boolean",
-      description: "Transcribe again, even when a transcript is stored",
-      default: false,
-    },
-    account: {
-      type: "string",
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-  },
+  args: transcribeArgs,
   async run({ args, rawArgs }) {
-    const rawIds = flagValues(rawArgs ?? [], "id");
+    const rawIds = flagValues(rawArgs, "id", transcribeArgs);
     const messageIds = [
       ...new Set(
         (rawIds.length > 0 ? rawIds : [args.id]).map((id) =>
@@ -74,11 +60,13 @@ export const transcribeMediaCommand = defineCommand({
     ];
     const { account } = openAccountCache(args.account);
 
-    const tmpRoot = mkdtempSync(join(tmpdir(), "tg-transcribe-"));
-    process.on("exit", () => rmSync(tmpRoot, { recursive: true, force: true }));
     const controller = new AbortController();
     const stop = () => {
-      if (controller.signal.aborted) process.exit(INTERRUPTED_EXIT_CODE);
+      if (controller.signal.aborted) {
+        stopLocalProcesses();
+        void exitAfterFlush(INTERRUPTED_EXIT_CODE);
+        return;
+      }
       controller.abort();
     };
     process.on("SIGINT", stop);
@@ -89,26 +77,12 @@ export const transcribeMediaCommand = defineCommand({
     try {
       const { config } = await loadConfig({ strict: true });
       const transcribe = config.transcribe ?? {};
-      const history = openHistory(account.id, CONTEXT);
-      const getClient = async () =>
-        wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
-          context: CONTEXT,
-          accountId: account.id,
-        });
       outcomes = await transcribeMessages(
         {
-          download: {
-            cacheDb: history.cacheDb,
-            mediaDir: getAccountMediaDir(account.id),
-            getClient,
-            history,
-            signal: controller.signal,
-            progress: (fileName) => createProgress(fileName),
-          },
-          setup: PROVIDERS.local(transcribe),
+          download: openDownloadDeps(account.id, CONTEXT, controller.signal),
+          setup: openLocalProvider(transcribe.local ?? {}),
           language: args.language?.trim() || transcribe.language || null,
           force: args.force ?? false,
-          tmpRoot,
         },
         args.chat,
         messageIds,
@@ -120,6 +94,10 @@ export const transcribeMediaCommand = defineCommand({
         return exitAfterFlush(INTERRUPTED_EXIT_CODE);
       }
       reportMediaError(err);
+    } finally {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+      process.off("SIGHUP", stop);
     }
 
     if (outcomes.length === 1) {

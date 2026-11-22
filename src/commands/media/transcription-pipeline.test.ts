@@ -207,6 +207,20 @@ function asError(outcome: TranscribeOutcome | undefined) {
 }
 
 describe("transcribeMessages with a provider that reads the message", () => {
+  it("withholds a cached transcript when its attachment changes while another ID runs", async () => {
+    voiceNote(1);
+    voiceNote(2);
+    const first = messageProvider(() => done("Earlier words."));
+    await transcribeMessages(deps(first.provider), "me", [1]);
+    const second = messageProvider(() => {
+      voiceNote(1, { fileId: "6000000000000000877" });
+      return done("Second note.");
+    });
+    const [old, fresh] = await transcribeMessages(deps(second.provider), "me", [1, 2]);
+    expect(asError(old).details.reason).toBe("attachment_changed");
+    expect(fresh).toMatchObject({ text: "Second note." });
+  });
+
   it("fetches no file and converts nothing", async () => {
     const raw = voiceNote(1, { duration: 7 });
     const fake = messageProvider(() => done("Read from the message."));
@@ -241,6 +255,20 @@ describe("transcribeMessages with a provider that reads the message", () => {
 });
 
 describe("transcribeMessages with a provider that uploads the original file", () => {
+  it("recognizes a forwarded file once in a cold batch and stores each message", async () => {
+    const fileId = "6000000000000000555";
+    voiceNote(1, { fileId, bytes: "one" });
+    voiceNote(2, { fileId, bytes: "one" });
+    const fake = remoteProvider(() => done("Same words."));
+    const results = await transcribeMessages(deps(fake.provider), "me", [2, 1]);
+    expect(fake.calls.flat()).toHaveLength(1);
+    expect(results).toMatchObject([
+      { messageId: 2, text: "Same words." },
+      { messageId: 1, text: "Same words." },
+    ]);
+    expect(stored(1)?.text).toBe(stored(2)?.text ?? "missing");
+  });
+
   it("hands over the cached file itself, unconverted", async () => {
     voiceNote(1, { bytes: "OggS example voice bytes" });
     let received = "";
@@ -396,6 +424,29 @@ describe("transcribeMessages: eligibility checked again before saving", () => {
 });
 
 describe("transcribeMessages: a message that is not cached", () => {
+  it("rejects a replacement returned online before downloading or recognizing its bytes", async () => {
+    voiceNote(1);
+    const fake = remoteProvider(() => done("never"));
+    const client = {
+      async call() {
+        return { _: "messages.messages", messages: [photoMessage(SELF, 1)], chats: [], users: [] };
+      },
+    } as unknown as TelegramClient;
+    const [outcome] = await transcribeMessages(
+      deps(fake.provider, {
+        getClient: () => client,
+        download: () => {
+          throw new Error("replacement must not be downloaded");
+        },
+      }),
+      "me",
+      [1],
+    );
+    expect(asError(outcome).details.reason).toBe("attachment_changed");
+    expect(fake.calls).toEqual([]);
+    expect(stored(1)).toBeNull();
+  });
+
   it("refuses a photo before any of its bytes are transferred", async () => {
     const calls: string[] = [];
     const client = {

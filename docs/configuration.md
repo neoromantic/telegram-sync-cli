@@ -175,11 +175,11 @@ Supported keys:
 - `sync.pacing.calmInterval` (duration, default `3s`): how often a job may start per account
   with no history due
 
-- `transcribe.command` (string, default none): the speech-to-text program the local provider of
+- `transcribe.local.command` (string, default none): the speech-to-text program the local provider of
   `tg media transcribe` runs ([media.md](media.md#providers)), a name on `PATH` or a path. A program named `whisper-cli` is run
   as whisper.cpp, any other as an openai-whisper-compatible CLI. Without it, tg looks on `PATH`
   for `whisper-cli`, `mlx_whisper`, `whisper-ctranslate2` and `whisper`, in that order
-- `transcribe.model` (string): the model; for whisper.cpp the path of a model file, which it
+- `transcribe.local.model` (string): the model; for whisper.cpp the path of a model file, which it
   needs (the error for a missing one suggests `~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin`). Defaults: `mlx-community/whisper-large-v3-turbo` for `mlx_whisper`, `large-v3-turbo`
   for the others ([media.md](media.md#transcribe))
 - `transcribe.language` (string, default none): the language code of the speech, such as `ru`;
@@ -239,7 +239,7 @@ tg config get cache.staleness.peers
 tg config set cache.staleness.peers 3d
 tg config set activeAccount 2
 tg config set sync.pacing.maxCallsPerSecond 0.8
-tg config set transcribe.model /path/to/ggml-large-v3-turbo-q5_0.bin
+tg config set transcribe.local.model /path/to/ggml-large-v3-turbo-q5_0.bin
 ```
 
 ## Runtime Behavior
