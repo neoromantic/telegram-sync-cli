@@ -1,4 +1,4 @@
-import { defineCommand } from "citty";
+import { type ArgsDef, defineCommand } from "citty";
 
 import { ErrorCodes } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
@@ -21,10 +21,32 @@ import {
 } from "./helpers";
 import { resolveHistoryChat } from "./history";
 
+const deleteArgs = {
+  chat: {
+    type: "string",
+    description: CHAT_ARG_DESCRIPTION,
+    required: true,
+  },
+  id: {
+    type: "string",
+    description: `Message ID; repeat for several, up to ${MAX_DELETE_IDS}`,
+    required: true,
+  },
+  revoke: {
+    type: "boolean",
+    description: "Delete for everyone in a private chat or basic group, not only for this account",
+    default: false,
+  },
+  account: {
+    type: "string",
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+} satisfies ArgsDef;
+
 function readMessageIds(rawArgs: string[]) {
   const ids = [
     ...new Set(
-      flagValues(rawArgs, "id").map((value) =>
+      flagValues(rawArgs, "id", deleteArgs).map((value) =>
         parseIntegerArg(value, "id", { min: 1, max: MAX_MESSAGE_ID }),
       ),
     ),
@@ -48,28 +70,7 @@ export const deleteMessagesCommand = defineCommand({
     description:
       "Delete messages of a chat, for this account or with --revoke for everyone (always for everyone in a supergroup or channel). This cannot be undone.",
   },
-  args: {
-    chat: {
-      type: "string",
-      description: CHAT_ARG_DESCRIPTION,
-      required: true,
-    },
-    id: {
-      type: "string",
-      description: `Message ID; repeat for several, up to ${MAX_DELETE_IDS}`,
-      required: true,
-    },
-    revoke: {
-      type: "boolean",
-      description:
-        "Delete for everyone in a private chat or basic group, not only for this account",
-      default: false,
-    },
-    account: {
-      type: "string",
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-  },
+  args: deleteArgs,
   async run({ args, rawArgs }) {
     const messageIds = readMessageIds(rawArgs);
     const { account } = openAccountCache(args.account);

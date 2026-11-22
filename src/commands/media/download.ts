@@ -1,186 +1,219 @@
-import { mkdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
-import { defineCommand } from "citty";
+import { openDownloadDeps } from "./download-deps";
+import { type ArgsDef, defineCommand } from "citty";
 
-import { getAccountMediaDir } from "../../db";
-import { getClientForAccount } from "../../services/telegram";
+import { exitAfterFlush } from "../../telemetry";
 import { ErrorCodes } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
+import { flagValues } from "../../utils/args";
 import { formatBytes } from "../../utils/formatting";
-import { error, info, rawFile, success } from "../../utils/output";
-import { createProgress } from "../../utils/progress";
-import { wrapClientCallWithRateLimits } from "../../utils/telegram-rate-limits";
-import {
-  CHAT_ARG_DESCRIPTION,
-  MAX_MESSAGE_ID,
-  openHistory,
-  parseIntegerArg,
-} from "../messages/helpers";
+import { error, getOutputFormat, info, rawFile, success } from "../../utils/output";
+import { CHAT_ARG_DESCRIPTION, MAX_MESSAGE_ID, parseIntegerArg } from "../messages/helpers";
+import { downloadBatch, type FileFailure } from "./batch";
 import { type DownloadResult, downloadMedia } from "./download-media";
 import { DownloadInterruptedError, reportMediaError } from "./errors";
+import {
+  BATCH_NAME_TEMPLATE,
+  copyOut,
+  type PublishedFiles,
+  expandTemplate,
+  isTemplate,
+  outTarget,
+  TEMPLATE_PLACEHOLDERS,
+  templateDate,
+  templateTarget,
+  unknownPlaceholders,
+} from "./out";
 
 const CONTEXT = "cli:media.download";
 const INTERRUPTED_EXIT_CODE = 130;
 
-function statOrNull(path: string) {
-  try {
-    return statSync(path);
-  } catch {
-    return null;
-  }
-}
-
-function outTarget(out: string, fileName: string) {
-  const isDir = /[/\\]$/.test(out) || statOrNull(out)?.isDirectory() === true;
-  const target = resolve(isDir ? join(out, fileName) : out);
-  mkdirSync(dirname(target), { recursive: true });
-  return target;
-}
-
-async function copyOut(result: DownloadResult, out: string, overwrite: boolean) {
-  let target: string;
-  try {
-    target = outTarget(out, result.fileName);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    error(ErrorCodes.GENERAL_ERROR, `Failed to create --out: ${message}`, {
-      out,
-    });
-  }
-  if (!overwrite && statOrNull(target) !== null) {
-    error(
-      ErrorCodes.FILE_EXISTS,
-      `File already exists: ${target}`,
-      { path: target },
-      "pass --overwrite or another --out",
-    );
-  }
-
-  const tmp = join(dirname(target), `.${basename(target)}.tg-${process.pid}.part`);
-  try {
-    await Bun.write(tmp, Bun.file(result.path));
-    renameSync(tmp, target);
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    const message = err instanceof Error ? err.message : String(err);
-    error(ErrorCodes.GENERAL_ERROR, `Failed to write --out: ${message}`, {
-      path: target,
-    });
-  }
-  return target;
-}
-
-function reportInterrupted(err: DownloadInterruptedError): never {
+function reportInterrupted(err: DownloadInterruptedError, partialExports: string[]) {
   const kept =
     err.downloaded === null
       ? ""
       : err.total === null
         ? `: ${formatBytes(err.downloaded)} kept`
         : `: ${formatBytes(err.downloaded)} of ${formatBytes(err.total)} kept`;
-  info(`Download interrupted${kept}, run the command again to resume`);
-  process.exit(INTERRUPTED_EXIT_CODE);
+  if (partialExports.length) {
+    info("Download interrupted. These exports may be incomplete:");
+    for (const path of partialExports) info(JSON.stringify(path));
+    info("Inspect each file before using --overwrite for its message ID.");
+  } else {
+    info(`Download interrupted${kept}, run the command again to resume`);
+  }
+  return exitAfterFlush(INTERRUPTED_EXIT_CODE);
 }
+
+function targetOf(out: string, result: DownloadResult, batch: boolean) {
+  if (!batch && !isTemplate(out)) return outTarget(out, result.fileName);
+  const values = {
+    chat: String(result.chatId),
+    id: String(result.messageId),
+    date: templateDate(result.date),
+    name: result.fileName,
+    kind: result.kind,
+  };
+  const name = batch ? expandTemplate(BATCH_NAME_TEMPLATE, values) : result.fileName;
+  return isTemplate(out) ? templateTarget(out, values, name) : outTarget(`${out}/`, name);
+}
+
+function outputOf(result: DownloadResult, path: string) {
+  const { path: cachePath, date, ...fields } = result;
+  return { path, cachePath, ...fields };
+}
+
+function exitWith(code: number) {
+  if (process.env.BUN_ENV === "test" || process.env.NODE_ENV === "test") {
+    process.exitCode = code;
+    return;
+  }
+  void exitAfterFlush(code);
+}
+
+const downloadArgs = {
+  chat: {
+    type: "string",
+    description: CHAT_ARG_DESCRIPTION,
+    required: true,
+  },
+  id: {
+    type: "string",
+    description: "Message ID; repeat it for several messages of the chat (one JSON line per file)",
+    required: true,
+  },
+  out: {
+    type: "string",
+    description: `Also copy the file here: a directory (under its name; with several --id, as ${BATCH_NAME_TEMPLATE}), a file path, a name template with ${TEMPLATE_PLACEHOLDERS.map((name) => `{${name}}`).join(" ")}, or - for stdout (bytes only, no JSON)`,
+  },
+  thumb: {
+    type: "boolean",
+    description: "Download the file's small preview instead of the file",
+    default: false,
+  },
+  fresh: {
+    type: "boolean",
+    description:
+      "Fetch the message from Telegram again and check its content protection, even when the file is cached",
+    default: false,
+  },
+  overwrite: {
+    type: "boolean",
+    description: "Replace an existing --out file",
+    default: false,
+  },
+  account: {
+    type: "string",
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+} satisfies ArgsDef;
 
 export const downloadMediaCommand = defineCommand({
   meta: {
     name: "download",
     description:
-      "Download a message's file into the account's media cache and print its path (cache-first: a cached file needs no network)",
+      "Download the files of one or more messages into the account's media cache and print their paths (cache-first: a cached file needs no network)",
   },
-  args: {
-    chat: {
-      type: "string",
-      description: CHAT_ARG_DESCRIPTION,
-      required: true,
-    },
-    id: {
-      type: "string",
-      description: "Message ID",
-      required: true,
-    },
-    out: {
-      type: "string",
-      description:
-        "Also copy the file here: a directory (under its name), a file path, or - for stdout (bytes only, no JSON)",
-    },
-    thumb: {
-      type: "boolean",
-      description: "Download the file's small preview instead of the file",
-      default: false,
-    },
-    fresh: {
-      type: "boolean",
-      description:
-        "Fetch the message from Telegram again and check its content protection, even when the file is cached",
-      default: false,
-    },
-    overwrite: {
-      type: "boolean",
-      description: "Replace an existing --out file",
-      default: false,
-    },
-    account: {
-      type: "string",
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-  },
-  async run({ args }) {
-    const messageId = parseIntegerArg(args.id, "id", {
-      min: 1,
-      max: MAX_MESSAGE_ID,
-    });
+  args: downloadArgs,
+  async run({ args, rawArgs }) {
+    const ids = flagValues(rawArgs, "id", downloadArgs);
+    const given = ids.length > 0 ? ids : [args.id];
+    const messageIds = [
+      ...new Set(given.map((id) => parseIntegerArg(id, "id", { min: 1, max: MAX_MESSAGE_ID }))),
+    ];
+    const batch = given.length > 1;
     const out = args.out;
     if (out !== undefined && out.trim() === "") {
       error(ErrorCodes.INVALID_ARGS, "--out needs a directory, a file path or -", { out });
+    }
+    const unknown = out === undefined ? [] : unknownPlaceholders(out);
+    if (unknown.length > 0) {
+      error(ErrorCodes.INVALID_ARGS, `Unknown placeholder in --out: {${unknown[0]}}`, {
+        out,
+        placeholders: TEMPLATE_PLACEHOLDERS,
+      });
+    }
+    if (batch && out === "-") {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        "--out - takes one --id: the bytes of several files would run together",
+        { out, ids: messageIds },
+      );
     }
     const { account } = openAccountCache(args.account);
 
     const controller = new AbortController();
     const stop = () => {
-      if (controller.signal.aborted) process.exit(INTERRUPTED_EXIT_CODE);
+      if (controller.signal.aborted) {
+        void exitAfterFlush(INTERRUPTED_EXIT_CODE);
+        return;
+      }
       controller.abort();
     };
+    const deps = openDownloadDeps(account.id, CONTEXT, controller.signal);
+    const overwrite = args.overwrite ?? false;
+    const options = { thumb: args.thumb ?? false, fresh: args.fresh ?? false };
+
+    const published: PublishedFiles | undefined = batch ? new Map() : undefined;
+    const partialExports: string[] = [];
+    const exportOptions = { published, signal: controller.signal, partialExports };
+    const copy = (result: DownloadResult) =>
+      out === undefined
+        ? result.path
+        : copyOut(result, targetOf(out, result, batch), overwrite, exportOptions);
+
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
-
-    let result: DownloadResult;
     try {
-      const history = openHistory(account.id, CONTEXT);
-      const getClient = async () =>
-        wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
-          context: CONTEXT,
-          accountId: account.id,
-        });
-      result = await downloadMedia(
-        {
-          cacheDb: history.cacheDb,
-          mediaDir: getAccountMediaDir(account.id),
-          getClient,
-          history,
-          signal: controller.signal,
-          progress: (fileName) => createProgress(fileName),
-        },
-        {
-          chat: args.chat,
-          messageId,
-          thumb: args.thumb ?? false,
-          fresh: args.fresh ?? false,
-        },
-      );
-    } catch (err) {
-      if (err instanceof DownloadInterruptedError) reportInterrupted(err);
-      reportMediaError(err);
-    }
+      if (batch) {
+        let processed = 0;
+        function printLine(
+          line:
+            | { success: true; data: ReturnType<typeof outputOf> }
+            | { success: false; error: FileFailure },
+        ) {
+          if (getOutputFormat() === "quiet") return;
+          console.log(JSON.stringify(line));
+          if (process.stderr.isTTY && ++processed < messageIds.length) {
+            info(`Processed ${processed} of ${messageIds.length} files`);
+          }
+        }
+        const failures = await downloadBatch(
+          deps,
+          { chat: args.chat, messageIds, ...options },
+          {
+            done: async (result) => {
+              const path = await copy(result);
+              printLine({ success: true, data: outputOf(result, path) });
+            },
+            failed: (_messageId, failure) => printLine({ success: false, error: failure }),
+          },
+        );
+        const done = messageIds.length - failures;
+        info(
+          `Downloaded ${done} of ${messageIds.length} files${failures > 0 ? `, ${failures} failed` : ""}`,
+        );
+        exitWith(failures > 0 ? 1 : 0);
+        return;
+      }
 
-    if (out === "-") {
-      await rawFile(result.path);
-      return;
+      const result = await downloadMedia(deps, {
+        chat: args.chat,
+        messageId: messageIds[0]!,
+        ...options,
+      });
+      if (out === "-") {
+        await rawFile(result.path);
+        return;
+      }
+      const path = await copy(result);
+      success(outputOf(result, path));
+    } catch (err) {
+      if (err instanceof DownloadInterruptedError) return reportInterrupted(err, partialExports);
+      reportMediaError(err);
+    } finally {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
     }
-    const cachePath = result.path;
-    const path =
-      out === undefined ? cachePath : await copyOut(result, out, args.overwrite ?? false);
-    const { path: _cachePath, ...fields } = result;
-    success({ path, cachePath, ...fields });
   },
 });

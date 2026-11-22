@@ -178,6 +178,11 @@ export function readMigrationStatus(
   return result;
 }
 
+/** Whether this migration has rows left to go through */
+export function isMigrationPending(db: Database, name: string) {
+  return readMigrationStatus(db).some((m) => m.name === name && m.state !== "done");
+}
+
 function startMigration(db: Database, migration: BackgroundMigration, now: number) {
   const { end, total } = db
     .query(`SELECT COALESCE(MAX(rowid), 0) AS end, COUNT(*) AS total FROM ${migration.table}`)

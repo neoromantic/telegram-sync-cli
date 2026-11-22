@@ -1,9 +1,14 @@
+import type { GetHistoryRequest } from "./fake-history.test-utils";
+
 /** This file, to pass as runCli's `entry` */
 export const FAKE_CLIENT_CLI = import.meta.path;
 
 export const FAKE_CLIENT_DESTROYED = "fake client: destroyed";
 
 export const FAKE_CLIENT_CALL = "fake client: call";
+
+/** Comma-separated message IDs that every chat's history holds behind the fake client */
+export const FAKE_HISTORY_ENV = "FAKE_HISTORY_IDS";
 
 /** The newest message of every chat the fake client reads */
 export const FAKE_TOP_MESSAGE = 30;
@@ -99,6 +104,8 @@ if (import.meta.main) {
   const { tl } = await import("@mtcute/bun");
   const telegram = await import("../services/telegram");
   const { toInputPeerFromPeerId } = await import("../utils/telegram-peer-ids");
+  const { historyPage } = await import("./fake-history.test-utils");
+  const historyIds = (process.env[FAKE_HISTORY_ENV] ?? "").split(",").filter(Boolean).map(Number);
 
   setInterval(() => {}, 60_000);
   let readMaxId = 0;
@@ -115,8 +122,7 @@ if (import.meta.main) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
       if (request._ === "messages.getHistory") {
         return {
-          _: "messages.messages",
-          messages: [],
+          ...historyPage(historyIds, request as GetHistoryRequest),
           chats: [],
           users: [],
         };
