@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hard links (exFAT, FAT, some network shares) it is copied instead, never over an existing
   file. If the copy is interrupted, use `--overwrite` to replace a partial export.
 
-- Transcribe voice and video notes with a local Whisper program using `tg media transcribe`. Cached messages include the transcript.
+- Transcribe voice and video notes with a local Whisper program using `tg media transcribe`. Search their transcripts with `tg messages search`, including snippets and counts.
 
 ### Fixed
 

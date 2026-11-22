@@ -5,6 +5,7 @@ import { isMigrationPending } from "../../db/background-migrations";
 import {
   createMessagesSearch,
   isFts5QueryError,
+  toFts5Query,
   MESSAGE_SEARCH_SORTS,
   type MessageSearchOptions,
   type MessageSearchSort,
@@ -13,6 +14,7 @@ import { MESSAGE_TYPES_MIGRATION } from "../../db/raw-json-migrations";
 import { ErrorCodes, type NextCommand } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
+import { extractAttachment } from "../../utils/attachment";
 import { normalizeUsername } from "../../utils/identifiers";
 import { error, success } from "../../utils/output";
 import { buildSnippet, snippetTerms } from "../../utils/search-snippet";
@@ -27,7 +29,7 @@ import {
   TYPE_ARG_DESCRIPTION,
   UNTIL_ARG_DESCRIPTION,
 } from "./filters";
-import { messageItemReader } from "./helpers";
+import { messageItemReader, visibleTranscriptFile } from "./helpers";
 import { refetchClause } from "./list";
 
 function parseIdentifier(
@@ -148,10 +150,34 @@ export function readSearchPage(
   page: { limit: number; offset: number; sort: MessageSearchSort; count: boolean },
 ) {
   return cacheDb.transaction(() => {
-    const search = createMessagesSearch(cacheDb);
+    const candidates = cacheDb.query<
+      { rowid: number; rank: number; chat_id: number; raw_json: string; unique_file_id: string },
+      [string]
+    >(`SELECT m.rowid, transcript_search.rank, m.chat_id, m.raw_json, t.unique_file_id
+       FROM transcript_search JOIN message_transcripts t ON t.rowid = transcript_search.rowid
+       JOIN messages_cache m ON m.chat_id = t.chat_id AND m.message_id = t.message_id
+       WHERE transcript_search MATCH ? AND m.has_media = 1`);
+    const visible = visibleTranscriptFile(cacheDb);
+    const hits: { rowid: number; rank: number }[] = [];
+    for (const candidate of candidates.iterate(toFts5Query(query, options))) {
+      const file = extractAttachment(candidate.raw_json);
+      if (
+        file?.uniqueFileId === candidate.unique_file_id &&
+        visible(candidate.chat_id, candidate.raw_json, file)
+      ) {
+        hits.push({ rowid: candidate.rowid, rank: candidate.rank });
+      }
+    }
+    const search = createMessagesSearch(cacheDb, hits);
+    const rows = search.search(query, { ...options, ...page, limit: page.limit + 1 });
+    const toItem = messageItemReader(cacheDb);
     const typed = options.types !== undefined;
     return {
-      rows: search.search(query, { ...options, ...page, limit: page.limit + 1 }),
+      rows,
+      items: rows.slice(0, page.limit).map((row) => ({
+        ...toItem(row),
+        ...(row.transcript_match ? { transcriptMatch: true } : {}),
+      })),
       count: page.count ? search.count(query, options) : null,
       migrating: typed && isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION),
       untyped: typed ? search.newestUntypedMatch(query, options) : null,
@@ -163,7 +189,7 @@ export const searchMessagesCommand = defineCommand({
   meta: {
     name: "search",
     description:
-      'Search cached messages, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
+      'Search cached messages and their available transcripts, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
   },
   args: searchArgs,
   async run({ args, rawArgs }) {
@@ -217,13 +243,12 @@ export const searchMessagesCommand = defineCommand({
         until,
         types,
       };
-      const { rows, count, migrating, untyped } = readSearchPage(cacheDb, query, options, {
+      const { rows, items, count, migrating, untyped } = readSearchPage(cacheDb, query, options, {
         limit,
         offset,
         sort,
         count: args.count ?? false,
       });
-      const results = rows.slice(0, limit);
       const typesPending = migrating || untyped !== null;
       const values = {
         ...args,
@@ -258,7 +283,6 @@ export const searchMessagesCommand = defineCommand({
           : []),
       ];
       const terms = args.snippet ? snippetTerms(query, { phrase: options.phrase }) : [];
-      const toItem = messageItemReader(cacheDb);
 
       success(
         {
@@ -273,11 +297,11 @@ export const searchMessagesCommand = defineCommand({
             type: types ?? null,
           },
           sort,
-          results: results.map((row) => {
-            const item = toItem(row);
-            return args.snippet ? { ...item, snippet: buildSnippet(item.text, terms) } : item;
+          results: items.map((item) => {
+            const text = item.transcriptMatch ? (item.transcript?.text ?? null) : item.text;
+            return args.snippet ? { ...item, snippet: buildSnippet(text, terms) } : item;
           }),
-          total: results.length,
+          total: items.length,
           count,
           typesPending,
           suggestion:

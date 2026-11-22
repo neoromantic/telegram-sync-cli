@@ -59,6 +59,14 @@ export function messageRowToItem(
   };
 }
 
+/** The same cached visibility check applies to display, search hits and counts. */
+export function visibleTranscriptFile(db: Database) {
+  const protection = cachedProtection(db);
+  return (chatId: number, raw: string, attachment: AttachmentInfo | null) =>
+    (attachment?.kind === "voice" || attachment?.kind === "round") &&
+    !protection(chatId, raw).protected;
+}
+
 /**
  * A function that makes the item for a row, with the attachment and the
  * service action read from its raw_json (only media and service rows are
@@ -73,9 +81,9 @@ export function messageItemReader(db: Database) {
     "SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?",
   );
   const transcriptOf = db.query<MessageTranscript, [number, number, string]>(
-    "SELECT text, language, source, model FROM message_transcripts WHERE chat_id = ? AND message_id = ? AND unique_file_id = ?",
+    "SELECT text, language, source, runner, model FROM message_transcripts WHERE chat_id = ? AND message_id = ? AND unique_file_id = ?",
   );
-  const protection = cachedProtection(db);
+  const visible = visibleTranscriptFile(db);
   const result: (row: MessageRow) => MessageSearchItem = (row) => {
     const isService = row.message_type === "service";
     const mayBeRich = !row.text && row.message_type === "text";
@@ -87,8 +95,7 @@ export function messageItemReader(db: Database) {
     const text = mayBeRich ? richMessageText(raw) : null;
     const attachment = row.has_media === 1 ? extractAttachment(raw) : null;
     const transcript =
-      (attachment?.kind === "voice" || attachment?.kind === "round") &&
-      !protection(row.chat_id, raw).protected
+      attachment && visible(row.chat_id, raw, attachment)
         ? transcriptOf.get(row.chat_id, row.message_id, attachment.uniqueFileId)
         : null;
     return messageRowToItem(

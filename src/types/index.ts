@@ -78,6 +78,7 @@ export interface MessageTranscript {
   text: string;
   language: string | null;
   source: TranscriptSource;
+  runner: string | null;
   model: string | null;
 }
 

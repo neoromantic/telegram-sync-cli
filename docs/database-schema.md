@@ -344,10 +344,11 @@ CREATE TABLE chat_content_protection (
 
 The text `tg media transcribe` got from a voice note or video note, one row per message
 ([media.md](media.md#transcribe)). Only that command writes it; the daemon never does. The
-search index doesn't cover it yet.
+per-account FTS5 table `transcript_search` indexes the stored text. `tg messages search` checks current attachment identity and protection before using a transcript hit.
 
 ```sql
 CREATE TABLE message_transcripts (
+  id             INTEGER PRIMARY KEY,
   chat_id        INTEGER NOT NULL,  -- marked peer ID
   message_id     INTEGER NOT NULL,
   unique_file_id TEXT NOT NULL,     -- as in message_attachments; the row counts only while the message holds this file
@@ -357,7 +358,7 @@ CREATE TABLE message_transcripts (
   runner         TEXT,              -- the provider's program or service: whisper-cli, mlx_whisper…; NULL for silent audio
   model          TEXT,              -- model name, or the model file's name for whisper.cpp; NULL for silent audio
   transcribed_at INTEGER NOT NULL,  -- ms
-  PRIMARY KEY (chat_id, message_id)
+  UNIQUE (chat_id, message_id)
 );
 CREATE INDEX idx_message_transcripts_unique_file_id ON message_transcripts(unique_file_id);
 ```

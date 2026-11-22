@@ -22,6 +22,7 @@ import { createDmLookup } from "../send/peer-resolver";
 import { parseRawMessage } from "../../daemon/sync-worker-real-helpers";
 import { createChatsCache } from "../../db/chats-cache";
 import { createMessageTranscriptsStore } from "../../db/message-transcripts";
+import { createMessageTranscriptsSchema } from "../../db/sync-schema";
 import { createMessagesCache } from "../../db/messages-cache";
 import { createUsersCache } from "../../db/users-cache";
 import { type Account, ErrorCodes } from "../../types";
@@ -478,4 +479,26 @@ describe("transcribeMessages: a message that is not cached", () => {
     expect(calls).toEqual(["messages.getMessages"]);
     expect(fake.calls).toEqual([]);
   });
+});
+
+it("upgrades stored speech and keeps the index attached to its row after vacuum", () => {
+  db.run("DROP TABLE transcript_search");
+  db.run("DROP TABLE message_transcripts");
+  db.run(`CREATE TABLE message_transcripts (chat_id INTEGER, message_id INTEGER,
+    unique_file_id TEXT, text TEXT, language TEXT, source TEXT, runner TEXT, model TEXT,
+    transcribed_at INTEGER, PRIMARY KEY(chat_id, message_id))`);
+  db.run(`INSERT INTO message_transcripts VALUES (1, 17, 'fake-a', 'North', 'en','local','whisper','small',1),
+    (1, 18, 'fake-b','South','en','local','whisper','small',2)`);
+  createMessageTranscriptsSchema(db);
+  db.run("DELETE FROM message_transcripts WHERE message_id = 17");
+  db.run("VACUUM");
+  expect(
+    db
+      .query(`SELECT t.message_id FROM transcript_search
+    JOIN message_transcripts t ON t.id = transcript_search.rowid WHERE transcript_search MATCH 'south'`)
+      .get(),
+  ).toEqual({ message_id: 18 });
+  expect(
+    db.query("SELECT rowid FROM transcript_search WHERE transcript_search MATCH 'north'").get(),
+  ).toBeNull();
 });

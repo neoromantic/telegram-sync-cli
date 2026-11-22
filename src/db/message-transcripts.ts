@@ -24,20 +24,23 @@ export interface MessageTranscriptsStore {
 export function createMessageTranscriptsStore(db: Database) {
   const stmts = {
     get: db.query<MessageTranscriptRow, [number, number]>(`
-      SELECT * FROM message_transcripts WHERE chat_id = ? AND message_id = ?
+      SELECT chat_id, message_id, unique_file_id, text, language, source, runner, model, transcribed_at FROM message_transcripts WHERE chat_id = ? AND message_id = ?
     `),
     getByFile: db.query<MessageTranscriptRow, [string]>(`
-      SELECT * FROM message_transcripts WHERE unique_file_id = ?
+      SELECT chat_id, message_id, unique_file_id, text, language, source, runner, model, transcribed_at FROM message_transcripts WHERE unique_file_id = ?
       ORDER BY transcribed_at DESC LIMIT 1
     `),
     save: db.prepare(`
-      INSERT OR REPLACE INTO message_transcripts (
+      INSERT INTO message_transcripts (
         chat_id, message_id, unique_file_id, text, language, source, runner,
         model, transcribed_at
       ) VALUES (
         $chat_id, $message_id, $unique_file_id, $text, $language, $source,
         $runner, $model, $transcribed_at
-      )
+      ) ON CONFLICT(chat_id, message_id) DO UPDATE SET
+        unique_file_id = excluded.unique_file_id, text = excluded.text,
+        language = excluded.language, source = excluded.source, runner = excluded.runner,
+        model = excluded.model, transcribed_at = excluded.transcribed_at
     `),
   };
 

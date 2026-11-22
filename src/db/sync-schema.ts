@@ -393,14 +393,18 @@ export function createChatContentProtectionSchema(db: Database) {
  * Created once, so opening a cache that has it never waits for the write lock.
  */
 export function createMessageTranscriptsSchema(db: Database) {
-  const exists = db
-    .query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_transcripts'`)
-    .get();
-  if (exists) return;
-
+  const indexed = () =>
+    db.query("SELECT 1 FROM sqlite_master WHERE name = 'transcript_search'").get();
+  if (indexed()) return;
   db.transaction(() => {
+    if (indexed()) return;
+    const previous = db
+      .query("SELECT 1 FROM sqlite_master WHERE name = 'message_transcripts'")
+      .get();
+    if (previous) db.run("ALTER TABLE message_transcripts RENAME TO previous_message_transcripts");
     db.run(`
-      CREATE TABLE IF NOT EXISTS message_transcripts (
+      CREATE TABLE message_transcripts (
+        id             INTEGER PRIMARY KEY,
         chat_id        INTEGER NOT NULL,
         message_id     INTEGER NOT NULL,
         unique_file_id TEXT NOT NULL,
@@ -410,13 +414,36 @@ export function createMessageTranscriptsSchema(db: Database) {
         runner         TEXT,
         model          TEXT,
         transcribed_at INTEGER NOT NULL,
-        PRIMARY KEY (chat_id, message_id)
+        UNIQUE (chat_id, message_id)
       )
     `);
+    if (previous) {
+      const columns =
+        "chat_id, message_id, unique_file_id, text, language, source, runner, model, transcribed_at";
+      db.run(
+        `INSERT INTO message_transcripts (${columns}) SELECT ${columns} FROM previous_message_transcripts`,
+      );
+      db.run("DROP TABLE previous_message_transcripts");
+    }
     db.run(`
       CREATE INDEX IF NOT EXISTS idx_message_transcripts_unique_file_id
       ON message_transcripts(unique_file_id)
     `);
+    db.run(
+      "CREATE VIRTUAL TABLE transcript_search USING fts5(text, sender UNINDEXED, chat UNINDEXED, files UNINDEXED, tokenize='unicode61')",
+    );
+    db.run(
+      "INSERT INTO transcript_search(rowid, text) SELECT rowid, text FROM message_transcripts",
+    );
+    db.run(`CREATE TRIGGER transcripts_ai AFTER INSERT ON message_transcripts BEGIN
+      INSERT OR REPLACE INTO transcript_search(rowid, text) VALUES (new.rowid, new.text);
+    END`);
+    db.run(`CREATE TRIGGER transcripts_ad AFTER DELETE ON message_transcripts BEGIN
+      DELETE FROM transcript_search WHERE rowid = old.rowid;
+    END`);
+    db.run(`CREATE TRIGGER transcripts_au AFTER UPDATE OF text ON message_transcripts BEGIN
+      UPDATE transcript_search SET text = new.text WHERE rowid = old.rowid;
+    END`);
   }).immediate();
 }
 

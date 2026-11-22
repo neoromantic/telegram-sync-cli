@@ -89,7 +89,7 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
   downloads resume, name templates for `--out`); every message item shows its attachment
   (kind, name, MIME type, size)
 - Voice notes and video notes to text with a speech-to-text program on your machine
-  (`tg media transcribe`, whisper.cpp or an openai-whisper CLI); `tg messages` shows the
+  (`tg media transcribe`, whisper.cpp or an openai-whisper CLI); `tg messages search` finds spoken words, and `tg messages` shows the
   transcript
 - Service messages say what happened: calls (video, duration, why they ended), pins and group
   changes in each item's `action`

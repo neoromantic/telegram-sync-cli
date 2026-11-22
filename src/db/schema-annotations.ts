@@ -109,7 +109,7 @@ const MESSAGE_ATTACHMENTS_ANNOTATION: TableAnnotation = {
 
 const CHAT_CONTENT_PROTECTION_ANNOTATION: TableAnnotation = {
   description:
-    "What the last online check of tg media download found about a chat's content protection. A protected chat's cached files are refused offline too, until an online check (--fresh) finds the protection off. Written only by tg media download.",
+    "What the last online check of tg media download found about a chat's content protection. A protected chat's cached files are refused offline too, until an online check (--fresh) finds the protection off. Written by tg media download and tg media transcribe.",
   primaryKey: "chat_id",
   columns: {
     chat_id: {
@@ -138,9 +138,10 @@ const CHAT_CONTENT_PROTECTION_ANNOTATION: TableAnnotation = {
 
 const MESSAGE_TRANSCRIPTS_ANNOTATION: TableAnnotation = {
   description:
-    "The text tg media transcribe got from a voice note or video note, with a speech-to-text program on this machine. One row per message. Not indexed for search. Join messages_cache USING (chat_id, message_id).",
-  primaryKey: ["chat_id", "message_id"],
+    "The text tg media transcribe got from a voice note or video note, with a speech-to-text program on this machine. One row per message. Indexed by transcript_search. Join messages_cache USING (chat_id, message_id).",
+  primaryKey: "id",
   columns: {
+    id: { description: "Stable row ID for the transcript search index", nullable: false },
     chat_id: {
       description: "Marked peer ID of the chat, as in messages_cache",
       nullable: false,

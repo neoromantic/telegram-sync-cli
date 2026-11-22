@@ -274,6 +274,58 @@ describe("E2E: media transcribe", () => {
     });
   });
 
+  it("searches visible speech once per message, including snippets, counts and pages", async () => {
+    install("ffmpeg", FAKE_FFMPEG);
+    install("whisper", FAKE_OPENAI_RUNNER);
+    note(1, "Harbor lantern.");
+    note(2, "Harbor bell.", { extra: { message: "Harbor caption." } });
+    await transcribe("--id", "1", "--id", "2");
+    const search = async (...args: string[]) => {
+      const response = await tg([
+        "messages",
+        "search",
+        "--query",
+        "harbor",
+        "--snippet",
+        "--count",
+        "--limit",
+        "1",
+        ...args,
+      ]);
+      expect(response.exitCode).toBe(0);
+      return (
+        response.json as {
+          data: {
+            count: number;
+            results: { messageId: number; transcriptMatch?: boolean; snippet: string }[];
+          };
+        }
+      ).data;
+    };
+    env.seedAccounts([{ phone: "+15550000002", user_id: SELF_ID + 2 }]);
+    expect((await search("--account", "2")).count).toBe(0);
+    const first = await search();
+    const next = await search("--offset", "1");
+    expect(first.count).toBe(2);
+    expect(new Set([...first.results, ...next.results].map((row) => row.messageId))).toEqual(
+      new Set([1, 2]),
+    );
+    expect(first.results[0]).toMatchObject({
+      transcriptMatch: true,
+      snippet: expect.stringContaining("**Harbor**"),
+    });
+    expect((await search("--sort", "relevance", "--type", "voice")).count).toBe(2);
+    note(1, "Another sound.");
+    await transcribe("--id", "1", "--force");
+    expect((await search()).count).toBe(1);
+    note(2, "Harbor bell.", { extra: { message: "Harbor caption.", noforwards: true } });
+    const caption = await search();
+    expect(caption.count).toBe(1);
+    expect(caption.results[0]?.transcriptMatch).toBeUndefined();
+    note(2, "New file.", { fileId: "6000000000000099999" });
+    expect((await search()).count).toBe(0);
+  });
+
   it("answers a second run from the stored transcript, and --force runs again", async () => {
     install("ffmpeg", FAKE_FFMPEG);
     install("whisper", FAKE_OPENAI_RUNNER);
