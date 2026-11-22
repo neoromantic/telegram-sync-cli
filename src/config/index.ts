@@ -5,7 +5,14 @@ import { type AccountsDbInterface, accountsDb } from "../db";
 import type { CacheConfig, CacheRetentionConfig, DurationString } from "../db/types";
 import { getDefaultCacheConfig, getDefaultRetentionConfig, parseDuration } from "../db/types";
 
-type ConfigValueType = "number" | "boolean" | "duration" | "positiveDuration" | "rate" | "chats";
+type ConfigValueType =
+  | "number"
+  | "boolean"
+  | "duration"
+  | "positiveDuration"
+  | "rate"
+  | "chats"
+  | "string";
 
 const MAX_CALLS_PER_SECOND = 2;
 
@@ -16,6 +23,7 @@ const TYPE_DESCRIPTIONS: Record<ConfigValueType, string> = {
   positiveDuration: "duration above 0",
   rate: `number above 0 and at most ${MAX_CALLS_PER_SECOND}`,
   chats: "list of chats: @username, a chat ID as tg prints it, or me",
+  string: "non-empty string",
 };
 
 export type ConfigLeafKey =
@@ -32,7 +40,10 @@ export type ConfigLeafKey =
   | "cache.retention.completedJobs"
   | "cache.retention.failedJobs"
   | "sync.pacing.maxCallsPerSecond"
-  | "sync.pacing.calmInterval";
+  | "sync.pacing.calmInterval"
+  | "transcribe.local.command"
+  | "transcribe.local.model"
+  | "transcribe.language";
 
 const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   activeAccount: "number",
@@ -49,6 +60,9 @@ const CONFIG_LEAF_TYPES: Record<ConfigLeafKey, ConfigValueType> = {
   "cache.retention.failedJobs": "positiveDuration",
   "sync.pacing.maxCallsPerSecond": "rate",
   "sync.pacing.calmInterval": "positiveDuration",
+  "transcribe.local.command": "string",
+  "transcribe.local.model": "string",
+  "transcribe.language": "string",
 };
 
 const CONFIG_PREFIX_KEYS = new Set<string>([
@@ -57,6 +71,8 @@ const CONFIG_PREFIX_KEYS = new Set<string>([
   "cache.retention",
   "sync",
   "sync.pacing",
+  "transcribe",
+  "transcribe.local",
 ]);
 
 const RETENTION_KEYS = {
@@ -95,12 +111,24 @@ export interface SyncConfigFile {
   pacing?: SyncPacingConfigFile;
 }
 
+/** The local speech-to-text program `tg media transcribe` runs */
+export interface LocalTranscribeConfig {
+  command?: string;
+  model?: string;
+}
+
+interface TranscribeConfigFile {
+  local?: LocalTranscribeConfig;
+  language?: string;
+}
+
 export interface ConfigFile {
   activeAccount?: number;
   readOnly?: boolean;
   allowedChats?: string[];
   cache?: CacheConfigFile;
   sync?: SyncConfigFile;
+  transcribe?: TranscribeConfigFile;
 }
 
 export interface ConfigIssue {
@@ -218,6 +246,8 @@ function validateValue(type: ConfigValueType, value: unknown) {
       return isValidRate(value);
     case "chats":
       return Array.isArray(value) && value.every(isChatEntry);
+    case "string":
+      return typeof value === "string" && value.trim() !== "";
     default:
       return false;
   }
@@ -244,7 +274,9 @@ function sanitizeConfig(raw: Record<string, unknown>) {
         ? normalizeDuration(value)
         : type === "chats"
           ? (value as string[]).map((entry) => entry.trim())
-          : value;
+          : type === "string"
+            ? (value as string).trim()
+            : value;
     setPathValue(config as Record<string, unknown>, path.split("."), normalizedValue);
   }
 
@@ -364,6 +396,15 @@ export function parseConfigValue(key: ConfigLeafKey, rawValue: string) {
     }
     case "chats": {
       const result: unknown = parseChatList(key, trimmed);
+      return result;
+    }
+    case "string": {
+      if (trimmed === "") {
+        throw new ConfigError("Invalid value", [
+          { path: key, message: `Expected a ${TYPE_DESCRIPTIONS.string}` },
+        ]);
+      }
+      const result: unknown = trimmed;
       return result;
     }
   }

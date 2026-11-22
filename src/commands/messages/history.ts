@@ -10,19 +10,26 @@ import {
   rawMessageId,
 } from "../../daemon/sync-worker-real-helpers";
 import type { AccountsDbInterface } from "../../db";
+import { isMigrationPending } from "../../db/background-migrations";
 import { type ChatsCache, createChatsCache } from "../../db/chats-cache";
+import { createGroupParticipation } from "../../db/group-participation";
 import { createHistoryRanges, type PageBounds } from "../../db/history-ranges";
 import { createMessagesCache } from "../../db/messages-cache";
-import { createMessagesHistory } from "../../db/messages-history";
+import { createMessagesHistory, type MessageFilter } from "../../db/messages-history";
 import type { MessageSearchRow } from "../../db/messages-search";
+import { MESSAGE_TYPES_MIGRATION } from "../../db/raw-json-migrations";
 import { createUsersCache, type UsersCache } from "../../db/users-cache";
 import type { MessageSearchItem } from "../../types";
+import { normalizeUsername } from "../../utils/identifiers";
 import { verbose } from "../../utils/output";
-import { toPeerIdFromInputPeer } from "../../utils/telegram-peer-ids";
+import { toInputPeerFromPeerId, toPeerIdFromInputPeer } from "../../utils/telegram-peer-ids";
 import { type DmLookup, type ResolvePeerOptions, resolvePeer } from "../send/peer-resolver";
 import { resolveSelfId } from "../send/sent-message-cache";
 import {
+  ChatNotCachedError,
+  createLazyClient,
   type HistoryClient,
+  MAX_MESSAGE_ID,
   MessageNotFoundError,
   type MessageRow,
   messageItemReader,
@@ -73,6 +80,33 @@ export async function resolveHistoryChat(
   }
   const result: HistoryChat & { name: string } = { chatId, inputPeer, name };
   return result;
+}
+
+const CHAT_USERNAME = /^@?(?!(?:me|self)$)[a-z]\w*$/i;
+
+/**
+ * Resolve `--chat` from the cache alone, for a read that never connects to
+ * Telegram. A cached @username resolves without an access hash too, so its
+ * input peer may lack one; anything only Telegram could resolve throws
+ * ChatNotCachedError.
+ */
+export async function resolveCachedChat(identifier: string, deps: ResolveHistoryChatDeps) {
+  const value = identifier.trim();
+  if (CHAT_USERNAME.test(value)) {
+    const username = normalizeUsername(value);
+    const id =
+      deps.usersCache.getByUsername(username)?.user_id ??
+      deps.chatsCache.getByUsername(username)?.chat_id;
+    const inputPeer = id === undefined ? null : toInputPeerFromPeerId(Number(id), null);
+    if (inputPeer) {
+      const chat: HistoryChat & { name: string } = { chatId: Number(id), inputPeer, name: value };
+      return chat;
+    }
+  }
+  const offline = createLazyClient(() => {
+    throw new ChatNotCachedError(value);
+  });
+  return resolveHistoryChat(offline, value, deps);
 }
 
 /** A page of history. Both bounds are exclusive message IDs. */
@@ -195,6 +229,7 @@ export async function fetchHistoryPage(
   chat: HistoryChat,
   window: HistoryWindow,
 ) {
+  const knownTop = createHistoryRanges(cacheDb).knownTop(chat.chatId);
   const { messages, users } = await callHistory(client, chat, historyRequest(window));
 
   const floor = window.after ?? 0;
@@ -209,10 +244,12 @@ export async function fetchHistoryPage(
     .slice(0, window.limit);
 
   const short = messages.length < window.limit;
-  const bounds: PageBounds =
-    window.after === undefined
-      ? { before: window.before, reachedStart: short }
-      : { after: window.after, before: short ? window.before : undefined };
+  let bounds: PageBounds = { after: window.after };
+  if (window.after === undefined) {
+    bounds = { before: window.before, reachedStart: short, knownTop };
+  } else if (short) {
+    bounds = { after: window.after, before: window.before, knownTop };
+  }
 
   return cacheHistoryResponse(cacheDb, chat.chatId, page, users, bounds);
 }
@@ -224,6 +261,8 @@ export interface ListHistoryOptions {
   window: HistoryWindow;
   includeDeleted: boolean;
   fresh: boolean;
+  /** Read only the cache, with these filters (see readFilteredPage) */
+  filter?: MessageFilter;
 }
 
 export interface ListHistoryResult {
@@ -239,6 +278,55 @@ export interface ListHistoryResult {
   nextAfter: number | null;
   source: "cache" | "api";
   stale: false;
+}
+
+/** Why a filtered page may lack matches */
+export type MissingPart = "history" | "types";
+
+export interface FilteredCoverage {
+  /**
+   * No message of the chat that matches is missing from the page, as of the
+   * chat's newest known message: missing is empty
+   */
+  complete: boolean;
+  /**
+   * `history`: the cache lacks messages of the page's span. `types`: some
+   * cached messages have no type to filter on yet (a background migration
+   * or a refetch of their raw message is pending)
+   */
+  missing: MissingPart[];
+  /**
+   * Where the newest gap ends: the `--before` of the unfiltered page that
+   * fills it. Null without a gap, or when the gap reaches the chat's newest
+   * message (the newest page fills it)
+   */
+  missingBefore: number | null;
+}
+
+/** The newest gap in the span a filtered page vouches for */
+export interface HistoryGap {
+  /** The first and last message ID the cache lacks */
+  low: number;
+  high: number;
+  /** The `--before` of the page that fills it; null for the newest page */
+  before: number | null;
+  /** False when the cache keeps out the group's messages of the gap's time */
+  fillable: boolean;
+}
+
+/** Why `--type` may miss cached messages of the page's span */
+export interface UntypedRows {
+  /** The migration that types older rows is unfinished */
+  migrating: boolean;
+  /** The newest media row still waiting for its raw message, or null */
+  newestAwaitingRaw: number | null;
+}
+
+export interface FilteredPage {
+  page: ListHistoryResult & FilteredCoverage;
+  gap: HistoryGap | null;
+  /** Null without --type, or when every row of the span has its type */
+  untyped: UntypedRows | null;
 }
 
 function readCachedWindow(
@@ -293,18 +381,84 @@ async function readHistoryPage({
   return { rows, source: "api" as const };
 }
 
-/**
- * One page of a chat, newest first. The cache answers when it holds the
- * whole window without a gap; otherwise, or with `fresh`, Telegram does.
- */
-export async function listHistory(options: ListHistoryOptions) {
-  const { chat, window } = options;
-  const { rows, source } = await readHistoryPage(options);
-  const ids = rows.map((row) => row.message_id);
+function pageSpan({ limit, before, after }: HistoryWindow, ids: number[], top: number | null) {
+  let low = (after ?? 0) + 1;
+  let high = Math.min(top ?? MAX_MESSAGE_ID, (before ?? MAX_MESSAGE_ID + 1) - 1);
+  if (ids.length === limit) {
+    if (after === undefined) low = Math.max(low, Math.min(...ids));
+    else high = Math.min(high, Math.max(...ids));
+  }
+  return { low, high };
+}
 
+function vouchedSpan(
+  cacheDb: Database,
+  chatId: number,
+  filter: MessageFilter,
+  page: { low: number; high: number },
+) {
+  const history = createMessagesHistory(cacheDb);
+  const ranges = createHistoryRanges(cacheDb);
+  let { low, high } = page;
+  if (filter.until !== undefined) {
+    const late = history.firstSentFrom(chatId, low, high, filter.until);
+    if (late !== null && ranges.holdsEvery(chatId, late, high)) high = late - 1;
+  }
+  if (filter.since !== undefined) {
+    const early = history.lastSentBefore(chatId, low, high, filter.since);
+    if (early !== null && ranges.holdsEvery(chatId, low, early)) low = early + 1;
+  }
+  return low <= high ? { low, high } : null;
+}
+
+function sentDuringCaptureGap(cacheDb: Database, chatId: number, low: number, high: number) {
+  const row = cacheDb
+    .query(`
+      SELECT 1 FROM group_capture_gaps
+      WHERE chat_id = $id
+        AND end_date > COALESCE((SELECT date FROM messages_cache
+          WHERE chat_id = $id AND message_id < $low ORDER BY message_id DESC LIMIT 1), 0)
+        AND start_date <= COALESCE((SELECT date FROM messages_cache
+          WHERE chat_id = $id AND message_id > $high ORDER BY message_id LIMIT 1), start_date)
+      LIMIT 1
+    `)
+    .get({ $id: chatId, $low: low, $high: high });
+  return row !== null;
+}
+
+function newestGap(
+  cacheDb: Database,
+  chatId: number,
+  span: { low: number; high: number },
+  top: number | null,
+) {
+  const ranges = createHistoryRanges(cacheDb);
+  const holding = ranges.find(chatId, span.high);
+  if (holding && holding.low <= span.low) return null;
+
+  const high = holding ? holding.low - 1 : span.high;
+  const low = Math.max(span.low, (ranges.below(chatId, high)?.high ?? 0) + 1);
+  return {
+    low,
+    high,
+    before: top !== null && high < top ? high + 1 : null,
+    fillable:
+      createGroupParticipation(cacheDb).captures(chatId) &&
+      !sentDuringCaptureGap(cacheDb, chatId, low, high),
+  } satisfies HistoryGap;
+}
+
+function historyPage(
+  cacheDb: Database,
+  chatId: number,
+  window: HistoryWindow,
+  rows: MessageRow[],
+  source: "cache" | "api",
+) {
+  const ids = rows.map((row) => row.message_id);
   const result: ListHistoryResult = {
-    chatId: chat.chatId,
-    items: messageRowsToItems(options.cacheDb, rows),
+    chatId,
+    items: messageRowsToItems(cacheDb, rows),
     limit: window.limit,
     before: window.before ?? null,
     after: window.after ?? null,
@@ -314,6 +468,66 @@ export async function listHistory(options: ListHistoryOptions) {
     stale: false,
   };
   return result;
+}
+
+/**
+ * A filtered page from the cache alone, with what it vouches for. The rows,
+ * the ranges, the chat's newest known message and the type state are read
+ * in one read transaction, so a sync writing meanwhile can't make a page
+ * look complete that its rows don't match.
+ */
+export function readFilteredPage(
+  cacheDb: Database,
+  chatId: number,
+  window: HistoryWindow,
+  includeDeleted: boolean,
+  filter: MessageFilter,
+) {
+  return cacheDb.transaction(() => {
+    const history = createMessagesHistory(cacheDb);
+    const rows = history.list(chatId, { ...window, includeDeleted, filter });
+    const ids = rows.map((row) => row.message_id);
+    const top = createHistoryRanges(cacheDb).knownTop(chatId);
+    const bounds = pageSpan(window, ids, top);
+    const span = vouchedSpan(cacheDb, chatId, filter, bounds);
+    const gap = span && newestGap(cacheDb, chatId, span, top);
+    const migrating =
+      filter.types !== undefined && isMigrationPending(cacheDb, MESSAGE_TYPES_MIGRATION);
+    const newestAwaitingRaw =
+      filter.types !== undefined
+        ? history.newestUntyped(chatId, bounds.low, bounds.high, { ...filter, includeDeleted })
+        : null;
+    const untyped =
+      migrating || newestAwaitingRaw !== null ? { migrating, newestAwaitingRaw } : null;
+
+    const missing: MissingPart[] = [];
+    if (gap) missing.push("history");
+    if (untyped) missing.push("types");
+    return {
+      page: {
+        ...historyPage(cacheDb, chatId, window, rows, "cache"),
+        complete: missing.length === 0,
+        missing,
+        missingBefore: gap?.before ?? null,
+      },
+      gap,
+      untyped,
+    } satisfies FilteredPage;
+  })();
+}
+
+/**
+ * One page of a chat, newest first. The cache answers when it holds the
+ * whole window without a gap; otherwise, or with `fresh`, Telegram does.
+ * With a filter only the cache answers (readFilteredPage).
+ */
+export async function listHistory(options: ListHistoryOptions) {
+  const { cacheDb, chat, window, filter } = options;
+  if (filter) {
+    return readFilteredPage(cacheDb, chat.chatId, window, options.includeDeleted, filter).page;
+  }
+  const { rows, source } = await readHistoryPage(options);
+  return historyPage(cacheDb, chat.chatId, window, rows, source);
 }
 
 /**

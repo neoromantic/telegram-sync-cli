@@ -708,11 +708,22 @@ describe("the CLI under the participation rule", () => {
         fresh: true,
       });
       expect(items.map((item) => item.messageId)).toEqual([1]);
-      return db.query("SELECT message_id FROM messages_cache WHERE chat_id = ?").all(chat.chatId);
+      return {
+        messages: db
+          .query("SELECT message_id FROM messages_cache WHERE chat_id = ?")
+          .all(chat.chatId),
+        ranges: db.query("SELECT low, high FROM history_ranges WHERE chat_id = ?").all(chat.chatId),
+      };
     };
 
-    expect(await read("made_up_broadcast", 9_100_000_004, false)).toEqual([{ message_id: 1 }]);
-    expect(await read("made_up_supergroup", 9_100_000_005, true)).toEqual([]);
+    expect(await read("made_up_broadcast", 9_100_000_004, false)).toEqual({
+      messages: [{ message_id: 1 }],
+      ranges: [{ low: 1, high: 1 }],
+    });
+    expect(await read("made_up_supergroup", 9_100_000_005, true)).toEqual({
+      messages: [],
+      ranges: [],
+    });
   });
 
   it("caches a message tg send sent, and the group takes messages again", async () => {

@@ -4,8 +4,7 @@ import { openAccountCache } from "../utils/account-cache";
 import { positionalChat, undeclaredArg } from "../utils/args";
 import { error } from "../utils/output";
 import { openHistory, reportHistoryError } from "./messages/helpers";
-import { resolveHistoryChat } from "./messages/history";
-import type { ResolvePeerOptions } from "./send/peer-resolver";
+import { resolveCachedChat, resolveHistoryChat } from "./messages/history";
 
 type Args = Record<string, unknown>;
 
@@ -18,6 +17,11 @@ export interface CommandAccess {
   crossChat?: boolean;
   /** Reads any chat and can't be limited to some: refused while allowedChats is set */
   unscopable?: boolean;
+  /**
+   * Reads only the cache: its chat args and allowedChats resolve from the
+   * cache alone, without a Telegram connection
+   */
+  cacheOnly?: boolean | ((args: Args) => boolean);
 }
 
 /** `tg api` methods named get…, search…, resolve… or check… after the namespace */
@@ -61,9 +65,12 @@ export const COMMAND_ACCESS: Record<string, CommandAccess> = {
   "daemon status": LOCAL,
   "db vacuum": LOCAL,
   "db migrate": LOCAL,
-  "messages list": CHAT,
+  "messages list": {
+    chatArgs: ["chat"],
+    cacheOnly: (args) => [args.type, args.since, args.until].some((value) => value !== undefined),
+  },
   "messages get": CHAT,
-  "messages search": { chatArgs: ["chat"], crossChat: true },
+  "messages search": { chatArgs: ["chat"], crossChat: true, cacheOnly: true },
   "messages wait": { chatArgs: ["chat"], crossChat: true },
   "messages watch": { chatArgs: ["chat"], crossChat: true },
   "messages unread": { chatArgs: ["chat"], crossChat: true },
@@ -71,6 +78,7 @@ export const COMMAND_ACCESS: Record<string, CommandAccess> = {
   "messages edit": { write: true, chatArgs: ["chat"] },
   "media download": CHAT,
   "media clean": LOCAL,
+  "media transcribe": CHAT,
   api: {
     write: (args) => !isReadMethod(String(args.method ?? "")),
     unscopable: true,
@@ -187,13 +195,17 @@ export async function checkAccess(
       "Use tg chats, tg messages and tg media, which keep to allowedChats",
     );
   }
+  const cacheOnly =
+    typeof access.cacheOnly === "function" ? access.cacheOnly(args) : access.cacheOnly === true;
   const chats = new Map<string, CheckedChat>();
   for (const name of access.chatArgs ?? []) {
     const input = positional.includes(name) ? positionalChat(args[name], rawArgs) : args[name];
     if (typeof input === "string" && input.trim() !== "") {
       const { account } = openAccountCache(args.account as string | undefined);
       args.account = String(account.id);
-      chats.set(name, await checkChatAllowed(input, account.id, allowed, write === true));
+      const deps = openHistory(account.id, "cli:allowed-chats");
+      const resolve = chatResolver(deps, { write: write === true, cacheOnly });
+      chats.set(name, await checkChatAllowed(input, allowed, resolve));
     }
   }
   checkedChats.set(args, chats);
@@ -214,16 +226,22 @@ export function checkedChat(args: Args, name: string) {
   return checkedChats.get(args)?.get(name);
 }
 
-type HistoryDeps = ReturnType<typeof openHistory>;
+type Resolve = (identifier: string) => Promise<CheckedChat>;
 
-async function resolveAllowed(entries: string[], deps: HistoryDeps, options?: ResolvePeerOptions) {
+function chatResolver(
+  deps: ReturnType<typeof openHistory>,
+  { write, cacheOnly }: { write: boolean; cacheOnly: boolean },
+) {
+  const resolve: Resolve = cacheOnly
+    ? (identifier) => resolveCachedChat(identifier, deps)
+    : (identifier) => resolveHistoryChat(deps.client, identifier, deps, { freshUsername: write });
+  return resolve;
+}
+
+async function resolveAllowed(entries: string[], resolve: Resolve) {
   const ids = new Set<number>();
   for (const entry of entries) {
-    ids.add(
-      /^-?\d+$/.test(entry)
-        ? Number(entry)
-        : (await resolveHistoryChat(deps.client, entry, deps, options)).chatId,
-    );
+    ids.add(/^-?\d+$/.test(entry) ? Number(entry) : (await resolve(entry)).chatId);
   }
   return ids;
 }
@@ -231,18 +249,12 @@ async function resolveAllowed(entries: string[], deps: HistoryDeps, options?: Re
 const ALLOWED_SUGGESTION =
   "Only the chats in allowedChats (config.json or TELEGRAM_SYNC_CLI_ALLOWED_CHATS) can be used; tg status lists them";
 
-async function checkChatAllowed(
-  input: string,
-  accountId: number,
-  allowed: string[],
-  write: boolean,
-) {
-  const deps = openHistory(accountId, "cli:allowed-chats");
+async function checkChatAllowed(input: string, allowed: string[], resolve: Resolve) {
   let chat: CheckedChat;
   let ids: Set<number>;
   try {
-    chat = await resolveHistoryChat(deps.client, input, deps, { freshUsername: write });
-    ids = await resolveAllowed(allowed, deps, { freshUsername: write });
+    chat = await resolve(input);
+    ids = await resolveAllowed(allowed, resolve);
   } catch (err) {
     reportHistoryError(err, `check ${input} against allowedChats`);
   }
@@ -259,14 +271,15 @@ async function checkChatAllowed(
 
 /**
  * For a command that reads across chats: the marked IDs of allowedChats,
- * or null when every chat is allowed
+ * or null when every chat is allowed. `cacheOnly` resolves them from the
+ * cache alone, without a Telegram connection.
  */
-export async function allowedChatIds(accountId: number) {
+export async function allowedChatIds(accountId: number, { cacheOnly = false } = {}) {
   const { allowedChats } = await readAccessSettings();
   if (allowedChats === null) return null;
   const deps = openHistory(accountId, "cli:allowed-chats");
   try {
-    return await resolveAllowed(allowedChats, deps);
+    return await resolveAllowed(allowedChats, chatResolver(deps, { write: false, cacheOnly }));
   } catch (err) {
     reportHistoryError(err, "resolve allowedChats");
   }

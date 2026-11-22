@@ -76,8 +76,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
   ([sync strategy](docs/sync-strategy.md#group-participation))
 - Full Telegram API access through `tg api <method>`
 - Cache-first reads (stale-while-revalidate) with `--fresh` to bypass the cache
-- Chat history with cursor paging (`tg messages list`) and a message in context
-  (`tg messages get`), cache-first
+- Chat history with cursor paging (`tg messages list`), filtered by type (voice notes, round
+  videos, photos…) and date, and a message in context (`tg messages get`), cache-first
 - Unread messages: chats with unread messages (`tg chats list --unread`), their unread messages
   (`tg messages unread`) and marking them read (`tg messages read`); the daemon keeps the
   counts current
@@ -86,9 +86,13 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
   code blocks and formulas that Telegram renders natively
 - Edit a message you sent (`tg messages edit`): the new text, plain or a rich message from
   Markdown or HTML, goes to Telegram and into the cache at once
-- Files: send one with `tg send --file`; download a message's file into a per-account media
-  cache with `tg media download` (cached files need no network, partial downloads resume);
-  every message item shows its attachment (kind, name, MIME type, size)
+- Files: send one with `tg send --file`; download the files of one or many messages into a
+  per-account media cache with `tg media download` (cached files need no network, partial
+  downloads resume, name templates for `--out`); every message item shows its attachment
+  (kind, name, MIME type, size)
+- Voice notes and video notes to text with a speech-to-text program on your machine
+  (`tg media transcribe`, whisper.cpp or an openai-whisper CLI); `tg messages search` finds spoken words, and `tg messages` shows the
+  transcript
 - Service messages say what happened: calls (video, duration, why they ended), pins and group
   changes in each item's `action`
 - Rich messages (headings, tables, lists, task lists, code, formulas) read as rich Markdown in
@@ -105,28 +109,28 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 [telegram-mcp](https://github.com/chigwell/telegram-mcp) is an MCP server that makes one live call
 per tool. Compared on 2026-10-21 from its README and tool list:
 
-| Feature                                      | tg                                                                                                                                                                        | telegram-mcp                                               |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Interface                                    | CLI, JSON output, fixed exit codes                                                                                                                                        | MCP server (stdio, HTTP, SSE)                              |
-| Agent integration                            | any agent with a shell                                                                                                                                                    | MCP clients, Claude Desktop bundle                         |
-| Local cache, offline queries                 | ✅ SQLite, cache-first, `--fresh`                                                                                                                                         | ❌ live calls only                                         |
-| Message search                               | ✅ full-text (FTS5) over cached messages                                                                                                                                  | ✅ Telegram server search                                  |
-| SQL over your data                           | ✅ read-only `tg sql`                                                                                                                                                     | ❌                                                         |
-| Background sync                              | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; catch-up and history for large groups and channels on request (`tg chats sync`) | partial: waits for events, stores nothing                  |
-| Any MTProto method                           | ✅ `tg api <method>`                                                                                                                                                      | ❌ fixed tool set                                          |
-| Read chat history                            | ✅ `tg messages list` (paging) and `tg messages get` (context), cache-first, `--fresh`                                                                                    | ✅                                                         |
-| Unread messages, mark as read                | ✅ `tg chats list --unread`, `tg messages unread`, `tg messages read`                                                                                                     | ✅                                                         |
-| Send text                                    | ✅ replies, silent, rich messages from Markdown or HTML (`--markdown`, `--html`)                                                                                          | ✅ replies, Markdown/HTML                                  |
-| Edit, delete, forward, pin                   | partial: `tg messages edit`; delete, forward and pin via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23))                                     | ✅                                                         |
-| Send and download media                      | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`); sending albums and voice messages later                                   | ✅ files, albums, voice, transcription                     |
-| Wait for new messages                        | ✅ `tg messages wait` (JSON, timeout, settle) and `tg messages watch` (NDJSON), from the daemon's cache                                                                   | ✅                                                         |
-| Groups, channels, admin rights               | partial: via `tg api`                                                                                                                                                     | ✅                                                         |
-| Contacts                                     | list, search, get; the rest via `tg api`                                                                                                                                  | ✅ add, import, block, export                              |
-| Reactions, polls, drafts, scheduled, folders | partial: via `tg api`                                                                                                                                                     | ✅                                                         |
-| Multi-account                                | ✅ `--account`; one cache per account, the daemon syncs each account with its own client                                                                                  | ✅                                                         |
-| Guardrails for agents                        | ✅ read-only mode, chat allowlist (`readOnly`, `allowedChats`)                                                                                                            | ✅ read-only mode, chat allowlist                          |
-| Install                                      | Homebrew binary, or bun/npm with Bun                                                                                                                                      | git clone + uv, pip from git, Docker                       |
-| Runtime, license                             | TypeScript on Bun ([mtcute](https://mtcute.dev)), MIT                                                                                                                     | Python ([Telethon](https://docs.telethon.dev)), Apache-2.0 |
+| Feature                                      | tg                                                                                                                                                                                                            | telegram-mcp                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Interface                                    | CLI, JSON output, fixed exit codes                                                                                                                                                                            | MCP server (stdio, HTTP, SSE)                              |
+| Agent integration                            | any agent with a shell                                                                                                                                                                                        | MCP clients, Claude Desktop bundle                         |
+| Local cache, offline queries                 | ✅ SQLite, cache-first, `--fresh`                                                                                                                                                                             | ❌ live calls only                                         |
+| Message search                               | ✅ full-text (FTS5) over cached messages                                                                                                                                                                      | ✅ Telegram server search                                  |
+| SQL over your data                           | ✅ read-only `tg sql`                                                                                                                                                                                         | ❌                                                         |
+| Background sync                              | ✅ read-only daemon: real-time, catch-up after restarts and reconnects, history backfill; catch-up and history for large groups and channels on request (`tg chats sync`)                                     | partial: waits for events, stores nothing                  |
+| Any MTProto method                           | ✅ `tg api <method>`                                                                                                                                                                                          | ❌ fixed tool set                                          |
+| Read chat history                            | ✅ `tg messages list` (paging) and `tg messages get` (context), cache-first, `--fresh`                                                                                                                        | ✅                                                         |
+| Unread messages, mark as read                | ✅ `tg chats list --unread`, `tg messages unread`, `tg messages read`                                                                                                                                         | ✅                                                         |
+| Send text                                    | ✅ replies, silent, rich messages from Markdown or HTML (`--markdown`, `--html`)                                                                                                                              | ✅ replies, Markdown/HTML                                  |
+| Edit, delete, forward, pin                   | partial: `tg messages edit`; delete, forward and pin via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23))                                                                         | ✅                                                         |
+| Send and download media                      | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`), local transcription of voice and video notes (`tg media transcribe`); sending albums and voice messages later | ✅ files, albums, voice, transcription                     |
+| Wait for new messages                        | ✅ `tg messages wait` (JSON, timeout, settle) and `tg messages watch` (NDJSON), from the daemon's cache                                                                                                       | ✅                                                         |
+| Groups, channels, admin rights               | partial: via `tg api`                                                                                                                                                                                         | ✅                                                         |
+| Contacts                                     | list, search, get; the rest via `tg api`                                                                                                                                                                      | ✅ add, import, block, export                              |
+| Reactions, polls, drafts, scheduled, folders | partial: via `tg api`                                                                                                                                                                                         | ✅                                                         |
+| Multi-account                                | ✅ `--account`; one cache per account, the daemon syncs each account with its own client                                                                                                                      | ✅                                                         |
+| Guardrails for agents                        | ✅ read-only mode, chat allowlist (`readOnly`, `allowedChats`)                                                                                                                                                | ✅ read-only mode, chat allowlist                          |
+| Install                                      | Homebrew binary, or bun/npm with Bun                                                                                                                                                                          | git clone + uv, pip from git, Docker                       |
+| Runtime, license                             | TypeScript on Bun ([mtcute](https://mtcute.dev)), MIT                                                                                                                                                         | Python ([Telethon](https://docs.telethon.dev)), Apache-2.0 |
 
 ## Usage
 
@@ -138,6 +142,7 @@ tg contacts list --limit 50
 tg chats list --limit 20
 tg chats sync @examplenews          # also sync a large group or channel
 tg messages list --chat @username --limit 20
+tg messages list --chat @username --type voice,round --since 7d   # voice notes and round videos
 tg messages get --chat @username --id 42 --context 3
 tg messages search --query "hello world" --since 7d   # both words, any order
 tg messages wait --chat @username --after 42 --timeout 60   # block until the next reply
@@ -147,6 +152,7 @@ tg send --to @username --message "Hi there"
 tg messages edit --chat @username --id 43 --message "Hi there!"   # fix a message you sent
 tg send --to me --file ./report.pdf --caption "Q3"
 tg media download --chat me --id 42 --out ./   # into the media cache, then copied here
+tg media download --chat me --id 42 --id 43 --out './media/{date}_{id}_{name}'
 tg api account.checkUsername --username=myuser
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg daemon start

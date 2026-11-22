@@ -1,6 +1,12 @@
+import type { Database } from "bun:sqlite";
 import type { TelegramClient, tl } from "@mtcute/bun";
 
-import type { ChatProtectionReason, ChatProtectionRow } from "../../db/chat-protection";
+import {
+  type ChatProtectionReason,
+  type ChatProtectionRow,
+  createChatProtectionStore,
+} from "../../db/chat-protection";
+import { createChatsCache } from "../../db/chats-cache";
 import { toPeerIdFromRawChat } from "../../utils/telegram-peer-ids";
 import type { HistoryChat } from "../messages/history";
 import type { FetchedRawMessage } from "./fetch";
@@ -11,6 +17,7 @@ export type ProtectionResult = { protected: false } | { protected: true; reason:
 
 /** The chat-level answer of an online check, recorded in chat_content_protection */
 export interface ChatProtectionResult {
+  fetchedAt: number;
   protected: boolean;
   reason: ChatProtectionReason | null;
 }
@@ -81,20 +88,52 @@ export function knownChatProtection(
 }
 
 /**
- * Protection known without Telegram: the message's flags in its raw_json,
- * then the chat's (knownChatProtection)
+ * Protection known without Telegram, from the account's cache: the
+ * message's flags in its raw_json, then the chat's (knownChatProtection).
+ * The one offline rule for reading a message's media or its transcript.
  */
-export function checkCachedProtection(
-  messageRawJson: string,
-  chat: CachedChatState | null,
-  stored: ChatProtectionRow | null,
+export function cachedProtection(db: Database) {
+  const chats = createChatsCache(db);
+  const stored = createChatProtectionStore(db);
+  return (chatId: number, messageRawJson: string) => {
+    const message = messageProtection(parseJson(messageRawJson));
+    if (message.protected) {
+      const result: ProtectionResult = message;
+      return result;
+    }
+    return knownChatProtection(chats.getById(String(chatId)), stored.get(chatId));
+  };
+}
+
+export function privateChatProtection(
+  client: Pick<TelegramClient, "call">,
+  signal?: AbortSignal,
+  now = Date.now,
 ) {
-  const message = messageProtection(parseJson(messageRawJson));
-  if (message.protected) {
-    const result: ProtectionResult = message;
-    return result;
-  }
-  return knownChatProtection(chat, stored);
+  let pending: Promise<ChatProtectionResult> | undefined;
+  return (peer: tl.RawInputPeerUser) =>
+    (pending ??= client
+      .call(
+        {
+          _: "users.getFullUser",
+          id: { _: "inputUser", userId: peer.userId, accessHash: peer.accessHash },
+        },
+        { abortSignal: signal },
+      )
+      .then(({ fullUser }) => {
+        const protectedChat = Boolean(
+          fullUser.noforwardsMyEnabled || fullUser.noforwardsPeerEnabled,
+        );
+        return {
+          protected: protectedChat,
+          reason: protectedChat ? "private_chat" : null,
+          fetchedAt: now(),
+        } satisfies ChatProtectionResult;
+      })
+      .catch((err) => {
+        pending = undefined;
+        throw err;
+      }));
 }
 
 export interface OnlineProtection {
@@ -109,11 +148,11 @@ export interface OnlineProtection {
  * other than Saved Messages, the user's full info
  */
 export async function checkOnlineProtection(
-  client: Pick<TelegramClient, "call">,
+  checkPrivate: ReturnType<typeof privateChatProtection>,
   chat: HistoryChat,
   message: FetchedRawMessage,
   chats: tl.TypeChat[],
-  signal?: AbortSignal,
+  fetchedAt: number,
 ) {
   const result: OnlineProtection = {
     message: messageProtection(message as unknown as RawObject),
@@ -122,22 +161,7 @@ export async function checkOnlineProtection(
 
   const peer = chat.inputPeer;
   if (peer._ === "inputPeerUser") {
-    const { fullUser } = await client.call(
-      {
-        _: "users.getFullUser",
-        id: {
-          _: "inputUser",
-          userId: peer.userId,
-          accessHash: peer.accessHash,
-        },
-      },
-      { abortSignal: signal },
-    );
-    const isProtected = Boolean(fullUser.noforwardsMyEnabled || fullUser.noforwardsPeerEnabled);
-    result.chat = {
-      protected: isProtected,
-      reason: isProtected ? "private_chat" : null,
-    };
+    if (!result.message.protected) result.chat = await checkPrivate(peer);
     return result;
   }
 
@@ -147,6 +171,7 @@ export async function checkOnlineProtection(
     result.chat = {
       protected: isProtected,
       reason: isProtected ? "chat" : null,
+      fetchedAt,
     };
   }
   return result;
