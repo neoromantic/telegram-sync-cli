@@ -331,17 +331,15 @@ describe("MessagesSearch", () => {
   it("matches every form of a word in results and count while a transcript matches too", () => {
     const now = Math.floor(Date.now() / 1000);
     messagesCache.upsertBatch(
-      ["Сдаю квартиру у парка", "Квартира ещё свободна?", "Голосовое сообщение"].map(
-        (text, i) => ({
-          chat_id: 10,
-          message_id: i + 1,
-          from_id: 10,
-          text,
-          message_type: "text",
-          date: now - i,
-          raw_json: "{}",
-        }),
-      ),
+      ["Сдаю квартиру у парка", "Квартира ещё свободна?", "Голосовое сообщение"].map((text, i) => ({
+        chat_id: 10,
+        message_id: i + 1,
+        from_id: 10,
+        text,
+        message_type: "text",
+        date: now - i,
+        raw_json: "{}",
+      })),
     );
     const voice = db
       .query("SELECT rowid FROM messages_cache WHERE chat_id = 10 AND message_id = 3")

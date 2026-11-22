@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createMessageTranscriptsStore } from "./message-transcripts";
 import { createMessagesCache } from "./messages-cache";
 import { toFts5Query } from "./messages-search";
 import { initCacheSchema } from "./schema";
@@ -52,6 +53,22 @@ describe("findQueryForms", () => {
       квартира: { words: ["квартира", "квартире", "квартиру"], cut: false },
     });
     expect(formsOf(db, "квартирой").квартирой!.words).toEqual(["квартире", "квартира", "квартиру"]);
+  });
+
+  it("finds forms that occur only in a transcript, counting messages of both indexes", () => {
+    const db = cacheWith("сдаю квартиру", "квартирой займёмся");
+    createMessageTranscriptsStore(db).save({
+      chat_id: CHAT_ID,
+      message_id: 3,
+      unique_file_id: "AgADexample01",
+      text: "квартиры дорожают, квартиру не найти",
+      language: "ru",
+      source: "local",
+      runner: "whisper",
+      model: null,
+      transcribed_at: 1_760_000_000,
+    });
+    expect(formsOf(db, "квартира").квартира!.words).toEqual(["квартиру", "квартирой", "квартиры"]);
   });
 
   it("matches an English word with and without its plural s", () => {

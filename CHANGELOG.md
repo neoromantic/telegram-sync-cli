@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behaviour, each word only as typed; a query with FTS5 syntax or `--phrase` is matched as
   written, as before, and so is every query while `allowedChats` is set, since the forms come
   from the whole cache. The answer adds `forms`, the forms searched for (`null` when the query
-  wasn't expanded), and `filters.exact`. The cache gets the table `message_search_vocab`, the
-  index's words, which `tg sql` can read. See [docs/search.md](docs/search.md#word-forms).
+  wasn't expanded), and `filters.exact`. The cache gets the tables `message_search_vocab` and
+  `transcript_search_vocab`, the words of the message and transcript indexes, which `tg sql` can
+  read. See [docs/search.md](docs/search.md#word-forms).
 
 ## [0.16.0] - 2026-11-22
 

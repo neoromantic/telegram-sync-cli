@@ -17,15 +17,13 @@ export interface WordForms {
 /** For each plain word of a query, as typed, its forms in the index */
 export type QueryForms = Map<string, WordForms>;
 
-/** The vocabulary of message_search, one row per word: persistent, so read-only connections can read it */
-export function createMessageSearchVocab(db: Database) {
-  const exists = db
-    .query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_search_vocab'`)
-    .get();
-  if (exists) return;
-  db.run(
-    "CREATE VIRTUAL TABLE IF NOT EXISTS message_search_vocab USING fts5vocab(message_search, row)",
-  );
+/** The vocabularies of message_search and transcript_search, one row per word: persistent, so read-only connections can read them */
+export function createSearchVocabs(db: Database) {
+  const exists = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?");
+  for (const index of ["message_search", "transcript_search"]) {
+    if (exists.get(`${index}_vocab`)) continue;
+    db.run(`CREATE VIRTUAL TABLE IF NOT EXISTS ${index}_vocab USING fts5vocab(${index}, row)`);
+  }
 }
 
 function scanPrefixes(stem: string) {
@@ -50,16 +48,21 @@ function after(prefix: string) {
 }
 
 /**
- * The forms of each plain word of a query: the index's words with the same
- * light stem, found by a range scan of the vocabulary on the stem without
- * its last letter (with е and ё both, as the stem reads ё as е), then
- * filtered by stem. A one-letter word, which no other word stems to, is
+ * The forms of each plain word of a query: the words of the message and
+ * transcript indexes with the same light stem, found by a range scan of
+ * both vocabularies on the stem without its last letter (with е and ё
+ * both, as the stem reads ё as е), then filtered by stem. A one-letter word, which no other word stems to, is
  * only looked up as it is. A word that is several index words (`e-mail`)
  * is left out and matched as written.
  */
 export function findQueryForms(db: Database, query: string) {
-  const range = db.query("SELECT term, doc FROM message_search_vocab WHERE term >= ? AND term < ?");
-  const exact = db.query("SELECT term, doc FROM message_search_vocab WHERE term = ?");
+  const vocab = (where: string) =>
+    db.query(`SELECT term, sum(doc) AS doc FROM (
+      SELECT term, doc FROM message_search_vocab WHERE ${where}
+      UNION ALL SELECT term, doc FROM transcript_search_vocab WHERE ${where}
+    ) GROUP BY term`);
+  const range = vocab("term >= ?1 AND term < ?2");
+  const exact = vocab("term = ?1");
   const forms: QueryForms = new Map();
   for (const piece of query.split(/\s+/).filter(Boolean)) {
     const tokens = tokenize(piece);

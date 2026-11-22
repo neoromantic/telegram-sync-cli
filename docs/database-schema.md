@@ -418,6 +418,17 @@ CREATE VIRTUAL TABLE message_search_vocab USING fts5vocab(message_search, row);
 -- columns: term (the word as the index keeps it), doc (messages that contain it), cnt (occurrences)
 ```
 
+### Table: transcript_search_vocab
+
+The words of `transcript_search`, the index of `message_transcripts`, in the same shape as
+`message_search_vocab`: `tg messages search` reads both, so a form that occurs only in a
+transcript is found too. Created the same way, when a cache opens.
+
+```sql
+CREATE VIRTUAL TABLE transcript_search_vocab USING fts5vocab(transcript_search, row);
+-- columns: term, doc (transcripts that contain it), cnt (occurrences)
+```
+
 ### Table: search_meta
 
 ```sql

@@ -26,8 +26,9 @@ CREATE TABLE IF NOT EXISTS search_meta (
   updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
 );
 
--- the index's words, for word forms (stores nothing)
+-- the words of the message and transcript indexes, for word forms (store nothing)
 CREATE VIRTUAL TABLE IF NOT EXISTS message_search_vocab USING fts5vocab(message_search, row);
+CREATE VIRTUAL TABLE IF NOT EXISTS transcript_search_vocab USING fts5vocab(transcript_search, row);
 ```
 
 ### A contentless index
@@ -449,7 +450,8 @@ and `еще` finds `ещё` (and the reverse). `--exact` turns this off: each wo
 typed. Why it is the default: [storage.md §9](storage.md#9-other-word-forms-and-typos).
 
 How it works ([#92](https://github.com/neoromantic/telegram-sync-cli/issues/92)): tg reads the
-index's own words from `message_search_vocab` and keeps those with the same stem as the query
+index's own words from `message_search_vocab`, with the words of voice and video note
+transcripts from `transcript_search_vocab`, and keeps those with the same stem as the query
 word. The stemmers are light: for a Cyrillic word, Russian noun and adjective case endings are
 stripped and `ё` reads as `е`; for a Latin word, only a plural `s` (`cities` to `city`); other
 words, and any word with a digit or a letter of another script (`2ms`), stay as they are
