@@ -16,9 +16,11 @@ export interface FetchedMessage {
   message: FetchedRawMessage;
   chats: tl.TypeChat[];
   users: tl.TypeUser[];
+  /** When a batch fetched it, ms */
+  fetchedAt?: number;
 }
 
-function messageNotFound(chatId: number, messageId: number) {
+export function messageNotFound(chatId: number, messageId: number) {
   return new MediaError(
     ErrorCodes.MESSAGE_NOT_FOUND,
     `Message ${messageId} not found in chat ${chatId}`,
@@ -27,25 +29,43 @@ function messageNotFound(chatId: number, messageId: number) {
 }
 
 /**
- * The message with this ID in the chat, from Telegram. A channel or
+ * The requested messages in the resolved chat. A channel or
  * supergroup numbers its own messages (channels.getMessages); private
  * chats and basic groups share the account's numbering (messages.getMessages),
- * so the message must also belong to the chat. MESSAGE_NOT_FOUND otherwise.
+ * so validate both the ID and the peer before handing any message to the caller.
  */
+export async function fetchMessagesById(
+  client: Pick<TelegramClient, "call">,
+  chat: HistoryChat,
+  ids: number[],
+  signal?: AbortSignal,
+) {
+  const page = await fetchMessagesByIdRaw(client, chat.inputPeer, ids, signal);
+  const wanted = new Set(ids);
+  const found = new Map<number, FetchedMessage>();
+  for (const message of page.messages as tl.TypeMessage[]) {
+    if (
+      message._ === "messageEmpty" ||
+      !wanted.has(message.id) ||
+      toPeerIdFromRawPeer(message.peerId) !== chat.chatId
+    ) {
+      continue;
+    }
+    found.set(message.id, { message, chats: page.chats, users: page.users });
+  }
+  return found;
+}
+
 export async function fetchMessageById(
   client: Pick<TelegramClient, "call">,
   chat: HistoryChat,
   messageId: number,
   signal?: AbortSignal,
 ) {
-  const page = await fetchMessagesByIdRaw(client, chat.inputPeer, [messageId], signal);
-  const message = (page.messages as tl.TypeMessage[]).find(
-    (item): item is FetchedRawMessage => item._ !== "messageEmpty" && item.id === messageId,
-  );
-  if (!message || toPeerIdFromRawPeer(message.peerId) !== chat.chatId) {
-    throw messageNotFound(chat.chatId, messageId);
-  }
-  return { message, chats: page.chats, users: page.users };
+  const page = await fetchMessagesById(client, chat, [messageId], signal);
+  const item = page.get(messageId);
+  if (!item) throw messageNotFound(chat.chatId, messageId);
+  return item;
 }
 
 /**

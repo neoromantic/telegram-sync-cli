@@ -38,6 +38,9 @@ export function createChatProtectionStore(db: Database) {
         protected = excluded.protected,
         reason = excluded.reason,
         fetched_at = excluded.fetched_at
+      WHERE excluded.fetched_at > chat_content_protection.fetched_at
+         OR (excluded.fetched_at = chat_content_protection.fetched_at
+             AND excluded.protected > chat_content_protection.protected)
     `),
   };
 
