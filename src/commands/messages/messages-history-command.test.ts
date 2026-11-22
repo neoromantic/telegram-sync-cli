@@ -13,12 +13,14 @@ import {
 import {
   aroundRequest,
   cacheHistoryResponse,
+  type FilteredCoverage,
   fetchHistoryPage,
   fetchMessageAround,
   getMessageWithContext,
   type HistoryChat,
   type HistoryWindow,
   historyRequest,
+  type ListHistoryResult,
   listHistory,
   type ResolveHistoryChatDeps,
   resolveHistoryChat,
@@ -30,8 +32,10 @@ import { createChatSyncStateService } from "../../db/chat-sync-state";
 import { createChatsCache } from "../../db/chats-cache";
 import { createHistoryRanges, type HistoryRange } from "../../db/history-ranges";
 import { createMessagesCache } from "../../db/messages-cache";
+import type { MessageFilter } from "../../db/messages-history";
 import { createMessagesSearch } from "../../db/messages-search";
 import { createRateLimitsService } from "../../db/rate-limits";
+import { MESSAGE_TYPES_MIGRATION } from "../../db/raw-json-migrations";
 import { SyncPriority } from "../../db/sync-schema";
 import { createUsersCache } from "../../db/users-cache";
 import { extractAttachment } from "../../utils/attachment";
@@ -822,6 +826,187 @@ describe("listHistory", () => {
     expect(after?.forward_cursor).toBe(before!.forward_cursor);
     expect(after?.backward_cursor).toBe(before!.backward_cursor);
     expect(after?.history_complete).toBe(before!.history_complete);
+  });
+});
+
+describe("listHistory with filters", () => {
+  let cacheDb: Database;
+
+  beforeEach(() => {
+    cacheDb = createCacheDb();
+  });
+
+  afterEach(() => {
+    cacheDb.close();
+  });
+
+  function markVoices() {
+    cacheDb.run("UPDATE messages_cache SET message_type = 'voice' WHERE message_id % 5 = 0");
+  }
+
+  function list(window: HistoryWindow, filter: MessageFilter) {
+    return listHistory({
+      cacheDb,
+      client: createLazyClient(throwingFactory()),
+      chat: TEAM_CHAT,
+      window,
+      includeDeleted: false,
+      fresh: false,
+      filter,
+    }) as Promise<ListHistoryResult & FilteredCoverage>;
+  }
+
+  const VOICE = { types: ["voice"] };
+
+  it("stays incomplete after a fill when a message arrived during its request", async () => {
+    cacheMessages(cacheDb, TEAM_CHAT_ID, [1, 10]);
+    createHistoryRanges(cacheDb).add(TEAM_CHAT_ID, { low: 1, high: 10 });
+    const server = createFakeHistory([1, 10]);
+    const read = server.client.call as unknown as (
+      request: GetHistoryRequest,
+    ) => Promise<Record<string, unknown>>;
+    const call = async (request: GetHistoryRequest) => {
+      const page = await read(request);
+      server.add(15, 30);
+      cacheMessages(cacheDb, TEAM_CHAT_ID, [30]);
+      return { ...page, users: [], chats: [] };
+    };
+    const client = { call } as unknown as CallClient;
+    const fill = () => fetchHistoryPage(client, cacheDb, TEAM_CHAT, { limit: 100, before: 21 });
+    const TEXT = { types: ["text"] };
+
+    await fill();
+    const first = await list({ limit: 20, before: 21 }, TEXT);
+    expect(messageIds(first.items)).toEqual([10, 1]);
+    expect(first).toMatchObject({ complete: false, missingBefore: 21 });
+
+    await fill();
+    const second = await list({ limit: 20, before: 21 }, TEXT);
+    expect(messageIds(second.items)).toEqual([15, 10, 1]);
+    expect(second.complete).toBe(true);
+  });
+
+  it("reads every match from the cache and is complete when the range reaches message 1", async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 30);
+    markVoices();
+
+    const result = await list({ limit: 20 }, VOICE);
+
+    expect(messageIds(result.items)).toEqual([30, 25, 20, 15, 10, 5]);
+    expect(result).toMatchObject({
+      source: "cache",
+      complete: true,
+      missing: [],
+      missingBefore: null,
+      nextBefore: 5,
+      nextAfter: 30,
+    });
+  });
+
+  it("vouches for a full page only down to its last item", async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 51, 100);
+    markVoices();
+
+    const first = await list({ limit: 3 }, VOICE);
+    expect(messageIds(first.items)).toEqual([100, 95, 90]);
+    expect(first.complete).toBe(true);
+
+    const second = await list({ limit: 3, before: first.nextBefore! }, VOICE);
+    expect(messageIds(second.items)).toEqual([85, 80, 75]);
+    expect(second.complete).toBe(true);
+  });
+
+  it("says where the cache stops when the page runs past a gap", async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 20);
+    cacheRun(cacheDb, TEAM_CHAT_ID, 51, 70);
+    markVoices();
+
+    const result = await list({ limit: 20 }, VOICE);
+
+    expect(messageIds(result.items)).toEqual([70, 65, 60, 55, 20, 15, 10, 5]);
+    expect(result).toMatchObject({
+      complete: false,
+      missing: ["history"],
+      missingBefore: 51,
+    });
+  });
+
+  it("is incomplete while the newest messages arrived live, outside any range", async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 20);
+    cacheMessages(cacheDb, TEAM_CHAT_ID, [21, 22]);
+    markVoices();
+
+    const result = await list({ limit: 20 }, VOICE);
+
+    expect(messageIds(result.items)).toEqual([20, 15, 10, 5]);
+    expect(result).toMatchObject({ complete: false, missingBefore: null });
+  });
+
+  it("bounds a date window by the cached messages sent after it, next to a range", async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 100);
+    cacheMessages(cacheDb, TEAM_CHAT_ID, [101, 102]);
+
+    const result = await list({ limit: 100 }, { since: DATE + 80, until: DATE + 90 });
+
+    expect(messageIds(result.items)).toEqual(range(80, 89).reverse());
+    expect(result.complete).toBe(true);
+  });
+
+  it("is incomplete when the range starts inside the date window", async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 51, 100);
+
+    const result = await list({ limit: 100 }, { since: DATE + 40 });
+
+    expect(messageIds(result.items)).toEqual(range(51, 100).reverse());
+    expect(result).toMatchObject({ complete: false, missingBefore: 51 });
+  });
+
+  it("pages forward with --after through the filtered list", async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 30);
+    markVoices();
+
+    const first = await list({ limit: 2, after: 0 }, VOICE);
+    expect(messageIds(first.items)).toEqual([10, 5]);
+    expect(first.complete).toBe(true);
+
+    const last = await list({ limit: 4, after: first.nextAfter! }, VOICE);
+    expect(messageIds(last.items)).toEqual([30, 25, 20, 15]);
+    expect(last.complete).toBe(true);
+
+    const end = await list({ limit: 4, after: last.nextAfter! }, VOICE);
+    expect(end).toMatchObject({
+      items: [],
+      nextBefore: null,
+      nextAfter: null,
+      complete: true,
+    });
+  });
+
+  it("is incomplete for a chat with no cached message", async () => {
+    const result = await list({ limit: 20 }, VOICE);
+
+    expect(result).toMatchObject({
+      items: [],
+      complete: false,
+      missing: ["history"],
+      missingBefore: null,
+    });
+  });
+
+  it("is incomplete for --type until older rows have their type", async () => {
+    cacheRun(cacheDb, TEAM_CHAT_ID, 1, 30);
+    cacheDb.run(
+      `UPDATE cache_migrations SET state = 'pending' WHERE name = '${MESSAGE_TYPES_MIGRATION}'`,
+    );
+
+    const typed = await list({ limit: 20 }, VOICE);
+    expect(typed).toMatchObject({
+      complete: false,
+      missing: ["types"],
+      missingBefore: null,
+    });
+
+    expect((await list({ limit: 20 }, { since: DATE })).complete).toBe(true);
   });
 });
 

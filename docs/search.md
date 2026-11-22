@@ -2,6 +2,12 @@
 
 > **Status:** Implemented (2026-02-02) — current implementation in `src/db/sync-schema.ts`\n> and `src/db/messages-search.ts`.
 
+`tg messages search` also searches stored voice and video note transcripts in the selected account.
+A query matches the indexed message or its visible transcript. Use `--chat` and `--sender` to filter either kind of match.
+Each matching message appears once, including in `--count`. A transcript hit has `transcriptMatch: true`;
+`--snippet` takes its excerpt from the speech. A replaced attachment or newly protected message or chat
+stops matching by speech as soon as the cache records the change. Searching never starts transcription.
+
 ## Schema
 
 ```sql

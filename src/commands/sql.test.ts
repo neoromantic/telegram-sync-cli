@@ -272,6 +272,21 @@ describe("SQL Command", () => {
       ]);
     });
 
+    it("describes every column of message_transcripts, with its index", () => {
+      const db = createAccountCacheDb();
+      const columns = (
+        db.query("PRAGMA table_info(message_transcripts)").all() as Array<{
+          name: string;
+        }>
+      ).map((column) => column.name);
+      db.close();
+
+      expect(getColumnNames("message_transcripts")).toEqual(columns);
+      expect(Object.keys(getTableAnnotation("message_transcripts")?.indexes ?? {})).toEqual([
+        "idx_message_transcripts_unique_file_id",
+      ]);
+    });
+
     it("describes every column of the message_search_text view, in order", () => {
       const db = createAccountCacheDb();
       const columns = (

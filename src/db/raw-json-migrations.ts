@@ -14,8 +14,11 @@ function rawMessageType(raw: unknown) {
   return resolveRawMessageType(raw).messageType;
 }
 
+/** The migration that gives older rows their message_type and attachment */
+export const MESSAGE_TYPES_MIGRATION = "messages_raw_json_v2";
+
 const messagesMigration: BackgroundMigration = {
-  name: "messages_raw_json_v2",
+  name: MESSAGE_TYPES_MIGRATION,
   description: "Re-encode raw_json of cached messages, fill their attachments and message types",
   table: "messages_cache",
   columns: ["chat_id", "message_id", "message_type", "has_media", "raw_json"],

@@ -30,6 +30,7 @@
         "src/daemon/daemon-accounts.connect.test.ts",
         "src/services/telegram-factory.test.ts",
         "src/test/fake-client-cli.test-utils.ts",
+        "src/test/fake-media-cli.test-utils.ts",
         "src/test/fake-telegram-client.test-utils.ts"
       ],
       "rules": {

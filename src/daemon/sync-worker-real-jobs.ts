@@ -159,6 +159,7 @@ export async function processBackwardHistoryReal(ctx: RealSyncWorkerContext, job
   backwardCursor ??= 0;
 
   try {
+    const knownTop = ctx.historyRanges.knownTop(chatId);
     const messages = await fetchJobPage(ctx, chatId, peer.inputPeer, {
       offsetId: backwardCursor,
       limit: ctx.config.batchSize,
@@ -167,6 +168,7 @@ export async function processBackwardHistoryReal(ctx: RealSyncWorkerContext, job
     const bounds = {
       before: backwardCursor || undefined,
       reachedStart: messages.length < ctx.config.batchSize,
+      knownTop,
     };
 
     if (!ctx.messagesCache.participation.captures(chatId)) return PAUSED;

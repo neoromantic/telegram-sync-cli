@@ -212,6 +212,9 @@ tg messages list --chat @username                  # the newest 20, newest first
 tg messages list --chat @username --before 1200    # the page older than message 1200
 tg messages list --chat -1001234567890 --after 0   # from the first message on
 tg messages list --chat me --limit 5 --fresh       # from Telegram, then cached
+tg messages list --chat @username --type voice,round   # every voice note and round video
+tg messages list --chat @username --since 2026-11-16   # since Monday, local midnight
+tg messages list --chat @username --type photo --since 7d --until 1d
 tg messages get --chat @username --id 1200 --context 3   # 3 newer and 3 older around it
 tg messages search --query "hello world"           # both words, any order
 tg messages search --query '"hello world"'         # the exact phrase (or --phrase)
@@ -258,6 +261,93 @@ without a running daemon it can miss recent messages. See
 [caching.md](caching.md#chat-history). `--fresh` always reads the window from Telegram. In a
 group you don't take part in, the page comes from Telegram
 as usual but its new messages aren't cached.
+
+#### Filtering a chat
+
+`--type`, `--since` and `--until` narrow `tg messages list` to some messages of the chat:
+
+- `--type` takes one or more of `text`, `photo`, `video`, `round`, `animation`, `document`,
+  `sticker`, `voice`, `audio`, `poll`, `contact`, `location`, `venue`, `game`, `invoice`,
+  `webpage`, `dice`, `service` and `unknown`, comma-separated (`--type voice,round`) or repeated.
+  Each is an item's `messageType`, except `round` and `animation`: round video messages and GIFs
+  have `messageType: "video"` and are matched by their `attachment.kind`, so `video` covers them
+  too. Any other value is `INVALID_ARGS` (exit 3).
+- `--since` (sent at or after) and `--until` (sent before) take the forms of
+  `tg messages search`: a date, a date and time, or a duration back from now (`24h`, `7d`).
+- Paging works as without filters: `nextBefore` and `nextAfter` page through the filtered list,
+  and a filter that matches nothing is an empty page.
+
+A filtered page reads only the cache and never asks Telegram for messages: Telegram's history
+has no such filters, so `--fresh` with a filter is `INVALID_ARGS`. Resolving `--chat` and the
+[`allowedChats`](configuration.md#read-only-mode-and-allowed-chats) check read only the cache
+too, so a chat the cache knows, by ID or by a cached `@username`, needs no credentials and no
+connection. A name the cache can't resolve is `INVALID_ARGS` that says so: pass the chat's ID
+as `tg chats list` prints it. The page lists every cached match and adds four keys:
+
+```json
+{ "chatId": -1001234567890, "items": [ … ], "limit": 20, "before": null, "after": null,
+  "nextBefore": 45, "nextAfter": 60, "source": "cache", "stale": false,
+  "complete": false, "missing": ["history"], "missingBefore": null,
+  "suggestion": "This page may lack matches: the cache lacks messages 61-62: next fetches them, then reads this page again (tg chats sync turns on history sync for a long gap)." }
+```
+
+What a filtered page promises:
+
+1. **The span.** The page vouches for a span of message IDs: from the chat's newest known
+   message (the newest cached one, or the newest one the dialog list or the daemon's sync state
+   reported, whichever is higher), or the one below `--before`, down to message 1 or the one
+   above `--after`; a full page vouches only down to its last item (up to it, paging forward).
+   A cached message sent at or after `--until` (before `--since`) ends the span there only when
+   the cache knows every message ID beyond it (each is cached or inside a recorded range): the
+   date of a missing message is never guessed, since dates can fall out of ID order. With
+   `--since`, the first page can already show all matches while `complete` stays false.
+   Confirming a short page can require fetching older history back to the start of the chat.
+2. **`complete: true`** means one recorded history range covers the whole span and, with
+   `--type`, every cached message in it has its type: no message of the chat that matches is
+   missing from the page, as of the chat's newest known message. An empty complete page is a
+   real zero. The rows, the ranges, the newest known message and the type state are read in one
+   SQLite read transaction, so a sync writing meanwhile can't make the page look complete.
+3. **`missing`** says why a page is incomplete, empty when it is complete: `history` when the
+   cache lacks messages of the span (a gap, or messages that arrived live since the last
+   catch-up), `types` with `--type` while some cached messages have no type to filter on yet
+   (the background migration that types messages of older versions is unfinished, or a media
+   message is waiting for a refetch of its raw message).
+4. **`missingBefore`** is where the newest gap ends: the `--before` of the unfiltered page that
+   fills it. It is `null` when the gap reaches the chat's newest message (the newest page fills
+   it) or when only `types` is missing.
+5. **`next` of an incomplete page fills first, then reads the same page again**, since filling
+   can add matches to it: `tg messages list --chat=… --limit=100 [--before=<missingBefore>]
+   --fresh` caches that page from Telegram (it needs credentials and a connection), `tg db
+   migrate` finishes the type migration, and the last command is this page again. Repeat until
+   the page is complete; each round fills up to 100 more messages. When only a media message’s
+   type is missing, the list omits `next` even if it returned `--limit` known matches. The
+   `suggestion` gives a `tg messages list --fresh` command to try once. Repeat the original
+   query after fetching. If Telegram no longer returns the message, the page stays incomplete.
+   Every command keeps `--account`. `next` of a complete page is the next page, as without filters, so `next` never
+   steps over a gap. `nextBefore` and `nextAfter` still page through the cached matches when you
+   choose to read past a gap. A group keeps its messages from a time you didn't take part in it
+   out of the cache ([group participation](sync-strategy.md#group-participation)), so a gap of
+   that time, or any gap while you don't take part, can't be filled: `next` is then the next page
+   and `suggestion` says to read the chat unfiltered.
+6. **Time bounds are pinned.** `next` carries `--since` and `--until` resolved to UTC seconds
+   (`--since=2026-11-11T14:59:53Z`), so a relative bound such as `60s` keeps the window of the
+   first page. Bounds with milliseconds round up to the next second, as message dates are whole
+   seconds: `--until 00:01:40.500Z` keeps a message sent at `00:01:40`.
+
+`suggestion` is one sentence on what the page lacks, `null` when it is complete; the commands
+are in `next`. A deleted newest message that the daemon hasn't settled yet
+([sync strategy](sync-strategy.md#when-catch-up-runs)) can keep the newest page incomplete
+until its next catch-up.
+
+`tg messages search --type` keeps the same types among the search hits; `filters.type` echoes
+it (`null` without the flag). Search vouches for nothing about history: it finds what the cache
+holds. `typesPending` is `true` when `--type` may miss cached matches that have no type yet (the
+migration is unfinished, or a matching media message waits for its raw message). `next` then
+starts with `tg db migrate` while the migration is pending. Otherwise `suggestion` names the `tg
+messages list --fresh` that fetches the newest such message, and the messages below it, again
+from Telegram, as the migration can't type a message whose raw message the cache lacks; run it
+once, since a message Telegram no longer returns keeps its type unknown. `suggestion` is `null`
+otherwise. Without `--type` `typesPending` is `false`.
 
 `tg messages get` returns one message with up to `--context` messages (0-49, default 0) on each
 side: `{ chatId, message, newer, older, source, stale }`. `newer` and `older` are newest first,
@@ -346,8 +436,11 @@ Telegram call: Saved Messages as a chat, your own messages as a sender); any oth
 relevance` puts the best matches first (bm25); `--count` adds `count`, every match over all
 pages, while `total` stays the size of the page; `--snippet` adds `snippet` to each item, the
 text around the first match with matched words in `**`. When another page has matches, `next`
-has the same search with the following `--offset` ([Next commands](#next-commands)). The rules
-and examples are in [search.md](search.md#query-rules).
+has the same search with the following `--offset` and `--since`/`--until` resolved to UTC
+seconds, so a relative bound keeps its window ([Next commands](#next-commands)). Search reads
+only the cache, so `--fresh` is `INVALID_ARGS` (exit 3), not a cached answer that looks fresh:
+fetch the chat with `tg messages list --chat <chat> --fresh` first. The rules and examples are in
+[search.md](search.md#query-rules).
 
 Each plain word also matches its other forms in the cache: Russian case forms (`квартира`,
 `квартиру`, `квартирой`), English plurals (`meeting`, `meetings`), with `ё` read as `е`.
@@ -538,6 +631,8 @@ tg media download --chat me --id 42                   # into the media cache, pr
 tg media download --chat @username --id 42 --out ./   # also copy it into this directory
 tg media download --chat me --id 42 --out - > report.pdf
 tg media download --chat me --id 42 --thumb           # the file's small preview
+tg media download --chat me --id 42 --id 43 --out ./media/   # several: one JSON line per file
+tg media download --chat me --id 42 --out './media/{chat}/{date}_{id}_{name}'
 tg media clean --older-than 30d                       # files not used for 30 days
 ```
 
@@ -551,12 +646,39 @@ mimeType, size, kind, chatId, messageId, uniqueFileId, groupedId, cached, resume
   download is kept and the next run resumes it (`resumedFrom`).
 - `--out` copies the file into a directory or to a file path; `--out -` writes the bytes to
   stdout with no JSON. An existing target is `FILE_EXISTS` unless `--overwrite` is set.
+  A batch also accepts identical bytes. Two different files mapped to the same path within
+  one batch conflict even with `--overwrite`.
+- `--out` can be a name template with `{chat}`, `{id}`, `{date}` (the message's UTC day),
+  `{name}` and `{kind}`; each filled part is made a safe file name, and one that exists as a
+  symlink fails that file with `GENERAL_ERROR` instead of being followed.
+- Repeat `--id` for several messages of the chat. One run fetches the messages together,
+  downloads up to 5 files at a time (2 of 20 MiB or more) and pauses the whole batch for a flood
+  wait of up to 5 minutes. It prints one JSON line per file as each finishes, success or error,
+  in the shapes above, then `Downloaded N of M files` on stderr. A failed file doesn't stop the
+  others; the exit code is 1 when any failed. A directory `--out` names each file
+  `{id}_{name}`. `--out -` takes one `--id`.
 - Errors, all exit 1: `NO_MEDIA` (no file, or no preview with `--thumb`), `MESSAGE_NOT_FOUND`
   (Telegram has no such message in the chat), `CONTENT_PROTECTED` (`details.reason`:
   `message`, `chat`, `private_chat` or `self_destructing`), `MEDIA_UNSUPPORTED` (a file served
   from Telegram's CDN), `FILE_EXISTS`. A stalled download is `NETWORK_ERROR` (exit 4) and a
   long flood wait `RATE_LIMITED` (exit 5); both keep the partial download. Ctrl-C keeps it too
   and exits 130.
+
+```bash
+tg media transcribe --chat me --id 42                 # a voice note or video note to text
+tg media transcribe --chat me --id 42 --id 43 --language ru
+```
+
+`tg media transcribe` gets each file the way `tg media download` does, converts it with
+ffmpeg and runs a speech-to-text program on this machine (whisper.cpp or an
+openai-whisper-compatible CLI) once for all of them. It prints `{ chatId, messageId, text,
+language, source, runner, model, cached }`; with several `--id`, one JSON line per message in `--id`
+order, and exit 1 when any failed. A stored transcript is printed again without running the
+program (`cached: true`) unless `--force`. `tg messages` items show it as `transcript`. No
+program or ffmpeg found is `TRANSCRIBER_NOT_FOUND` (exit 1); this and every other setup error
+carries the commands to fix it in `suggestion`; in a batch it fails only the messages that need
+the program. Ctrl-C, SIGTERM or SIGHUP removes the converted audio and exits 130. Setup, providers and
+where the audio goes: [media.md](media.md#transcribe).
 
 `tg media clean` removes partial downloads untouched for a day; `--older-than <30d|date>`,
 `--chat <peer>` (a file another chat also holds stays, as far as `message_attachments` knows)
@@ -1047,17 +1169,18 @@ A success answer may add `next`, the commands that continue the read, beside `da
   `-`, stays one argument. It never carries the global `--format`, `--verbose` or `--quiet`.
 - `why` is one sentence for whoever decides whether to run it.
 - `next` is absent when there is nothing to suggest, and it never suggests a command that
-  read-only mode or `allowedChats` would refuse: only reads, of the chat the command already read.
+  read-only mode or `allowedChats` would refuse: only reads, of the chat the command already read,
+  and `tg db migrate`, which changes only the local cache.
 - `--format pretty` prints each suggestion on stderr as `Next: <why>` and the command on the
   line below, so stdout stays the data's JSON; `--quiet` prints nothing.
 
-| Command                             | `next`                                                                                                                    |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `tg messages list`                  | after a full page: `--before <nextBefore>` (older), or with `--after`, `--after <nextAfter>` (newer); none past message 1 |
-| `tg messages search`                | when another page has matches: `--offset <offset + limit>`                                                                |
-| `tg chats list`, `tg contacts list` | when `hasMore`: `--offset <offset + limit>`; `--fresh` is kept, so the page comes from the same list                      |
-| `tg messages wait --chat`           | after new messages: the same wait with `--after` the newest of them                                                       |
-| `tg chats search`                   | with no result: `tg chats list --fresh`, then the same search                                                             |
+| Command                             | `next`                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tg messages list`                  | after a full page: `--before <nextBefore>` (older), or with `--after`, `--after <nextAfter>` (newer); none past message 1. With `--type`, `--since` or `--until`, `--since`/`--until` are resolved to UTC seconds, and an incomplete page suggests instead what fills it (`tg messages list --fresh`, `tg db migrate`) and then the same page ([Filtering a chat](#filtering-a-chat)) |
+| `tg messages search`                | when another page has matches: `--offset <offset + limit>`, with `--since`/`--until` resolved to UTC seconds; with `typesPending`, first `tg db migrate`                                                                                                                                                                                                                              |
+| `tg chats list`, `tg contacts list` | when `hasMore`: `--offset <offset + limit>`; `--fresh` is kept, so the page comes from the same list                                                                                                                                                                                                                                                                                  |
+| `tg messages wait --chat`           | after new messages: the same wait with `--after` the newest of them                                                                                                                                                                                                                                                                                                                   |
+| `tg chats search`                   | with no result: `tg chats list --fresh`, then the same search                                                                                                                                                                                                                                                                                                                         |
 
 The cursors (`nextBefore`, `nextAfter`, `hasMore`, `offset`) and `message` stay as they were;
 `next` only spells out the command they lead to.

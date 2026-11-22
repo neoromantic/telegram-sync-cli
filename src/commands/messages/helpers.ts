@@ -6,7 +6,7 @@ import { createChatsCache } from "../../db/chats-cache";
 import type { MessageSearchRow } from "../../db/messages-search";
 import { createUsersCache } from "../../db/users-cache";
 import { getClientForAccount } from "../../services/telegram";
-import { ErrorCodes, type MessageSearchItem } from "../../types";
+import { ErrorCodes, type MessageSearchItem, type MessageTranscript } from "../../types";
 import { type AttachmentInfo, extractAttachment } from "../../utils/attachment";
 import { error } from "../../utils/output";
 import { richMessageText } from "../../utils/rich-message";
@@ -15,6 +15,7 @@ import {
   reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from "../../utils/telegram-rate-limits";
+import { cachedProtection } from "../media/protection";
 import { AmbiguousPeerError, createDmLookup, InvalidPeerError } from "../send/peer-resolver";
 
 /** The JSON item for a message row, shared by every `tg messages` command */
@@ -22,6 +23,7 @@ export function messageRowToItem(
   row: MessageSearchRow,
   attachment: AttachmentInfo | null,
   action: MessageAction | null,
+  transcript: MessageTranscript | null = null,
 ) {
   return {
     chatId: row.chat_id,
@@ -33,6 +35,7 @@ export function messageRowToItem(
     mediaPath: row.media_path,
     attachment,
     action,
+    transcript,
     isOutgoing: row.is_outgoing === 1,
     isEdited: row.is_edited === 1,
     isPinned: row.is_pinned === 1,
@@ -56,17 +59,31 @@ export function messageRowToItem(
   };
 }
 
+/** The same cached visibility check applies to display, search hits and counts. */
+export function visibleTranscriptFile(db: Database) {
+  const protection = cachedProtection(db);
+  return (chatId: number, raw: string, attachment: AttachmentInfo | null) =>
+    (attachment?.kind === "voice" || attachment?.kind === "round") &&
+    !protection(chatId, raw).protected;
+}
+
 /**
  * A function that makes the item for a row, with the attachment and the
  * service action read from its raw_json (only media and service rows are
- * read), and the text of a rich message cached before its text was (a text
- * row without text). Every cached message has raw_json, so this works for
- * rows cached before message_attachments existed too.
+ * read), the transcript of a voice or video note unless the cache knows
+ * the message or its chat is protected, and the text of a rich
+ * message cached before its text was (a text row without text). Every
+ * cached message has raw_json, so this works for rows cached before
+ * message_attachments existed too.
  */
 export function messageItemReader(db: Database) {
   const rawJson = db.query<{ raw_json: string }, [number, number]>(
     "SELECT raw_json FROM messages_cache WHERE chat_id = ? AND message_id = ?",
   );
+  const transcriptOf = db.query<MessageTranscript, [number, number, string]>(
+    "SELECT text, language, source, runner, model FROM message_transcripts WHERE chat_id = ? AND message_id = ? AND unique_file_id = ?",
+  );
+  const visible = visibleTranscriptFile(db);
   const result: (row: MessageRow) => MessageSearchItem = (row) => {
     const isService = row.message_type === "service";
     const mayBeRich = !row.text && row.message_type === "text";
@@ -76,10 +93,16 @@ export function messageItemReader(db: Database) {
         : null;
     if (!raw) return messageRowToItem(row, null, null);
     const text = mayBeRich ? richMessageText(raw) : null;
+    const attachment = row.has_media === 1 ? extractAttachment(raw) : null;
+    const transcript =
+      attachment && visible(row.chat_id, raw, attachment)
+        ? transcriptOf.get(row.chat_id, row.message_id, attachment.uniqueFileId)
+        : null;
     return messageRowToItem(
       text ? { ...row, text } : row,
-      row.has_media === 1 ? extractAttachment(raw) : null,
+      attachment,
       isService ? extractServiceAction(raw) : null,
+      transcript,
     );
   };
   return result;
@@ -151,10 +174,29 @@ export class MessageNotFoundError extends Error {
   }
 }
 
+/** A read that takes only the cache got a chat name that only Telegram could resolve */
+export class ChatNotCachedError extends Error {
+  readonly identifier: string;
+
+  constructor(identifier: string) {
+    super(`${identifier} is not in the cache, and this read doesn't connect to Telegram`);
+    this.name = "ChatNotCachedError";
+    this.identifier = identifier;
+  }
+}
+
 /** Report a failed history read with the error codes other commands use */
 export function reportHistoryError(err: unknown, action: string): never {
   if (err instanceof MessageNotFoundError) {
     error(ErrorCodes.TELEGRAM_ERROR, err.message, err.details);
+  }
+  if (err instanceof ChatNotCachedError) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      err.message,
+      { chat: err.identifier },
+      "Use the numeric ID from tg chats list wherever this name is set (including in allowedChats), or cache the name for this account with tg chats list --fresh",
+    );
   }
   if (err instanceof AmbiguousPeerError) {
     error(ErrorCodes.INVALID_ARGS, err.message, {

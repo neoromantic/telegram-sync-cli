@@ -340,6 +340,35 @@ CREATE TABLE chat_content_protection (
 );
 ```
 
+### Table: message_transcripts
+
+The text `tg media transcribe` got from a voice note or video note, one row per message
+([media.md](media.md#transcribe)). Only that command writes it; the daemon never does. The
+per-account FTS5 table `transcript_search` indexes the stored text. `tg messages search` checks current attachment identity and protection before using a transcript hit.
+
+```sql
+CREATE TABLE message_transcripts (
+  id             INTEGER PRIMARY KEY,
+  chat_id        INTEGER NOT NULL,  -- marked peer ID
+  message_id     INTEGER NOT NULL,
+  unique_file_id TEXT NOT NULL,     -- as in message_attachments; the row counts only while the message holds this file
+  text           TEXT NOT NULL,     -- empty for silent audio
+  language       TEXT,              -- code the program detected or was given; NULL for silent audio
+  source         TEXT NOT NULL,     -- the provider: local, a program on this machine
+  runner         TEXT,              -- the provider's program or service: whisper-cli, mlx_whisper…; NULL for silent audio
+  model          TEXT,              -- model name, or the model file's name for whisper.cpp; NULL for silent audio
+  transcribed_at INTEGER NOT NULL,  -- ms
+  UNIQUE (chat_id, message_id)
+);
+CREATE INDEX idx_message_transcripts_unique_file_id ON message_transcripts(unique_file_id);
+```
+
+```sql
+SELECT m.date, t.text
+FROM message_transcripts t JOIN messages_cache m USING (chat_id, message_id)
+WHERE t.chat_id = 5550001 ORDER BY m.date;
+```
+
 ### Table: message_search
 
 FTS5 index for message search.
@@ -424,8 +453,9 @@ CREATE TABLE search_reindex_queue (
 
 The message ID ranges of a chat that `messages_cache` holds without a gap. Each
 `messages.getHistory` page the daemon or the CLI caches adds the range it covers; touching or
-overlapping ranges merge, so the ranges of one chat never touch. `tg messages list` and `get`
-answer from the cache only inside a range (see `docs/caching.md`).
+overlapping ranges merge, so the ranges of one chat never touch. `low` 1 with `high` 0 records a
+chat whose newest page Telegram returned empty. `tg messages list` and `get` answer from the
+cache only inside a range (see `docs/caching.md`).
 
 ```sql
 CREATE TABLE history_ranges (
@@ -727,8 +757,8 @@ lacks them. The build reads the whole table under the write lock, so that open, 
 other process opening the cache meanwhile, waits up to 60 seconds for the lock instead of 5;
 the process that waited finds the index built. Opens of a cache that has them only read.
 
-`message_attachments` (with its index) and `chat_content_protection` are created on the first
-open of a cache that lacks them. They start empty, so the step rewrites nothing and takes no
+`message_attachments` (with its index), `chat_content_protection` and `message_transcripts`
+(with its index) are created on the first open of a cache that lacks them. They start empty, so the step rewrites nothing and takes no
 time; opens that find them only read.
 
 `group_participation` and `group_capture_gaps` are created on the first open of a cache that

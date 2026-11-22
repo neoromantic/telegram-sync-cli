@@ -175,6 +175,16 @@ Supported keys:
 - `sync.pacing.calmInterval` (duration, default `3s`): how often a job may start per account
   with no history due
 
+- `transcribe.local.command` (string, default none): the speech-to-text program the local provider of
+  `tg media transcribe` runs ([media.md](media.md#providers)), a name on `PATH` or a path. A program named `whisper-cli` is run
+  as whisper.cpp, any other as an openai-whisper-compatible CLI. Without it, tg looks on `PATH`
+  for `whisper-cli`, `mlx_whisper`, `whisper-ctranslate2` and `whisper`, in that order
+- `transcribe.local.model` (string): the model; for whisper.cpp the path of a model file, which it
+  needs (the error for a missing one suggests `~/.cache/whisper-cli/ggml-large-v3-turbo-q5_0.bin`). Defaults: `mlx-community/whisper-large-v3-turbo` for `mlx_whisper`, `large-v3-turbo`
+  for the others ([media.md](media.md#transcribe))
+- `transcribe.language` (string, default none): the language code of the speech, such as `ru`;
+  without it the program detects the language. `--language` overrides it
+
 The retention keys and `sync.pacing.calmInterval` take a value above 0; `0s` is rejected. The daemon prunes on a schedule
 ([daemon.md](daemon.md#cache-pruning)) and `tg db vacuum` prunes before it compacts.
 Messages, chats and users are never pruned.
@@ -229,6 +239,7 @@ tg config get cache.staleness.peers
 tg config set cache.staleness.peers 3d
 tg config set activeAccount 2
 tg config set sync.pacing.maxCallsPerSecond 0.8
+tg config set transcribe.local.model /path/to/ggml-large-v3-turbo-q5_0.bin
 ```
 
 ## Runtime Behavior
@@ -287,7 +298,7 @@ something on Telegram, before it connects, with `READ_ONLY` (exit 1):
 - `tg auth login`, `tg auth login-qr` and `tg auth logout`, which add or end a session on
   Telegram.
 
-Everything else runs: cache reads, `--fresh` reads, `tg media download` and `clean`,
+Everything else runs: cache reads, `--fresh` reads, `tg media download`, `transcribe` and `clean`,
 `tg chats sync` (it only changes what the daemon syncs), `tg db`, `tg config`, `tg daemon`,
 `tg telemetry`, `tg skill`, `tg sql`, and the account commands. The daemon is read-only anyway.
 
@@ -297,7 +308,7 @@ while it is set, even to an empty string) limit the commands that read or send t
 - A command that names a chat refuses one outside the list with `CHAT_NOT_ALLOWED` (exit 1,
   `details: { chat, id }`: the chat as given and its marked ID). That is `--to` of `tg send`,
   `--chat` of `tg messages list`, `get`, `search`, `wait`, `watch`, `unread` and `read` and of
-  `tg media download`, `--id` of
+  `tg media download` and `transcribe`, `--id` of
   `tg chats get` and the chat of `tg chats sync`. The chat and the list resolve the same way,
   cache-first: `@name` and its ID are the same chat, `me` is the account's own user ID (Saved
   Messages), and an ID in the list is taken as written. A command that changes Telegram
@@ -317,7 +328,11 @@ while it is set, even to an empty string) limit the commands that read or send t
   keeps syncing every chat.
 
 An empty list allows no chat; remove the key (and unset the variable) to allow every chat. An
-`@username` the cache doesn't know is looked up on Telegram, which needs credentials. `tg status`
+`@username` the cache doesn't know is looked up on Telegram, which needs credentials. A command
+that reads only the cache (`tg messages search`, and `tg messages list` with `--type`, `--since`
+or `--until`) resolves the chat and the list from the cache alone and never connects: a cached
+`@username` resolves without its access hash, and a name the cache doesn't know is
+`INVALID_ARGS` that says so; pass the chat's ID instead. `tg status`
 shows both switches as `access: { read_only, allowed_chats }` (`allowed_chats` is `null`
 without a list), so an agent that was refused can see why.
 

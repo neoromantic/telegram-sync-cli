@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { defineCommand } from "citty";
+import { type ArgsDef, defineCommand } from "citty";
 import { ConfigError, ConfigReadError, getResolvedCacheConfig } from "../config";
 import { createPidFile } from "../daemon/pid-file";
 import {
@@ -200,18 +200,20 @@ function migrationProgress() {
   return result;
 }
 
+export const migrateArgs = {
+  account: {
+    type: "string",
+    description: ACCOUNT_SELECTOR_DESCRIPTION,
+  },
+} satisfies ArgsDef;
+
 const migrateCommand = defineCommand({
   meta: {
     name: "migrate",
     description:
       "Finish an account's background migrations now, in the foreground (the daemon runs them on its own)",
   },
-  args: {
-    account: {
-      type: "string",
-      description: ACCOUNT_SELECTOR_DESCRIPTION,
-    },
-  },
+  args: migrateArgs,
   async run({ args }) {
     const account = resolveAccount(args.account);
     const daemonRunning = createPidFile(join(getDataDir(), "daemon.pid")).isRunning();
