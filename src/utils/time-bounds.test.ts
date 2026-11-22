@@ -33,9 +33,15 @@ describe("parseTimeBound", () => {
     expect(parseTimeBound("2026-10-01T09:30+03:00", { now: NOW })).toBe(
       Date.UTC(2026, 9, 1, 6, 30) / 1000,
     );
-    expect(parseTimeBound("2026-10-01T09:30:15.500Z", { now: NOW })).toBe(
-      Date.UTC(2026, 9, 1, 9, 30, 15) / 1000,
-    );
+  });
+
+  it("rounds a bound with milliseconds up, as message dates are whole seconds", () => {
+    const at = Date.UTC(2026, 9, 1, 9, 30, 15) / 1000;
+    for (const end of [false, true]) {
+      expect(parseTimeBound("2026-10-01T09:30:15.500Z", { now: NOW, end })).toBe(at + 1);
+      expect(parseTimeBound("2026-10-01T09:30:15.000Z", { now: NOW, end })).toBe(at);
+    }
+    expect(parseTimeBound("60s", { now: NOW + 500 })).toBe(NOW / 1000 - 59);
   });
 
   it("returns null for anything else", () => {

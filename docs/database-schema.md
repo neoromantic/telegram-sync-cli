@@ -437,8 +437,9 @@ CREATE TABLE search_reindex_queue (
 
 The message ID ranges of a chat that `messages_cache` holds without a gap. Each
 `messages.getHistory` page the daemon or the CLI caches adds the range it covers; touching or
-overlapping ranges merge, so the ranges of one chat never touch. `tg messages list` and `get`
-answer from the cache only inside a range (see `docs/caching.md`).
+overlapping ranges merge, so the ranges of one chat never touch. `low` 1 with `high` 0 records a
+chat whose newest page Telegram returned empty. `tg messages list` and `get` answer from the
+cache only inside a range (see `docs/caching.md`).
 
 ```sql
 CREATE TABLE history_ranges (

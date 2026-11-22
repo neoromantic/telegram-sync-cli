@@ -151,16 +151,16 @@ export async function runCliFailure(
  * Run a command line as a POSIX shell reads it, with `tg` on PATH running
  * this checkout's CLI: the way an agent runs a `next` command it copied
  */
-export async function runShellCommand(command: string, options: Omit<CliOptions, "entry"> = {}) {
-  const shimDir = join(process.cwd(), ".tmp", `tg-shim-${process.pid}`);
+export async function runShellCommand(command: string, options: CliOptions = {}) {
+  const { env = {}, timeout = 10000, entry = CLI_PATH } = options;
+  const shimDir = join(process.cwd(), ".tmp", `tg-shim-${process.pid}-${Bun.hash(entry)}`);
   const shim = join(shimDir, "tg");
   if (!existsSync(shim)) {
     mkdirSync(shimDir, { recursive: true });
-    writeFileSync(shim, `#!/bin/sh\nexec bun --no-env-file run '${CLI_PATH}' "$@"\n`, {
+    writeFileSync(shim, `#!/bin/sh\nexec bun --no-env-file run '${entry}' "$@"\n`, {
       mode: 0o755,
     });
   }
-  const { env = {}, timeout = 10000 } = options;
   const startTime = performance.now();
   const proc = Bun.spawn(["sh", "-c", command], {
     env: {
