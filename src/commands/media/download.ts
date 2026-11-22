@@ -36,14 +36,20 @@ import {
 const CONTEXT = "cli:media.download";
 const INTERRUPTED_EXIT_CODE = 130;
 
-function reportInterrupted(err: DownloadInterruptedError) {
+function reportInterrupted(err: DownloadInterruptedError, partialExports: string[]) {
   const kept =
     err.downloaded === null
       ? ""
       : err.total === null
         ? `: ${formatBytes(err.downloaded)} kept`
         : `: ${formatBytes(err.downloaded)} of ${formatBytes(err.total)} kept`;
-  info(`Download interrupted${kept}, run the command again to resume`);
+  if (partialExports.length) {
+    info("Download interrupted. These exports may be incomplete:");
+    for (const path of partialExports) info(JSON.stringify(path));
+    info("Inspect each file before using --overwrite for its message ID.");
+  } else {
+    info(`Download interrupted${kept}, run the command again to resume`);
+  }
   return exitAfterFlush(INTERRUPTED_EXIT_CODE);
 }
 
@@ -169,10 +175,12 @@ export const downloadMediaCommand = defineCommand({
     const options = { thumb: args.thumb ?? false, fresh: args.fresh ?? false };
 
     const published: PublishedFiles | undefined = batch ? new Map() : undefined;
+    const partialExports: string[] = [];
+    const exportOptions = { published, signal: controller.signal, partialExports };
     const copy = (result: DownloadResult) =>
       out === undefined
         ? result.path
-        : copyOut(result, targetOf(out, result, batch), overwrite, published, controller.signal);
+        : copyOut(result, targetOf(out, result, batch), overwrite, exportOptions);
 
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
@@ -221,7 +229,7 @@ export const downloadMediaCommand = defineCommand({
       const path = await copy(result);
       success(outputOf(result, path));
     } catch (err) {
-      if (err instanceof DownloadInterruptedError) return reportInterrupted(err);
+      if (err instanceof DownloadInterruptedError) return reportInterrupted(err, partialExports);
       reportMediaError(err);
     } finally {
       process.off("SIGINT", stop);

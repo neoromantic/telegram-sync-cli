@@ -115,6 +115,12 @@ async function digest(path: string, signal?: AbortSignal) {
 
 export type PublishedFiles = Map<string, Promise<void> | undefined>;
 
+interface ExportOptions {
+  published?: PublishedFiles;
+  signal?: AbortSignal;
+  partialExports?: string[];
+}
+
 function inodeKey(st: { dev: bigint; ino: bigint }) {
   return `${st.dev}:${st.ino}`;
 }
@@ -135,22 +141,26 @@ export function lacksHardLinks(err: unknown) {
 export async function publishByCopy(
   tmp: string,
   target: string,
-  published?: PublishedFiles,
-  signal?: AbortSignal,
+  { published, signal, partialExports }: ExportOptions = {},
 ) {
   const fd = openSync(target, "wx");
   const writing = pipeline(createReadStream(tmp), createWriteStream(target, { fd }), { signal });
   if (published) published.set(inodeKey(fstatSync(fd, { bigint: true })), writing);
-  await writing;
+  try {
+    await writing;
+  } catch (err) {
+    if (signal?.aborted) partialExports?.push(target);
+    throw err;
+  }
 }
 
 async function publishCopy(
   source: string,
   target: string,
   overwrite: boolean,
-  published?: PublishedFiles,
-  signal?: AbortSignal,
+  options: ExportOptions,
 ) {
+  const { published, signal } = options;
   const tmp = join(dirname(target), `.tg-${randomUUID()}.part`);
   try {
     await Bun.write(tmp, Bun.file(source));
@@ -165,7 +175,7 @@ async function publishCopy(
         linkSync(tmp, target);
       } catch (err) {
         if (!lacksHardLinks(err)) throw err;
-        await publishByCopy(tmp, target, published, signal);
+        await publishByCopy(tmp, target, options);
         return true;
       }
     }
@@ -185,13 +195,13 @@ export async function copyOut(
   result: DownloadResult,
   target: string,
   overwrite: boolean,
-  published?: PublishedFiles,
-  signal?: AbortSignal,
+  options: ExportOptions = {},
 ) {
+  const { published, signal } = options;
   try {
     mkdirSync(dirname(target), { recursive: true });
     const exists = !overwrite && statSync(target, { throwIfNoEntry: false });
-    if (!exists && (await publishCopy(result.path, target, overwrite, published, signal))) {
+    if (!exists && (await publishCopy(result.path, target, overwrite, options))) {
       checkDownloadInterrupted(signal);
       return target;
     }

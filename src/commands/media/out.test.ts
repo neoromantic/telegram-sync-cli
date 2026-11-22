@@ -69,7 +69,7 @@ describe("publishing without hard links", () => {
     fs.writeFileSync(tmp, bytes);
 
     const published: PublishedFiles = new Map();
-    const writing = publishByCopy(tmp, target, published);
+    const writing = publishByCopy(tmp, target, { published });
     const { dev, ino } = fs.statSync(target, { bigint: true });
     expect(published.get(`${dev}:${ino}`)).toBeInstanceOf(Promise);
     await writing;
@@ -100,9 +100,14 @@ describe("publishing without hard links", () => {
     const result = cached(fakeBytes(70_000));
     const target = join(root, "notes.txt");
     const controller = new AbortController();
-    const writing = publishByCopy(result.path, target, undefined, controller.signal);
+    const partialExports: string[] = [];
+    const writing = publishByCopy(result.path, target, {
+      signal: controller.signal,
+      partialExports,
+    });
     controller.abort();
     await expect(writing).rejects.toMatchObject({ name: "AbortError" });
+    expect(partialExports).toEqual([target]);
   });
 
   it("waits for an identical export in the batch to finish copying", async () => {
@@ -113,7 +118,7 @@ describe("publishing without hard links", () => {
     const { dev, ino } = fs.statSync(target, { bigint: true });
     const writer = Promise.withResolvers<void>();
     published.set(`${dev}:${ino}`, writer.promise);
-    const second = copyOut(result, target, false, published);
+    const second = copyOut(result, target, false, { published });
     fs.copyFileSync(result.path, target);
     writer.resolve();
     expect(await second).toBe(target);
@@ -126,7 +131,9 @@ describe("copyOut collisions in a batch", () => {
     const target = join(root, "out", "notes.txt");
     fs.mkdirSync(join(root, "out"));
     fs.writeFileSync(target, "edited copy");
-    const err = await refusal(copyOut(cached(fakeBytes(70_000)), target, false, new Map()));
+    const err = await refusal(
+      copyOut(cached(fakeBytes(70_000)), target, false, { published: new Map() }),
+    );
     expect(err.code).toBe(ErrorCodes.FILE_EXISTS);
     expect(err.suggestion).toContain("--overwrite");
   });
@@ -136,9 +143,9 @@ describe("copyOut collisions in a batch", () => {
     async (overwrite) => {
       const target = join(root, "out", "notes.txt");
       const published: PublishedFiles = new Map();
-      await copyOut(cached(fakeBytes(70_000), 1), target, overwrite, published);
+      await copyOut(cached(fakeBytes(70_000), 1), target, overwrite, { published });
       const err = await refusal(
-        copyOut(cached(fakeBytes(70_000, 3), 2), target, overwrite, published),
+        copyOut(cached(fakeBytes(70_000, 3), 2), target, overwrite, { published }),
       );
       expect(err.code).toBe(ErrorCodes.FILE_EXISTS);
       expect(err.suggestion).toBe("use a distinct output path for each file");

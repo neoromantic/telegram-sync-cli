@@ -175,7 +175,7 @@ tg sql "SELECT message_id FROM message_attachments WHERE chat_id = 5550001 AND k
   the file instead, still never over an existing one, but not atomically: until the copy ends,
   another program can see a partial file at the target. Other files in this batch wait for a
   copy to the same target to finish. If the copy fails or is interrupted, the target may hold
-  partial bytes. After checking that the target is yours, use `--overwrite` to replace it
+  partial bytes. On Ctrl-C, stderr lists the affected output paths. After checking that the target is yours, use `--overwrite` to replace it
   from the media cache.
 - A template ending in a slash or expanding to an existing directory uses the directory naming
   rule. Paired braces in output paths denote placeholders.
