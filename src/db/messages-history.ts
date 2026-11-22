@@ -1,6 +1,22 @@
 import type { Database } from "bun:sqlite";
 
-import { MESSAGE_ROW_COLUMNS, MESSAGE_ROW_JOINS, type MessageSearchRow } from "./messages-search";
+import {
+  AWAITING_RAW_MESSAGE,
+  MESSAGE_ROW_COLUMNS,
+  MESSAGE_ROW_JOINS,
+  type MessageSearchRow,
+  messageTypeCondition,
+} from "./messages-search";
+
+/** `tg messages list --type/--since/--until` */
+export interface MessageFilter {
+  /** MESSAGE_TYPE_FILTERS values */
+  types?: readonly string[];
+  /** Sent at or after this Unix time, in seconds */
+  since?: number;
+  /** Sent before this Unix time, in seconds */
+  until?: number;
+}
 
 export interface HistoryListOptions {
   limit: number;
@@ -11,6 +27,7 @@ export interface HistoryListOptions {
   includeDeleted?: boolean;
   /** Only messages the account received */
   incomingOnly?: boolean;
+  filter?: MessageFilter;
 }
 
 export interface MessagesHistory {
@@ -24,13 +41,30 @@ export interface MessagesHistory {
   get(chatId: number, messageId: number): MessageSearchRow | null;
   /** How many incoming messages above `after` are cached, deleted ones not */
   countIncomingAfter(chatId: number, after: number): number;
+  /**
+   * The lowest cached message ID from `low` to `high` sent at or after
+   * `time`, deleted messages included
+   */
+  firstSentFrom(chatId: number, low: number, high: number, time: number): number | null;
+  /** The highest cached message ID from `low` to `high` sent before `time` */
+  lastSentBefore(chatId: number, low: number, high: number, time: number): number | null;
+  /** The newest untyped row (AWAITING_RAW_MESSAGE) from `low` to `high` a page would list */
+  newestUntyped(
+    chatId: number,
+    low: number,
+    high: number,
+    options: Pick<MessageFilter, "since" | "until"> & { includeDeleted: boolean },
+  ): number | null;
 }
 
 export function createMessagesHistory(db: Database) {
   const result: MessagesHistory = {
-    list(chatId, { limit, before, after, includeDeleted = false, incomingOnly = false }) {
+    list(
+      chatId,
+      { limit, before, after, includeDeleted = false, incomingOnly = false, filter = {} },
+    ) {
       const conditions = ["m.chat_id = ?"];
-      const params: number[] = [chatId];
+      const params: Array<number | string> = [chatId];
 
       if (!includeDeleted) {
         conditions.push("m.is_deleted = 0");
@@ -45,6 +79,19 @@ export function createMessagesHistory(db: Database) {
       if (after !== undefined) {
         conditions.push("m.message_id > ?");
         params.push(after);
+      }
+      if (filter.since !== undefined) {
+        conditions.push("m.date >= ?");
+        params.push(filter.since);
+      }
+      if (filter.until !== undefined) {
+        conditions.push("m.date < ?");
+        params.push(filter.until);
+      }
+      if (filter.types !== undefined) {
+        const typed = messageTypeCondition(filter.types);
+        conditions.push(typed.condition);
+        params.push(...typed.params);
       }
       params.push(limit);
 
@@ -83,6 +130,47 @@ export function createMessagesHistory(db: Database) {
         `)
         .get(chatId, after) as { n: number };
       return row.n;
+    },
+
+    firstSentFrom(chatId, low, high, time) {
+      const row = db
+        .query(`
+          SELECT MIN(message_id) AS id FROM messages_cache
+          WHERE chat_id = ? AND message_id BETWEEN ? AND ? AND date >= ?
+        `)
+        .get(chatId, low, high, time) as { id: number | null };
+      return row.id;
+    },
+
+    lastSentBefore(chatId, low, high, time) {
+      const row = db
+        .query(`
+          SELECT MAX(message_id) AS id FROM messages_cache
+          WHERE chat_id = ? AND message_id BETWEEN ? AND ? AND date < ?
+        `)
+        .get(chatId, low, high, time) as { id: number | null };
+      return row.id;
+    },
+
+    newestUntyped(chatId, low, high, { includeDeleted, since, until }) {
+      const row = db
+        .query(`
+          SELECT MAX(m.message_id) AS id FROM messages_cache m
+          WHERE m.chat_id = $chat_id AND m.message_id BETWEEN $low AND $high
+            AND ${AWAITING_RAW_MESSAGE}
+            AND ($deleted = 1 OR m.is_deleted = 0)
+            AND ($since IS NULL OR m.date >= $since)
+            AND ($until IS NULL OR m.date < $until)
+        `)
+        .get({
+          $chat_id: chatId,
+          $low: low,
+          $high: high,
+          $deleted: includeDeleted ? 1 : 0,
+          $since: since ?? null,
+          $until: until ?? null,
+        }) as { id: number | null };
+      return row.id;
     },
   };
   return result;
