@@ -84,9 +84,10 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Full-text search (FTS5) over cached messages
 - Rich messages: `tg send --markdown` or `--html` sends headings, tables, lists, quotations,
   code blocks and formulas that Telegram renders natively
-- Files: send one with `tg send --file`; download a message's file into a per-account media
-  cache with `tg media download` (cached files need no network, partial downloads resume);
-  every message item shows its attachment (kind, name, MIME type, size)
+- Files: send one with `tg send --file`; download the files of one or many messages into a
+  per-account media cache with `tg media download` (cached files need no network, partial
+  downloads resume, name templates for `--out`); every message item shows its attachment
+  (kind, name, MIME type, size)
 - Service messages say what happened: calls (video, duration, why they ended), pins and group
   changes in each item's `action`
 - Rich messages (headings, tables, lists, task lists, code, formulas) read as rich Markdown in
@@ -145,6 +146,7 @@ tg messages read --chat @username    # mark the chat read
 tg send --to @username --message "Hi there"
 tg send --to me --file ./report.pdf --caption "Q3"
 tg media download --chat me --id 42 --out ./   # into the media cache, then copied here
+tg media download --chat me --id 42 --id 43 --out './media/{date}_{id}_{name}'
 tg api account.checkUsername --username=myuser
 tg sql --query "SELECT * FROM users_cache LIMIT 10"
 tg daemon start

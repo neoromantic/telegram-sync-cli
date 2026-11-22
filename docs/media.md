@@ -2,11 +2,11 @@
 
 > **Status: Implemented**
 
-`tg send --file` sends one file. `tg media download` saves a message's file into the account's
-media cache and prints its path. `tg messages list`, `get` and `search` show what file each
-message has, and `tg messages list --type voice,round` (or `photo`, `document`…) lists the cached
-messages of a chat with such a file ([cli-commands.md](cli-commands.md#filtering-a-chat)). The
-daemon downloads and uploads nothing.
+Create a message with a file using `tg send --file`. Use `tg media download` to save files from
+one or more messages to the account's media cache and print their paths. `tg messages list`,
+`get` and `search` show each message's attachment. To list cached messages in a chat by
+attachment type, use `tg messages list --type voice,round` (or `photo`, `document`…). See
+[Filtering a chat](cli-commands.md#filtering-a-chat). The daemon downloads and uploads nothing.
 
 ## Attachments
 
@@ -53,6 +53,7 @@ tg media download --chat @examplegroup --id 1200 --out ./downloads/
 tg media download --chat -1001234567890 --id 77 --out ./photo.jpg
 tg media download --chat me --id 42 --out - > report.pdf # the bytes alone on stdout
 tg media download --chat me --id 42 --thumb              # the file's small preview
+tg media download --chat me --id 42 --id 43 --id 44      # several messages, one line per file
 ```
 
 `--chat` takes the same forms as `tg messages list`. Output:
@@ -115,14 +116,83 @@ How a run gets the file:
   download refreshes its lock; a lock whose process is gone, or that nobody refreshed for a
   minute (a crashed run), is taken over.
 
+### Several messages
+
+Repeat `--id` to download the files of several messages of one chat in one run:
+
+```bash
+tg media download --chat @examplegroup --id 1200 --id 1201 --id 1205 --out ./downloads/
+```
+
+- One run resolves `--chat` once, serves the files the cache holds without network, then
+  fetches the other messages together (one call per 100 IDs) and checks the chat's content
+  protection once. Running one `tg media download` per message in parallel repeats all of
+  that in every process, and their flood waits aren't shared.
+- Two or more `--id` always run as a batch, even when they repeat one ID; a repeated ID is
+  downloaded once.
+- Up to 5 files download at a time, of which up to 2 of 20 MiB or more: Telegram's own
+  soft limits for parallel downloads from one data center
+  ([client configuration](https://core.telegram.org/api/config)).
+- A flood wait pauses the whole batch, which then retries the files it stopped. A partial file
+  resumes. A wait longer than 5 minutes returns `RATE_LIMITED` for the affected IDs, and so
+  does a sixth wait in a row for one file with no part downloaded between the waits, or a
+  sixth wait for one page of IDs. A large file that keeps receiving parts between waits, such
+  as one throttled by Telegram's download speed limit, never fails on waits. Other pages
+  continue.
+- stdout gets one JSON line per file as each finishes, in the order they finish: the result of
+  a single download (`{"success":true,"data":{…}}`) or its error
+  (`{"success":false,"error":{…}}`, with `chatId` and `messageId` in `details`). A failed file
+  doesn't stop the others. Both `json` and `pretty` use compact JSON lines.
+  On a terminal, stderr shows the completed file count. stderr ends with `Downloaded N of M files`, and says when a flood
+  wait pauses the batch.
+- The exit code is 0 when every file downloaded, 1 when any failed, 130 on Ctrl-C. An error
+  that fails the whole run (an unknown `--chat`, missing credentials) is reported as for one
+  message.
+- A directory `--out` names each file `{id}_{name}`, so two photos never collide on
+  `photo.jpg`. `--out -` takes one `--id`.
+
+To download the files of chosen messages, pass the IDs another command prints, for example
+the voice messages the cache knows in a chat:
+
+```bash
+tg sql "SELECT message_id FROM message_attachments WHERE chat_id = 5550001 AND kind = 'voice'" \
+  | jq -r '.data.rows[] | "--id=\(.message_id)"' \
+  | xargs tg media download --chat 5550001 --out ./voice/
+```
+
 ### `--out`
 
 - A directory (an existing one, or a path ending in `/`): the file is copied there under its
-  cached name.
+  cached name, or `{id}_{name}` with several `--id`.
 - A file path: the file is copied to that path; missing parent directories are created.
+- A name template: a path with placeholders, such as `./media/{chat}/{date}_{id}_{name}`.
+  Folders are created.
 - `-`: the bytes go to stdout with no JSON. Errors still go to stderr as JSON.
-- An existing target is `FILE_EXISTS` (exit 1), `details: { path }`. Pass `--overwrite` to
-  replace it. `tg` never picks a numbered name.
+- A single ID returns `FILE_EXISTS` (exit 1) for an existing target unless you pass
+  `--overwrite`. A batch accepts an existing file with identical bytes. Within one batch,
+  the first file written to a path keeps it. Different bytes for that path return
+  `FILE_EXISTS` even with `--overwrite`.
+- Creating a new export without `--overwrite` uses a hard link to publish the complete copy
+  atomically. On a filesystem without hard links (exFAT, FAT, some network shares) it copies
+  the file instead, still never over an existing one, but not atomically: until the copy ends,
+  another program can see a partial file at the target. Other files in this batch wait for a
+  copy to the same target to finish. If the copy fails or is interrupted, the target may hold
+  partial bytes. On Ctrl-C, stderr lists the affected output paths. After checking that the target is yours, use `--overwrite` to replace it
+  from the media cache.
+- A template ending in a slash or expanding to an existing directory uses the directory naming
+  rule. Paired braces in output paths denote placeholders.
+
+| Placeholder | Value                                  |
+| ----------- | -------------------------------------- |
+| `{chat}`    | the chat ID, as `chatId` prints it     |
+| `{id}`      | the message ID                         |
+| `{date}`    | the message's day in UTC, `2026-10-09` |
+| `{name}`    | the cached file name (`fileName`)      |
+| `{kind}`    | `photo`, `voice`, `document`… (`kind`) |
+
+Each path part that holds a placeholder is made a safe file name once filled, as cached names
+are, so a value never adds a folder. Such a part that already exists as a symlink is never
+followed: that file fails with `GENERAL_ERROR`. An unknown placeholder is `INVALID_ARGS`.
 
 ### `--thumb`
 
@@ -146,8 +216,8 @@ media from protected chats and messages. `tg media download` refuses with `CONTE
 
 A refused run downloads nothing. A file already cached stays in the cache, but the command
 won't serve it either. A protection found online is kept: the message's in its cached row, the
-chat's in `chat_content_protection`. Later runs refuse those files offline too, until an online
-check (`--fresh`, or a download of a file the cache lacks) finds the protection turned off. When
+chat's in `chat_content_protection`. Later runs refuse those files offline too, until a newer
+online check (`--fresh`, or a download of a file the cache lacks) finds the protection turned off. When
 Telegram sends the message without its chat, the protection last known holds. A chat object the
 cache got after the last online check, from `tg chats get` or the daemon, counts too. A
 protection turned on after that and never seen isn't known offline; `--fresh` checks again.
@@ -232,6 +302,6 @@ tg send --to @username --file ./photo.jpg --force-document
   a disk quota ([#99](https://github.com/neoromantic/telegram-sync-cli/issues/99)), voice
   transcription ([#102](https://github.com/neoromantic/telegram-sync-cli/issues/102)), text from
   documents and images ([#103](https://github.com/neoromantic/telegram-sync-cli/issues/103)),
-  batch downloads with name templates
-  ([#104](https://github.com/neoromantic/telegram-sync-cli/issues/104)) and server-side media
-  search ([#105](https://github.com/neoromantic/telegram-sync-cli/issues/105)).
+  filters for batch downloads (`--type`, `--since`, `--until`, `--limit`) and defaults in
+  `config.json` ([#104](https://github.com/neoromantic/telegram-sync-cli/issues/104)) and
+  server-side media search ([#105](https://github.com/neoromantic/telegram-sync-cli/issues/105)).

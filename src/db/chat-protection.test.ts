@@ -46,6 +46,19 @@ describe("chat protection store", () => {
     expect(db.query("SELECT COUNT(*) AS n FROM chat_content_protection").get()).toEqual({ n: 1 });
   });
 
+  it.each([999, 1000])(
+    "keeps a protected verdict over an earlier or simultaneous clear at %i",
+    (time) => {
+      const store = createChatProtectionStore(db);
+      store.record(-4001, { protected: true, reason: "chat" }, 1000);
+      store.record(-4001, { protected: false, reason: null }, time);
+      store.record(-4002, { protected: false, reason: null }, time);
+      store.record(-4002, { protected: true, reason: "chat" }, 1000);
+      expect(store.get(-4001)).toMatchObject({ protected: 1, fetched_at: 1000 });
+      expect(store.get(-4002)).toMatchObject({ protected: 1, fetched_at: 1000 });
+    },
+  );
+
   it("creates the table once: a second schema run changes nothing", () => {
     createChatProtectionStore(db).record(-4001, { protected: true, reason: "chat" }, 1_000);
     initSyncSchema(db);

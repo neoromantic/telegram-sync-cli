@@ -23,6 +23,7 @@ import {
   tl,
 } from "@mtcute/bun";
 
+import { type BatchHandlers, downloadBatch } from "./batch";
 import {
   type DownloadDeps,
   type DownloadRequest,
@@ -306,6 +307,7 @@ describe("downloadMedia from the cache", () => {
       kind: "photo",
       chatId: SELF_ID,
       messageId: 1,
+      date: photo.date,
       uniqueFileId: extractAttachment(photo)!.uniqueFileId,
       groupedId: null,
       cached: true,
@@ -483,6 +485,7 @@ describe("downloadMedia from Telegram", () => {
       kind: "document",
       chatId: SELF_ID,
       messageId: 5,
+      date: pdf.date,
       uniqueFileId: extractAttachment(pdf)!.uniqueFileId,
       groupedId: null,
       cached: false,
@@ -554,6 +557,27 @@ describe("downloadMedia from Telegram", () => {
       reason: null,
       fetched_at: NOW,
     });
+  });
+
+  it("returns the message date when the cache skips a group the account takes no part in", async () => {
+    createChatsCache(db).upsert(chatRow(-5_550_010, "group", { fetched_at: NOW }));
+    const notes = documentMessage({ _: "peerChat", chatId: 5_550_010 }, 8, {
+      mimeType: "text/plain",
+      size: 64,
+      attributes: [],
+    });
+    const telegram = fakeTelegram({ message: () => notes });
+    const transfer = fakeTransfer(async function* () {
+      yield fakeBytes(64);
+    });
+
+    const result = await downloadMedia(
+      deps({ getClient: () => telegram.client, download: transfer.download }),
+      request("-5550010", 8),
+    );
+
+    expect(createMessagesCache(db).get(-5_550_010, 8)).toBeNull();
+    expect(result.date).toBe(notes.date);
   });
 
   it("reports MESSAGE_NOT_FOUND for an empty message or one of another chat", async () => {
@@ -761,7 +785,7 @@ describe("downloadMedia: protection found online, then offline", () => {
         ...testCase.telegram(false),
       });
       const fresh = await downloadMedia(
-        deps({ getClient: () => openTelegram.client }),
+        deps({ getClient: () => openTelegram.client, now: () => NOW + 1 }),
         request(testCase.chat, 8, { fresh: true }),
       );
       expect(fresh.cached).toBe(true);
@@ -851,19 +875,32 @@ describe("downloadMedia: protection found online, then offline", () => {
     });
   }
 
-  it("refuses the next offline run after --fresh finds a message protected", async () => {
-    cacheMessage(SELF_ID, pdf);
-    place(pathsOf(pdf).file, fakeBytes(PDF_SIZE));
-    const telegram = fakeTelegram({
-      message: () => ({ ...pdf, noforwards: true }),
-    });
+  it.each([false, true])(
+    "refuses the next offline run after --fresh finds a message protected (thumb %s)",
+    async (thumb) => {
+      const report = documentMessage(SELF, 5, {
+        mimeType: "application/pdf",
+        size: PDF_SIZE,
+        thumbs: [],
+        attributes: [{ _: "documentAttributeFilename", fileName: "example-report.pdf" }],
+      });
+      cacheMessage(SELF_ID, report);
+      place(pathsOf(report).file, fakeBytes(PDF_SIZE));
+      const telegram = fakeTelegram({
+        message: () => ({ ...report, noforwards: true }),
+      });
 
-    await mediaError(
-      downloadMedia(deps({ getClient: () => telegram.client }), request("me", 5, { fresh: true })),
-    );
-    const offline = await mediaError(downloadMedia(deps(), request("me", 5)));
-    expect(offline.details).toMatchObject({ reason: "message" });
-  });
+      const online = await mediaError(
+        downloadMedia(
+          deps({ getClient: () => telegram.client }),
+          request("me", 5, { fresh: true, thumb }),
+        ),
+      );
+      expect(online.code).toBe(thumb ? ErrorCodes.NO_MEDIA : ErrorCodes.CONTENT_PROTECTED);
+      const offline = await mediaError(downloadMedia(deps(), request("me", 5)));
+      expect(offline.details).toMatchObject({ reason: "message" });
+    },
+  );
 });
 
 describe("downloadMedia: partial downloads", () => {
@@ -1157,6 +1194,7 @@ describe("downloadMedia --thumb from Telegram", () => {
       kind: "thumbnail",
       chatId: SELF_ID,
       messageId: 10,
+      date: video.date,
       uniqueFileId: thumb.uniqueFileId,
       groupedId: null,
       cached: false,
@@ -1183,5 +1221,459 @@ describe("fetchMessageById", () => {
       _: "messages.getMessages",
       id: [{ _: "inputMessageID", id: 5 }],
     });
+  });
+});
+
+describe("batch download", () => {
+  function batch(
+    overrides: Partial<DownloadDeps>,
+    ids: number[],
+    chat = "me",
+    handlers: Partial<BatchHandlers> = {},
+  ) {
+    const done: number[] = [];
+    const failed: Array<[number, string]> = [];
+    return downloadBatch(
+      deps(overrides),
+      { chat, messageIds: ids, thumb: false, fresh: false },
+      {
+        done: async (result) => {
+          done.push(result.messageId);
+        },
+        failed: (id, e) => {
+          failed.push([id, e.code]);
+        },
+        ...handlers,
+      },
+    ).then(() => ({ done, failed }));
+  }
+
+  it("validates the peer before any cache write", async () => {
+    const tg = fakeTelegram({ message: () => photoMessage(ALICE, 1) });
+    const result = await batch({ getClient: () => tg.client }, [1, 2]);
+    expect(result.failed).toContainEqual([1, "MESSAGE_NOT_FOUND"]);
+    expect(createMessagesCache(db).get(SELF_ID, 1)).toBeNull();
+  });
+
+  it("checks online protection on a newly fetched message even if its file exists", async () => {
+    const msg = photoMessage(ALICE, 1);
+    place(pathsOf(msg).file, fakeBytes(60_000));
+    const tg = fakeTelegram({
+      message: () => msg,
+      fullUser: { noforwardsPeerEnabled: true },
+    });
+    const result = await batch({ getClient: () => tg.client }, [1, 2], String(ALICE_ID));
+    expect(result.failed).toContainEqual([1, "CONTENT_PROTECTED"]);
+    expect(tg.methods()).toContain("users.getFullUser");
+  });
+
+  it("dates the shared private-chat check once across pages", async () => {
+    let page = 0;
+    const tg = fakeTelegram({
+      message: () => photoMessage(ALICE, ++page === 1 ? 1 : 101),
+      fullUser: { noforwardsPeerEnabled: true },
+    });
+    const result = await batch(
+      { getClient: () => tg.client, now: () => NOW + page },
+      Array.from({ length: 101 }, (_, i) => i + 1),
+      String(ALICE_ID),
+    );
+    expect(result.failed).toContainEqual([101, "CONTENT_PROTECTED"]);
+    expect(tg.methods().filter((method) => method === "users.getFullUser")).toHaveLength(1);
+    expect(createChatProtectionStore(db).get(ALICE_ID)?.fetched_at).toBe(NOW + 1);
+  });
+
+  it("only resolves the username once", async () => {
+    const history = historyDeps();
+    let resolutions = 0;
+    history.client.call = (async () => {
+      resolutions++;
+      return {
+        _: "contacts.resolvedPeer",
+        users: [],
+        chats: [teamChannel()],
+        peer: TEAM,
+      };
+    }) as HistoryClient["call"];
+    const tg = fakeTelegram({ message: () => photoMessage(TEAM, 1) });
+    await batch({ history, getClient: () => tg.client }, [1, 2], "@exampleteam");
+    expect(resolutions).toBe(1);
+  });
+
+  it("keeps completed pages and reports every ID on a failed page", async () => {
+    const msg = photoMessage(SELF, 1);
+    place(pathsOf(msg).file, fakeBytes(60_000));
+    let page = 0;
+    const tg = fakeTelegram({
+      message: () => {
+        if (++page === 2) throw new RateLimitError("messages.getMessages", 301);
+        return msg;
+      },
+    });
+    const result = await batch(
+      { getClient: () => tg.client },
+      Array.from({ length: 101 }, (_, i) => i + 1),
+    );
+    expect(result.done).toEqual([1]);
+    expect(result.failed).toHaveLength(100);
+    expect(result.failed).toContainEqual([101, "RATE_LIMITED"]);
+  });
+
+  it("bounds retries of a flooded page", async () => {
+    let calls = 0;
+    const tg = fakeTelegram({
+      message: () => {
+        if (++calls > 6) throw new Error("unexpected seventh call");
+        throw new RateLimitError("messages.getMessages", 0.001);
+      },
+    });
+    const result = await batch({ getClient: () => tg.client }, [1, 2]);
+    expect(calls).toBe(6);
+    expect(result.failed).toEqual([
+      [1, "RATE_LIMITED"],
+      [2, "RATE_LIMITED"],
+    ]);
+  });
+
+  it("stops before another page RPC when its wait is interrupted", async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const tg = fakeTelegram({
+      message: () => {
+        if (++calls > 1) throw new Error("unexpected repeat");
+        controller.abort();
+        throw new RateLimitError("messages.getMessages", 1);
+      },
+    });
+    await expect(
+      batch({ getClient: () => tg.client, signal: controller.signal }, [1, 2]),
+    ).rejects.toBeInstanceOf(DownloadInterruptedError);
+    expect(calls).toBe(1);
+  });
+
+  it.each([false, true])(
+    "honours cancellation between cached results (queued: %s)",
+    async (queued) => {
+      const controller = new AbortController();
+      for (const id of [1, 2]) {
+        const msg = photoMessage(SELF, id);
+        cacheMessage(SELF_ID, msg);
+        place(pathsOf(msg).file, fakeBytes(60_000));
+      }
+      const seen: number[] = [];
+      await expect(
+        batch({ signal: controller.signal }, [1, 2], "me", {
+          done: async (result) => {
+            seen.push(result.messageId);
+            if (queued) setImmediate(() => controller.abort());
+            else controller.abort();
+          },
+        }),
+      ).rejects.toBeInstanceOf(DownloadInterruptedError);
+      expect(seen).toEqual([1]);
+    },
+  );
+
+  it("does not cache a new attachment until its private-chat check succeeds", async () => {
+    const msg = photoMessage(ALICE, 1);
+    place(pathsOf(msg).file, fakeBytes(60_000));
+    const tg = fakeTelegram({ message: () => msg });
+    const call = tg.client.call;
+    tg.client.call = ((req, opts) =>
+      req._ === "users.getFullUser"
+        ? Promise.reject(new RateLimitError(req._, 301))
+        : call(req, opts)) as TelegramClient["call"];
+    const result = await batch({ getClient: () => tg.client }, [1, 2], String(ALICE_ID));
+    expect(result.failed).toContainEqual([1, "RATE_LIMITED"]);
+    expect(createMessagesCache(db).get(ALICE_ID, 1)).toBeNull();
+  });
+
+  it("records a message-level refusal without needing a private-chat RPC", async () => {
+    const msg = { ...photoMessage(ALICE, 1), noforwards: true };
+    const tg = fakeTelegram({ message: () => msg });
+    const result = await batch({ getClient: () => tg.client }, [1, 2], String(ALICE_ID));
+    expect(result.failed).toContainEqual([1, "CONTENT_PROTECTED"]);
+    expect(tg.methods()).not.toContain("users.getFullUser");
+    expect(createMessagesCache(db).get(ALICE_ID, 1)).not.toBeNull();
+  });
+
+  it("refuses a queued file after a refreshed file reference finds the chat protected", async () => {
+    const ids = [1, 2, 3, 4, 5, 6];
+    const files = ids.map((id) =>
+      documentMessage(TEAM, id, {
+        id: String(7100 + id),
+        size: 100 + id,
+        mimeType: "text/plain",
+        attributes: [],
+      }),
+    );
+    place(pathsOf(files[5]).file, fakeBytes(106));
+    let pages = 0;
+    const client = {
+      call: async () => ({
+        _: "messages.channelMessages",
+        messages: files,
+        users: [],
+        chats: [teamChannel(++pages > 1)],
+      }),
+    } as unknown as TelegramClient;
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const transfer = fakeTransfer(async function* ({ params }) {
+      if (params.fileSize === 101) throw new tl.RpcError(400, "FILE_REFERENCE_EXPIRED");
+      await settled;
+      yield fakeBytes(params.fileSize!);
+    });
+    const outcomes = new Map<number, string>();
+    let clock = NOW;
+    await batch(
+      { getClient: () => client, download: transfer.download, now: () => clock++ },
+      ids,
+      String(TEAM_CHAT_ID),
+      {
+        done: async (result) => {
+          outcomes.set(result.messageId, "done");
+          if (result.messageId === 6) settle();
+        },
+        failed: (id, failure) => {
+          outcomes.set(id, failure.code);
+          if (id === 6) settle();
+        },
+      },
+    );
+    expect(outcomes.get(1)).toBe("CONTENT_PROTECTED");
+    expect(outcomes.get(6)).toBe("CONTENT_PROTECTED");
+    expect(createChatProtectionStore(db).get(TEAM_CHAT_ID)?.protected).toBe(1);
+  });
+
+  it("closes the RPC gate before the flooded transfer finishes unwinding", async () => {
+    const files = [1, 2].map((id) =>
+      documentMessage(SELF, id, {
+        id: String(7000 + id),
+        size: id,
+        mimeType: "text/plain",
+        attributes: [],
+      }),
+    );
+    const attempts: number[] = [];
+    let notify!: () => void;
+    const flooded = new Promise<void>((resolve) => {
+      notify = resolve;
+    });
+    const client = {
+      call: async (req: { _: string }) => {
+        if (req._ !== "upload.getFile")
+          return {
+            _: "messages.messages",
+            messages: files,
+            users: [],
+            chats: [],
+          };
+        attempts.push(Date.now());
+        if (attempts.length === 1) {
+          notify();
+          throw new RateLimitError(req._, 0.12);
+        }
+        return {};
+      },
+    } as unknown as TelegramClient;
+    const transfer = fakeTransfer(async function* ({ client, params }) {
+      if (params.fileSize === 2) {
+        await flooded;
+        await Bun.sleep(10);
+      }
+      try {
+        await client.call({
+          _: "upload.getFile",
+        } as tl.upload.RawGetFileRequest);
+      } catch (err) {
+        await Bun.sleep(40);
+        throw err;
+      }
+      yield fakeBytes(params.fileSize!);
+    });
+    expect(
+      (await batch({ getClient: () => client, download: transfer.download }, [1, 2])).done.sort(),
+    ).toEqual([1, 2]);
+    expect(attempts[1]! - attempts[0]!).toBeGreaterThanOrEqual(120);
+  });
+
+  it("rechecks an extended deadline before retries and new parts of active files", async () => {
+    const ids = [1, 2, 3];
+    const files = ids.map((id) =>
+      documentMessage(SELF, id, {
+        id: String(6000 + id),
+        size: id,
+        mimeType: "application/octet-stream",
+        attributes: [],
+      }),
+    );
+    const uploads: number[] = [];
+    const client = {
+      call: async (req: { _: string }) => {
+        if (req._ === "upload.getFile") {
+          uploads.push(Date.now());
+          return {};
+        }
+        return { _: "messages.messages", messages: files, users: [], chats: [] };
+      },
+    } as unknown as TelegramClient;
+    let until = 0;
+    const started = new Set<number>();
+    const transfer = fakeTransfer(async function* ({ client, params }) {
+      const size = params.fileSize!;
+      if (!started.has(size)) {
+        started.add(size);
+        if (size === 1) throw new RateLimitError("upload.getFile", 0.08);
+        if (size === 2) {
+          await Bun.sleep(20);
+          until = Date.now() + 150;
+          throw new RateLimitError("upload.getFile", 0.15);
+        }
+        await Bun.sleep(40);
+      }
+      await client.call({ _: "upload.getFile" } as tl.upload.RawGetFileRequest);
+      yield fakeBytes(size);
+    });
+    const result = await batch({ getClient: () => client, download: transfer.download }, ids);
+    expect(result.done.sort()).toEqual(ids);
+    expect(uploads).toHaveLength(3);
+    expect(Math.min(...uploads)).toBeGreaterThanOrEqual(until);
+  });
+
+  it("runs at most five transfers including two at or above 20 MiB", async () => {
+    const limit = 20 * 1024 * 1024;
+    const sizes = [limit, limit, limit, limit - 1, 64, 64, 64];
+    const messages = sizes.map((size, i) =>
+      documentMessage(SELF, i + 1, {
+        id: String(8000 + i),
+        size,
+        mimeType: "text/plain",
+        attributes: [],
+      }),
+    );
+    const client = {
+      call: async () => ({
+        _: "messages.messages",
+        messages,
+        users: [],
+        chats: [],
+      }),
+    } as unknown as TelegramClient;
+    let active = 0,
+      large = 0,
+      peak = 0,
+      peakLarge = 0;
+    const transfer = fakeTransfer(async function* ({ params }) {
+      const big = params.fileSize! >= limit;
+      active++;
+      if (big) large++;
+      peak = Math.max(peak, active);
+      peakLarge = Math.max(peakLarge, large);
+      await Bun.sleep(20);
+      active--;
+      if (big) large--;
+      yield new Uint8Array();
+    });
+    await batch(
+      { getClient: () => client, download: transfer.download },
+      messages.map((m) => m.id),
+    );
+    expect([peak, peakLarge]).toEqual([5, 2]);
+  });
+
+  function floodingClient(messages: unknown[], waitFor: () => number | null) {
+    const getFile: number[] = [];
+    const client = {
+      call: async (req: { _: string }, options?: { floodSleepThreshold?: number }) => {
+        if (req._ !== "upload.getFile") {
+          return { _: "messages.messages", messages, users: [], chats: [] };
+        }
+        getFile.push(Date.now());
+        const seconds = waitFor();
+        if (seconds !== null) {
+          const threshold = options?.floodSleepThreshold ?? MEDIA_FLOOD_SLEEP_MS;
+          if (seconds * 1000 > threshold) {
+            throw new RateLimitError(req._, seconds);
+          }
+          await Bun.sleep(seconds * 1000);
+        }
+        return {};
+      },
+    } as unknown as TelegramClient;
+    return { client, getFile };
+  }
+
+  function partsTransfer(bytes: Uint8Array) {
+    return fakeTransfer(async function* ({ client, params }) {
+      for (let at = params.offset ?? 0; at < bytes.length; at += PART_BYTES) {
+        await client.call({
+          _: "upload.getFile",
+        } as tl.upload.RawGetFileRequest);
+        const chunk = bytes.subarray(at, at + PART_BYTES);
+        params.progressCallback?.(at + chunk.length, bytes.length);
+        yield chunk;
+      }
+    });
+  }
+
+  function largeFile(id: number, size: number) {
+    return documentMessage(SELF, id, {
+      id: String(9000 + id),
+      size,
+      mimeType: "video/mp4",
+      attributes: [],
+    });
+  }
+
+  it("pauses every file for a short wait one file would sleep through alone", async () => {
+    const files = [1, 2].map((id) => largeFile(id, 64));
+    let first = true;
+    const tg = floodingClient(files, () => {
+      if (!first) return null;
+      first = false;
+      return 0.15;
+    });
+    const transfer = fakeTransfer(async function* ({ client, params }) {
+      if (params.fileSize === 64 && !first) await Bun.sleep(20);
+      await client.call({ _: "upload.getFile" } as tl.upload.RawGetFileRequest);
+      yield fakeBytes(64);
+    });
+    const started = Date.now();
+    const result = await batch({ getClient: () => tg.client, download: transfer.download }, [1, 2]);
+    expect(result.done.sort()).toEqual([1, 2]);
+    expect(tg.getFile.length).toBeGreaterThanOrEqual(3);
+    expect(Math.min(...tg.getFile.slice(1))).toBeGreaterThanOrEqual(started + 150);
+  });
+
+  it("completes a file that keeps moving between more waits than the retry bound", async () => {
+    const bytes = fakeBytes(8 * PART_BYTES);
+    const file = largeFile(1, bytes.length);
+    let calls = 0;
+    let waits = 0;
+    const tg = floodingClient([file], () => {
+      if (++calls % 2 !== 0 || waits === 7) return null;
+      waits++;
+      return 0.001;
+    });
+    const transfer = partsTransfer(bytes);
+    const result = await batch({ getClient: () => tg.client, download: transfer.download }, [1]);
+    expect(result).toEqual({ done: [1], failed: [] });
+    expect(waits).toBe(7);
+    expectBytes(readFileSync(pathsOf(file).file), bytes);
+  });
+
+  it("gives up on a file that makes no progress across the retry bound", async () => {
+    const bytes = fakeBytes(4 * PART_BYTES);
+    const file = largeFile(1, bytes.length);
+    let calls = 0;
+    const tg = floodingClient([file], () => (++calls > 1 ? 0.001 : null));
+    const transfer = partsTransfer(bytes);
+    const result = await batch({ getClient: () => tg.client, download: transfer.download }, [1]);
+    expect(result).toEqual({ done: [], failed: [[1, "RATE_LIMITED"]] });
+    expect(tg.getFile).toHaveLength(1 + 6);
+    expect(statSync(pathsOf(file).part).size).toBe(PART_BYTES);
   });
 });
