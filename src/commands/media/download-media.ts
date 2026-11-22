@@ -43,7 +43,7 @@ import {
   fetchMessageById,
 } from "./fetch";
 import {
-  checkCachedProtection,
+  cachedProtection,
   checkOnlineProtection,
   knownChatProtection,
   privateChatProtection,
@@ -90,6 +90,7 @@ export interface DownloadDeps {
 }
 
 export interface DownloadRequest {
+  expectedAttachment?: Pick<AttachmentInfo, "uniqueFileId" | "kind">;
   chat: string;
   messageId: number;
   thumb: boolean;
@@ -247,7 +248,11 @@ function lockTimeout(err: DownloadLockTimeoutError) {
   );
 }
 
-export function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: DownloadRequest) {
+function readCachedTarget(
+  deps: Pick<DownloadDeps, "cacheDb">,
+  chat: HistoryChat,
+  request: Pick<DownloadRequest, "messageId" | "thumb">,
+) {
   const { chatId } = chat;
   const { messageId } = request;
   const row = createMessagesCache(deps.cacheDb).get(chatId, messageId);
@@ -260,23 +265,50 @@ export function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: Do
   const thumb = request.thumb ? pickThumb(row.raw_json) : null;
   if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
 
-  const verdict = checkCachedProtection(
-    row.raw_json,
-    deps.history.chatsCache.getById(String(chatId)),
-    createChatProtectionStore(deps.cacheDb).get(chatId),
-  );
+  const verdict = cachedProtection(deps.cacheDb)(chatId, row.raw_json);
   if (verdict.protected) {
     throw contentProtected(chatId, messageId, verdict.reason, "pass --fresh to check again");
   }
+  return { info, thumb, date: row.date };
+}
 
+/**
+ * The cached message's attachment, checked as `tg media download` checks
+ * it offline. Null when the message isn't cached.
+ */
+export function readCachedAttachment(
+  deps: Pick<DownloadDeps, "cacheDb">,
+  chat: HistoryChat,
+  messageId: number,
+) {
+  const target = readCachedTarget(deps, chat, { messageId, thumb: false });
+  if (target) return target.info;
+  const known = cachedProtection(deps.cacheDb)(chat.chatId, "{}");
+  if (known.protected)
+    throw contentProtected(chat.chatId, messageId, known.reason, "pass --fresh to check again");
+  return null;
+}
+
+export function readFromCache(deps: DownloadDeps, chat: HistoryChat, request: DownloadRequest) {
+  const cachedTarget = readCachedTarget(deps, chat, request);
+  if (!cachedTarget) return null;
+  const { info, thumb } = cachedTarget;
+  checkExpectedAttachment(request, chat.chatId, info);
   const target = downloadTarget(deps.mediaDir, info, thumb);
   const file = findCachedFile(target.paths.file, target.expectedSize);
   if (!file) return null;
   touch(file.path);
-  return toResult(target, { chatId, messageId, date: row.date, groupedId: info.groupedId }, file, {
-    cached: true,
-    resumedFrom: null,
-  });
+  return toResult(
+    target,
+    {
+      chatId: chat.chatId,
+      messageId: request.messageId,
+      date: cachedTarget.date,
+      groupedId: info.groupedId,
+    },
+    file,
+    { cached: true, resumedFrom: null },
+  );
 }
 
 type Mtcute = typeof import("@mtcute/bun");
@@ -471,52 +503,96 @@ async function streamToCache({ client, location, target, deps, stallTimeoutMs }:
   return offset > 0 ? offset : null;
 }
 
-export async function downloadOnline(
-  deps: DownloadDeps,
+async function fetchCheckedTarget(
+  deps: Pick<DownloadDeps, "cacheDb" | "history" | "now" | "signal" | "checkPrivate">,
   chat: HistoryChat,
-  request: DownloadRequest,
+  request: Pick<DownloadRequest, "messageId" | "thumb">,
+  client: TelegramClient,
   first?: FetchedMessage,
 ) {
   const { chatId } = chat;
   const { messageId } = request;
   const now = deps.now ?? Date.now;
+  const protection = createChatProtectionStore(deps.cacheDb);
+  const {
+    message,
+    chats,
+    users,
+    fetchedAt = now(),
+  } = first ?? (await fetchMessageById(client, chat, messageId, deps.signal));
+  const info = extractAttachment(message);
+  if (!info) {
+    cacheFetchedMessage(deps.cacheDb, chatId, message, users);
+    throw noMedia(chatId, messageId, resolveRawMessageType(message).messageType);
+  }
+  const thumb = request.thumb ? pickThumb(message) : null;
+
+  const verdict = await checkOnlineProtection(
+    deps.checkPrivate ?? privateChatProtection(client, deps.signal, now),
+    chat,
+    message,
+    chats,
+    fetchedAt,
+  );
+  if (verdict.chat) protection.record(chatId, verdict.chat, verdict.chat.fetchedAt);
+  cacheFetchedMessage(deps.cacheDb, chatId, message, users);
+  if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
+  if (verdict.message.protected) {
+    throw contentProtected(chatId, messageId, verdict.message.reason);
+  }
+  const known = knownChatProtection(
+    deps.history.chatsCache.getById(String(chatId)),
+    protection.get(chatId),
+  );
+  if (known.protected) throw contentProtected(chatId, messageId, known.reason);
+  return { message, info, thumb };
+}
+
+/**
+ * The message's attachment once it may be read, without its file: the
+ * cached message checked offline, else the message fetched and checked
+ * online. The eligibility `tg media download` applies, for callers that
+ * may not need the file.
+ */
+export async function checkedAttachment(
+  deps: DownloadDeps,
+  chat: HistoryChat,
+  messageId: number,
+  offlineProblem: MediaError | null,
+) {
+  const cached = readCachedAttachment(deps, chat, messageId);
+  if (cached) return { attachment: cached, prepared: undefined };
+  if (offlineProblem) throw offlineProblem;
+  try {
+    const request = { messageId, thumb: false };
+    const prepared = await fetchCheckedTarget(deps, chat, request, await deps.getClient());
+    return { attachment: prepared.info, prepared };
+  } catch (err) {
+    if (deps.signal?.aborted) throw new DownloadInterruptedError(null, null);
+    throw err;
+  }
+}
+
+export type CheckedTarget = Awaited<ReturnType<typeof fetchCheckedTarget>>;
+
+export async function downloadOnline(
+  deps: DownloadDeps,
+  chat: HistoryChat,
+  request: DownloadRequest,
+  first?: FetchedMessage,
+  prepared?: CheckedTarget,
+) {
+  const { chatId } = chat;
+  const { messageId } = request;
   const stallTimeoutMs = deps.stallTimeoutMs ?? STALL_TIMEOUT_MS;
   const rateLimits = () => deps.rateLimits ?? createRateLimitsService(deps.cacheDb);
-  const protection = createChatProtectionStore(deps.cacheDb);
   const client = await deps.getClient();
 
   for (let attempt = 1; ; attempt++) {
-    const {
-      message,
-      chats,
-      users,
-      fetchedAt = now(),
-    } = (attempt === 1 && first) || (await fetchMessageById(client, chat, messageId, deps.signal));
-    const info = extractAttachment(message);
-    if (!info) {
-      cacheFetchedMessage(deps.cacheDb, chatId, message, users);
-      throw noMedia(chatId, messageId, resolveRawMessageType(message).messageType);
-    }
-    const thumb = request.thumb ? pickThumb(message) : null;
-
-    const verdict = await checkOnlineProtection(
-      deps.checkPrivate ?? privateChatProtection(client, deps.signal, now),
-      chat,
-      message,
-      chats,
-      fetchedAt,
-    );
-    if (verdict.chat) protection.record(chatId, verdict.chat, verdict.chat.fetchedAt);
-    cacheFetchedMessage(deps.cacheDb, chatId, message, users);
-    if (request.thumb && !thumb) throw noThumbnail(chatId, messageId);
-    if (verdict.message.protected) {
-      throw contentProtected(chatId, messageId, verdict.message.reason);
-    }
-    const known = knownChatProtection(
-      deps.history.chatsCache.getById(String(chatId)),
-      protection.get(chatId),
-    );
-    if (known.protected) throw contentProtected(chatId, messageId, known.reason);
+    const { message, info, thumb } =
+      (attempt === 1 && prepared) ||
+      (await fetchCheckedTarget(deps, chat, request, client, attempt === 1 ? first : undefined));
+    checkExpectedAttachment(request, chatId, info);
 
     const target = downloadTarget(deps.mediaDir, info, thumb);
     const ref = { chatId, messageId, date: message.date, groupedId: info.groupedId };
@@ -578,12 +654,38 @@ export async function downloadOnline(
  */
 export async function downloadMedia(deps: DownloadDeps, request: DownloadRequest) {
   const chat = await resolveHistoryChat(deps.history.client, request.chat, deps.history);
+  return downloadResolved(deps, chat, request);
+}
+
+function checkExpectedAttachment(request: DownloadRequest, chatId: number, info: AttachmentInfo) {
+  const expected = request.expectedAttachment;
+  if (expected && (info.uniqueFileId !== expected.uniqueFileId || info.kind !== expected.kind)) {
+    throw attachmentChanged(chatId, request.messageId);
+  }
+}
+
+export function attachmentChanged(chatId: number, messageId: number) {
+  return new MediaError(
+    ErrorCodes.GENERAL_ERROR,
+    "The attachment changed during transcription",
+    { chatId, messageId, reason: "attachment_changed" },
+    "run the command again",
+    true,
+  );
+}
+
+export async function downloadResolved(
+  deps: DownloadDeps,
+  chat: HistoryChat,
+  request: DownloadRequest,
+  prepared?: CheckedTarget,
+) {
   if (!request.fresh) {
     const cached = readFromCache(deps, chat, request);
     if (cached) return cached;
   }
   try {
-    return await downloadOnline(deps, chat, request);
+    return await downloadOnline(deps, chat, request, undefined, prepared);
   } catch (err) {
     if (deps.signal?.aborted && !(err instanceof DownloadInterruptedError)) {
       throw new DownloadInterruptedError(null, null);

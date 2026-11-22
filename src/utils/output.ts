@@ -155,6 +155,7 @@ export function getExitCode(code: ErrorCode) {
     CONTENT_PROTECTED: 1,
     MEDIA_UNSUPPORTED: 1,
     FILE_EXISTS: 1,
+    TRANSCRIBER_NOT_FOUND: 1,
     READ_ONLY: 1,
     CHAT_NOT_ALLOWED: 1,
   };

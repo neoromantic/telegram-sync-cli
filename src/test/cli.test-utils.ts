@@ -44,7 +44,7 @@ const CLI_PATH = `${import.meta.dir}/../index.ts`;
 export function spawnCli(args: string[], options: Omit<CliOptions, "timeout"> = {}) {
   const { env = {}, cwd, entry = CLI_PATH } = options;
 
-  return Bun.spawn(["bun", "--no-env-file", "run", entry, ...args], {
+  return Bun.spawn([process.execPath, "--no-env-file", "run", entry, ...args], {
     env: {
       ...process.env,
       BUN_ENV: undefined,

@@ -126,6 +126,7 @@ export const MESSAGE_SEARCH_SORTS = ["date", "relevance"] as const;
 export type MessageSearchSort = (typeof MESSAGE_SEARCH_SORTS)[number];
 
 export interface MessageSearchRow {
+  transcript_match?: number;
   chat_id: number;
   message_id: number;
   from_id: number | null;
@@ -273,21 +274,27 @@ const MATCHES_FROM =
 function sortedPage(
   db: Database,
   from: string,
-  fromParam: string,
+  fromParam: string | string[],
   options: MessageSearchOptions,
   order: string,
+  extraColumns = "",
 ) {
   const { conditions, params } = searchFilter(options);
   return db
     .query(
-      `SELECT ${MESSAGE_ROW_COLUMNS}
+      `SELECT ${MESSAGE_ROW_COLUMNS}${extraColumns}
        ${from}
        ${MESSAGE_ROW_JOINS}
        ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
        ORDER BY ${order}
        LIMIT ? OFFSET ?`,
     )
-    .all(fromParam, ...params, options.limit ?? 50, options.offset ?? 0) as MessageSearchRow[];
+    .all(
+      ...(typeof fromParam === "string" ? [fromParam] : fromParam),
+      ...params,
+      options.limit ?? 50,
+      options.offset ?? 0,
+    ) as MessageSearchRow[];
 }
 
 /** How the newest page was found: by going through the newest messages, or by sorting every match */
@@ -423,28 +430,50 @@ export function searchNewestFirst(
   return sorted();
 }
 
-export function createMessagesSearch(db: Database) {
+/** Include already visibility-checked hits from this account and read transaction. */
+export function createMessagesSearch(
+  db: Database,
+  transcriptHits: { rowid: number; rank: number }[] = [],
+) {
+  const speech = transcriptHits.length ? JSON.stringify(transcriptHits) : null;
+  const from =
+    speech === null
+      ? MATCHES_FROM
+      : `FROM (
+    SELECT rowid, min(rank) AS rank, max(spoken) AS spoken FROM (
+      SELECT rowid, rank, 0 AS spoken FROM message_search WHERE message_search MATCH ?
+      UNION ALL
+      SELECT value->>'$.rowid', value->>'$.rank', 1 FROM json_each(?)
+    ) GROUP BY rowid
+  ) AS hits JOIN messages_cache m ON m.rowid = hits.rowid`;
+  const bindings = (query: string, options: MessageSearchOptions) => {
+    const match = toFts5Query(query, { phrase: options.phrase });
+    return speech === null ? [match] : [match, speech];
+  };
   const matching = (columns: string, query: string, options: MessageSearchOptions, extra = "") => {
     const { conditions, params } = searchFilter(options);
     if (extra) conditions.push(extra);
     const sql = `SELECT ${columns}
-      ${MATCHES_FROM}
+      ${from}
       ${options.chatUsername ? CHAT_JOIN : ""}${options.senderUsername ? SENDER_JOIN : ""}
       ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}`;
-    return { sql, params: [toFts5Query(query, { phrase: options.phrase }), ...params] };
+    return { sql, params: [...bindings(query, options), ...params] };
   };
 
   const result: MessagesSearchService = {
     search(query: string, options: MessageSearchOptions = {}) {
-      if (options.sort !== "relevance") {
+      if (speech === null && options.sort !== "relevance") {
         return searchNewestFirst(db, query, options).rows;
       }
       return sortedPage(
         db,
-        MATCHES_FROM,
-        toFts5Query(query, { phrase: options.phrase }),
+        from,
+        bindings(query, options),
         options,
-        `message_search.rank, ${NEWEST_FIRST}`,
+        options.sort === "relevance"
+          ? `${speech === null ? "message_search" : "hits"}.rank, ${NEWEST_FIRST}`
+          : NEWEST_FIRST,
+        speech === null ? "" : ", hits.spoken AS transcript_match",
       );
     },
 

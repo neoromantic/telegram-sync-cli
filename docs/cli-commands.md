@@ -570,6 +570,22 @@ mimeType, size, kind, chatId, messageId, uniqueFileId, groupedId, cached, resume
   long flood wait `RATE_LIMITED` (exit 5); both keep the partial download. Ctrl-C keeps it too
   and exits 130.
 
+```bash
+tg media transcribe --chat me --id 42                 # a voice note or video note to text
+tg media transcribe --chat me --id 42 --id 43 --language ru
+```
+
+`tg media transcribe` gets each file the way `tg media download` does, converts it with
+ffmpeg and runs a speech-to-text program on this machine (whisper.cpp or an
+openai-whisper-compatible CLI) once for all of them. It prints `{ chatId, messageId, text,
+language, source, runner, model, cached }`; with several `--id`, one JSON line per message in `--id`
+order, and exit 1 when any failed. A stored transcript is printed again without running the
+program (`cached: true`) unless `--force`. `tg messages` items show it as `transcript`. No
+program or ffmpeg found is `TRANSCRIBER_NOT_FOUND` (exit 1); this and every other setup error
+carries the commands to fix it in `suggestion`; in a batch it fails only the messages that need
+the program. Ctrl-C, SIGTERM or SIGHUP removes the converted audio and exits 130. Setup, providers and
+where the audio goes: [media.md](media.md#transcribe).
+
 `tg media clean` removes partial downloads untouched for a day; `--older-than <30d|date>`,
 `--chat <peer>` (a file another chat also holds stays, as far as `message_attachments` knows)
 and `--all` remove complete files too.

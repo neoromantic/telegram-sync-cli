@@ -1,7 +1,6 @@
+import { openDownloadDeps } from "./download-deps";
 import { type ArgsDef, defineCommand } from "citty";
 
-import { getAccountMediaDir } from "../../db";
-import { getClientForAccount } from "../../services/telegram";
 import { exitAfterFlush } from "../../telemetry";
 import { ErrorCodes } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
@@ -9,16 +8,9 @@ import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
 import { flagValues } from "../../utils/args";
 import { formatBytes } from "../../utils/formatting";
 import { error, getOutputFormat, info, rawFile, success } from "../../utils/output";
-import { createProgress } from "../../utils/progress";
-import { wrapClientCallWithRateLimits } from "../../utils/telegram-rate-limits";
-import {
-  CHAT_ARG_DESCRIPTION,
-  MAX_MESSAGE_ID,
-  openHistory,
-  parseIntegerArg,
-} from "../messages/helpers";
+import { CHAT_ARG_DESCRIPTION, MAX_MESSAGE_ID, parseIntegerArg } from "../messages/helpers";
 import { downloadBatch, type FileFailure } from "./batch";
-import { type DownloadDeps, type DownloadResult, downloadMedia } from "./download-media";
+import { type DownloadResult, downloadMedia } from "./download-media";
 import { DownloadInterruptedError, reportMediaError } from "./errors";
 import {
   BATCH_NAME_TEMPLATE,
@@ -158,20 +150,7 @@ export const downloadMediaCommand = defineCommand({
       }
       controller.abort();
     };
-    const history = openHistory(account.id, CONTEXT);
-    const getClient = async () =>
-      wrapClientCallWithRateLimits(await getClientForAccount(account.id), {
-        context: CONTEXT,
-        accountId: account.id,
-      });
-    const deps: DownloadDeps = {
-      cacheDb: history.cacheDb,
-      mediaDir: getAccountMediaDir(account.id),
-      getClient,
-      history,
-      signal: controller.signal,
-      progress: (fileName) => createProgress(fileName),
-    };
+    const deps = openDownloadDeps(account.id, CONTEXT, controller.signal);
     const overwrite = args.overwrite ?? false;
     const options = { thumb: args.thumb ?? false, fresh: args.fresh ?? false };
 

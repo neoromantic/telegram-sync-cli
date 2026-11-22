@@ -387,6 +387,13 @@ Exit codes:
   target. A batch accepts identical bytes and rejects conflicting output from two IDs even
   with `--overwrite`.
 
+`tg media transcribe` adds `TRANSCRIBER_NOT_FOUND` (exit 1): missing whisper.cpp model setting, speech-to-text program or
+ffmpeg on `PATH`; `details: { chatId, messageId, searched, runnerPath, ffmpeg }` (the message, the names looked for, and the path
+found for each or `null`), with install commands for the OS (and for whisper.cpp the model download and
+`tg config set transcribe.local.model`) as `suggestion`. A message that is
+not a voice note or video note is `MEDIA_UNSUPPORTED` with `details.reason: "not_speech"`
+([media.md](media.md#transcribe)).
+
 A single download that stalls for 60 seconds or loses its connection is `NETWORK_ERROR` (exit 4) with
 `details.resumable: true`; a flood wait over 10 seconds is `RATE_LIMITED` (exit 5) with
 `details: { method: "upload.getFile", wait_seconds }`. Both are `retryable` and keep the partial
