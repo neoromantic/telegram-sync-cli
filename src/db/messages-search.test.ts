@@ -6,6 +6,7 @@ import { createMessagesSearch, isFts5QueryError, toFts5Query } from "./messages-
 import { initCacheSchema } from "./schema";
 import { initSyncSchema, isContentlessSearch } from "./sync-schema";
 import { createUsersCache } from "./users-cache";
+import { findQueryForms } from "./word-forms";
 import { chatRow, createAccountCacheDb } from "../test/cache-db.test-utils";
 import { takePartIn } from "../test/participation.test-utils";
 
@@ -325,6 +326,32 @@ describe("MessagesSearch", () => {
     const parenResults = search.search("function(arg)", { phrase: true });
     expect(parenResults).toHaveLength(1);
     expect(parenResults[0]!.message_id).toBe(3);
+  });
+
+  it("matches every form of a word in results and count while a transcript matches too", () => {
+    const now = Math.floor(Date.now() / 1000);
+    messagesCache.upsertBatch(
+      ["Сдаю квартиру у парка", "Квартира ещё свободна?", "Голосовое сообщение"].map(
+        (text, i) => ({
+          chat_id: 10,
+          message_id: i + 1,
+          from_id: 10,
+          text,
+          message_type: "text",
+          date: now - i,
+          raw_json: "{}",
+        }),
+      ),
+    );
+    const voice = db
+      .query("SELECT rowid FROM messages_cache WHERE chat_id = 10 AND message_id = 3")
+      .get() as { rowid: number };
+    const search = createMessagesSearch(db, [{ rowid: voice.rowid, rank: -1 }]);
+    const options = { forms: findQueryForms(db, "квартира") };
+
+    const rows = search.search("квартира", options);
+    expect(rows.map((row) => row.message_id)).toEqual([1, 2, 3]);
+    expect(search.count("квартира", options)).toBe(rows.length);
   });
 });
 

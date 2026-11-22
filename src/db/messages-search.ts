@@ -459,7 +459,7 @@ export function createMessagesSearch(
     ) GROUP BY rowid
   ) AS hits JOIN messages_cache m ON m.rowid = hits.rowid`;
   const bindings = (query: string, options: MessageSearchOptions) => {
-    const match = toFts5Query(query, { phrase: options.phrase });
+    const match = toFts5Query(query, options);
     return speech === null ? [match] : [match, speech];
   };
   const matching = (columns: string, query: string, options: MessageSearchOptions, extra = "") => {
