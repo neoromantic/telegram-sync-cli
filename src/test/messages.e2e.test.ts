@@ -981,6 +981,42 @@ describe("E2E: Messages List filters", () => {
     expect(forward).toEqual([[5, 2, 1], [11, 9, 7], [12]]);
   });
 
+  it("keeps a full page in place when a video note may be missing in either direction", async () => {
+    const chatId = 7_000_000_207;
+    const db = env.openCacheDb(1);
+    const messages = createMessagesCache(db);
+    const videoNote = (id: number) =>
+      parseRawMessage(roundMessage({ _: "peerUser", userId: chatId }, id), chatId)!;
+    messages.upsertBatch([videoNote(2), { ...videoNote(3), raw_json: "{}" }, videoNote(4)]);
+    createHistoryRanges(db).add(chatId, { low: 1, high: 4 });
+
+    const filter = ["--chat", String(chatId), "--type", "round", "--limit", "1"];
+    const windows = [
+      { cursor: "--before=4", known: 2 },
+      { cursor: "--after=2", known: 4 },
+    ];
+    for (const { cursor, known } of windows) {
+      const { data, next } = await answer(...filter, cursor);
+      expect(ids(data)).toEqual([known]);
+      expect(data).toMatchObject({
+        complete: false,
+        missing: ["types"],
+        nextBefore: known,
+        nextAfter: known,
+      });
+      expect(data.suggestion).toContain("--before=4 --fresh");
+      expect(next).toBeUndefined();
+    }
+
+    messages.upsert(videoNote(3));
+    for (const { cursor } of windows) {
+      const { data, next } = await answer(...filter, cursor);
+      expect(ids(data)).toEqual([3]);
+      expect(data.complete).toBe(true);
+      expect(next).toHaveLength(1);
+    }
+  });
+
   it("returns an empty page when nothing matches", async () => {
     const data = await list("--chat", "@pierclub", "--type", "sticker");
 
@@ -1229,6 +1265,18 @@ describe("E2E: Messages List filters offline and on another account", () => {
     expect(error).toMatchObject({ code: "INVALID_ARGS", details: { chat: "@nobodycached" } });
     expect(error.message).toContain("@nobodycached is not in the cache");
     expect(error.suggestion).toContain("numeric ID");
+  });
+
+  it("points to allowedChats when a configured name is missing from the cache", async () => {
+    const result = await runCli(
+      ["messages", "search", "--account", "2", "--query", "note"],
+      offline("@nobodycached"),
+    );
+
+    expect(result.exitCode).toBe(3);
+    const { error } = result.json as ErrorData & { error: { suggestion?: string } };
+    expect(error).toMatchObject({ code: "INVALID_ARGS", details: { chat: "@nobodycached" } });
+    expect(error.suggestion).toContain("allowedChats");
   });
 
   it("keeps --account in every command it suggests", async () => {

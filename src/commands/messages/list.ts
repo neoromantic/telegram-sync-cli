@@ -55,7 +55,10 @@ export const listArgs = {
     type: "string",
     description: `${TYPE_ARG_DESCRIPTION}. With --type, --since or --until the page comes from the cache only, with complete saying whether the cache holds all of it`,
   },
-  since: { type: "string", description: SINCE_ARG_DESCRIPTION },
+  since: {
+    type: "string",
+    description: `${SINCE_ARG_DESCRIPTION}. Proving the page is complete can require fetching older history back to the start of the chat`,
+  },
   until: { type: "string", description: UNTIL_ARG_DESCRIPTION },
   includeDeleted: {
     type: "boolean",
@@ -221,7 +224,9 @@ function fillCommands(args: Record<string, unknown>, { gap, untyped }: FilteredP
 
 function filteredNext(args: Record<string, unknown>, result: FilteredPage) {
   const fills = fillCommands(args, result);
-  if (fills.length === 0) return nextPage(args, result.page);
+  if (fills.length === 0) {
+    return result.untyped ? [] : nextPage(args, result.page);
+  }
   return [
     ...fills,
     nextCommand(

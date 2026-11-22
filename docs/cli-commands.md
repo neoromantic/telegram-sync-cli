@@ -298,7 +298,9 @@ What a filtered page promises:
    above `--after`; a full page vouches only down to its last item (up to it, paging forward).
    A cached message sent at or after `--until` (before `--since`) ends the span there only when
    the cache knows every message ID beyond it (each is cached or inside a recorded range): the
-   date of a missing message is never guessed, since dates can fall out of ID order.
+   date of a missing message is never guessed, since dates can fall out of ID order. With
+   `--since`, the first page can already show all matches while `complete` stays false.
+   Confirming a short page can require fetching older history back to the start of the chat.
 2. **`complete: true`** means one recorded history range covers the whole span and, with
    `--type`, every cached message in it has its type: no message of the chat that matches is
    missing from the page, as of the chat's newest known message. An empty complete page is a
@@ -316,11 +318,11 @@ What a filtered page promises:
    can add matches to it: `tg messages list --chat=… --limit=100 [--before=<missingBefore>]
    --fresh` caches that page from Telegram (it needs credentials and a connection), `tg db
    migrate` finishes the type migration, and the last command is this page again. Repeat until
-   the page is complete; each round fills up to 100 more messages. A media message waiting for
-   its raw message gets no `next`: `suggestion` names the `tg messages list --fresh` that fetches
-   it again, to run once, since a message Telegram no longer returns keeps its type unknown and
-   the page incomplete. Every command keeps
-   `--account`. `next` of a complete page is the next page, as without filters, so `next` never
+   the page is complete; each round fills up to 100 more messages. When only a media message’s
+   type is missing, the list omits `next` even if it returned `--limit` known matches. The
+   `suggestion` gives a `tg messages list --fresh` command to try once. Repeat the original
+   query after fetching. If Telegram no longer returns the message, the page stays incomplete.
+   Every command keeps `--account`. `next` of a complete page is the next page, as without filters, so `next` never
    steps over a gap. `nextBefore` and `nextAfter` still page through the cached matches when you
    choose to read past a gap. A group keeps its messages from a time you didn't take part in it
    out of the cache ([group participation](sync-strategy.md#group-participation)), so a gap of

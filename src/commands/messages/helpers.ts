@@ -172,7 +172,7 @@ export function reportHistoryError(err: unknown, action: string): never {
       ErrorCodes.INVALID_ARGS,
       err.message,
       { chat: err.identifier },
-      "Pass the chat's numeric ID as tg chats list prints it, or cache the chat first: tg chats list --fresh, or tg chats get --id with the @username",
+      "Use the numeric ID from tg chats list wherever this name is set (including in allowedChats), or cache the name for this account with tg chats list --fresh",
     );
   }
   if (err instanceof AmbiguousPeerError) {
