@@ -1511,30 +1511,43 @@ describe("batch download", () => {
       }),
     );
     const uploads: number[] = [];
-    const client = {
-      call: async (req: { _: string }) => {
-        if (req._ === "upload.getFile") {
-          uploads.push(Date.now());
-          return {};
-        }
-        return { _: "messages.messages", messages: files, users: [], chats: [] };
-      },
-    } as unknown as TelegramClient;
+    const secondSent = Promise.withResolvers<void>();
+    const firstFlooded = Promise.withResolvers<void>();
+    const secondFlooded = Promise.withResolvers<void>();
+    const flooded = new Set<number>();
     let until = 0;
-    const started = new Set<number>();
-    const transfer = fakeTransfer(async function* ({ client, params }) {
-      const size = params.fileSize!;
-      if (!started.has(size)) {
-        started.add(size);
-        if (size === 1) throw new RateLimitError("upload.getFile", 0.08);
-        if (size === 2) {
+    const client = {
+      call: async (req: { _: string; limit?: number }) => {
+        if (req._ !== "upload.getFile") {
+          return { _: "messages.messages", messages: files, users: [], chats: [] };
+        }
+        const file = req.limit;
+        if (file === 1 && !flooded.has(file)) {
+          flooded.add(file);
+          await secondSent.promise;
+          firstFlooded.resolve();
+          throw new RateLimitError(req._, 0.08);
+        }
+        if (file === 2 && !flooded.has(file)) {
+          flooded.add(file);
+          secondSent.resolve();
+          await firstFlooded.promise;
           await Bun.sleep(20);
           until = Date.now() + 150;
-          throw new RateLimitError("upload.getFile", 0.15);
+          secondFlooded.resolve();
+          throw new RateLimitError(req._, 0.15);
         }
-        await Bun.sleep(40);
+        uploads.push(Date.now());
+        return {};
+      },
+    } as unknown as TelegramClient;
+    const transfer = fakeTransfer(async function* ({ client, params }) {
+      const size = params.fileSize!;
+      if (size === 3) {
+        await secondFlooded.promise;
+        await Bun.sleep(0);
       }
-      await client.call({ _: "upload.getFile" } as tl.upload.RawGetFileRequest);
+      await client.call({ _: "upload.getFile", limit: size } as tl.upload.RawGetFileRequest);
       yield fakeBytes(size);
     });
     const result = await batch({ getClient: () => client, download: transfer.download }, ids);
