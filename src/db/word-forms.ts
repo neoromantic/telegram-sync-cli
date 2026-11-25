@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 
 import { fold, tokenize } from "../utils/search-snippet";
-import { lightStem } from "../utils/word-stems";
+import { isStemmable, lightStem } from "../utils/word-stems";
 
 /** At most this many words stand for one query word: the word as typed, then its most frequent forms */
 export const MAX_FORMS = 30;
@@ -26,19 +26,18 @@ export function createSearchVocabs(db: Database) {
   }
 }
 
-function scanPrefixes(stem: string) {
-  const letters = [...stem];
-  let prefixes = [""];
+function yoVariants(word: string) {
+  let variants = [""];
   let yo = 0;
-  for (const letter of letters.length > 1 ? letters.slice(0, -1) : letters) {
-    if (letter === "е") {
+  for (const letter of word) {
+    if (letter === "е" || letter === "ё") {
       if (++yo > MAX_YO_VARIANTS) break;
-      prefixes = prefixes.flatMap((p) => [`${p}е`, `${p}ё`]);
+      variants = variants.flatMap((v) => [`${v}е`, `${v}ё`]);
     } else {
-      prefixes = prefixes.map((p) => p + letter);
+      variants = variants.map((v) => v + letter);
     }
   }
-  return prefixes;
+  return variants;
 }
 
 function after(prefix: string) {
@@ -51,9 +50,11 @@ function after(prefix: string) {
  * The forms of each plain word of a query: the words of the message and
  * transcript indexes with the same light stem, found by a range scan of
  * both vocabularies on the stem without its last letter (with е and ё
- * both, as the stem reads ё as е), then filtered by stem. A one-letter word, which no other word stems to, is
- * only looked up as it is. A word that is several index words (`e-mail`)
- * is left out and matched as written.
+ * both, as the stem reads ё as е), then filtered by stem. A word whose
+ * stem has at most two letters (`ok`, `не`), where that scan would read a
+ * large part of the vocabulary, is looked up only as typed (with е and ё
+ * both), and a word with no stem (`2026`) only as it is. A word that is
+ * several index words (`e-mail`) is left out and matched as written.
  */
 export function findQueryForms(db: Database, query: string) {
   const vocab = (where: string) =>
@@ -70,10 +71,14 @@ export function findQueryForms(db: Database, query: string) {
     const word = fold(tokens[0]!);
     const stem = lightStem(word);
     const found: Array<[string, number]> = [];
-    if ([...word].length === 1) {
+    if (!isStemmable(word)) {
       found.push(...(exact.values(word) as Array<[string, number]>));
+    } else if ([...stem].length <= 2) {
+      for (const variant of yoVariants(word)) {
+        found.push(...(exact.values(variant) as Array<[string, number]>));
+      }
     } else {
-      for (const prefix of scanPrefixes(stem)) {
+      for (const prefix of yoVariants([...stem].slice(0, -1).join(""))) {
         for (const [term, doc] of range.values(prefix, after(prefix)) as Array<[string, number]>) {
           if (lightStem(term) === stem) found.push([term, doc]);
         }

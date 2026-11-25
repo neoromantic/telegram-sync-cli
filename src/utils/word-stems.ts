@@ -105,6 +105,11 @@ function englishMinimal(word: string) {
   return word.slice(0, -1);
 }
 
+/** Whether a lowercase word has a light stem: only Latin (a–z) and Cyrillic letters */
+export function isStemmable(word: string) {
+  return LETTERS.test(word);
+}
+
 /**
  * The light stem of a lowercase word of Latin (a–z) and Cyrillic letters
  * only: Russian case endings stripped for a word with a Cyrillic letter (ё
@@ -113,6 +118,6 @@ function englishMinimal(word: string) {
  * EnglishMinimalStemmer (see NOTICE).
  */
 export function lightStem(word: string) {
-  if (!LETTERS.test(word)) return word;
+  if (!isStemmable(word)) return word;
   return isCyrillic(word) ? russianLight(word) : englishMinimal(word);
 }

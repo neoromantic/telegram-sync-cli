@@ -94,15 +94,45 @@ describe("findQueryForms", () => {
     });
   });
 
-  it("matches a one-letter word as typed, and still finds the forms of a two-letter one", () => {
-    const db = cacheWith("a cat", "я тут", "it is", "its tail", "её дом", "ее кот");
-    expect(formsOf(db, "a я x it её")).toEqual({
+  it("looks up a word with a stem of at most two letters, or with no stem, only as typed", () => {
+    const db = cacheWith(
+      "a cat",
+      "я тут",
+      "it is",
+      "its tail",
+      "её дом",
+      "ее кот",
+      "ок 2026",
+      "2026s",
+    );
+    const lookups: unknown[][] = [];
+    const spy = new Proxy(db, {
+      get(target, key) {
+        if (key !== "query") return Reflect.get(target, key);
+        return (sql: string) => {
+          const statement = target.query(sql);
+          return new Proxy(statement, {
+            get(inner, name) {
+              if (name !== "values") return Reflect.get(inner, name);
+              return (...args: unknown[]) => {
+                lookups.push(args);
+                return inner.values(...(args as []));
+              };
+            },
+          });
+        };
+      },
+    });
+    expect(formsOf(spy, "a я x it её ок 2026")).toEqual({
       a: { words: ["a"], cut: false },
       я: { words: ["я"], cut: false },
       x: { words: [], cut: false },
-      it: { words: ["it", "its"], cut: false },
+      it: { words: ["it"], cut: false },
       её: { words: ["её", "ее"], cut: false },
+      ок: { words: ["ок"], cut: false },
+      2026: { words: ["2026"], cut: false },
     });
+    expect(lookups.every((args) => args.length === 1)).toBe(true);
   });
 
   it("folds case and Latin diacritics as the index does, keyed by the word as typed", () => {

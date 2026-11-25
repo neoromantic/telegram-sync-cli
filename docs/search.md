@@ -473,8 +473,10 @@ clients read the same file.
 - **A word that is several index words** (`e-mail`, `don't`) is matched as written: it is a
   phrase to FTS5.
 - **A word with no form in the index** stays as it is and finds nothing, as without `--forms`.
-- **A one-letter word** has no other forms under these stemmers, so it is looked up only as it
-  is, without the range scan.
+- **A short word**: a word whose stem has one or two letters (`a`, `ok`, `не`) is looked up only
+  as typed, with `е` and `ё` both, and a word with no stem (`2026`, `2ms`) only as it is: the
+  range scan on a prefix of a letter or none would read a large part of the vocabulary. So
+  `it` doesn't find `its`.
 - **At most 30 forms a word**: the word as typed, then its most frequent forms. The word as
   typed is always searched, also where the index keeps it apart from its forms: `мой` typed
   with `и` and a combining breve is the index word `мои`. A Russian adjective has about 12 forms

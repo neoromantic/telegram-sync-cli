@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `tg messages search --forms` also matches other forms of each plain word that occur in the
   cache: `квартира` finds `квартиру` and `квартирой`, `meeting` finds `meetings`, and `еще`
-  finds `ещё`; a word with a digit (`2ms`) stays as typed. It works on the index's own words
-  with light Russian and English stemmers, so the index and older versions are unchanged.
+  finds `ещё`; a word with a digit (`2ms`) or a stem of one or two letters (`ok`) stays as
+  typed. It works on the index's own words with light Russian and English stemmers, so the
+  index and older versions are unchanged.
   Without the flag search stays exact. A query with FTS5 syntax or `--phrase` with `--forms` is
   `INVALID_ARGS`; while `allowedChats` is set, `--forms` matches words only as typed, since the
   forms come from the whole cache. The answer adds `forms`, the forms searched for (`null`

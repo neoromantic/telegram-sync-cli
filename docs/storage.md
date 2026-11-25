@@ -409,7 +409,8 @@ have: at most 30 forms a word (the word itself, then the most frequent), and the
 reads `е` and `ё` both at every position of the stem's prefix, where the candidate stopped the
 prefix at the first of them. Both scans cover every word with the stem, so below the cap they
 find the same words, only with fewer words read; the benchmark's E2 now runs through the shipped
-code (`findQueryForms`). Typo correction is a separate change. How word forms work:
+code (`findQueryForms`). A word whose stem has one or two letters, or no stem, is looked up only
+as typed, so the scan never reads every word that starts with one letter. Typo correction is a separate change. How word forms work:
 [search.md](search.md#word-forms).
 
 **Why opt-in.** No candidate passed Q3, the precision limit fixed in advance: E2 loses 0.059 of
