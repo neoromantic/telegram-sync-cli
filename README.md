@@ -84,7 +84,7 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Full-text search (FTS5) over cached messages
 - Rich messages: `tg send --markdown` or `--html` sends headings, tables, lists, quotations,
   code blocks and formulas that Telegram renders natively
-- Files: send one with `tg send --file`; download the files of one or many messages into a
+- Files: send one with `tg send --file` (images as photos, MP4 and MOV as videos); download the files of one or many messages into a
   per-account media cache with `tg media download` (cached files need no network, partial
   downloads resume, name templates for `--out`); every message item shows its attachment
   (kind, name, MIME type, size)

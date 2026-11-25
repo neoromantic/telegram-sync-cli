@@ -637,9 +637,10 @@ Cached reads and search use the returned blocks rendered as Markdown. If Telegra
 acknowledgement, they use the submitted source. If it returns only some blocks, they include
 only those blocks until a full message reaches the cache.
 
-`--file` sends one file: JPEG, PNG and WebP images up to 10 MB as a photo, anything else as a
-document under its file name (`--force-document` sends an image as a document too). `--caption`
-is its text. `--message` with `--file`, `--caption` or `--force-document` without it, a second
+`--file` sends one file: JPEG, PNG and WebP images up to 10 MB as a photo, an MP4 or MOV
+file as a video that plays in the chat, anything else as a document under its file name
+(`--force-document` sends an image or a video as a document too). `--caption` is its text.
+`--message` with `--file`, `--caption` or `--force-document` without it, a second
 `--file` (albums aren't supported yet), and a path that isn't a readable, non-empty file are
 `INVALID_ARGS` (exit 3), checked before any connection. The result adds
 `file: { name, mimeType, size, sentAs }` and `attachment`, whose `uniqueFileId` is the media

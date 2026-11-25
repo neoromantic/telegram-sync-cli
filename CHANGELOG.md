@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `tg send --file` sends an MP4 or MOV file as a video that plays in the chat, the way it sent
+  JPEG, PNG and WebP images as photos: before, a video arrived as a file to download. `tg`
+  reads the duration and frame size from the file and uploads it as it is, without
+  re-encoding. The result has `sentAs: "video"`. `--force-document` sends it as a file, as
+  before; a video file whose track `tg` can't read still goes as a document.
+
 ## [0.16.0] - 2026-11-22
 
 ### Added

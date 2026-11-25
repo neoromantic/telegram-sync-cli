@@ -143,7 +143,7 @@ tg messages read --chat @username     # mark read on Telegram (--max-id)
 tg send --to @username --message "Hello"
 tg send --to @username -m "Hello" --silent
 tg send --to @username -m "Reply" --reply-to 123
-tg send --to me --file ./report.pdf --caption "Q3"   # one file: a photo or a document
+tg send --to me --file ./report.pdf --caption "Q3"   # one file: a photo, a video or a document
 
 # Media: a message's file into the account's media cache (cache-first)
 tg media download --chat me --id 42 --out ./

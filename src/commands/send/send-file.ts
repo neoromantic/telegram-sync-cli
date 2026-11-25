@@ -5,8 +5,9 @@ import type { uploadFile } from "@mtcute/bun/methods.js";
 import { type AttachmentInfo, extractAttachment } from "../../utils/attachment";
 import { toLong } from "../../utils/long";
 import { transferClient } from "../../utils/telegram-transfer";
+import { readVideoMetadata } from "../../utils/video-metadata";
 
-export type SendFileKind = "photo" | "document";
+export type SendFileKind = "photo" | "video" | "document";
 
 const PHOTO_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 /** Telegram's limit for a photo: a bigger image is sent as a document */
@@ -64,7 +65,13 @@ export async function sendFile(
   const fileName = basename(request.path);
   const size = file.size;
   const mimeType = fileMimeType(request.path);
-  const kind = chooseSendKind(mimeType, size, request.forceDocument);
+  const video =
+    !request.forceDocument && mimeType.startsWith("video/")
+      ? await readVideoMetadata(request.path)
+      : null;
+  const kind: SendFileKind = video
+    ? "video"
+    : chooseSendKind(mimeType, size, request.forceDocument);
 
   const upload = deps.upload ?? (await import("@mtcute/bun/methods.js")).uploadFile;
   await client.prepare();
@@ -76,6 +83,7 @@ export async function sendFile(
     progressCallback: request.progress,
   });
 
+  const named: tl.TypeDocumentAttribute = { _: "documentAttributeFilename", fileName };
   const media: tl.TypeInputMedia =
     kind === "photo"
       ? { _: "inputMediaUploadedPhoto", file: uploaded.inputFile }
@@ -83,8 +91,19 @@ export async function sendFile(
           _: "inputMediaUploadedDocument",
           file: uploaded.inputFile,
           mimeType: uploaded.mime,
-          attributes: [{ _: "documentAttributeFilename", fileName }],
-          forceFile: true,
+          attributes: video
+            ? [
+                {
+                  _: "documentAttributeVideo",
+                  duration: video.duration,
+                  w: video.width,
+                  h: video.height,
+                  supportsStreaming: video.streamable,
+                },
+                named,
+              ]
+            : [named],
+          forceFile: !video,
         };
 
   const sendRequest: tl.messages.RawSendMediaRequest = {
