@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg send --file --html --caption` formats the caption (bold, italic, links, code, quotes,
+  spoilers) with Telegram's HTML style, so a caption can carry a link. `--markdown` still
+  formats `--message` only.
+
 ## [0.16.0] - 2026-11-22
 
 ### Added

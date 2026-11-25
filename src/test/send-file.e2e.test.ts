@@ -57,12 +57,24 @@ describe("E2E: send --file arguments", () => {
   it("rejects conflicting formats before resolving an allowed chat", async () => {
     await Bun.write(join(env.dataDir, "config.json"), JSON.stringify({ allowedChats: ["55"] }));
     await expectInvalid(["-m", "hi", "--markdown", "--html"], "Use --markdown or --html");
-    for (const flag of ["--markdown", "--html"]) {
-      await expectInvalid(
-        [flag, "--file", "report.pdf", "--caption", "Q3"],
-        "a caption is plain text",
-      );
-    }
+    await expectInvalid(
+      ["--markdown", "--file", "report.pdf", "--caption", "Q3"],
+      "format a caption with --html",
+    );
+    await expectInvalid(["--html", "--file", "report.pdf"], "--html with --file formats --caption");
+  });
+
+  it("refuses a caption that mentions a user by ID before connecting", async () => {
+    await expectInvalid(
+      [
+        "--html",
+        "--file",
+        join(filesDir, "report.pdf"),
+        "--caption",
+        '<a href="tg://user?id=5550002">Ann</a>',
+      ],
+      "can't mention a user by ID",
+    );
   });
 
   it("refuses --caption and --force-document without --file", async () => {
@@ -94,12 +106,17 @@ describe("E2E: send --file arguments", () => {
     await expectInvalid(["--message", "  "], "Message text cannot be empty");
   });
 
-  it("accepts a readable file and only then needs credentials", async () => {
-    const result = await send(["--file", join(filesDir, "report.pdf"), "--caption", "Q3"]);
-    expect(result.exitCode).toBe(3);
-    expect(result.json).toMatchObject({
-      success: false,
-      error: { code: "INVALID_ARGS", details: { issues: expect.any(Array) } },
-    });
+  it("accepts a readable file, with a plain or an HTML caption, and only then needs credentials", async () => {
+    for (const caption of [
+      ["--caption", "Q3"],
+      ["--html", "--caption", '<a href="https://example.com/q3">Q3</a>'],
+    ]) {
+      const result = await send(["--file", join(filesDir, "report.pdf"), ...caption]);
+      expect(result.exitCode).toBe(3);
+      expect(result.json).toMatchObject({
+        success: false,
+        error: { code: "INVALID_ARGS", details: { issues: expect.any(Array) } },
+      });
+    }
   });
 });

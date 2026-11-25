@@ -460,10 +460,16 @@ tg media clean --all                # everything
 tg send --to me --file ./report.pdf --caption "Q3"
 tg send --to @username --file ./photo.jpg               # sent as a photo
 tg send --to @username --file ./photo.jpg --force-document
+tg send --to me --file ./report.pdf --html --caption 'Launch day: <a href="https://example.com/post">the post</a>'
 ```
 
 - JPEG, PNG and WebP images up to 10 MB go as photos; everything else, GIFs and videos
   included, as documents with their file name. `--force-document` sends an image as a file.
+- `--html` formats the caption with Telegram's
+  [HTML style](https://core.telegram.org/bots/api#html-style): `<b>`, `<i>`, `<u>`, `<s>`,
+  `<a href>`, `<code>`, `<pre>`, `<blockquote>`, `<tg-spoiler>`. Line breaks stay as written.
+  The result has `format: "html"`. `--markdown` formats `--message` only, and a link to a
+  user by ID (`tg://user?id=…`) is `INVALID_ARGS`: link `https://t.me/<username>`.
 - One file per message: a second `--file` is `INVALID_ARGS` (albums aren't supported yet).
   `--caption` is the text sent with the file; `--message` doesn't combine with `--file`.
 - `--reply-to` and `--silent` work as for text. The sent message goes into the cache with its
