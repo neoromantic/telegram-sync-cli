@@ -221,7 +221,7 @@ tg messages search --query '"hello world"'         # the exact phrase (or --phra
 tg messages search --query "error OR timeout" --chat @teamchat --sender @alice
 tg messages search --query "todo" --chat me        # Saved Messages; --sender me: your own
 tg messages search --query "квартир*" --includeDeleted   # every word that starts so
-tg messages search --query "квартира" --exact      # only as typed, not квартиру, квартирой…
+tg messages search --query "квартира" --forms      # its other forms: квартиру, квартирой…
 tg messages search --query "deploy" --since 7d --sort relevance --count --snippet
 tg messages wait --chat @username --after 1200     # the next reply after message 1200
 tg messages wait --timeout 300 --settle 3          # any chat; then 3 quiet seconds
@@ -442,19 +442,19 @@ only the cache, so `--fresh` is `INVALID_ARGS` (exit 3), not a cached answer tha
 fetch the chat with `tg messages list --chat <chat> --fresh` first. The rules and examples are in
 [search.md](search.md#query-rules).
 
-Each plain word also matches its other forms in the cache: Russian case forms (`квартира`,
-`квартиру`, `квартирой`), English plurals (`meeting`, `meetings`), with `ё` read as `е`.
-`--exact` turns this off, and a query with FTS5 syntax or `--phrase` is matched as written,
-without forms. While `allowedChats` is set, words are matched only as typed, as with `--exact`
-(`forms` is `null`): the forms come from the whole cache and could show words of other chats.
-The answer's `forms` lists, for each query word as typed, the index words searched for besides
-the word itself (`words`) and whether more were left out (`cut`, past 30); it is `null` when the query wasn't
-expanded, and `filters.exact` says whether `--exact` was given. `next` keeps
-`--exact`. How it works, its limits and its measured quality: [search.md](search.md#word-forms).
-From a made-up cache, with each result trimmed to its ID and text:
+Without flags each word matches only as typed. `--forms` makes each plain word also match its
+other forms in the cache: Russian case forms (`квартира`, `квартиру`, `квартирой`), English
+plurals (`meeting`, `meetings`), with `ё` read as `е`. A query with FTS5 syntax or `--phrase`
+with `--forms` is `INVALID_ARGS` (exit 3). While `allowedChats` is set, `--forms` matches words
+only as typed (`forms` is `null`): the forms come from the whole cache and could show words of
+other chats. The answer's `forms` lists, for each query word as typed, the index words searched
+for (`words`) and whether more were left out (`cut`, past 30); it is `null` without `--forms`,
+and `filters.forms` says whether `--forms` was given. `next` keeps `--forms`. How it works, its
+limits and its measured quality: [search.md](search.md#word-forms). From a made-up cache, with
+each result trimmed to its ID and text:
 
 ```bash
-tg messages search --query квартира --limit 3 --snippet
+tg messages search --query квартира --forms --limit 3 --snippet
 ```
 
 ```json
@@ -467,7 +467,7 @@ tg messages search --query квартира --limit 3 --snippet
       "sender": null,
       "includeDeleted": false,
       "phrase": false,
-      "exact": false,
+      "forms": true,
       "since": null,
       "until": null
     },
@@ -492,18 +492,18 @@ tg messages search --query квартира --limit 3 --snippet
   },
   "next": [
     {
-      "command": "tg messages search --query='квартира' --limit=3 --offset=3 --snippet",
+      "command": "tg messages search --query='квартира' --forms --limit=3 --offset=3 --snippet",
       "why": "The next page of results."
     }
   ]
 }
 ```
 
-With `--exact` the same query finds only message 2, the one with `квартира` itself, and there
-is no next page:
+Without `--forms` the same query finds only message 2, the one with `квартира` itself, and
+there is no next page:
 
 ```bash
-tg messages search --query квартира --exact --limit 3 --snippet
+tg messages search --query квартира --limit 3 --snippet
 ```
 
 ```json
@@ -516,7 +516,7 @@ tg messages search --query квартира --exact --limit 3 --snippet
       "sender": null,
       "includeDeleted": false,
       "phrase": false,
-      "exact": true,
+      "forms": false,
       "since": null,
       "until": null
     },

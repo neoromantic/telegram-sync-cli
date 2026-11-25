@@ -7,19 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- `tg messages search` also matches other forms of each plain word that occur in the cache, so
-  it returns more results: `квартира` finds `квартиру` and `квартирой`, `meeting` finds
-  `meetings`, and `еще` finds `ещё`; a word with a digit (`2ms`) stays as typed. It works on
-  the index's own words with light Russian and English stemmers, so the index and older
-  versions are unchanged. `--exact` gives the old
-  behaviour, each word only as typed; a query with FTS5 syntax or `--phrase` is matched as
-  written, as before, and so is every query while `allowedChats` is set, since the forms come
-  from the whole cache. The answer adds `forms`, the forms searched for (`null` when the query
-  wasn't expanded), and `filters.exact`. The cache gets the tables `message_search_vocab` and
-  `transcript_search_vocab`, the words of the message and transcript indexes, which `tg sql` can
-  read. See [docs/search.md](docs/search.md#word-forms).
+- `tg messages search --forms` also matches other forms of each plain word that occur in the
+  cache: `квартира` finds `квартиру` and `квартирой`, `meeting` finds `meetings`, and `еще`
+  finds `ещё`; a word with a digit (`2ms`) stays as typed. It works on the index's own words
+  with light Russian and English stemmers, so the index and older versions are unchanged.
+  Without the flag search stays exact. A query with FTS5 syntax or `--phrase` with `--forms` is
+  `INVALID_ARGS`; while `allowedChats` is set, `--forms` matches words only as typed, since the
+  forms come from the whole cache. The answer adds `forms`, the forms searched for (`null`
+  without `--forms` or with `allowedChats`), and `filters.forms`. The cache gets the tables
+  `message_search_vocab` and `transcript_search_vocab`, the words of the message and transcript
+  indexes, which `tg sql` can read. See [docs/search.md](docs/search.md#word-forms).
 
 ## [0.16.0] - 2026-11-22
 

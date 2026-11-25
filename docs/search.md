@@ -359,7 +359,7 @@ same order. For a page of P (`--limit` plus `--offset`) of N messages:
   re-indexed messages ([above](#keeping-the-index-merged)), costs a quarter more at most.
 - **A prefix** (`word*`) always uses the query above: asking about the messages would read every
   word the prefix starts.
-- **Forms** (without `--exact`). A word with one form in the index is the same quoted word, and a
+- **Forms** (`--forms`). A word with one form in the index is the same quoted word, and a
   one-word query keeps the shortcut of counting without reading rowids. A word with several
   forms is an `OR` of them, so the counting reads rowids as for several words, and the walk asks
   the index about the whole group. On a merged index of 20,000 made-up messages, a word whose
@@ -406,7 +406,7 @@ tg messages search \
 ### Query Rules
 
 A query without FTS5 syntax is a list of words: a message matches when it contains every word,
-in any order and in any of its forms ([Word forms](#word-forms)). Each word is quoted before it
+in any order, as typed; `--forms` also matches its other forms ([Word forms](#word-forms)). Each word is quoted before it
 goes to FTS5, so punctuation inside a word (`don't`, `e-mail`, `че-нить`) is never read as
 syntax.
 
@@ -427,11 +427,10 @@ or `^` inside a word is punctuation:
 | `квартир*`         | every form of a word: `квартира`, `квартиру`, `квартирой`     |
 | `^hello`           | messages whose text starts with `hello`                       |
 
-FTS5 doesn't stem words, so tg looks up the other forms of each plain word in the index and
-searches for them too ([below](#word-forms)); with `--exact`, or in a query with FTS5 syntax, a
-word finds only itself as typed. A prefix (`word*`) finds every word that starts the same way.
-Matching ignores case, and diacritics in Latin letters (`cafe` finds `café`). A plain word reads
-`ё` as `е` (`еще` finds `ещё` and the reverse); with `--exact` or FTS5 syntax, `ё` stays distinct
+FTS5 doesn't stem words: a plain query finds the word as typed. `--forms` finds its other forms
+([below](#word-forms)), and a prefix (`word*`) finds every word that starts the same way.
+Matching ignores case, and diacritics in Latin letters (`cafe` finds `café`). With `--forms` a
+plain word reads `ё` as `е` (`еще` finds `ещё` and the reverse); without it `ё` stays distinct
 from `е` (`еще` doesn't find `ещё`). `й` always stays distinct from `и`.
 
 `--phrase` matches the whole query as one exact phrase, the way `tg messages search` read
@@ -444,10 +443,10 @@ name), returns `INVALID_ARGS` (exit 3) with a suggestion: quote the words with p
 
 ### Word forms
 
-Each plain word of the query also matches its other forms that occur in the index:
-`--query квартира` finds `квартиру`, `квартирой` and `квартирах`, `meeting` finds `meetings`,
-and `еще` finds `ещё` (and the reverse). `--exact` turns this off: each word matches only as
-typed. Why it is the default: [storage.md §9](storage.md#9-other-word-forms-and-typos).
+`--forms` makes each plain word of the query match its other forms that occur in the index too:
+`--query квартира --forms` finds `квартиру`, `квартирой` and `квартирах`, `meeting` finds
+`meetings`, and `еще` finds `ещё` (and the reverse). Without it search stays exact. Why it is
+opt-in: [storage.md §9](storage.md#9-other-word-forms-and-typos).
 
 How it works ([#92](https://github.com/neoromantic/telegram-sync-cli/issues/92)): tg reads the
 index's own words from `message_search_vocab`, with the words of voice and video note
@@ -468,12 +467,12 @@ Nothing changes in the index, so there is no migration, and older versions and o
 clients read the same file.
 
 - **Plain words only.** A query with FTS5 syntax (`"phrase"`, `word*`, `OR`, `AND`, `NOT`,
-  `sender:`, `chat:`) or `--phrase` is matched as written, without forms. Forms inside a phrase,
-  a `NOT` or a column filter would change what the query means, and expanding only the words
-  outside them would change it silently.
+  `sender:`, `chat:`) or `--phrase` with `--forms` is `INVALID_ARGS` (exit 3), with the
+  suggestion to drop one of them. Forms inside a phrase, a `NOT` or a column filter would change
+  what the query means, and expanding only the words outside them would change it silently.
 - **A word that is several index words** (`e-mail`, `don't`) is matched as written: it is a
   phrase to FTS5.
-- **A word with no form in the index** stays as it is and finds nothing, as with `--exact`.
+- **A word with no form in the index** stays as it is and finds nothing, as without `--forms`.
 - **A one-letter word** has no other forms under these stemmers, so it is looked up only as it
   is, without the range scan.
 - **At most 30 forms a word**: the word as typed, then its most frequent forms. The word as
@@ -483,16 +482,14 @@ clients read the same file.
   stem; the answer marks such a word with `cut: true`.
 - The forms are words of the whole index: of deleted messages and of sender and chat names too,
   as a plain word matches them.
-- **Not while `allowedChats` is set**: the words are matched only as typed, as with `--exact`,
-  since the forms of the whole index would show words of chats outside the list.
+- **Not while `allowedChats` is set**: with `--forms` the words are matched only as typed and
+  `forms` is `null`, since the forms of the whole index would show words of chats outside the list.
 - **Quality**, measured on public Russian and English sentences ([storage.md
   §9](storage.md#9-other-word-forms-and-typos)): a Russian word finds 0.70 of the messages with
   any of its forms instead of 0.37, with 0.95 of the results right instead of 1.0; English 0.84
   instead of 0.75, 0.997 right. The wrong ones are other words with the same stem (`брат` and
   `брать`, `лет` and `лето`, `как` and `какой`) or of the same family (`больше` for `большой`).
-  Verb forms and irregular forms (`meet` and `met`) are not found. These are limits of the
-  default: when a wrong form gets in the way, or the exact word is what you need, pass
-  `--exact`.
+  Verb forms and irregular forms (`meet` and `met`) are not found. So it is opt-in.
 
 ### Supported Filters
 
@@ -506,7 +503,7 @@ Any other value that is neither an ID nor a username is `INVALID_ARGS`, never an
 
 - `--includeDeleted` (alias: `--include-deleted`)
 - `--phrase`: the whole query as one phrase
-- `--exact`: each word only as typed, without its other forms ([above](#word-forms))
+- `--forms`: other forms of each plain word ([above](#word-forms))
 - `--since`, `--until`: the date range, on the date a message was sent (see below)
 - `--sort date|relevance`: `date` (default) is newest first; `relevance` is best match first,
   by FTS5's bm25 rank over the text, sender and chat, with ties newest first
@@ -536,9 +533,9 @@ tg messages search --query "hello world" --limit 10 --count
 {
   "query": "hello world",
   "filters": { "chat": null, "sender": null, "includeDeleted": false, "phrase": false,
-               "exact": false, "since": "7d", "until": null },
+               "forms": false, "since": "7d", "until": null },
   "sort": "date",
-  "forms": { "hello": { … }, "world": { … } },
+  "forms": null,
   "results": [ … ],
   "total": 10,
   "count": 42,
@@ -554,10 +551,9 @@ messages that match with the same filters, over every page, and is `null` withou
 is a second query, so it is opt-in. Page with `--offset` until `results` is empty, or until
 `offset + total` reaches `count`.
 
-`forms` is `null` when the query wasn't expanded: with `--exact`, `--phrase`, FTS5 syntax or
-`allowedChats`.
-Otherwise each plain word of the query, as typed, maps to the index words searched for it
-(`words`), and `cut` says whether more forms were left out. A result
+`forms` is `null` without `--forms`, and with it while `allowedChats` is set. Otherwise each
+plain word of the query, as typed, maps to the index words searched for it (`words`), and `cut`
+says whether more forms were left out. A result
 found by another form shows it in its `text`, and `--snippet` highlights it:
 
 ```json

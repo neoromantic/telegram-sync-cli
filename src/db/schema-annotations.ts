@@ -637,7 +637,7 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
 
     transcript_search_vocab: {
       description:
-        "The words of transcript_search, the index of message_transcripts (FTS5 fts5vocab table, type row): one row per word, read from the index, nothing stored. tg messages search reads it with message_search_vocab to find the other forms of a query word.",
+        "The words of transcript_search, the index of message_transcripts (FTS5 fts5vocab table, type row): one row per word, read from the index, nothing stored. tg messages search --forms reads it with message_search_vocab to find the other forms of a query word.",
       primaryKey: "term",
       columns: {
         term: {

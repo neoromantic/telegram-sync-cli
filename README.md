@@ -81,8 +81,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Unread messages: chats with unread messages (`tg chats list --unread`), their unread messages
   (`tg messages unread`) and marking them read (`tg messages read`); the daemon keeps the
   counts current
-- Full-text search (FTS5) over cached messages; a plain word also finds its other forms
-  (`квартира` finds `квартиру`, `meeting` finds `meetings`), `--exact` only the word as typed
+- Full-text search (FTS5) over cached messages; `--forms` also finds other forms of each word
+  (`квартира` finds `квартиру`, `meeting` finds `meetings`)
 - Rich messages: `tg send --markdown` or `--html` sends headings, tables, lists, quotations,
   code blocks and formulas that Telegram renders natively
 - Files: send one with `tg send --file`; download the files of one or many messages into a

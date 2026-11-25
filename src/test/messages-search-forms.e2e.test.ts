@@ -9,7 +9,7 @@ import { createMessagesCache } from "../db/messages-cache";
 import { createUsersCache } from "../db/users-cache";
 import type { WordForms } from "../db/word-forms";
 import type { MessageSearchItem } from "../types";
-import { runCliSuccess, runShellCommand } from "./cli.test-utils";
+import { runCli, runCliSuccess, runShellCommand } from "./cli.test-utils";
 import { createTestEnvironment, type TestEnvironment } from "./e2e-setup.test-utils";
 
 const TEAM_CHAT_ID = -1001234567890;
@@ -83,7 +83,7 @@ function seed(db: Database) {
 
 interface SearchData {
   results: Array<MessageSearchItem & { snippet?: string }>;
-  filters: { exact: boolean; phrase: boolean };
+  filters: { forms: boolean; phrase: boolean };
   forms: Record<string, WordForms> | null;
   count: number | null;
   offset: number;
@@ -94,7 +94,7 @@ interface SearchAnswer {
   next?: Array<{ command: string }>;
 }
 
-describe("E2E: messages search word forms", () => {
+describe("E2E: messages search --forms", () => {
   let env: TestEnvironment;
 
   beforeAll(() => {
@@ -121,15 +121,15 @@ describe("E2E: messages search word forms", () => {
     return data.results.map((item) => item.messageId).sort((a, b) => a - b);
   }
 
-  it("finds other forms of a Russian word, and only the word itself with --exact", async () => {
-    const exact = await search("квартира", "--exact");
+  it("finds other forms of a Russian word with --forms, and only the word itself without", async () => {
+    const exact = await search("квартира");
     expect(exact.data.results.map((item) => item.messageId)).toEqual([2]);
-    expect(exact.data.filters.exact).toBe(true);
+    expect(exact.data.filters.forms).toBe(false);
     expect(exact.data.forms).toBeNull();
 
-    const forms = await search("квартира");
+    const forms = await search("квартира", "--forms");
     expect(forms.data.results.map((item) => item.messageId)).toEqual([1, 2, 3, 9]);
-    expect(forms.data.filters.exact).toBe(false);
+    expect(forms.data.filters.forms).toBe(true);
     expect(forms.data.forms).toEqual({
       квартира: {
         words: ["квартира", "квартирах", "квартирой", "квартиру", "квартиры"],
@@ -138,61 +138,81 @@ describe("E2E: messages search word forms", () => {
     });
   });
 
-  it("finds other forms of an English word", async () => {
-    expect(await ids("meeting", "--exact")).toEqual([6]);
-    expect(await ids("meeting")).toEqual([5, 6]);
-    expect(await ids("Meetings late")).toEqual([5]);
+  it("finds other forms of an English word with --forms", async () => {
+    expect(await ids("meeting")).toEqual([6]);
+    expect(await ids("meeting", "--forms")).toEqual([5, 6]);
+    expect(await ids("Meetings late", "--forms")).toEqual([5]);
   });
 
-  it("reads ё as е, except with --exact", async () => {
-    expect(await ids("еще", "--exact")).toEqual([10]);
-    expect(await ids("ещё", "--exact")).toEqual([2]);
-    expect(await ids("еще")).toEqual([2, 10]);
-    expect(await ids("ещё")).toEqual([2, 10]);
+  it("reads ё as е with --forms only", async () => {
+    expect(await ids("еще")).toEqual([10]);
+    expect(await ids("ещё")).toEqual([2]);
+    expect(await ids("еще", "--forms")).toEqual([2, 10]);
+    expect(await ids("ещё", "--forms")).toEqual([2, 10]);
   });
 
   it("finds nothing for a word with no form in the cache", async () => {
-    const { data } = await search("квартирка");
+    const { data } = await search("квартирка", "--forms");
     expect(data.results).toEqual([]);
     expect(data.forms).toEqual({ квартирка: { words: [], cut: false } });
   });
 
-  it("matches a query with FTS5 syntax or --phrase as written, without forms", async () => {
+  it("matches a query with FTS5 syntax or --phrase as written", async () => {
     expect(await ids('"квартира ещё"')).toEqual([2]);
     expect(await ids("квартира ещё", "--phrase")).toEqual([2]);
     expect(await ids("квартира OR meeting")).toEqual([2, 6]);
     expect(await ids("квартир*")).toEqual([1, 2, 3, 9]);
+  });
+
+  it("refuses --forms with FTS5 syntax or --phrase, with a suggestion", async () => {
     for (const args of [
-      ['"квартира ещё"'],
-      ["квартира ещё", "--phrase"],
-      ["квартира OR meeting"],
+      ['"квартира у парка"'],
+      ["квартир*"],
+      ["квартира OR парк"],
+      ["sender:alice квартира"],
+      ["chat:team квартира"],
+      ["квартира парка", "--phrase"],
     ]) {
-      const { data } = await search(args[0]!, ...args.slice(1));
-      expect(data.forms).toBeNull();
+      const result = await runCli(
+        ["messages", "search", "--query", ...args, "--forms"],
+        env.getCliOptions(),
+      );
+      const json = result.json as { error: { code: string; suggestion?: string } };
+      expect(result.exitCode).toBe(3);
+      expect(json.error.code).toBe("INVALID_ARGS");
+      expect(json.error.suggestion).toContain("Drop --forms");
     }
   });
 
   it("keeps the chat, sender, date and deleted filters", async () => {
-    expect(await ids("квартира", "--chat", "@teamchat")).toEqual([1, 2]);
-    expect(await ids("квартира", "--sender", "@bob")).toEqual([2, 9]);
-    expect(await ids("квартира", "--since", "7d")).toEqual([1, 2, 3]);
-    expect(await ids("квартира", "--until", "7d")).toEqual([9]);
-    expect(await ids("квартира", "--includeDeleted")).toEqual([1, 2, 3, 8, 9]);
+    expect(await ids("квартира", "--forms", "--chat", "@teamchat")).toEqual([1, 2]);
+    expect(await ids("квартира", "--forms", "--sender", "@bob")).toEqual([2, 9]);
+    expect(await ids("квартира", "--forms", "--since", "7d")).toEqual([1, 2, 3]);
+    expect(await ids("квартира", "--forms", "--until", "7d")).toEqual([9]);
+    expect(await ids("квартира", "--forms", "--includeDeleted")).toEqual([1, 2, 3, 8, 9]);
   });
 
-  it("matches words as typed while allowedChats is set, so no word of another chat shows", async () => {
-    const result = await runCliSuccess(["messages", "search", "--query", "квартира"], {
+  it("matches words as typed with --forms while allowedChats is set, so no word of another chat shows", async () => {
+    const result = await runCliSuccess(["messages", "search", "--query", "квартира", "--forms"], {
       env: { ...env.getCliOptions().env, TELEGRAM_SYNC_CLI_ALLOWED_CHATS: "@teamchat" },
     });
     const { data } = result.json as SearchAnswer;
     expect(data.results.map((item) => item.messageId)).toEqual([2]);
+    expect(data.filters.forms).toBe(true);
     expect(data.forms).toBeNull();
     expect(result.stdout).not.toContain("квартирах");
     expect(result.stdout).not.toContain("квартиры");
   });
 
   it("sorts by relevance, counts, and highlights every form in snippets", async () => {
-    const { data } = await search("квартира", "--sort", "relevance", "--count", "--snippet");
+    const { data } = await search(
+      "квартира",
+      "--forms",
+      "--sort",
+      "relevance",
+      "--count",
+      "--snippet",
+    );
     expect(data.count).toBe(4);
     expect(Object.fromEntries(data.results.map((item) => [item.messageId, item.snippet]))).toEqual({
       1: "Сдаю **квартиру** у парка",
@@ -202,16 +222,14 @@ describe("E2E: messages search word forms", () => {
     });
   });
 
-  it("pages on with forms by default, and carries --exact when it was given", async () => {
-    const exact = await search("budget", "--exact", "--limit", "1");
-    expect(exact.next?.[0]?.command).toBe(
-      "tg messages search --query=budget --exact --limit=1 --offset=1",
-    );
+  it("carries --forms into the next page, and pages on exact without it", async () => {
+    const exact = await search("budget", "--limit", "1");
+    expect(exact.next?.[0]?.command).toBe("tg messages search --query=budget --limit=1 --offset=1");
 
-    const first = await search("квартира", "--limit", "3");
+    const first = await search("квартира", "--forms", "--limit", "3");
     expect(first.data.results.map((item) => item.messageId)).toEqual([1, 2, 3]);
     const command = first.next?.[0]?.command;
-    expect(command).toBe("tg messages search --query='квартира' --limit=3 --offset=3");
+    expect(command).toBe("tg messages search --query='квартира' --forms --limit=3 --offset=3");
 
     const result = await runShellCommand(command!, env.getCliOptions());
     expect(result.exitCode).toBe(0);
