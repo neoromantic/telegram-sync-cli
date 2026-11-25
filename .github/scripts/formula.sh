@@ -11,7 +11,7 @@ sha() {
 	awk -v f="$1" '$2 == f || $2 == "*" f { print $1 }' "$sums"
 }
 
-for asset in tg-darwin-arm64 tg-darwin-x64 tg-linux-arm64 tg-linux-x64; do
+for asset in tg-darwin-arm64 tg-darwin-x64 tg-linux-arm64 tg-linux-x64 NOTICE; do
 	if [ -z "$(sha "$asset")" ]; then
 		echo "formula.sh: $sums has no $asset" >&2
 		exit 1
@@ -52,8 +52,14 @@ class Tg < Formula
     end
   end
 
+  resource "notice" do
+    url "$base/NOTICE"
+    sha256 "$(sha NOTICE)"
+  end
+
   def install
     bin.install Dir["tg-*"].first => "tg"
+    resource("notice").stage { prefix.install "NOTICE" }
   end
 
   def caveats

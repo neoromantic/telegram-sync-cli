@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without `--forms` or with `allowedChats`), and `filters.forms`. The cache gets the tables
   `message_search_vocab` and `transcript_search_vocab`, the words of the message and transcript
   indexes, which `tg sql` can read. See [docs/search.md](docs/search.md#word-forms).
+- The GitHub Release has `NOTICE`, the licences of the ported stemmers, next to the binaries,
+  and `brew install neoromantic/tap/tg` installs it in the formula's prefix.
 
 ## [0.16.0] - 2026-11-22
 
