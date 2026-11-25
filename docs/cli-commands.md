@@ -540,11 +540,13 @@ undone. Repeat `--id` for several messages, up to 100 per call (more, or an empt
 everyone. In a supergroup or channel it calls `channels.deleteMessages`, which always deletes for
 everyone, with or without `--revoke`.
 
+The command first fetches the IDs (`messages.getMessages`, or `channels.getMessages` in a
+supergroup or channel) and deletes only if every one is a message of `--chat`.
 `messages.deleteMessages` names no chat: message IDs of private chats and basic groups are
-shared across the account, so an ID would delete whatever message has it. The command first
-fetches the IDs (`messages.getMessages`) and deletes only if every one is a message of `--chat`.
-Otherwise nothing is deleted, and the error lists the IDs in `details.missingIds` without
-saying which chat holds them:
+shared across the account, so an ID would delete whatever message has it. In a supergroup or
+channel the check keeps an ID the chat never had from being reported as deleted. Otherwise
+nothing is deleted, and the error lists the IDs in `details.missingIds` without saying which
+chat holds them:
 
 ```json
 {
@@ -574,8 +576,8 @@ those deleted in the cache, so `tg messages list` and `tg messages search` leave
 ```
 
 `messageIds` are the IDs asked for. `deletedCount` is the number Telegram reports deleted
-(`ptsCount`), which can be lower, for example for a message that was already gone; the command
-still succeeds. `deletedIds` are the IDs Telegram no longer has. If that check fails, for example
+(`ptsCount`), which can be lower when Telegram leaves a message in place without an error; the
+command still succeeds. `deletedIds` are the IDs Telegram no longer has. If that check fails, for example
 on a flood wait, the delete has still happened and the command succeeds with `deletedIds: []`
 and every ID in `unverifiedIds`, and the cache stays as it was. `forEveryone` is `true` with
 `--revoke` and always in a supergroup or channel.

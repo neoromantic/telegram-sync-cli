@@ -29,7 +29,7 @@ export const FAKE_MESSAGE_CHATS: Record<number, number> = {
 /** A message delete refuses with MESSAGE_DELETE_FORBIDDEN */
 export const FAKE_UNDELETABLE_MESSAGE = 9;
 
-/** A message already gone: a delete succeeds but does not count it */
+/** A message a supergroup no longer has */
 export const FAKE_GONE_MESSAGE = 26;
 
 /** A message a delete leaves in place without an error, and does not count */
@@ -134,7 +134,7 @@ if (import.meta.main) {
       if (request._ === "messages.getMessages" || request._ === "channels.getMessages") {
         const ids = (request.id ?? []).map((item) => (typeof item === "number" ? item : item.id));
         console.error(`${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: ids })}`);
-        if (ids.includes(FAKE_UNCHECKABLE_MESSAGE)) {
+        if (ids.includes(FAKE_UNCHECKABLE_MESSAGE) && deleted.has(FAKE_UNCHECKABLE_MESSAGE)) {
           throw tl.RpcError.fromTl({
             _: "rpc_error",
             errorCode: 420,

@@ -276,7 +276,7 @@ describe("E2E: messages delete", () => {
   });
 
   it("reports what Telegram counted and hides only the messages that are gone", async () => {
-    const ids = [25, FAKE_GONE_MESSAGE, FAKE_KEPT_MESSAGE];
+    const ids = [25, FAKE_KEPT_MESSAGE];
     const result = await remove("@teamchat", ids);
 
     expect(result.exitCode).toBe(0);
@@ -284,7 +284,7 @@ describe("E2E: messages delete", () => {
       chatId: TEAM_ID,
       messageIds: ids,
       deletedCount: 1,
-      deletedIds: [25, FAKE_GONE_MESSAGE],
+      deletedIds: [25],
       unverifiedIds: [],
       forEveryone: true,
     });
@@ -292,8 +292,22 @@ describe("E2E: messages delete", () => {
       `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: "channels.getMessages", id: ids })}`,
     );
     expect(await searched("green")).toEqual([]);
-    expect(await searched("Deploying")).toEqual([]);
     expect(await searched("finished")).toEqual([FAKE_KEPT_MESSAGE]);
+  });
+
+  it("refuses an ID a supergroup does not have, and deletes nothing", async () => {
+    const result = await remove("@teamchat", [25, FAKE_GONE_MESSAGE]);
+
+    expect(result.exitCode).toBe(5);
+    expect(deleteCalls(result.stderr)).toEqual([]);
+    expect(errorJson(result.stderr).error).toEqual({
+      code: "TELEGRAM_ERROR",
+      message: `Chat ${TEAM_ID} has no message ${FAKE_GONE_MESSAGE}: nothing was deleted`,
+      details: { chatId: TEAM_ID, missingIds: [FAKE_GONE_MESSAGE] },
+      retryable: false,
+    });
+    expect(await searched("green")).toEqual([25]);
+    expect(await searched("Deploying")).toEqual([FAKE_GONE_MESSAGE]);
   });
 
   it("succeeds with the IDs unverified and the cache unchanged when the check after the delete fails", async () => {

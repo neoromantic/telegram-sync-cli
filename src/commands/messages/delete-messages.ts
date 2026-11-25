@@ -159,9 +159,7 @@ export async function deleteMessages(
   const request = deleteMessagesRequest(chat.inputPeer, messageIds, revoke);
   let affected: tl.messages.TypeAffectedMessages;
   try {
-    if (request._ === "messages.deleteMessages") {
-      await checkIdsInChat(client, chat, messageIds);
-    }
+    await checkIdsInChat(client, chat, messageIds);
     affected = await client.call(request);
   } catch (err) {
     const { RpcError } = (await import("@mtcute/bun")).tl;

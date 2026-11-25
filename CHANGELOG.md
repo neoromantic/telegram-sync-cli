@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tg messages delete --chat <peer> --id <id>... [--revoke]` deletes up to 100 messages of a chat
   (the delete part of #23). In a private chat, basic group or Saved Messages it deletes for this
   account, or for everyone with `--revoke`; in a supergroup or channel always for everyone. It
-  first checks that every ID is a message of `--chat` and refuses the whole call otherwise, since
-  `messages.deleteMessages` names no chat. It prints `chatId`, `messageIds`, `deletedCount` (as
+  first checks that every ID is a message of `--chat` and refuses the whole call otherwise:
+  `messages.deleteMessages` names no chat, and a supergroup or channel would report an ID it
+  never had as deleted. It prints `chatId`, `messageIds`, `deletedCount` (as
   Telegram reports it), `deletedIds` (the IDs Telegram no longer has after the delete),
   `unverifiedIds` (every ID when that check failed, else none) and `forEveryone`, and marks only
   `deletedIds` deleted in the cache, so list and search hide them. `--no-id`, or a value for
