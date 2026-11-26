@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg messages pin --chat <peer> --id <id> [--silent]` and `tg messages unpin --chat <peer> --id
+  <id>` pin and unpin a message (`messages.updatePinnedMessage`; the pin part of #23). A pin is
+  visible to everyone in the chat and, unless `--silent`, notifies its members; an unpin never
+  notifies. Both set the cached message's pinned flag at once and store the "pinned a message"
+  service message Telegram returns, and print the message as `tg messages get` does (`null`
+  when the cache does not hold it). Telegram's refusals (no such message, no permission) are
+  `TELEGRAM_ERROR` with the reason in `details.telegramError`. Both are writes: read-only mode
+  refuses them and `allowedChats` applies.
+
 ## [0.16.0] - 2026-11-22
 
 ### Added

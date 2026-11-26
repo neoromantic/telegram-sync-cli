@@ -98,6 +98,11 @@ export interface MessagesCache {
    * among the account's private chats and basic groups that has it live
    */
   markDeletedByMessageIds(messageIds: number[]): DeleteWithoutChatResult;
+  /**
+   * Set the pinned flag of the chat's cached messages; returns how many rows
+   * changed. Messages the cache does not hold are skipped.
+   */
+  setPinned(chatId: number, messageIds: number[], pinned: boolean): number;
   /** Update message text (for edits) */
   updateText(chatId: number, messageId: number, newText: string, editDate: number): void;
   /** Get the latest message ID for a chat */
@@ -172,6 +177,13 @@ export function createMessagesCache(db: Database) {
       UPDATE messages_cache
       SET is_deleted = 1, updated_at = $now
       WHERE chat_id = $chat_id AND message_id = $message_id
+    `),
+
+    setPinned: db.prepare(`
+      UPDATE messages_cache
+      SET is_pinned = $pinned, updated_at = $now
+      WHERE chat_id = $chat_id AND message_id = $message_id
+        AND is_pinned IS NOT $pinned
     `),
 
     findChatIdsByMessageId: db.query(`
@@ -342,6 +354,22 @@ export function createMessagesCache(db: Database) {
       })();
 
       return { deleted: lookup.chatIds.size, ambiguous: lookup.ambiguous };
+    },
+
+    setPinned(chatId: number, messageIds: number[], pinned: boolean) {
+      const now = Date.now();
+      let changed = 0;
+      db.transaction(() => {
+        for (const messageId of messageIds) {
+          changed += stmts.setPinned.run({
+            $chat_id: chatId,
+            $message_id: messageId,
+            $pinned: pinned ? 1 : 0,
+            $now: now,
+          }).changes;
+        }
+      })();
+      return changed;
     },
 
     updateText(chatId: number, messageId: number, newText: string, editDate: number) {
