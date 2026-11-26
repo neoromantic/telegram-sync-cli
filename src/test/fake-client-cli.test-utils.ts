@@ -13,6 +13,18 @@ export const FAKE_HISTORY_ENV = "FAKE_HISTORY_IDS";
 /** The newest message of every chat the fake client reads */
 export const FAKE_TOP_MESSAGE = 30;
 
+/** The account the fake client is signed in as */
+export const FAKE_SELF_ID = 999;
+
+/** A message of someone else: messages.editMessage refuses it */
+export const FAKE_FOREIGN_MESSAGE = 14;
+/** A message that holds a file, in Saved Messages and in every channel */
+export const FAKE_FILE_MESSAGE = 16;
+
+export const FAKE_MESSAGE_DATE = 1_760_000_000;
+
+export const FAKE_EDIT_DATE = 1_760_003_600;
+
 /** The method Telegram answers with FLOOD_WAIT_<FAKE_FLOOD_SECONDS> */
 export const FAKE_FLOOD_METHOD = "help.getNearestDc";
 
@@ -57,17 +69,44 @@ export const FAKE_CONFIG = {
   chatSizeMax: 200,
 };
 
+interface FakeInputPeer {
+  _: string;
+  userId?: number;
+  chatId?: number;
+  channelId?: number;
+}
+
+function fakePeer(peer: FakeInputPeer | undefined) {
+  if (peer?._ === "inputPeerChannel") {
+    return { _: "peerChannel", channelId: peer.channelId };
+  }
+  if (peer?._ === "inputPeerChat") {
+    return { _: "peerChat", chatId: peer.chatId };
+  }
+  return { _: "peerUser", userId: peer?.userId ?? FAKE_SELF_ID };
+}
+
 if (import.meta.main) {
   const { mock } = await import("bun:test");
   const { tl } = await import("@mtcute/bun");
   const telegram = await import("../services/telegram");
+  const { paragraph, richMessage } = await import("./rich-message.test-utils");
   const { historyPage } = await import("./fake-history.test-utils");
   const historyIds = (process.env[FAKE_HISTORY_ENV] ?? "").split(",").filter(Boolean).map(Number);
 
   setInterval(() => {}, 60_000);
   let readMaxId = 0;
   const client = {
-    async call(request: { _: string; maxId?: number; username?: string }) {
+    async call(request: {
+      _: string;
+      maxId?: number;
+      username?: string;
+      id?: number | { id: number }[];
+      message?: string;
+      richMessage?: { _: string; markdown?: string; html?: string };
+      peer?: FakeInputPeer;
+      channel?: { channelId: number };
+    }) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
       if (request._ === "messages.getHistory") {
         return {
@@ -79,6 +118,76 @@ if (import.meta.main) {
       const owner = FAKE_USERNAMES[request.username ?? ""];
       if (request._ === "contacts.resolveUsername" && owner) {
         return { _: "contacts.resolvedPeer", ...owner };
+      }
+      if (
+        (request._ === "messages.getMessages" || request._ === "channels.getMessages") &&
+        Array.isArray(request.id)
+      ) {
+        return {
+          _: "messages.messages",
+          messages: request.id.map(({ id }) =>
+            id === FAKE_FILE_MESSAGE
+              ? {
+                  _: "message",
+                  id,
+                  out: true,
+                  peerId: request.channel
+                    ? { _: "peerChannel", channelId: request.channel.channelId }
+                    : { _: "peerUser", userId: FAKE_SELF_ID },
+                  date: FAKE_MESSAGE_DATE,
+                  message: "Notes from Monday",
+                  media: {
+                    _: "messageMediaDocument",
+                    document: { _: "document", mimeType: "text/plain", attributes: [] },
+                  },
+                }
+              : { _: "messageEmpty", id },
+          ),
+          chats: [],
+          users: [],
+        };
+      }
+      if (request._ === "messages.editMessage") {
+        console.error(
+          `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: request.id, message: request.message, rich: request.richMessage?._ })}`,
+        );
+        if (request.id === FAKE_FOREIGN_MESSAGE) {
+          throw tl.RpcError.fromTl({
+            _: "rpc_error",
+            errorCode: 403,
+            errorMessage: "MESSAGE_AUTHOR_REQUIRED",
+          });
+        }
+        const channel = request.peer?._ === "inputPeerChannel";
+        return {
+          _: "updates",
+          updates: [
+            {
+              _: channel ? "updateEditChannelMessage" : "updateEditMessage",
+              message: {
+                _: "message",
+                id: request.id,
+                out: true,
+                peerId: fakePeer(request.peer),
+                fromId: { _: "peerUser", userId: FAKE_SELF_ID },
+                date: FAKE_MESSAGE_DATE,
+                editDate: FAKE_EDIT_DATE,
+                message: request.message ?? "",
+                richMessage: request.richMessage
+                  ? richMessage([
+                      paragraph(request.richMessage.markdown ?? request.richMessage.html ?? ""),
+                    ])
+                  : undefined,
+              },
+              pts: 1,
+              ptsCount: 1,
+            },
+          ],
+          users: [],
+          chats: [],
+          date: FAKE_EDIT_DATE,
+          seq: 0,
+        };
       }
       if (request._ === "messages.readHistory" || request._ === "channels.readHistory") {
         console.error(
