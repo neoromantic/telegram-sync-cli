@@ -75,6 +75,7 @@ export const COMMAND_ACCESS: Record<string, CommandAccess> = {
   "messages watch": { chatArgs: ["chat"], crossChat: true },
   "messages unread": { chatArgs: ["chat"], crossChat: true },
   "messages read": { write: true, chatArgs: ["chat"] },
+  "messages forward": { write: true, chatArgs: ["from", "to"] },
   "media download": CHAT,
   "media clean": LOCAL,
   "media transcribe": CHAT,

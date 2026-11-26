@@ -13,6 +13,14 @@ export const FAKE_HISTORY_ENV = "FAKE_HISTORY_IDS";
 /** The newest message of every chat the fake client reads */
 export const FAKE_TOP_MESSAGE = 30;
 
+/** The account the fake client is signed in as */
+export const FAKE_SELF_ID = 999;
+
+export const FAKE_MESSAGE_DATE = 1_760_000_000;
+
+/** A channel that protects its content: messages.forwardMessages refuses it */
+export const FAKE_PROTECTED_CHANNEL = 5555555555;
+
 /** The method Telegram answers with FLOOD_WAIT_<FAKE_FLOOD_SECONDS> */
 export const FAKE_FLOOD_METHOD = "help.getNearestDc";
 
@@ -22,6 +30,25 @@ const FAKE_USERNAMES: Record<string, { users: object[]; chats: object[] }> = {
   alice: {
     users: [{ _: "user", id: 10, accessHash: 777, firstName: "Alice", username: "alice" }],
     chats: [],
+  },
+  bob: {
+    users: [{ _: "user", id: 20, accessHash: 777, firstName: "Bob", username: "bob" }],
+    chats: [],
+  },
+  vault: {
+    users: [],
+    chats: [
+      {
+        _: "channel",
+        id: FAKE_PROTECTED_CHANNEL,
+        accessHash: 777,
+        title: "Vault",
+        username: "vault",
+        broadcast: true,
+        photo: { _: "chatPhotoEmpty" },
+        date: 1_700_000_000,
+      },
+    ],
   },
   teamchat: {
     users: [],
@@ -57,6 +84,69 @@ export const FAKE_CONFIG = {
   chatSizeMax: 200,
 };
 
+interface FakeInputPeer {
+  _: string;
+  userId?: number;
+  chatId?: number;
+  channelId?: number;
+}
+
+function fakePeer(peer: FakeInputPeer | undefined) {
+  if (peer?._ === "inputPeerChannel") {
+    return { _: "peerChannel", channelId: peer.channelId };
+  }
+  if (peer?._ === "inputPeerChat") {
+    return { _: "peerChat", chatId: peer.chatId };
+  }
+  return { _: "peerUser", userId: peer?.userId ?? FAKE_SELF_ID };
+}
+
+interface FakeForwardRequest {
+  fromPeer: FakeInputPeer;
+  toPeer: FakeInputPeer;
+  id: number[];
+  randomId: { toString(): string }[];
+}
+
+function fakeForward(request: FakeForwardRequest) {
+  const channel = request.toPeer._ === "inputPeerChannel";
+  const sources = request.id
+    .map((id, i) => ({ id, randomId: request.randomId[i] }))
+    .sort((a, b) => a.id - b.id);
+  return {
+    _: "updates",
+    updates: sources.flatMap((source, i) => {
+      const id = FAKE_TOP_MESSAGE + 1 + i;
+      return [
+        { _: "updateMessageID", id, randomId: source.randomId },
+        {
+          _: channel ? "updateNewChannelMessage" : "updateNewMessage",
+          message: {
+            _: "message",
+            id,
+            out: true,
+            peerId: fakePeer(request.toPeer),
+            fromId: { _: "peerUser", userId: FAKE_SELF_ID },
+            fwdFrom: {
+              _: "messageFwdHeader",
+              fromId: fakePeer(request.fromPeer),
+              date: FAKE_MESSAGE_DATE - 60,
+            },
+            date: FAKE_MESSAGE_DATE,
+            message: `Forwarded message ${source.id}`,
+          },
+          pts: id,
+          ptsCount: 1,
+        },
+      ];
+    }),
+    users: [],
+    chats: [],
+    date: FAKE_MESSAGE_DATE,
+    seq: 0,
+  };
+}
+
 if (import.meta.main) {
   const { mock } = await import("bun:test");
   const { tl } = await import("@mtcute/bun");
@@ -67,7 +157,9 @@ if (import.meta.main) {
   setInterval(() => {}, 60_000);
   let readMaxId = 0;
   const client = {
-    async call(request: { _: string; maxId?: number; username?: string }) {
+    async call(
+      request: { _: string; maxId?: number; username?: string } & Partial<FakeForwardRequest>,
+    ) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
       if (request._ === "messages.getHistory") {
         return {
@@ -79,6 +171,22 @@ if (import.meta.main) {
       const owner = FAKE_USERNAMES[request.username ?? ""];
       if (request._ === "contacts.resolveUsername" && owner) {
         return { _: "contacts.resolvedPeer", ...owner };
+      }
+      if (request._ === "messages.forwardMessages") {
+        const forward = request as FakeForwardRequest;
+        const randomIds = new Set(forward.randomId.map(String)).size;
+        console.error(
+          `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: forward.id, randomIds })}`,
+        );
+        const refuse = (errorCode: number, errorMessage: string) =>
+          tl.RpcError.fromTl({ _: "rpc_error", errorCode, errorMessage });
+        if (forward.fromPeer.channelId === FAKE_PROTECTED_CHANNEL) {
+          throw refuse(406, "CHAT_FORWARDS_RESTRICTED");
+        }
+        if (forward.id.some((id) => id > FAKE_TOP_MESSAGE)) {
+          throw refuse(400, "MESSAGE_ID_INVALID");
+        }
+        return fakeForward(forward);
       }
       if (request._ === "messages.readHistory" || request._ === "channels.readHistory") {
         console.error(
