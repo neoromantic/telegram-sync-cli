@@ -15,8 +15,9 @@ import {
 import { extractAttachment } from "../../utils/attachment";
 import { toLong } from "../../utils/long";
 import { MEDIA_FLOOD_SLEEP_MS } from "../../utils/telegram-transfer";
-import { pdfDocumentMessage } from "../../test/media-messages.test-utils";
+import { pdfDocumentMessage, videoMessage } from "../../test/media-messages.test-utils";
 import { fakeBytes, photoMessage } from "../../test/photo-message.test-utils";
+import { fakeMp4 } from "../../test/video-file.test-utils";
 
 const SELF_ID = 5_550_001;
 const SELF = { _: "peerUser" as const, userId: SELF_ID };
@@ -143,11 +144,11 @@ describe("sendFile", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function place(name: string, size: number) {
+  function place(name: string, content: number | Uint8Array) {
     const dir = join(root, "nested", "dir");
     mkdirSync(dir, { recursive: true });
     const path = join(dir, name);
-    writeFileSync(path, fakeBytes(size, 5));
+    writeFileSync(path, typeof content === "number" ? fakeBytes(content, 5) : content);
     return path;
   }
 
@@ -238,6 +239,66 @@ describe("sendFile", () => {
       attributes: [{ _: "documentAttributeFilename", fileName: "example-report.pdf" }],
       forceFile: true,
     });
+  });
+
+  async function sendVideoFile(bytes: Uint8Array, forceDocument: boolean) {
+    const { client, call } = fakeClient(sentUpdates(videoMessage(SELF, 44)));
+    const { upload } = fakeUpload();
+    const sent = await sendFile(
+      client,
+      {
+        peer: { _: "inputPeerSelf" },
+        path: place("launch.mp4", bytes),
+        caption: "",
+        silent: false,
+        forceDocument,
+      },
+      { upload },
+    );
+    return { kind: sent.kind, media: sendMediaRequest(call).media };
+  }
+
+  const launch = fakeMp4({ duration: 13.1, width: 1920, height: 1080 });
+  const launchAsFile = {
+    _: "inputMediaUploadedDocument",
+    mimeType: "video/mp4",
+    attributes: [{ _: "documentAttributeFilename", fileName: "launch.mp4" }],
+    forceFile: true,
+  };
+
+  it("sends an MP4 as a video with its duration and frame size", async () => {
+    const { kind, media } = await sendVideoFile(launch, false);
+
+    expect(kind).toBe("video");
+    expect(media).toMatchObject({
+      _: "inputMediaUploadedDocument",
+      mimeType: "video/mp4",
+      attributes: [
+        {
+          _: "documentAttributeVideo",
+          duration: 13.1,
+          w: 1920,
+          h: 1080,
+          supportsStreaming: true,
+        },
+        { _: "documentAttributeFilename", fileName: "launch.mp4" },
+      ],
+      forceFile: false,
+    });
+  });
+
+  it("sends a video as a document when asked", async () => {
+    const { kind, media } = await sendVideoFile(launch, true);
+
+    expect(kind).toBe("document");
+    expect(media).toMatchObject(launchAsFile);
+  });
+
+  it("sends a video file whose track it cannot read as a document", async () => {
+    const { kind, media } = await sendVideoFile(fakeBytes(900, 3), false);
+
+    expect(kind).toBe("document");
+    expect(media).toMatchObject(launchAsFile);
   });
 });
 

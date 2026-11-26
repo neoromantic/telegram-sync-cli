@@ -225,7 +225,7 @@ const sendArgs = {
   file: {
     type: "string",
     description:
-      "Send this file: a photo for JPEG/PNG/WebP images up to 10 MB, otherwise a document. One per message",
+      "Send this file: a photo for JPEG/PNG/WebP images up to 10 MB, a video for MP4/MOV, otherwise a document. One per message",
   },
   caption: {
     type: "string",
@@ -234,7 +234,7 @@ const sendArgs = {
   "force-document": {
     type: "boolean",
     default: false,
-    description: "Send an image as a file (document), not as a photo",
+    description: "Send an image or a video as a file (document), not as a photo or a video",
   },
   markdown: {
     type: "boolean",

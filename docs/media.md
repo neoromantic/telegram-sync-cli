@@ -459,16 +459,20 @@ tg media clean --all                # everything
 ```bash
 tg send --to me --file ./report.pdf --caption "Q3"
 tg send --to @username --file ./photo.jpg               # sent as a photo
+tg send --to @username --file ./clip.mp4                # sent as a video that plays in the chat
 tg send --to @username --file ./photo.jpg --force-document
 ```
 
-- JPEG, PNG and WebP images up to 10 MB go as photos; everything else, GIFs and videos
-  included, as documents with their file name. `--force-document` sends an image as a file.
+- JPEG, PNG and WebP images up to 10 MB go as photos. An MP4 or MOV file goes as a video that
+  plays in the chat: `tg` reads its duration and frame size from the file and uploads it as
+  it is, without re-encoding. Everything else, GIFs included, and a video file whose track
+  `tg` can't read, goes as a document with its file name. `--force-document` sends an image
+  or a video as a file.
 - One file per message: a second `--file` is `INVALID_ARGS` (albums aren't supported yet).
   `--caption` is the text sent with the file; `--message` doesn't combine with `--file`.
 - `--reply-to` and `--silent` work as for text. The sent message goes into the cache with its
   attachment.
-- The result adds `file: { name, mimeType, size, sentAs }` (`sentAs`: `photo` or `document`)
+- The result adds `file: { name, mimeType, size, sentAs }` (`sentAs`: `photo`, `video` or `document`)
   and `attachment`; its `uniqueFileId` is the media cache folder `tg media download` saves the
   file in.
 
