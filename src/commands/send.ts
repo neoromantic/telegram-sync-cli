@@ -20,7 +20,7 @@ import {
 } from "../utils/telegram-rate-limits";
 import { checkedChat } from "./access";
 import { AmbiguousPeerError, createDmLookup, resolvePeer } from "./send/peer-resolver";
-import { sendFile, sentAttachment } from "./send/send-file";
+import { parseHtmlCaption, sendFile, sentAttachment } from "./send/send-file";
 import { cacheSentMessage, resolveSelfId } from "./send/sent-message-cache";
 
 function extractMessageInfo(result: tl.TypeUpdates) {
@@ -134,7 +134,18 @@ function sendMessageRequest(
 
 type SendContent =
   | { file: null; text: string; format: RichFormat | null }
-  | { file: string; caption: string; forceDocument: boolean };
+  | { file: string; caption: string; format: "html" | null; forceDocument: boolean };
+
+async function formattedCaption(source: string) {
+  const caption = await parseHtmlCaption(source);
+  if (caption.entities.some((entity) => entity._ === "messageEntityMentionName")) {
+    error(
+      ErrorCodes.INVALID_ARGS,
+      "A caption can't mention a user by ID: link https://t.me/<username> instead",
+    );
+  }
+  return caption;
+}
 
 function checkSendableFile(path: string) {
   let size: number;
@@ -194,8 +205,11 @@ function readSendContent(
     return result;
   }
 
-  if (format) {
-    error(ErrorCodes.INVALID_ARGS, `--${format} formats --message: a caption is plain text`);
+  if (format === "markdown") {
+    error(ErrorCodes.INVALID_ARGS, "--markdown formats --message: format a caption with --html");
+  }
+  if (format && args.caption === undefined) {
+    error(ErrorCodes.INVALID_ARGS, "--html with --file formats --caption");
   }
 
   if (args.message !== undefined) {
@@ -205,6 +219,7 @@ function readSendContent(
   const result: SendContent = {
     file,
     caption: args.caption ?? "",
+    format,
     forceDocument: args["force-document"] ?? false,
   };
   return result;
@@ -229,7 +244,7 @@ const sendArgs = {
   },
   caption: {
     type: "string",
-    description: "Text sent with --file",
+    description: "Text sent with --file; --html formats it (bold, italic, links, code)",
   },
   "force-document": {
     type: "boolean",
@@ -245,7 +260,7 @@ const sendArgs = {
   html: {
     type: "boolean",
     default: false,
-    description: "Send --message as a rich message written in HTML",
+    description: "Send --message as a rich message written in HTML, or format --caption",
   },
   account: {
     type: "string",
@@ -282,6 +297,8 @@ export const sendCommand = defineCommand({
     const replyTo = args["reply-to"] ? Number.parseInt(args["reply-to"], 10) : undefined;
 
     const content: SendContent = data ?? readSendContent(args, rawArgs ?? []);
+    const caption =
+      content.file !== null && content.format ? await formattedCaption(content.caption) : null;
 
     const { account, db: cacheDb } = openAccountCache(args.account);
     const accountId = account.id;
@@ -302,7 +319,7 @@ export const sendCommand = defineCommand({
           freshUsername: true,
         }));
 
-      const text = content.file === null ? content.text : content.caption;
+      const text = content.file === null ? content.text : (caption?.text ?? content.caption);
       let result: tl.TypeUpdates;
       let fileOutput = {};
       if (content.file === null) {
@@ -316,7 +333,8 @@ export const sendCommand = defineCommand({
         const sent = await sendFile(client, {
           peer: inputPeer,
           path: content.file,
-          caption: content.caption,
+          caption: text,
+          entities: caption?.entities,
           silent,
           replyTo,
           forceDocument: content.forceDocument,
@@ -354,7 +372,7 @@ export const sendCommand = defineCommand({
         timestamp: timestamp ? timestamp * 1000 : Date.now(),
         replyTo: replyTo ?? null,
         silent,
-        format: content.file === null ? content.format : null,
+        format: content.format,
         ...fileOutput,
       });
     } catch (err) {

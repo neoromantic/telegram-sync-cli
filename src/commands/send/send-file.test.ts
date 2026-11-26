@@ -8,6 +8,7 @@ import type { uploadFile } from "@mtcute/bun/methods.js";
 import {
   chooseSendKind,
   fileMimeType,
+  parseHtmlCaption,
   PHOTO_MAX_BYTES,
   sendFile,
   sentAttachment,
@@ -225,6 +226,7 @@ describe("sendFile", () => {
     expect(sent.kind).toBe("document");
     const request = sendMediaRequest(call);
     expect(request.replyTo).toBeUndefined();
+    expect(request.entities).toBeUndefined();
     expect(request.media).toEqual({
       _: "inputMediaUploadedDocument",
       file: {
@@ -237,6 +239,39 @@ describe("sendFile", () => {
       mimeType: "application/pdf",
       attributes: [{ _: "documentAttributeFilename", fileName: "example-report.pdf" }],
       forceFile: true,
+    });
+  });
+
+  it("sends a caption written in HTML as plain text with its formatting", async () => {
+    const caption = await parseHtmlCaption(
+      '<b>Launch</b> day\n\nRead <a href="https://example.com/post">the post</a> &amp; reply',
+    );
+    expect(caption).toEqual({
+      text: "Launch day\n\nRead the post & reply",
+      entities: [
+        { _: "messageEntityBold", offset: 0, length: 6 },
+        { _: "messageEntityTextUrl", offset: 17, length: 8, url: "https://example.com/post" },
+      ],
+    });
+    const { client, call } = fakeClient(sentUpdates(pdfDocumentMessage(SELF, 46)));
+    const { upload } = fakeUpload();
+
+    await sendFile(
+      client,
+      {
+        peer: { _: "inputPeerSelf" },
+        path: place("example-report.pdf", 1_500),
+        caption: caption.text,
+        entities: caption.entities,
+        silent: false,
+        forceDocument: false,
+      },
+      { upload },
+    );
+
+    expect(sendMediaRequest(call)).toMatchObject({
+      message: caption.text,
+      entities: caption.entities,
     });
   });
 });

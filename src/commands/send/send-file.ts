@@ -25,11 +25,20 @@ export function fileMimeType(path: string) {
   return type || "application/octet-stream";
 }
 
+/** The plain text of a caption written in HTML, and its formatting */
+export async function parseHtmlCaption(source: string) {
+  const { thtml } = await import("@mtcute/bun");
+  const { text, entities = [] } = thtml(source);
+  return { text, entities };
+}
+
 export interface SendFileRequest {
   peer: tl.TypeInputPeer;
   /** A readable regular file */
   path: string;
   caption: string;
+  /** Formatting of the caption, with offsets into it */
+  entities?: tl.TypeMessageEntity[];
   silent: boolean;
   replyTo?: number;
   forceDocument: boolean;
@@ -95,6 +104,7 @@ export async function sendFile(
     randomId: toLong(BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))),
     silent: request.silent,
   };
+  if (request.entities?.length) sendRequest.entities = request.entities;
   if (request.replyTo) {
     sendRequest.replyTo = {
       _: "inputReplyToMessage",
