@@ -84,6 +84,8 @@ Bun auto-loads `.env`, so you can `cp .env.example .env` and fill it in instead.
 - Full-text search (FTS5) over cached messages
 - Rich messages: `tg send --markdown` or `--html` sends headings, tables, lists, quotations,
   code blocks and formulas that Telegram renders natively
+- Delete messages (`tg messages delete`), for yourself or for everyone; the cache hides them at
+  once
 - Files: send one with `tg send --file`; download the files of one or many messages into a
   per-account media cache with `tg media download` (cached files need no network, partial
   downloads resume, name templates for `--out`); every message item shows its attachment
@@ -119,7 +121,7 @@ per tool. Compared on 2026-10-21 from its README and tool list:
 | Read chat history                            | ✅ `tg messages list` (paging) and `tg messages get` (context), cache-first, `--fresh`                                                                                                                        | ✅                                                         |
 | Unread messages, mark as read                | ✅ `tg chats list --unread`, `tg messages unread`, `tg messages read`                                                                                                                                         | ✅                                                         |
 | Send text                                    | ✅ replies, silent, rich messages from Markdown or HTML (`--markdown`, `--html`)                                                                                                                              | ✅ replies, Markdown/HTML                                  |
-| Edit, delete, forward, pin                   | partial: via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23))                                                                                                                     | ✅                                                         |
+| Edit, delete, forward, pin                   | partial: `tg messages delete`; edit, forward and pin via `tg api` ([#23](https://github.com/neoromantic/telegram-sync-cli/issues/23))                                                                         | ✅                                                         |
 | Send and download media                      | ✅ one file per message (`tg send --file`), cached downloads with resume (`tg media download`), local transcription of voice and video notes (`tg media transcribe`); sending albums and voice messages later | ✅ files, albums, voice, transcription                     |
 | Wait for new messages                        | ✅ `tg messages wait` (JSON, timeout, settle) and `tg messages watch` (NDJSON), from the daemon's cache                                                                                                       | ✅                                                         |
 | Groups, channels, admin rights               | partial: via `tg api`                                                                                                                                                                                         | ✅                                                         |
@@ -146,6 +148,7 @@ tg messages search --query "hello world" --since 7d   # both words, any order
 tg messages wait --chat @username --after 42 --timeout 60   # block until the next reply
 tg messages unread                   # unread messages of every chat
 tg messages read --chat @username    # mark the chat read
+tg messages delete --chat @username --id 43 --revoke   # delete for everyone, cannot be undone
 tg send --to @username --message "Hi there"
 tg send --to me --file ./report.pdf --caption "Q3"
 tg media download --chat me --id 42 --out ./   # into the media cache, then copied here

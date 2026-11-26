@@ -13,6 +13,31 @@ export const FAKE_HISTORY_ENV = "FAKE_HISTORY_IDS";
 /** The newest message of every chat the fake client reads */
 export const FAKE_TOP_MESSAGE = 30;
 
+/** The account the fake client is signed in as */
+export const FAKE_SELF_ID = 999;
+
+/** The messages messages.getMessages finds: message ID to marked chat ID */
+export const FAKE_MESSAGE_CHATS: Record<number, number> = {
+  12: 10,
+  13: 10,
+  9: 10,
+  40: 20,
+  3: -4242,
+  7: FAKE_SELF_ID,
+};
+
+/** A message delete refuses with MESSAGE_DELETE_FORBIDDEN */
+export const FAKE_UNDELETABLE_MESSAGE = 9;
+
+/** A message a supergroup no longer has */
+export const FAKE_GONE_MESSAGE = 26;
+
+/** A message a delete leaves in place without an error, and does not count */
+export const FAKE_KEPT_MESSAGE = 27;
+
+/** A message a delete removes, but whose fetch Telegram answers with FLOOD_WAIT */
+export const FAKE_UNCHECKABLE_MESSAGE = 28;
+
 /** The method Telegram answers with FLOOD_WAIT_<FAKE_FLOOD_SECONDS> */
 export const FAKE_FLOOD_METHOD = "help.getNearestDc";
 
@@ -57,17 +82,43 @@ export const FAKE_CONFIG = {
   chatSizeMax: 200,
 };
 
+interface FakeInputPeer {
+  _: string;
+  userId?: number;
+  chatId?: number;
+  channelId?: number;
+}
+
+function fakePeer(peer: FakeInputPeer | null | undefined) {
+  if (peer?._ === "inputPeerChannel") {
+    return { _: "peerChannel", channelId: peer.channelId };
+  }
+  if (peer?._ === "inputPeerChat") {
+    return { _: "peerChat", chatId: peer.chatId };
+  }
+  return { _: "peerUser", userId: peer?.userId ?? FAKE_SELF_ID };
+}
+
 if (import.meta.main) {
   const { mock } = await import("bun:test");
   const { tl } = await import("@mtcute/bun");
   const telegram = await import("../services/telegram");
+  const { toInputPeerFromPeerId } = await import("../utils/telegram-peer-ids");
   const { historyPage } = await import("./fake-history.test-utils");
   const historyIds = (process.env[FAKE_HISTORY_ENV] ?? "").split(",").filter(Boolean).map(Number);
 
   setInterval(() => {}, 60_000);
   let readMaxId = 0;
+  const deleted = new Set<number>();
   const client = {
-    async call(request: { _: string; maxId?: number; username?: string }) {
+    async call(request: {
+      _: string;
+      maxId?: number;
+      username?: string;
+      id?: Array<number | { id: number }>;
+      revoke?: boolean;
+      channel?: { channelId: number };
+    }) {
       if (request._ === "help.getConfig") return FAKE_CONFIG;
       if (request._ === "messages.getHistory") {
         return {
@@ -79,6 +130,57 @@ if (import.meta.main) {
       const owner = FAKE_USERNAMES[request.username ?? ""];
       if (request._ === "contacts.resolveUsername" && owner) {
         return { _: "contacts.resolvedPeer", ...owner };
+      }
+      if (request._ === "messages.getMessages" || request._ === "channels.getMessages") {
+        const ids = (request.id ?? []).map((item) => (typeof item === "number" ? item : item.id));
+        console.error(`${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: ids })}`);
+        if (ids.includes(FAKE_UNCHECKABLE_MESSAGE) && deleted.has(FAKE_UNCHECKABLE_MESSAGE)) {
+          throw tl.RpcError.fromTl({
+            _: "rpc_error",
+            errorCode: 420,
+            errorMessage: `FLOOD_WAIT_${FAKE_FLOOD_SECONDS}`,
+          });
+        }
+        const channel = request.channel;
+        return {
+          _: "messages.messages",
+          messages: ids.map((id) => {
+            const chatId = FAKE_MESSAGE_CHATS[id];
+            const found = channel ? id !== FAKE_GONE_MESSAGE : chatId !== undefined;
+            if (!found || deleted.has(id)) return { _: "messageEmpty", id };
+            return {
+              _: "message",
+              id,
+              peerId: channel
+                ? { _: "peerChannel", channelId: channel.channelId }
+                : fakePeer(toInputPeerFromPeerId(chatId as number, null)),
+              date: 1_760_000_000,
+              message: "A made-up message.",
+            };
+          }),
+          chats: [],
+          users: [],
+        };
+      }
+      if (request._ === "messages.deleteMessages" || request._ === "channels.deleteMessages") {
+        const ids = (request.id ?? []) as number[];
+        console.error(
+          `${FAKE_CLIENT_CALL} ${JSON.stringify({ method: request._, id: ids, revoke: request.revoke })}`,
+        );
+        if (ids.includes(FAKE_UNDELETABLE_MESSAGE)) {
+          throw tl.RpcError.fromTl({
+            _: "rpc_error",
+            errorCode: 403,
+            errorMessage: "MESSAGE_DELETE_FORBIDDEN",
+          });
+        }
+        const removed = ids.filter((id) => id !== FAKE_GONE_MESSAGE && id !== FAKE_KEPT_MESSAGE);
+        for (const id of removed) deleted.add(id);
+        return {
+          _: "messages.affectedMessages",
+          pts: 1,
+          ptsCount: removed.length,
+        };
       }
       if (request._ === "messages.readHistory" || request._ === "channels.readHistory") {
         console.error(
