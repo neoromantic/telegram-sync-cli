@@ -21,7 +21,6 @@ The list is in priority order.
 - [Extract text from documents and images (PDF, office files, OCR)](https://github.com/neoromantic/telegram-sync-cli/issues/103)
 - [Edit, delete, forward and pin messages](https://github.com/neoromantic/telegram-sync-cli/issues/23)
 - [Semantic search over messages](https://github.com/neoromantic/telegram-sync-cli/issues/82)
-- [Search: find other word forms without a manual prefix](https://github.com/neoromantic/telegram-sync-cli/issues/92)
 - [Search attachment names, kinds and text derived from attachments](https://github.com/neoromantic/telegram-sync-cli/issues/94)
 - [Keep earlier versions of edited messages](https://github.com/neoromantic/telegram-sync-cli/issues/96)
 - [AI integration (skills)](https://github.com/neoromantic/telegram-sync-cli/issues/3)
