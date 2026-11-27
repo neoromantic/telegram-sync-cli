@@ -4,6 +4,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createChatProtectionStore } from "./chat-protection";
+import { parseRawMessage } from "../daemon/sync-worker-real-helpers";
+import { voiceMessage } from "../test/media-messages.test-utils";
+import { extractAttachment } from "../utils/attachment";
 import { createMessageTranscriptsStore } from "./message-transcripts";
 import { createMessagesCache } from "./messages-cache";
 import { toFts5Query } from "./messages-search";
@@ -55,12 +59,15 @@ describe("findQueryForms", () => {
     expect(formsOf(db, "квартирой").квартирой!.words).toEqual(["квартире", "квартира", "квартиру"]);
   });
 
-  it("finds forms that occur only in a transcript, counting messages of both indexes", () => {
+  it("counts forms from messages and visible transcripts when a chat or attachment changes", () => {
     const db = cacheWith("сдаю квартиру", "квартирой займёмся");
+    const voice = voiceMessage({ _: "peerUser", userId: CHAT_ID }, 3);
+    const messages = createMessagesCache(db);
+    messages.upsert(parseRawMessage(voice, CHAT_ID)!);
     createMessageTranscriptsStore(db).save({
       chat_id: CHAT_ID,
       message_id: 3,
-      unique_file_id: "AgADexample01",
+      unique_file_id: extractAttachment(voice)!.uniqueFileId,
       text: "квартиры дорожают, квартиру не найти",
       language: "ru",
       source: "local",
@@ -69,6 +76,14 @@ describe("findQueryForms", () => {
       transcribed_at: 1_760_000_000,
     });
     expect(formsOf(db, "квартира").квартира!.words).toEqual(["квартиру", "квартирой", "квартиры"]);
+    const protection = createChatProtectionStore(db);
+    protection.record(CHAT_ID, { protected: true, reason: "private_chat" }, 1);
+    expect(formsOf(db, "квартира").квартира!.words).toEqual(["квартирой", "квартиру"]);
+    protection.record(CHAT_ID, { protected: false, reason: null }, 2);
+    expect(formsOf(db, "квартира").квартира!.words).toContain("квартиры");
+    voice.media.document.id = voice.media.document.id.add(1);
+    messages.upsert(parseRawMessage(voice, CHAT_ID)!);
+    expect(formsOf(db, "квартира").квартира!.words).toEqual(["квартирой", "квартиру"]);
   });
 
   it("matches an English word with and without its plural s", () => {

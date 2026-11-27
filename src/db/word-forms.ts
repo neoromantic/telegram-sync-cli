@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 
+import { visibleTranscriptHits } from "./message-transcripts";
 import { fold, tokenize } from "../utils/search-snippet";
 import { isStemmable, lightStem } from "../utils/word-stems";
 
@@ -58,9 +59,9 @@ function after(prefix: string) {
  */
 export function findQueryForms(db: Database, query: string) {
   const vocab = (where: string) =>
-    db.query(`SELECT term, sum(doc) AS doc FROM (
-      SELECT term, doc FROM message_search_vocab WHERE ${where}
-      UNION ALL SELECT term, doc FROM transcript_search_vocab WHERE ${where}
+    db.query(`SELECT term, sum(message_docs), max(in_transcripts) FROM (
+      SELECT term, doc AS message_docs, 0 AS in_transcripts FROM message_search_vocab WHERE ${where}
+      UNION ALL SELECT term, 0, 1 FROM transcript_search_vocab WHERE ${where}
     ) GROUP BY term`);
   const range = vocab("term >= ?1 AND term < ?2");
   const exact = vocab("term = ?1");
@@ -70,19 +71,27 @@ export function findQueryForms(db: Database, query: string) {
     if (tokens.length !== 1 || forms.has(piece)) continue;
     const word = fold(tokens[0]!);
     const stem = lightStem(word);
-    const found: Array<[string, number]> = [];
+    const candidates: Array<[string, number, number]> = [];
     if (!isStemmable(word)) {
-      found.push(...(exact.values(word) as Array<[string, number]>));
+      candidates.push(...(exact.values(word) as typeof candidates));
     } else if ([...stem].length <= 2) {
       for (const variant of yoVariants(word)) {
-        found.push(...(exact.values(variant) as Array<[string, number]>));
+        candidates.push(...(exact.values(variant) as typeof candidates));
       }
     } else {
       for (const prefix of yoVariants([...stem].slice(0, -1).join(""))) {
-        for (const [term, doc] of range.values(prefix, after(prefix)) as Array<[string, number]>) {
-          if (lightStem(term) === stem) found.push([term, doc]);
+        for (const row of range.values(prefix, after(prefix)) as typeof candidates) {
+          if (lightStem(row[0]) === stem) candidates.push(row);
         }
       }
+    }
+    const found: Array<[string, number]> = [];
+    for (const [term, messageDocs, inTranscripts] of candidates) {
+      const transcriptDocs = inTranscripts
+        ? visibleTranscriptHits(db, `"${term}"`).reduce((count) => count + 1, 0)
+        : 0;
+      const docs = messageDocs + transcriptDocs;
+      if (docs > 0) found.push([term, docs]);
     }
     found.sort(
       ([a, aDocs], [b, bDocs]) =>

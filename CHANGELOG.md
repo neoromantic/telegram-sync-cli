@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   index and older versions are unchanged.
   Without the flag search stays exact. A query with FTS5 syntax or `--phrase` with `--forms` is
   `INVALID_ARGS`; while `allowedChats` is set, `--forms` matches words only as typed, since the
-  forms come from the whole cache. The answer adds `forms`, the forms searched for (`null`
+  forms come from the whole cache. Only visible transcripts of current attachments contribute
+  word forms. The answer adds `forms`, the forms searched for (`null`
   without `--forms` or with `allowedChats`), and `filters.forms`. The cache gets the tables
   `message_search_vocab` and `transcript_search_vocab`, the words of the message and transcript
   indexes, which `tg sql` can read. See [docs/search.md](docs/search.md#word-forms).
