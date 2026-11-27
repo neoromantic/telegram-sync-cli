@@ -30,7 +30,8 @@
     "!src/**/*.test.ts",
     "!src/**/*.test-utils.ts",
     "!src/test/**",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "NOTICE"
   ],
   "type": "module",
   "publishConfig": {
@@ -53,6 +54,7 @@
     "test:build": "bun run scripts/test-build.ts",
     "test:install": "bun run scripts/test-install.ts",
     "bench:storage": "bun run scripts/bench-storage.ts",
+    "bench:search": "bun run scripts/bench-search.ts",
     "docs:outputs": "bun run scripts/docs-outputs.ts",
     "lint": "oxlint --deny-warnings",
     "format": "oxfmt",

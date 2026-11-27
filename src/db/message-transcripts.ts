@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 
+import { cachedProtection } from "../commands/media/protection";
+import { extractAttachment, type AttachmentInfo } from "../utils/attachment";
 import type { TranscriptSource } from "../types";
 
 export interface MessageTranscriptRow {
@@ -65,4 +67,32 @@ export function createMessageTranscriptsStore(db: Database) {
       });
     },
   } satisfies MessageTranscriptsStore;
+}
+
+/** The same cached visibility check applies to display, search hits and counts. */
+export function visibleTranscriptFile(db: Database) {
+  const protection = cachedProtection(db);
+  return (chatId: number, raw: string, attachment: AttachmentInfo | null) =>
+    (attachment?.kind === "voice" || attachment?.kind === "round") &&
+    !protection(chatId, raw).protected;
+}
+
+export function* visibleTranscriptHits(cacheDb: Database, match: string) {
+  const candidates = cacheDb.query<
+    { rowid: number; rank: number; chat_id: number; raw_json: string; unique_file_id: string },
+    [string]
+  >(`SELECT m.rowid, transcript_search.rank, m.chat_id, m.raw_json, t.unique_file_id
+       FROM transcript_search JOIN message_transcripts t ON t.rowid = transcript_search.rowid
+       JOIN messages_cache m ON m.chat_id = t.chat_id AND m.message_id = t.message_id
+       WHERE transcript_search MATCH ? AND m.has_media = 1`);
+  const visible = visibleTranscriptFile(cacheDb);
+  for (const candidate of candidates.iterate(match)) {
+    const file = extractAttachment(candidate.raw_json);
+    if (
+      file?.uniqueFileId === candidate.unique_file_id &&
+      visible(candidate.chat_id, candidate.raw_json, file)
+    ) {
+      yield { rowid: candidate.rowid, rank: candidate.rank };
+    }
+  }
 }

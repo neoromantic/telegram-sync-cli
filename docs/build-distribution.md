@@ -11,8 +11,9 @@ telegram-sync-cli ships two ways:
   install time and there is no `postinstall` step. Requires Bun >= 1.4.
 - GitHub Releases and Homebrew: standalone binaries (Bun runtime and SQLite
   included) for every platform below, built by the release workflow. The
-  Homebrew formula `neoromantic/tap/tg` installs them; see
-  [releasing.md](releasing.md).
+  Homebrew formula `neoromantic/tap/tg` installs them. `NOTICE`, the licences of
+  the ported stemmers, ships with them: as a release asset and in the formula's
+  prefix (`$(brew --prefix tg)/NOTICE`); see [releasing.md](releasing.md).
 
 ## Build Commands
 

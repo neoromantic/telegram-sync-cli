@@ -615,6 +615,46 @@ export const SCHEMA_REGISTRY: SchemaRegistry = {
       indexes: {},
     },
 
+    message_search_vocab: {
+      description:
+        "The words of message_search (FTS5 fts5vocab table, type row): one row per word, read from the index, nothing stored. tg messages search --forms reads it to find the other forms of a query word. SELECT term, doc FROM message_search_vocab WHERE term >= 'квартир' AND term < 'квартирь'.",
+      primaryKey: "term",
+      columns: {
+        term: {
+          description: "A word as the index keeps it: lowercase, Latin diacritics removed",
+          nullable: false,
+        },
+        doc: {
+          description: "How many indexed messages contain the word, in any column",
+          nullable: false,
+        },
+        cnt: {
+          description: "How many times the word occurs in the index",
+          nullable: false,
+        },
+      },
+    },
+
+    transcript_search_vocab: {
+      description:
+        "The words of transcript_search, the index of message_transcripts (FTS5 fts5vocab table, type row): one row per word, read from the index, nothing stored. tg messages search --forms reads it with message_search_vocab to find the other forms of a query word.",
+      primaryKey: "term",
+      columns: {
+        term: {
+          description: "A word as the index keeps it: lowercase, Latin diacritics removed",
+          nullable: false,
+        },
+        doc: {
+          description: "How many transcripts contain the word",
+          nullable: false,
+        },
+        cnt: {
+          description: "How many times the word occurs in the transcripts",
+          nullable: false,
+        },
+      },
+    },
+
     search_reindex_queue: {
       description:
         "Senders and chats whose cached messages wait for a re-index of message_search with their current names (#93). Triggers on users_cache and chats_cache add a row when a peer with cached messages is inserted or renamed; the daemon and tg db migrate drain it in batches and delete each row when done.",

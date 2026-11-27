@@ -4,17 +4,19 @@ import { type ArgsDef, defineCommand } from "citty";
 import { isMigrationPending } from "../../db/background-migrations";
 import {
   createMessagesSearch,
+  hasFts5Syntax,
   isFts5QueryError,
   toFts5Query,
   MESSAGE_SEARCH_SORTS,
   type MessageSearchOptions,
   type MessageSearchSort,
 } from "../../db/messages-search";
+import { findQueryForms } from "../../db/word-forms";
 import { MESSAGE_TYPES_MIGRATION } from "../../db/raw-json-migrations";
 import { ErrorCodes, type NextCommand } from "../../types";
 import { openAccountCache } from "../../utils/account-cache";
 import { ACCOUNT_SELECTOR_DESCRIPTION } from "../../utils/account-selector";
-import { extractAttachment } from "../../utils/attachment";
+import { visibleTranscriptHits } from "../../db/message-transcripts";
 import { normalizeUsername } from "../../utils/identifiers";
 import { error, success } from "../../utils/output";
 import { buildSnippet, snippetTerms } from "../../utils/search-snippet";
@@ -29,7 +31,7 @@ import {
   TYPE_ARG_DESCRIPTION,
   UNTIL_ARG_DESCRIPTION,
 } from "./filters";
-import { messageItemReader, visibleTranscriptFile } from "./helpers";
+import { messageItemReader } from "./helpers";
 import { refetchClause } from "./list";
 
 function parseIdentifier(
@@ -72,6 +74,12 @@ const searchArgs = {
   phrase: {
     type: "boolean",
     description: "Match the whole query as one exact phrase",
+    default: false,
+  },
+  forms: {
+    type: "boolean",
+    description:
+      "Also match other forms of each plain word that occur in the cache (квартира: квартиру, квартирой; meeting: meetings), ё read as е",
     default: false,
   },
   limit: {
@@ -146,33 +154,25 @@ const searchArgs = {
 export function readSearchPage(
   cacheDb: Database,
   query: string,
-  options: MessageSearchOptions,
-  page: { limit: number; offset: number; sort: MessageSearchSort; count: boolean },
+  filters: Omit<MessageSearchOptions, "forms">,
+  page: {
+    limit: number;
+    offset: number;
+    sort: MessageSearchSort;
+    count: boolean;
+    expandForms?: boolean;
+  },
 ) {
   return cacheDb.transaction(() => {
-    const candidates = cacheDb.query<
-      { rowid: number; rank: number; chat_id: number; raw_json: string; unique_file_id: string },
-      [string]
-    >(`SELECT m.rowid, transcript_search.rank, m.chat_id, m.raw_json, t.unique_file_id
-       FROM transcript_search JOIN message_transcripts t ON t.rowid = transcript_search.rowid
-       JOIN messages_cache m ON m.chat_id = t.chat_id AND m.message_id = t.message_id
-       WHERE transcript_search MATCH ? AND m.has_media = 1`);
-    const visible = visibleTranscriptFile(cacheDb);
-    const hits: { rowid: number; rank: number }[] = [];
-    for (const candidate of candidates.iterate(toFts5Query(query, options))) {
-      const file = extractAttachment(candidate.raw_json);
-      if (
-        file?.uniqueFileId === candidate.unique_file_id &&
-        visible(candidate.chat_id, candidate.raw_json, file)
-      ) {
-        hits.push({ rowid: candidate.rowid, rank: candidate.rank });
-      }
-    }
+    const forms = page.expandForms ? findQueryForms(cacheDb, query) : undefined;
+    const options = { ...filters, forms };
+    const hits = [...visibleTranscriptHits(cacheDb, toFts5Query(query, options))];
     const search = createMessagesSearch(cacheDb, hits);
     const rows = search.search(query, { ...options, ...page, limit: page.limit + 1 });
     const toItem = messageItemReader(cacheDb);
     const typed = options.types !== undefined;
     return {
+      forms,
       rows,
       items: rows.slice(0, page.limit).map((row) => ({
         ...toItem(row),
@@ -189,7 +189,7 @@ export const searchMessagesCommand = defineCommand({
   meta: {
     name: "search",
     description:
-      'Search cached messages and their available transcripts, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form',
+      'Search cached messages and their available transcripts, newest first. hello world finds messages with both words in any order; FTS5 syntax works as written: error OR timeout, "exact phrase", sender:alice, chat:team, квартир* for every word form; --forms finds other forms of plain words',
   },
   args: searchArgs,
   async run({ args, rawArgs }) {
@@ -204,6 +204,23 @@ export const searchMessagesCommand = defineCommand({
     const query = (args.query ?? "").trim();
     if (!query) {
       error(ErrorCodes.INVALID_ARGS, "Search query is required");
+    }
+
+    if (args.forms && args.phrase) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        "--forms can't be combined with --phrase",
+        { query },
+        "Drop --forms to match the exact phrase, or drop --phrase to match the words in any order with their forms",
+      );
+    }
+    if (args.forms && hasFts5Syntax(query)) {
+      error(
+        ErrorCodes.INVALID_ARGS,
+        "--forms works on plain words only, and this query has FTS5 syntax",
+        { query },
+        "Drop --forms to run the query as written, or write the forms into it yourself (квартир*)",
+      );
     }
 
     const limit = Number.parseInt(args.limit ?? "50", 10);
@@ -243,12 +260,18 @@ export const searchMessagesCommand = defineCommand({
         until,
         types,
       };
-      const { rows, items, count, migrating, untyped } = readSearchPage(cacheDb, query, options, {
-        limit,
-        offset,
-        sort,
-        count: args.count ?? false,
-      });
+      const { forms, rows, items, count, migrating, untyped } = readSearchPage(
+        cacheDb,
+        query,
+        options,
+        {
+          limit,
+          offset,
+          sort,
+          count: args.count ?? false,
+          expandForms: args.forms && allowed === null,
+        },
+      );
       const typesPending = migrating || untyped !== null;
       const values = {
         ...args,
@@ -282,7 +305,14 @@ export const searchMessagesCommand = defineCommand({
             ]
           : []),
       ];
-      const terms = args.snippet ? snippetTerms(query, { phrase: options.phrase }) : [];
+      const terms = args.snippet
+        ? [
+            ...snippetTerms(query, { phrase: options.phrase }),
+            ...[...(forms?.values() ?? [])].flatMap((found) =>
+              found.words.map((text) => ({ text, prefix: false })),
+            ),
+          ]
+        : [];
 
       success(
         {
@@ -292,11 +322,13 @@ export const searchMessagesCommand = defineCommand({
             sender: args.sender ?? null,
             includeDeleted: args.includeDeleted ?? false,
             phrase: args.phrase ?? false,
+            forms: args.forms ?? false,
             since: args.since ?? null,
             until: args.until ?? null,
             type: types ?? null,
           },
           sort,
+          forms: forms ? Object.fromEntries(forms) : null,
           results: items.map((item) => {
             const text = item.transcriptMatch ? (item.transcript?.text ?? null) : item.text;
             return args.snippet ? { ...item, snippet: buildSnippet(text, terms) } : item;

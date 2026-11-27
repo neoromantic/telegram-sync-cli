@@ -403,6 +403,32 @@ column: `WHERE message_search_text MATCH '…' ORDER BY rank` goes to FTS5. The 
 EXISTS` after the index; it outlives an index rebuild that drops and recreates `message_search`
 ([search.md](search.md#sql-the-message_search_text-view)).
 
+### Table: message_search_vocab
+
+The words of `message_search`, one row per word: an FTS5 `fts5vocab` table of type `row`, which
+reads the index when queried and stores nothing. `tg messages search` reads it to find the other
+forms of each plain query word with `--forms` ([search.md](search.md#word-forms)).
+It is a persistent table rather than a temporary one, so the read-only, `query_only` connection
+of `tg sql` can read it too. Created after the index when a cache opens, so an older cache gets
+it the first time this version opens it, without a migration. It names the index by name, so it
+outlives a rebuild that drops and recreates `message_search`.
+
+```sql
+CREATE VIRTUAL TABLE message_search_vocab USING fts5vocab(message_search, row);
+-- columns: term (the word as the index keeps it), doc (messages that contain it), cnt (occurrences)
+```
+
+### Table: transcript_search_vocab
+
+The words of `transcript_search`, the index of `message_transcripts`, in the same shape as
+`message_search_vocab`: `tg messages search --forms` reads both, so a form that occurs only in a
+transcript is found too. Created the same way, when a cache opens.
+
+```sql
+CREATE VIRTUAL TABLE transcript_search_vocab USING fts5vocab(transcript_search, row);
+-- columns: term, doc (transcripts that contain it), cnt (occurrences)
+```
+
 ### Table: search_meta
 
 ```sql

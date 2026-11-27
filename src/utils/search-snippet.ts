@@ -12,7 +12,8 @@ const TOKEN = /[\p{L}\p{N}\p{Co}\p{M}]+/gu;
 
 const MAX_SNIPPET_LENGTH = 300;
 
-function fold(token: string) {
+/** A word as the index keeps it: lowercase, a Latin letter with one diacritic as the bare letter */
+export function fold(token: string) {
   return token
     .toLowerCase()
     .normalize("NFD")
@@ -27,7 +28,8 @@ function keepPair(text: string, at: number) {
   return at > 0 && code >= 0xdc00 && code <= 0xdfff ? at - 1 : at;
 }
 
-function tokenize(text: string) {
+/** The words of a text as the index splits them */
+export function tokenize(text: string) {
   return text.match(TOKEN) ?? [];
 }
 

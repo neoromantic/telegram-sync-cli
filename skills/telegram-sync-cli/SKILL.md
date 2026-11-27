@@ -17,7 +17,7 @@ tg messages get --chat @climbclub_example --id 150 --context 3
 ```
 
 - Every search takes `--query`; `tg chats get` takes `--id`. `messages list` and `messages unread` take `--limit` up to 100; `messages search` takes more.
-- `messages search` matches every word in any order; `'"rope repair"'` is the exact phrase.
+- `messages search` matches every word in any order, as typed; `--forms` also finds other forms of each word (`rope` finds `ropes`); `'"rope repair"'` is the exact phrase.
 - Search includes available voice and video note transcripts. `transcriptMatch: true` identifies a spoken match. To recognize one note with a configured local Whisper program, run `tg media transcribe --chat <chat> --id <id>`.
 - An answer may carry `next`, a list of `{command, why}`: the next page, or a refresh of an empty cache followed by the same read. Run its commands in order, as written. No `next` means the read is done. Refresh at most once per query: when `chats search` still finds nothing after its suggested refresh, the chat isn't in the list; don't run the refresh again.
 - `messages unread` gives each chat's oldest unread messages the cache holds, `--limit` of them. When `missing` is 0 and `returned` is below `unreadCount`, `tg messages list --chat <id> --after <nextAfter>` reads on. When `missing` is above 0, the cache lacks some unread messages, older ones too, and `nextAfter` can be `null`: read from the boundary instead, `tg messages list --chat <id> --after <readInboxMaxId>`, which fetches what the cache lacks.

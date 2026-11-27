@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "extends": ["./.oxlintrc.devkit.jsonc"],
+  "ignorePatterns": ["scripts/snowball/**"],
   "rules": {
     "landmines-testing/no-fixed-sleep": [
       "error",

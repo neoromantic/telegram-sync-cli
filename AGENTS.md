@@ -98,6 +98,7 @@ bun run build                    # compile dist/tg for this platform
 bun run build:all                # cross-compile every target
 bun run test:integration         # real Telegram API, opt-in (see Testing)
 bun run bench:storage            # storage benchmark on made-up data, opt-in (docs/storage.md)
+bun run bench:search             # word forms and typos benchmark, opt-in (docs/storage.md)
 bun run docs:outputs             # regenerate output tables in docs/cli-commands.md
 ```
 

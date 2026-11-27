@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tg messages search --forms` also matches other forms of each plain word that occur in the
+  cache: `квартира` finds `квартиру` and `квартирой`, `meeting` finds `meetings`, and `еще`
+  finds `ещё`; a word with a digit (`2ms`) or a stem of one or two letters (`ok`) stays as
+  typed. It works on the index's own words with light Russian and English stemmers, so the
+  index and older versions are unchanged.
+  Without the flag search stays exact. A query with FTS5 syntax or `--phrase` with `--forms` is
+  `INVALID_ARGS`; while `allowedChats` is set, `--forms` matches words only as typed, since the
+  forms come from the whole cache. Only visible transcripts of current attachments contribute
+  word forms. The answer adds `forms`, the forms searched for (`null`
+  without `--forms` or with `allowedChats`), and `filters.forms`. The cache gets the tables
+  `message_search_vocab` and `transcript_search_vocab`, the words of the message and transcript
+  indexes, which `tg sql` can read. See [docs/search.md](docs/search.md#word-forms).
+- The GitHub Release has `NOTICE`, the licences of the ported stemmers, next to the binaries,
+  and `brew install neoromantic/tap/tg` installs it in the formula's prefix.
+
 ## [0.16.0] - 2026-11-22
 
 ### Added

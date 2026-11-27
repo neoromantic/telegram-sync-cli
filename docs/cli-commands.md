@@ -220,7 +220,8 @@ tg messages search --query "hello world"           # both words, any order
 tg messages search --query '"hello world"'         # the exact phrase (or --phrase)
 tg messages search --query "error OR timeout" --chat @teamchat --sender @alice
 tg messages search --query "todo" --chat me        # Saved Messages; --sender me: your own
-tg messages search --query "квартир*" --includeDeleted   # every word form
+tg messages search --query "квартир*" --includeDeleted   # every word that starts so
+tg messages search --query "квартира" --forms      # its other forms: квартиру, квартирой…
 tg messages search --query "deploy" --since 7d --sort relevance --count --snippet
 tg messages wait --chat @username --after 1200     # the next reply after message 1200
 tg messages wait --timeout 300 --settle 3          # any chat; then 3 quiet seconds
@@ -440,6 +441,99 @@ seconds, so a relative bound keeps its window ([Next commands](#next-commands)).
 only the cache, so `--fresh` is `INVALID_ARGS` (exit 3), not a cached answer that looks fresh:
 fetch the chat with `tg messages list --chat <chat> --fresh` first. The rules and examples are in
 [search.md](search.md#query-rules).
+
+Without flags each word matches only as typed. `--forms` makes each plain word also match its
+other forms in the cache: Russian case forms (`квартира`, `квартиру`, `квартирой`), English
+plurals (`meeting`, `meetings`), with `ё` read as `е`. A query with FTS5 syntax or `--phrase`
+with `--forms` is `INVALID_ARGS` (exit 3). While `allowedChats` is set, `--forms` matches words
+only as typed (`forms` is `null`): the forms come from the whole cache and could show words of
+other chats. The answer's `forms` lists, for each query word as typed, the index words searched
+for (`words`) and whether more were left out (`cut`, past 30); it is `null` without `--forms`,
+and `filters.forms` says whether `--forms` was given. `next` keeps `--forms`. How it works, its
+limits and its measured quality: [search.md](search.md#word-forms). From a made-up cache, with
+each result trimmed to its ID and text:
+
+```bash
+tg messages search --query квартира --forms --limit 3 --snippet
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "query": "квартира",
+    "filters": {
+      "chat": null,
+      "sender": null,
+      "includeDeleted": false,
+      "phrase": false,
+      "forms": true,
+      "since": null,
+      "until": null
+    },
+    "sort": "date",
+    "forms": {
+      "квартира": {
+        "words": ["квартира", "квартирах", "квартирой", "квартиру", "квартиры"],
+        "cut": false
+      }
+    },
+    "results": [
+      { "messageId": 1, "text": "Сдаю квартиру у парка", "snippet": "Сдаю **квартиру** у парка", … },
+      { "messageId": 2, "text": "Квартира ещё свободна?", "snippet": "**Квартира** ещё свободна?", … },
+      { "messageId": 3, "text": "Поговорим о квартирах и ценах", "snippet": "Поговорим о **квартирах** и ценах", … }
+    ],
+    "total": 3,
+    "count": null,
+    "limit": 3,
+    "offset": 0,
+    "source": "cache",
+    "stale": false
+  },
+  "next": [
+    {
+      "command": "tg messages search --query='квартира' --forms --limit=3 --offset=3 --snippet",
+      "why": "The next page of results."
+    }
+  ]
+}
+```
+
+Without `--forms` the same query finds only message 2, the one with `квартира` itself, and
+there is no next page:
+
+```bash
+tg messages search --query квартира --limit 3 --snippet
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "query": "квартира",
+    "filters": {
+      "chat": null,
+      "sender": null,
+      "includeDeleted": false,
+      "phrase": false,
+      "forms": false,
+      "since": null,
+      "until": null
+    },
+    "sort": "date",
+    "forms": null,
+    "results": [
+      { "messageId": 2, "text": "Квартира ещё свободна?", "snippet": "**Квартира** ещё свободна?", … }
+    ],
+    "total": 1,
+    "count": null,
+    "limit": 3,
+    "offset": 0,
+    "source": "cache",
+    "stale": false
+  }
+}
+```
 
 #### Waiting for new messages
 

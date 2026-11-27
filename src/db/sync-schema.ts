@@ -12,6 +12,7 @@ import {
   readsChannelSenders,
 } from "./search-reindex";
 import { createSenderLookupsSchema } from "./sender-lookups";
+import { createSearchVocabs } from "./word-forms";
 
 const SEARCH_INDEX_VERSION = 1;
 const MESSAGE_SEARCH_COLUMNS = ["text", "sender", "chat", "files"] as const;
@@ -518,6 +519,7 @@ export function initSyncSchema(db: Database, options: SyncSchemaOptions = {}) {
     createMessageSearchSchema(db, contentless);
     ensureMessageSearchIndex(db, contentless);
     createMessageSearchTextView(db);
+    createSearchVocabs(db);
   }
   upgradeMessagesCacheWrites(db);
 

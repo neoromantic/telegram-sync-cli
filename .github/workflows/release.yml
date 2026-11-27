@@ -105,12 +105,12 @@ jobs:
       - name: Release notes
         run: bun scripts/changelog-section.ts "${TAG}" >"${RUNNER_TEMP}/notes.md"
       - name: Build the binaries
-        run: bun run build:all
+        run: bun run build:all && cp NOTICE dist/NOTICE
       - name: Check the binaries
         run: |
           test "$(./dist/tg-darwin-arm64 --version)" = "${TAG#v}"
-          (cd dist && shasum -a 256 tg-* >checksums.txt && shasum -a 256 --strict -c checksums.txt)
-          test "$(wc -l <dist/checksums.txt)" -eq 5
+          (cd dist && shasum -a 256 tg-* NOTICE >checksums.txt && shasum -a 256 --strict -c checksums.txt)
+          test "$(wc -l <dist/checksums.txt)" -eq 6
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/tg-*
@@ -134,10 +134,10 @@ jobs:
         run: |
           if gh release view "${TAG}" >/dev/null 2>&1; then
             if [ "$(gh release view "${TAG}" --json isDraft --jq .isDraft)" = "true" ]; then
-              gh release upload "${TAG}" dist/tg-* dist/checksums.txt --clobber
+              gh release upload "${TAG}" dist/tg-* dist/NOTICE dist/checksums.txt --clobber
             fi
           else
-            gh release create "${TAG}" dist/tg-* dist/checksums.txt --draft --verify-tag \
+            gh release create "${TAG}" dist/tg-* dist/NOTICE dist/checksums.txt --draft --verify-tag \
               --title "${TAG}" --notes-file "${RUNNER_TEMP}/notes.md"
           fi
           gh release edit "${TAG}" --draft=false

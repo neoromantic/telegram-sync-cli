@@ -24,15 +24,16 @@ A release is a `vX.Y.Z` tag on `main`. Pushing the tag runs
    `CHANGELOG.md` has a section for it, then runs `check`, `test`, `test:e2e`, and builds and
    runs the Linux binary.
 2. `release` (macOS), in the `release` environment:
-   1. builds every binary with `bun run build:all`, runs the darwin-arm64 one and writes
-      `checksums.txt`;
+   1. builds every binary with `bun run build:all`, copies `NOTICE` next to them, runs the
+      darwin-arm64 one and writes `checksums.txt` for the binaries and `NOTICE`;
    2. attests the binaries' build provenance;
    3. publishes the npm package with trusted publishing (GitHub OIDC, Node 24), unless that
       version is already on npm;
-   4. creates the GitHub Release as a draft with the binaries, `checksums.txt` and the
+   4. creates the GitHub Release as a draft with the binaries, `NOTICE`, `checksums.txt` and the
       `CHANGELOG.md` section as notes, then publishes it;
    5. writes `Formula/tg.rb` in [`neoromantic/homebrew-tap`](https://github.com/neoromantic/homebrew-tap)
-      after `brew audit --strict --online` passes. The formula comes from
+      after `brew audit --strict --online` passes; it installs the binary as `tg` and `NOTICE`
+      in the formula's prefix. The formula comes from
       [`.github/scripts/formula.sh`](../.github/scripts/formula.sh); don't edit it in the tap.
 
 Every step can be re-run: a version already on npm is skipped, a published release is left

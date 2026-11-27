@@ -42,7 +42,7 @@ sh "$root/.github/scripts/formula.sh" "$tag" "$sums" >"$work/tg.rb"
 # formula before them.
 base=https://github.com/neoromantic/telegram-sync-cli/releases/download/$tag
 tries=0
-for asset in tg-darwin-arm64 tg-darwin-x64 tg-linux-arm64 tg-linux-x64; do
+for asset in tg-darwin-arm64 tg-darwin-x64 tg-linux-arm64 tg-linux-x64 NOTICE; do
 	until curl -fsSIL -o /dev/null "$base/$asset"; do
 		tries=$((tries + 1))
 		[ "$tries" -lt 30 ] || fail "$base/$asset does not download after 5 minutes"

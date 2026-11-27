@@ -15,7 +15,7 @@ import {
   reportConfigOrRateLimitError,
   wrapClientCallWithRateLimits,
 } from "../../utils/telegram-rate-limits";
-import { cachedProtection } from "../media/protection";
+import { visibleTranscriptFile } from "../../db/message-transcripts";
 import { AmbiguousPeerError, createDmLookup, InvalidPeerError } from "../send/peer-resolver";
 
 /** The JSON item for a message row, shared by every `tg messages` command */
@@ -57,14 +57,6 @@ export function messageRowToItem(
       lastName: row.sender_last_name,
     },
   };
-}
-
-/** The same cached visibility check applies to display, search hits and counts. */
-export function visibleTranscriptFile(db: Database) {
-  const protection = cachedProtection(db);
-  return (chatId: number, raw: string, attachment: AttachmentInfo | null) =>
-    (attachment?.kind === "voice" || attachment?.kind === "round") &&
-    !protection(chatId, raw).protected;
 }
 
 /**

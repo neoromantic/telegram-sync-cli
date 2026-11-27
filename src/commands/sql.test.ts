@@ -305,6 +305,18 @@ describe("SQL Command", () => {
       expect(sql).toContain("CREATE VIEW message_search_text (");
     });
 
+    it("describes every column of the vocabulary tables, in order", () => {
+      const db = createAccountCacheDb();
+      for (const table of ["message_search_vocab", "transcript_search_vocab"]) {
+        const columns = (
+          db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+        ).map((column) => column.name);
+        expect(columns).toEqual(["term", "doc", "cnt"]);
+        expect(getColumnNames(table)).toEqual(columns);
+      }
+      db.close();
+    });
+
     it("returns column names for table", () => {
       const columns = getColumnNames("users_cache");
       expect(columns).toContain("user_id");
